@@ -2,6 +2,13 @@
   (:require ["ai" :refer [tool]]
             ["zod" :as z]))
 
+(defn ^:async read-execute [{:keys [path range]}]
+  (let [content (js-await (.text (js/Bun.file path)))]
+    (if range
+      (let [lines (.split content "\n")]
+        (.join (.slice lines (dec (first range)) (second range)) "\n"))
+      content)))
+
 (def read-tool
   (tool
     #js {:description "Read file contents"
@@ -11,13 +18,11 @@
                              :range (-> (.tuple z #js [(.number z) (.number z)])
                                         (.optional)
                                         (.describe "Line range [start, end]"))})
-         :execute
-         (fn ^:async [{:keys [path range]}]
-           (let [content (js-await (.text (js/Bun.file path)))]
-             (if range
-               (let [lines (.split content "\n")]
-                 (.join (.slice lines (dec (first range)) (second range)) "\n"))
-               content)))}))
+         :execute read-execute}))
+
+(defn ^:async write-execute [{:keys [path content]}]
+  (js-await (js/Bun.write path content))
+  (str "Wrote " (count content) " bytes to " path))
 
 (def write-tool
   (tool
@@ -25,10 +30,15 @@
          :parameters  (.object z
                         #js {:path    (.string z)
                              :content (.string z)})
-         :execute
-         (fn ^:async [{:keys [path content]}]
-           (js-await (js/Bun.write path content))
-           (str "Wrote " (count content) " bytes to " path))}))
+         :execute write-execute}))
+
+(defn ^:async edit-execute [{:keys [path old_string new_string]}]
+  (let [content (js-await (.text (js/Bun.file path)))
+        updated (.replace content old_string new_string)]
+    (when (= updated content)
+      (throw (js/Error. "old_string not found in file")))
+    (js-await (js/Bun.write path updated))
+    "Edit applied successfully"))
 
 (def edit-tool
   (tool
@@ -37,14 +47,20 @@
                         #js {:path       (.string z)
                              :old_string (.string z)
                              :new_string (.string z)})
-         :execute
-         (fn ^:async [{:keys [path old_string new_string]}]
-           (let [content (js-await (.text (js/Bun.file path)))
-                 updated (.replace content old_string new_string)]
-             (when (= updated content)
-               (throw (js/Error. "old_string not found in file")))
-             (js-await (js/Bun.write path updated))
-             "Edit applied successfully"))}))
+         :execute edit-execute}))
+
+(defn ^:async bash-execute [{:keys [command timeout]}]
+  (let [proc   (js/Bun.spawn #js ["sh" "-c" command]
+                 #js {:timeout (or timeout 30000)
+                      :stdout  "pipe"
+                      :stderr  "pipe"})
+        stdout (js-await (.text (js/Response. (.-stdout proc))))
+        stderr (js-await (.text (js/Response. (.-stderr proc))))
+        code   (js-await (.-exited proc))]
+    (js/JSON.stringify
+      #js {:stdout   stdout
+           :stderr   stderr
+           :exitCode code})))
 
 (def bash-tool
   (tool
@@ -53,17 +69,7 @@
                         #js {:command (.string z)
                              :timeout (-> (.number z) (.optional)
                                           (.describe "Timeout in ms, default 30000"))})
-         :execute
-         (fn ^:async [{:keys [command timeout]}]
-           (let [proc   (js/Bun.spawn #js ["sh" "-c" command]
-                          #js {:timeout (or timeout 30000)})
-                 stdout (js-await (.text (js/Response. (.-stdout proc))))
-                 stderr (js-await (.text (js/Response. (.-stderr proc))))
-                 code   (js-await (.-exited proc))]
-             (js/JSON.stringify
-               #js {:stdout   stdout
-                    :stderr   stderr
-                    :exitCode code})))}))
+         :execute bash-execute}))
 
 (def builtin-tools
   {"read"  read-tool

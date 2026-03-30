@@ -1,4 +1,4 @@
-{:paths      ["src"]
+{:paths      ["src" "test"]
  :output-dir "dist"
  :extension  "mjs"
  :copy-resources #{:json}}

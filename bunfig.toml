@@ -3,3 +3,6 @@ production = false
 
 [run]
 bun = true
+
+[test]
+root = ["./test", "./dist/test"]

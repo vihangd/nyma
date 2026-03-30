@@ -80,7 +80,7 @@
                             (if (= (:role last-msg) "assistant")
                               (conj (vec (butlast all))
                                     (update last-msg :content str (.-textDelta chunk)))
-                              (conj all {:role "assistant" :content (.-textDelta chunk "")})))))))
+                              (conj all {:role "assistant" :content (or (.-textDelta chunk) "")})))))))
 
                   (js-await (run agent text))
                   (set-streaming false))))
@@ -95,4 +95,4 @@
             [Editor {:onSubmit  handle-submit
                      :streaming streaming
                      :theme     theme}]
-            [Footer {:agent agent :theme theme}]]))))
+            [Footer {:agent agent :theme theme}]])))

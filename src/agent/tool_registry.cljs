@@ -15,5 +15,5 @@
      :get-active (fn []
                    (let [ts @tools
                          ac @active]
-                     (into {} (filter (fn [[k _]] (ac k)) ts))))
+                     (into {} (filter (fn [[k _]] (contains? ac k)) ts))))
      :all        (fn [] @tools)}))

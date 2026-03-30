@@ -66,6 +66,105 @@ bun test
 npx squint repl
 ```
 
+## Squint Conventions & Pitfalls
+
+Squint compiles ClojureScript to JavaScript, but several Clojure idioms do **not** work as expected. These have caused real bugs in this codebase.
+
+### `fn ^:async` does NOT work — use `defn ^:async`
+
+Squint only generates `async function` for top-level `defn`. The `^:async` metadata on anonymous `fn` is silently ignored, producing a non-async function where `await` becomes a runtime syntax error.
+
+```clojure
+;; BROKEN — compiles to plain `function`, `await` fails at runtime
+(def handler (fn ^:async [x] (js-await (some-promise x))))
+
+;; CORRECT — compiles to `async function`
+(defn ^:async handler [x] (js-await (some-promise x)))
+```
+
+This applies everywhere: tool execute functions, event handlers, test callbacks. If you need an async callback, extract it to a named `defn ^:async`.
+
+### Sets are not callable
+
+In Clojure, sets work as functions: `(#{:a :b} :a) ;=> :a`. In squint, sets compile to JS `Set` objects which are **not callable**.
+
+```clojure
+;; BROKEN — TypeError: ac is not a function
+(filter (fn [[k _]] (my-set k)) items)
+
+;; CORRECT
+(filter (fn [[k _]] (contains? my-set k)) items)
+```
+
+### Maps/objects are not callable — use `get`
+
+`(into {} ...)` produces a plain JS object. You cannot call it as a function like a Clojure map.
+
+```clojure
+;; BROKEN — TypeError: by-id is not a function
+(let [by-id (into {} (map (fn [e] [(:id e) e]) entries))]
+  (by-id some-key))
+
+;; CORRECT
+(let [by-id (into {} (map (fn [e] [(:id e) e]) entries))]
+  (get by-id some-key))
+```
+
+**Rule:** Always use `get`, `get-in`, or keyword access (`:key obj`) — never call a map/object as a function.
+
+### `js->clj` does not exist
+
+Squint compiles the symbol `js->clj` but does not provide the function at runtime (`ReferenceError: js__GT_clj is not defined`). This is because squint maps **are** plain JS objects — there is no conversion needed.
+
+```clojure
+;; BROKEN — ReferenceError at runtime
+(js->clj (js/JSON.parse json-str) :keywordize-keys true)
+
+;; CORRECT — JSON.parse output is already a plain object, keywords are strings
+(js/JSON.parse json-str)
+```
+
+`clj->js` **does** work (for converting to JS objects with `JSON.stringify`).
+
+### `Bun.spawn` requires explicit pipe config
+
+Without `stdout: "pipe"` and `stderr: "pipe"`, `Bun.spawn` does not capture output — it goes directly to the parent process.
+
+```clojure
+;; BROKEN — stderr is empty string, output goes to terminal
+(js/Bun.spawn #js ["sh" "-c" cmd] #js {:timeout 30000})
+
+;; CORRECT
+(js/Bun.spawn #js ["sh" "-c" cmd]
+  #js {:timeout 30000 :stdout "pipe" :stderr "pipe"})
+```
+
+### Paren discipline in JSX
+
+JSX components (using `#jsx` reader tag) mix Hiccup-style brackets with ClojureScript parens. Extra or missing parens are hard to spot and produce confusing "Unmatched delimiter" errors at compile time. Also note:
+
+```clojure
+;; BROKEN — property access does not take a default argument
+(.-textDelta chunk "")
+
+;; CORRECT
+(or (.-textDelta chunk) "")
+```
+
+## Testing
+
+Tests are in `test/` as `.cljs` (compiled by squint) or `.ts` files. Run with `bun test`.
+
+For async tests, use `defn ^:async` helpers (since `fn ^:async` doesn't work):
+
+```clojure
+(defn ^:async test-my-async-thing []
+  (let [result (js-await (some-async-fn))]
+    (-> (expect result) (.toBe "expected"))))
+
+(it "does the async thing" test-my-async-thing)
+```
+
 ## Extension System
 
 Extensions can be written in **ClojureScript (.cljs)** or **TypeScript (.ts)**:
@@ -128,3 +227,8 @@ Use `deftool` and `defcommand` macros for concise tool definitions:
   (let [res (js-await (js/fetch (str "https://api.example.com?q=" query)))]
     (js-await (.json res))))
 ```
+
+## Git Workflow
+
+- Commit messages: `<module>: <short description>` (e.g., `memory: add TTL to working memory`)
+- One logical change per commit

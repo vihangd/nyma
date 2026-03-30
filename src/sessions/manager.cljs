@@ -1,6 +1,5 @@
 (ns agent.sessions.manager
-  (:require ["node:fs" :as fs]
-            ["node:fs/promises" :as fsp]))
+  (:require ["node:fs" :as fs]))
 
 (defn- nanoid []
   (-> (js/Math.random) (.toString 36) (.slice 2 11)))
@@ -16,12 +15,12 @@
         leaf-id (atom nil)]
 
     {:load
-     (fn ^:async []
+     (fn []
        (when (and file-path (fs/existsSync file-path))
-         (let [content (js-await (.readFile fsp file-path "utf8"))
+         (let [content (.readFileSync fs file-path "utf8")
                lines   (->> (.split content "\n")
                              (filter seq)
-                             (mapv #(js->clj (js/JSON.parse %) :keywordize-keys true)))]
+                             (mapv #(js/JSON.parse %)))]
            (reset! entries lines)
            (reset! leaf-id (:id (last lines))))))
 
@@ -31,7 +30,7 @@
        (let [by-id (into {} (map (fn [e] [(:id e) e]) @entries))]
          (loop [current @leaf-id
                 path    []]
-           (if-let [entry (by-id current)]
+           (if-let [entry (get by-id current)]
              (recur (:parent-id entry) (cons entry path))
              (->> path
                   (filter #(contains? #{"user" "assistant" "tool_call" "tool_result"}
