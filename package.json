@@ -1,0 +1,32 @@
+{
+  "name": "nyma",
+  "version": "0.1.0",
+  "description": "Nyma Yokai Mystic Agent — a minimal coding agent built with Squint + Bun + Vercel AI SDK + Ink",
+  "type": "module",
+  "bin": {
+    "nyma": "./dist/agent/cli.mjs"
+  },
+  "scripts": {
+    "dev": "concurrently \"npx squint watch\" \"bun --watch dist/agent/cli.mjs\"",
+    "build": "npx squint compile",
+    "start": "bun dist/agent/cli.mjs",
+    "test": "bun test",
+    "repl": "npx squint repl"
+  },
+  "dependencies": {
+    "ai": "^4.0.0",
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/google": "^1.0.0",
+    "ink": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.0.0",
+    "zod": "^3.0.0",
+    "squint-cljs": "^0.8.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "@types/react": "^18.0.0"
+  }
+}

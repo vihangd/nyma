@@ -1,0 +1,24 @@
+{
+  "name": "dark",
+  "colors": {
+    "primary": "#7aa2f7",
+    "secondary": "#9ece6a",
+    "error": "#f7768e",
+    "warning": "#e0af68",
+    "success": "#9ece6a",
+    "muted": "#565f89",
+    "border": "#3b4261",
+    "editorBorder": {
+      "off": "#3b4261",
+      "low": "#9ece6a",
+      "medium": "#e0af68",
+      "high": "#f7768e"
+    }
+  },
+  "icons": {
+    "user": "❯",
+    "assistant": "●",
+    "tool": "⚙",
+    "error": "✗"
+  }
+}

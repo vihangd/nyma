@@ -1,0 +1,24 @@
+{
+  "name": "light",
+  "colors": {
+    "primary": "#2e7de9",
+    "secondary": "#587539",
+    "error": "#c64343",
+    "warning": "#8c6c3e",
+    "success": "#587539",
+    "muted": "#848cb5",
+    "border": "#d0d5e3",
+    "editorBorder": {
+      "off": "#d0d5e3",
+      "low": "#587539",
+      "medium": "#8c6c3e",
+      "high": "#c64343"
+    }
+  },
+  "icons": {
+    "user": "❯",
+    "assistant": "●",
+    "tool": "⚙",
+    "error": "✗"
+  }
+}
