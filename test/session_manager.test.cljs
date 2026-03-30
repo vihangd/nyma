@@ -3,7 +3,7 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
-            ["./sessions/manager.mjs" :refer [create-session-manager]]))
+            ["./agent/sessions/manager.mjs" :refer [create-session-manager]]))
 
 (describe "agent.sessions.manager (in-memory)"
   (fn []

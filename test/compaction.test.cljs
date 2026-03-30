@@ -1,8 +1,8 @@
 (ns compaction.test
   (:require ["bun:test" :refer [describe it expect]]
-            ["./sessions/manager.mjs" :refer [create-session-manager]]
+            ["./agent/sessions/manager.mjs" :refer [create-session-manager]]
             ["./agent/events.mjs" :refer [create-event-bus]]
-            ["./sessions/compaction.mjs" :refer [compact]]))
+            ["./agent/sessions/compaction.mjs" :refer [compact]]))
 
 (defn ^:async test-under-threshold []
   (let [sm     (create-session-manager nil)

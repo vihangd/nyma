@@ -7,7 +7,7 @@
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load]]
-            [agent.modes.interactive :as interactive]
+            ["./modes/interactive.jsx" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
 
@@ -26,7 +26,7 @@
 (defn- resolve-session [values]
   (let [session-path (or (:session values)
                          (when-not (:no-session values)
-                           (str (js/process.env.HOME) "/.agent/sessions/default.jsonl")))]
+                           (str (.. js/process -env -HOME) "/.agent/sessions/default.jsonl")))]
     (create-session-manager session-path)))
 
 (defn ^:async main []
