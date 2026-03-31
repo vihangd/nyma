@@ -59,6 +59,27 @@
 
         api (create-extension-api agent)]
 
+    ;; Register built-in commands
+    (swap! (:commands agent) assoc
+      "help" {:description "Show available commands"
+              :handler (fn [_args _ctx]
+                         (let [cmds @(:commands agent)]
+                           (js/console.log "\nAvailable commands:")
+                           (doseq [[name cmd] cmds]
+                             (js/console.log (str "  /" name " — " (:description cmd))))
+                           (js/console.log "")))}
+      "model" {:description "Show current model"
+               :handler (fn [_args _ctx]
+                          (js/console.log
+                            (str "\nModel: " (:model (:config agent)) "\n")))}
+      "clear" {:description "Clear messages"
+               :handler (fn [_args _ctx]
+                          (swap! (:state agent) assoc :messages [])
+                          (js/console.log "\nMessages cleared.\n"))}
+      "exit" {:description "Exit the agent"
+              :handler (fn [_args _ctx]
+                         (js/process.exit 0))})
+
     ;; Load all extensions (both .cljs and .ts/.js)
     (js-await (discover-and-load (:extension-dirs resources) api))
 
