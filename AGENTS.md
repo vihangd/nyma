@@ -29,17 +29,17 @@ NYMA is a minimal, extensible coding agent built with:
 | `src/agent/extensions.cljs` | `agent.extensions` | Extension API factory |
 | `src/agent/extension_loader.cljs` | `agent.extension-loader` | Dual .cljs/.ts loader |
 | `src/agent/context.cljs` | `agent.context` | Message filtering, context building |
-| `src/ui/app.cljs` | `agent.ui.app` | Root Ink component |
-| `src/ui/chat_view.cljs` | `agent.ui.chat-view` | Message rendering |
-| `src/ui/editor.cljs` | `agent.ui.editor` | Text input component |
-| `src/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage |
-| `src/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction |
-| `src/resources/loader.cljs` | `agent.resources.loader` | Resource discovery |
-| `src/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings |
-| `src/modes/interactive.cljs` | `agent.modes.interactive` | TUI mode |
-| `src/modes/print.cljs` | `agent.modes.print` | Print mode |
-| `src/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode |
-| `src/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode |
+| `src/agent/ui/app.cljs` | `agent.ui.app` | Root Ink component |
+| `src/agent/ui/chat_view.cljs` | `agent.ui.chat-view` | Message rendering |
+| `src/agent/ui/editor.cljs` | `agent.ui.editor` | Text input component |
+| `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage |
+| `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction |
+| `src/agent/resources/loader.cljs` | `agent.resources.loader` | Resource discovery |
+| `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings |
+| `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | TUI mode |
+| `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode |
+| `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode |
+| `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode |
 | `src/macros/tool_dsl.cljs` | `macros.tool-dsl` | Compile-time `deftool`/`defcommand` macros |
 
 ## Development Workflow
@@ -137,6 +137,51 @@ Without `stdout: "pipe"` and `stderr: "pipe"`, `Bun.spawn` does not capture outp
 ;; CORRECT
 (js/Bun.spawn #js ["sh" "-c" cmd]
   #js {:timeout 30000 :stdout "pipe" :stderr "pipe"})
+```
+
+### Namespace path must match file path
+
+Squint resolves ClojureScript namespace requires by converting the namespace to a file path. `agent.sessions.manager` becomes `./agent/sessions/manager.mjs`. If the file lives at `src/sessions/manager.cljs` (compiled to `dist/sessions/manager.mjs`), the import will fail with "Cannot find package".
+
+**Rule:** The directory structure under `src/` must mirror the namespace prefix. A file declaring `(ns agent.foo.bar ...)` must live at `src/agent/foo/bar.cljs`.
+
+### JSX files must be imported with explicit `.jsx` extension
+
+Squint compiles files that use `#jsx` or declare `{:squint/extension "jsx"}` to `.jsx`. However, namespace-based requires always generate `.mjs` import paths — even from within another `.jsx` file. This causes a "Cannot find module" error at runtime.
+
+```clojure
+;; BROKEN — generates `import { Header } from './header.mjs'` but file is header.jsx
+[agent.ui.header :refer [Header]]
+
+;; CORRECT — explicit string require with .jsx extension
+["./header.jsx" :refer [Header]]
+```
+
+For dynamic imports of JSX modules, use `(js/import "path/to/file.jsx")` directly.
+
+### `js->clj` does not exist — use plain JS objects
+
+See above. Additionally: `clojure.string` must be explicitly required even for namespaced calls like `clojure.string/join`. Without the require, it compiles to `clojure.string.join(...)` which is a `ReferenceError` at runtime.
+
+```clojure
+;; BROKEN — ReferenceError: clojure is not defined
+(clojure.string/join "\n" items)
+
+;; CORRECT
+(:require [clojure.string :as str])
+(str/join "\n" items)
+```
+
+### `process.env.FOO` is a property, not a function
+
+Squint compiles `(js/process.env.HOME)` as a function call `process.env.HOME()` — TypeError at runtime. Use the `..` interop form:
+
+```clojure
+;; BROKEN — TypeError: process.env.HOME is not a function
+(js/process.env.HOME)
+
+;; CORRECT
+(.. js/process -env -HOME)
 ```
 
 ### Paren discipline in JSX

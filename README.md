@@ -82,18 +82,28 @@ Starts a Squint REPL for interactive ClojureScript development.
 
 ```
 src/
-  agent/           Core agent (cli, core, loop, events, tools, registry, extensions, context)
-  modes/           Operational modes (interactive, print, rpc, sdk)
-  ui/              Ink/React terminal components
-  sessions/        Session management + compaction
-  settings/        Configuration system
-  resources/       Resource discovery (prompts, skills, themes)
-  packages/        Package management
+  agent/           Core agent modules (all under agent.* namespace)
+    cli.cljs       Entry point
+    core.cljs      Agent factory
+    loop.cljs      Execution loop
+    events.cljs    Event bus
+    tools.cljs     Built-in tools
+    tool_registry.cljs
+    extensions.cljs / extension_loader.cljs
+    context.cljs
+    modes/         Operational modes (interactive, print, rpc, sdk)
+    ui/            Ink/React terminal components (.jsx)
+    sessions/      Session management + compaction
+    settings/      Configuration system
+    resources/     Resource discovery (prompts, skills, themes)
+    packages/      Package management
   macros/          Compile-time macros (deftool, defcommand)
 test/              Test files (.cljs and .ts)
 built-in/themes/   Default dark/light themes
-dist/              Compiled output (generated)
+dist/              Compiled output (generated, gitignored)
 ```
+
+> **Important:** File paths must mirror namespace prefixes. `(ns agent.foo.bar ...)` must live at `src/agent/foo/bar.cljs`. Squint resolves imports by converting namespace dots to path separators.
 
 ### Compilation Model
 
