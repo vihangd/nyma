@@ -2,13 +2,13 @@
   {:squint/extension "jsx"}
   (:require ["ink" :refer [Box Text useInput]]))
 
-(defn TreeViewer [{:keys [session on-close theme]}]
+(defn TreeViewer [{:keys [session onClose theme]}]
   (let [tree ((:get-tree session))
         entries tree]
     (useInput
       (fn [_input key]
         (when (.-escape key)
-          (on-close))))
+          (onClose))))
     #jsx [Box {:flexDirection "column" :padding 1}
           [Text {:bold true :color (get-in theme [:colors :primary])}
            "Session Tree"]

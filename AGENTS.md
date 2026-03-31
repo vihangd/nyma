@@ -184,6 +184,21 @@ Squint compiles `(js/process.env.HOME)` as a function call `process.env.HOME()` 
 (.. js/process -env -HOME)
 ```
 
+### Props use string keys — kebab-case ≠ camelCase
+
+Squint keywords become string keys. `:on-submit` becomes `"on-submit"`, but `:onSubmit` becomes `"onSubmit"` — these are different keys. If a caller passes `{:onSubmit handler}` and the component destructures `{:keys [on-submit]}`, the prop will be `undefined`.
+
+**Rule:** Use camelCase for JSX component props to match React conventions. Both caller and receiver must use the same casing.
+
+```clojure
+;; Caller (app.cljs)
+[Editor {:onSubmit handle-submit :streaming streaming}]
+
+;; Receiver (editor.cljs) — must match the caller's casing
+(defn Editor [{:keys [onSubmit streaming theme]}]
+  ...)
+```
+
 ### Paren discipline in JSX
 
 JSX components (using `#jsx` reader tag) mix Hiccup-style brackets with ClojureScript parens. Extra or missing parens are hard to spot and produce confusing "Unmatched delimiter" errors at compile time. Also note:

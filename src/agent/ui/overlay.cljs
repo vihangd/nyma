@@ -2,11 +2,11 @@
   {:squint/extension "jsx"}
   (:require ["ink" :refer [Box Text useInput]]))
 
-(defn Overlay [{:keys [on-close children]}]
+(defn Overlay [{:keys [onClose children]}]
   (useInput
     (fn [_input key]
       (when (.-escape key)
-        (on-close))))
+        (onClose))))
   #jsx [Box {:position "absolute"
              :flexDirection "column"
              :borderStyle "round"

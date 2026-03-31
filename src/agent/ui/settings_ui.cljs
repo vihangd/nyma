@@ -3,14 +3,14 @@
   (:require ["react" :refer [useState]]
             ["ink" :refer [Box Text useInput]]))
 
-(defn SettingsUI [{:keys [settings on-close theme]}]
+(defn SettingsUI [{:keys [settings onClose theme]}]
   (let [[selected set-selected] (useState 0)
         current-settings ((:get settings))
         setting-keys     (keys current-settings)]
     (useInput
       (fn [_input key]
         (cond
-          (.-escape key) (on-close)
+          (.-escape key) (onClose)
           (.-upArrow key) (set-selected (fn [s] (max 0 (dec s))))
           (.-downArrow key) (set-selected (fn [s] (min (dec (count setting-keys)) (inc s)))))))
     #jsx [Box {:flexDirection "column" :padding 1}

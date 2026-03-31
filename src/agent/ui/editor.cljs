@@ -4,7 +4,7 @@
             ["ink" :refer [Box Text]]
             ["ink-text-input$default" :as TextInput]))
 
-(defn Editor [{:keys [on-submit streaming theme]}]
+(defn Editor [{:keys [onSubmit streaming theme]}]
   (let [[value set-value] (useState "")
         border-color      (if streaming
                             (get-in theme [:colors :warning] "#e0af68")
@@ -18,4 +18,4 @@
                       :onChange  set-value
                       :onSubmit  (fn [text]
                                   (set-value "")
-                                  (on-submit text))}]]))
+                                  (onSubmit text))}]]))
