@@ -6,19 +6,17 @@ Nyma compiles ClojureScript to native ES modules, runs on Bun for speed, and ren
 
 ## vs. pi-mono
 
-Nyma is a spiritual successor to [pi-mono](https://github.com/mariozechner/pi-mono) — Mario Zechner's TypeScript coding agent — with a different set of trade-offs:
+Nyma is a spiritual successor to [pi-mono](https://github.com/badlogic/pi-mono) — Mario Zechner's TypeScript coding agent — with a different set of trade-offs:
 
 | | pi-mono | Nyma |
 |---|---|---|
 | **Language** | TypeScript | ClojureScript (Squint) → ES modules |
-| **Runtime overhead** | Minimal | Zero — compiled to plain JS |
 | **Extension language** | TypeScript | TypeScript **or** ClojureScript |
 | **Schema library** | TypeBox | Zod (data-driven, no imports needed in extensions) |
 | **State model** | Mutable atom | Event-sourced store with full history |
 | **Tool pipeline** | Linear | Pedestal-style interceptor chain (composable middleware) |
 | **Extension isolation** | Shared namespace | Capability-gated, namespaced sandbox |
 | **Macros** | None | `deftool`, `defcommand`, `definterceptor`, `defreducer`, `defextension` |
-| **Multi-provider** | Limited | Anthropic, OpenAI, Google via provider registry |
 | **Session storage** | JSONL | JSONL tree + optional SQLite with usage tracking |
 
 **Why Nyma over pi-mono:**
