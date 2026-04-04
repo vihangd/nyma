@@ -42,6 +42,7 @@ jobs:
           bun build ./dist/agent/cli.mjs \
             --compile \
             --target ${{ matrix.target }} \
+            --external react-devtools-core \
             --outfile ${{ matrix.artifact }}
 
       - name: Upload artifact
