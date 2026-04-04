@@ -4,13 +4,41 @@
             ["node:os" :as os]
             [clojure.string :as str]))
 
-(def global-dir (path/join (os/homedir) ".agent"))
-(def project-dir ".agent")
+(def global-dir (path/join (os/homedir) ".nyma"))
+(def project-dir ".nyma")
 
 (def default-system-prompt
-  "You are Nyma, a helpful coding agent. You have access to tools to read files,
-write files, edit files, and run shell commands. Use them to help the user with
-their software engineering tasks. Be concise and precise.")
+  "You are Nyma, an interactive CLI coding agent. You help users with software engineering tasks: fixing bugs, writing features, refactoring code, answering questions, and exploring codebases.
+
+## Tools
+
+You have specialized tools — always prefer them over bash:
+
+- **read** — Read file contents. Use this, not `cat`/`head`/`tail` in bash.
+- **write** — Write content to a file. Use this, not `echo >` in bash.
+- **edit** — Replace exact text in a file. Use this, not `sed`/`awk` in bash.
+- **bash** — Run shell commands. Only use for build, test, git, and install commands — not for tasks that have a dedicated tool.
+- **think** — Reason through complex problems step-by-step before acting.
+- **ls** — List directory contents. Use this, not `ls` in bash.
+- **glob** — Find files by pattern. Use this, not `find` in bash.
+- **grep** — Search file contents with regex. Use this, not `grep`/`rg` in bash.
+- **web_fetch** — Fetch and extract content from a URL. Use this, not `curl` in bash.
+- **web_search** — Search the web for information. Always use this for any web lookup — never use curl to search engines in bash.
+
+When multiple independent tool calls are needed, make them in parallel.
+
+## Guidelines
+
+- Be concise. Keep responses under 4 lines unless the user asks for detail.
+- Use markdown formatting.
+- Do not add emojis unless the user requests them.
+- Do not start responses with filler (\"Great!\", \"Sure!\", \"Certainly!\").
+- Prefer editing existing files over creating new ones.
+- Respect existing code conventions, libraries, and patterns in the codebase.
+- Only make changes that are requested or clearly necessary — avoid over-engineering.
+- When unsure about requirements, ask the user rather than guessing.
+- Never generate or guess URLs unless confident they are correct.
+- Use the think tool to plan before making complex multi-step changes.")
 
 (defn- read-if-exists [file-path]
   (when (fs/existsSync file-path)
@@ -65,8 +93,9 @@ their software engineering tasks. Be concise and precise.")
            (into {})))))
 
 (defn ^:async discover
-  "Discover all resources from global and project directories."
-  []
+  "Discover all resources from global and project directories.
+   Optionally accepts an events bus to emit resources_discover for extensions."
+  [& [{:keys [events reason]}]]
   (let [skills  (merge
                   (or (discover-skills (path/join global-dir "skills")) {})
                   (or (discover-skills (path/join project-dir "skills")) {}))
@@ -83,20 +112,52 @@ their software engineering tasks. Be concise and precise.")
                        (str/join "\n\n"))
 
         system-md (or (read-if-exists (path/join project-dir "SYSTEM.md"))
-                      (read-if-exists (path/join global-dir "SYSTEM.md")))]
+                      (read-if-exists (path/join global-dir "SYSTEM.md")))
 
-    {:skills    skills
-     :prompts   prompts
-     :themes    themes
+        ;; Emit resources_discover event so extensions can contribute paths
+        ext-resources (when events
+                        (js-await
+                          ((:emit-collect events) "resources_discover"
+                            #js {:cwd    (js/process.cwd)
+                                 :reason (or reason "startup")})))
+
+        ;; Merge extension-contributed resources
+        ext-skill-paths  (get ext-resources "skillPaths")
+        ext-prompt-paths (get ext-resources "promptPaths")
+        ext-theme-paths  (get ext-resources "themePaths")
+
+        extra-skills  (when (seq ext-skill-paths)
+                        (reduce (fn [acc p] (merge acc (or (discover-skills p) {})))
+                                {} ext-skill-paths))
+        extra-prompts (when (seq ext-prompt-paths)
+                        (reduce (fn [acc p] (merge acc (or (discover-prompts p) {})))
+                                {} ext-prompt-paths))
+        extra-themes  (when (seq ext-theme-paths)
+                        (discover-themes ext-theme-paths))]
+
+    {:skills    (merge skills (or extra-skills {}))
+     :prompts   (merge prompts (or extra-prompts {}))
+     :themes    (merge themes (or extra-themes {}))
      :agents-md agents-md
      :system-md system-md
      :theme     nil
 
      :build-system-prompt
      (fn [& [{:keys [append]}]]
-       (str (or system-md default-system-prompt)
-            (when (seq agents-md) (str "\n\n" agents-md))
-            (when append (str "\n\n" append))))
+       (let [env-block (str "\n\n## Environment\n"
+                            "- Working directory: " (js/process.cwd) "\n"
+                            "- Platform: " (.-platform js/process) " " (.-arch js/process) "\n"
+                            "- Date: " (.toISOString (js/Date.)) "\n")
+             skills-block (when (seq skills)
+                            (str "\n\n## Available Skills (slash commands)\n"
+                                 (->> skills
+                                      (map (fn [[name _]] (str "- /" name)))
+                                      (str/join "\n"))))]
+         (str (or system-md default-system-prompt)
+              env-block
+              skills-block
+              (when (seq agents-md) (str "\n\n" agents-md))
+              (when append (str "\n\n" append)))))
 
      :extension-dirs
      [(path/join global-dir "extensions")

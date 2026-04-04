@@ -4,5 +4,5 @@ dist/
 .env.local
 *.log
 .DS_Store
-.clj-kondo/.cache/
+.clj-kondo/
 .lsp/

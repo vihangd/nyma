@@ -3,7 +3,7 @@
   (:require ["ink" :refer [Box Text]]))
 
 (defn Header [{:keys [agent resources theme]}]
-  (let [model (get-in agent [:config :model] "unknown")]
+  (let [model (or (.-modelId (get-in agent [:config :model])) "unknown")]
     #jsx [Box {:borderStyle "single"
                :borderColor (get-in theme [:colors :border] "#3b4261")
                :paddingX 1

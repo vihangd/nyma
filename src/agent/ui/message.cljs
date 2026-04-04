@@ -6,12 +6,12 @@
   #jsx [Box {:flexDirection "row" :marginBottom 0}
         [Text {:color (get-in theme [:colors :muted] "#565f89")}
          (str "⚙ " name " ")]
-        [Text {:color (get-in theme [:colors :muted] "#565f89") :dimColor true}
+        [Text {:color (get-in theme [:colors :muted] "#565f89")}
          (js/JSON.stringify (clj->js args) nil 2)]])
 
 (defn ToolResultMessage [{:keys [name result theme]}]
   #jsx [Box {:flexDirection "column" :marginBottom 1}
         [Text {:color (get-in theme [:colors :success] "#9ece6a")}
          (str "✓ " name)]
-        [Text {:dimColor true}
+        [Text {:color (get-in theme [:colors :muted] "#565f89")}
          (str result)]])

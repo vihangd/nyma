@@ -9,10 +9,11 @@
    :thinking       "off"
    :compaction     {:enabled true :threshold 0.85}
    :retry          {:enabled true :max-retries 3}
-   :tools          ["read" "write" "edit" "bash"]
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
-   :transport      "auto"})
+   :transport              "auto"
+   :tool-display           "collapsed"
+   :tool-display-max-lines 500})
 
 (defn- load-json [file-path]
   (when (fs/existsSync file-path)
@@ -26,16 +27,19 @@
     (fs/writeFileSync file-path (js/JSON.stringify (clj->js data) nil 2))))
 
 (defn create-settings-manager
-  "Two-scope settings: global + project. Project overrides global."
+  "Two-scope settings: global + project. Project overrides global.
+   Supports :reload to re-read files from disk without restarting."
   []
-  (let [global-settings  (load-json (path/join (os/homedir) ".agent" "settings.json"))
-        project-settings (load-json ".agent/settings.json")
+  (let [global-path      (path/join (os/homedir) ".nyma" "settings.json")
+        project-path     ".nyma/settings.json"
+        global-settings  (atom (load-json global-path))
+        project-settings (atom (load-json project-path))
         overrides        (atom {})]
 
     {:get (fn []
             (merge defaults
-                   (or global-settings {})
-                   (or project-settings {})
+                   (or @global-settings {})
+                   (or @project-settings {})
                    @overrides))
 
      :set-override (fn [k v]
@@ -44,10 +48,14 @@
      :apply-overrides (fn [m]
                         (swap! overrides merge m))
 
+     :reload (fn []
+               (reset! global-settings (load-json global-path))
+               (reset! project-settings (load-json project-path)))
+
      :save-global (fn [settings]
-                    (save-json (path/join (os/homedir) ".agent" "settings.json")
-                      (merge global-settings settings)))
+                    (save-json global-path
+                      (merge @global-settings settings)))
 
      :save-project (fn [settings]
-                     (save-json ".agent/settings.json"
-                       (merge project-settings settings)))}))
+                     (save-json project-path
+                       (merge @project-settings settings)))}))

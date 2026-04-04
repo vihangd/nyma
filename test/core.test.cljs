@@ -1,5 +1,6 @@
 (ns core.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["@ai-sdk/provider-utils" :refer [asSchema]]
             [agent.core :refer [create-agent]]))
 
 (describe "agent.core"
@@ -38,10 +39,8 @@
       (fn []
         (let [agent (create-agent {:model "m"})
               all   ((:all (:tool-registry agent)))]
-          (-> (expect (get all "read")) (.toBeTruthy))
-          (-> (expect (get all "write")) (.toBeTruthy))
-          (-> (expect (get all "edit")) (.toBeTruthy))
-          (-> (expect (get all "bash")) (.toBeTruthy)))))
+          (doseq [name ["read" "write" "edit" "bash" "think" "ls" "glob" "grep" "web_fetch" "web_search"]]
+            (-> (expect (get all name)) (.toBeTruthy))))))
 
     (it "merges custom tools with builtins"
       (fn []
@@ -65,4 +64,43 @@
               called  (atom false)]
           ((:on events) "test" (fn [_] (reset! called true)))
           ((:emit events) "test" {})
-          (-> (expect @called) (.toBe true)))))))
+          (-> (expect @called) (.toBe true)))))
+
+    ;; Regression: passing a vector of tool names as :tools corrupted the registry.
+    ;; Squint's merge treats vectors as maps (pairs), overwriting builtin tool entries
+    ;; with strings instead of tool objects. :tools must be nil or a map of extra tools.
+    (it "does not corrupt builtin tools when :tools is nil"
+      (fn []
+        (let [agent (create-agent {:model "m"})
+              all   ((:all (:tool-registry agent)))]
+          (doseq [[name t] all]
+            ;; Every tool must be an object with inputSchema, not a string
+            (-> (expect (= "object" (js/typeof t))) (.toBe true))
+            (-> (expect (.-inputSchema t)) (.toBeTruthy))
+            (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
+              (-> (expect (.-type schema)) (.toBe "object")))))))
+
+    ;; Regression: cli.cljs once passed ["read","write","edit","bash"] as :tools.
+    ;; Squint merge treated the vector as pairs, overwriting read→"write", edit→"bash".
+    (it "passing a vector as :tools does not corrupt builtin tools"
+      (fn []
+        (let [agent (create-agent {:model "m" :tools ["read" "write" "edit" "bash"]})
+              all   ((:all (:tool-registry agent)))]
+          ;; Every builtin must still be a tool object, not a string
+          (doseq [name ["read" "write" "edit" "bash"]]
+            (let [t (get all name)]
+              (-> (expect (= "object" (js/typeof t))) (.toBe true))
+              (-> (expect (.-inputSchema t)) (.toBeTruthy))
+              (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
+                (-> (expect (.-type schema)) (.toBe "object"))))))))
+
+    (it "additional :tools are objects merged with builtins"
+      (fn []
+        (let [extra-tool #js {:description "extra" :inputSchema nil :execute (fn [_] "ok")}
+              agent (create-agent {:model "m" :tools {"extra" extra-tool}})
+              all   ((:all (:tool-registry agent)))]
+          ;; Extra tool is present
+          (-> (expect (.-description (get all "extra"))) (.toBe "extra"))
+          ;; Builtins are NOT corrupted
+          (-> (expect (.-inputSchema (get all "read"))) (.toBeTruthy))
+          (-> (expect (.-inputSchema (get all "write"))) (.toBeTruthy)))))))

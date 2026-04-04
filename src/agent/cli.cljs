@@ -6,19 +6,51 @@
             [agent.sessions.manager :refer [create-session-manager]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.extension-loader :refer [discover-and-load]]
+            [agent.extension-loader :refer [discover-and-load deactivate-all]]
+            [agent.commands.builtins :refer [register-builtins]]
+            [agent.keybindings :refer [load-keybindings apply-keybindings]]
             ["./modes/interactive.jsx" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
 
-(defn- resolve-model [values merged]
-  (or (:model values) (:model merged) "claude-sonnet-4-20250514"))
+(defn- resolve-model-via-registry
+  "Resolve a model through the agent's provider registry.
+   Falls back to the provider name as a direct model ID."
+  [provider-registry values merged]
+  (let [model-id  (or (:model values) (:model merged) "claude-sonnet-4-20250514")
+        provider  (or (:provider values) (:provider merged) "anthropic")]
+    ((:resolve provider-registry) provider model-id)))
 
-(defn- resolve-tools [values merged]
+(defn- resolve-tools
+  "Returns an explicit tool restriction list, or nil if all builtins should be active.
+   Only restricts when --tools CLI flag or settings 'tools' key is set."
+  [values merged]
   (or (when-let [t (:tools values)]
         (-> t (.split ",") vec))
-      (:tools merged)
-      ["read" "write" "edit" "bash"]))
+      (:tools merged)))
+
+(defn resolve-ext-flags
+  "Resolve --ext-* CLI flags against registered extension flags.
+   Scans process.argv for --ext-flagname=value or --ext-flagname (boolean),
+   matches against registered flags, coerces by type, and sets :value."
+  [agent]
+  (let [argv  (.slice js/process.argv 2)
+        flags @(:flags agent)]
+    (doseq [arg argv]
+      (when (.startsWith arg "--ext-")
+        (let [rest-arg  (.slice arg 6)
+              eq-idx    (.indexOf rest-arg "=")
+              flag-name (if (>= eq-idx 0) (.slice rest-arg 0 eq-idx) rest-arg)
+              raw-value (when (>= eq-idx 0) (.slice rest-arg (inc eq-idx)))]
+          (doseq [[full-name flag-config] flags]
+            (let [short-name (last (.split full-name "/"))]
+              (when (= short-name flag-name)
+                (let [coerced (case (:type flag-config)
+                                "boolean" (if (nil? raw-value) true (not= raw-value "false"))
+                                "number"  (js/Number raw-value)
+                                "string"  (or raw-value "")
+                                raw-value)]
+                  (swap! (:flags agent) assoc-in [full-name :value] coerced))))))))))
 
 (defn- temp-session-path []
   (str "/tmp/nyma-session-" (js/Date.now) ".jsonl"))
@@ -26,7 +58,7 @@
 (defn- resolve-session [values]
   (let [session-path (or (:session values)
                          (when-not (:no-session values)
-                           (str (.. js/process -env -HOME) "/.agent/sessions/default.jsonl")))]
+                           (str (.. js/process -env -HOME) "/.nyma/sessions/default.jsonl")))]
     (create-session-manager session-path)))
 
 (defn ^:async main []
@@ -48,49 +80,55 @@
 
         settings  (create-settings-manager)
         merged    ((:get settings))
-        resources (js-await (discover))
+        resources (assoc (js-await (discover)) :settings settings)
         session   (resolve-session values)
 
+        active-tools (resolve-tools values merged)
+        ;; Create agent first, then resolve model via its provider registry
         agent (create-agent
-                {:model         (resolve-model values merged)
+                {:model         nil
                  :system-prompt ((:build-system-prompt resources))
-                 :tools         (resolve-tools values merged)
                  :max-steps     20})
-
+        model (resolve-model-via-registry (:provider-registry agent) values merged)
+        _     (set! (.-model (:config agent)) model)
         api (create-extension-api agent)]
 
-    ;; Register built-in commands
-    (swap! (:commands agent) assoc
-      "help" {:description "Show available commands"
-              :handler (fn [_args _ctx]
-                         (let [cmds @(:commands agent)]
-                           (js/console.log "\nAvailable commands:")
-                           (doseq [[name cmd] cmds]
-                             (js/console.log (str "  /" name " — " (:description cmd))))
-                           (js/console.log "")))}
-      "model" {:description "Show current model"
-               :handler (fn [_args _ctx]
-                          (js/console.log
-                            (str "\nModel: " (:model (:config agent)) "\n")))}
-      "clear" {:description "Clear messages"
-               :handler (fn [_args _ctx]
-                          (swap! (:state agent) assoc :messages [])
-                          (js/console.log "\nMessages cleared.\n"))}
-      "exit" {:description "Exit the agent"
-              :handler (fn [_args _ctx]
-                         (js/process.exit 0))})
+    ;; Filter active tools if --tools flag was used
+    (when active-tools
+      ((:set-active (:tool-registry agent)) (set active-tools)))
+
+    ;; Attach session to agent so extensions can access it
+    (reset! (:session agent) session)
+
+    ;; Attach extension API to agent so UI can access it
+    (set! (.-extension-api agent) api)
 
     ;; Load all extensions (both .cljs and .ts/.js)
-    (js-await (discover-and-load (:extension-dirs resources) api))
+    (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api))
+          extensions-atom   (atom loaded-extensions)]
 
-    ;; Dispatch to mode
-    (let [mode (or (:mode values)
-                   (when (:print values) "print")
-                   "interactive")]
-      (case mode
-        "interactive" (js-await (interactive/start agent session resources))
-        "print"       (js-await (print-mode/start agent (first positionals)))
-        "json"        (js-await (print-mode/start-json agent (first positionals)))
-        "rpc"         (js-await (rpc/start agent))))))
+      ;; Resolve --ext-* CLI flags against registered extension flags
+      (resolve-ext-flags agent)
 
-(main)
+      ;; Register built-in commands with reload support
+      (register-builtins agent session resources extensions-atom resolve-ext-flags)
+
+      ;; Load user keybindings
+      (let [bindings (load-keybindings)]
+        (when (seq bindings)
+          (apply-keybindings (:shortcuts agent) (:commands agent) bindings)))
+
+      ;; Deactivate extensions on process exit
+      (.on js/process "exit" (fn [] (deactivate-all @extensions-atom)))
+
+      ;; Dispatch to mode
+      (let [mode (or (:mode values)
+                     (when (:print values) "print")
+                     "interactive")]
+        (case mode
+          "interactive" (js-await (interactive/start agent session resources))
+          "print"       (js-await (print-mode/start agent (first positionals)))
+          "json"        (js-await (print-mode/start-json agent (first positionals)))
+          "rpc"         (js-await (rpc/start agent)))))))
+
+(when (.-main js/import.meta) (main))

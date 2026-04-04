@@ -39,7 +39,7 @@
 
     (.startsWith source "git:")
     (let [repo (subs source 4)
-          dir  (path/join (os/homedir) ".agent" "git"
+          dir  (path/join (os/homedir) ".nyma" "git"
                  (-> repo (.replace ":" "/") (.replace ".git" "")))]
       (js-await (run-cmd (str "git clone " repo " " dir)))
       (when (fs/existsSync (path/join dir "package.json"))

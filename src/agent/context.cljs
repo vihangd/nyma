@@ -1,4 +1,5 @@
-(ns agent.context)
+(ns agent.context
+  (:require [agent.protocols :refer [IContextBuilder_build_ctx]]))
 
 (defn- message-entry? [entry]
   (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry)))
@@ -16,3 +17,10 @@
   "Return the currently active tools from the registry."
   [agent]
   ((:get-active (:tool-registry agent))))
+
+(def default-context-builder
+  "Default IContextBuilder implementation."
+  (let [builder {}]
+    (aset builder IContextBuilder_build_ctx
+      (fn [_ agent _opts] (build-context agent)))
+    builder))

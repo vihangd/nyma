@@ -21,6 +21,6 @@
   [template variables]
   (reduce-kv
     (fn [s k v]
-      (.replace s (js/RegExp. (str "\\{\\{" (name k) "\\}\\}") "g") (str v)))
+      (.replace s (js/RegExp. (str "\\{\\{" (str k) "\\}\\}") "g") (str v)))
     template
     variables))

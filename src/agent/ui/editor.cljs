@@ -4,7 +4,10 @@
             ["ink" :refer [Box Text]]
             ["ink-text-input$default" :as TextInput]))
 
-(defn Editor [{:keys [onSubmit streaming theme]}]
+(defn editor-prefix [streaming steerAcked]
+  (cond steerAcked "↳ queued " streaming "steer❯ " :else "❯ "))
+
+(defn Editor [{:keys [onSubmit streaming steerAcked theme]}]
   (let [[value set-value] (useState "")
         border-color      (if streaming
                             (get-in theme [:colors :warning] "#e0af68")
@@ -13,7 +16,7 @@
                :borderColor border-color
                :paddingX 1}
           [Text {:color (get-in theme [:colors :muted] "#565f89")}
-           (if streaming "steer❯ " "❯ ")]
+           (editor-prefix streaming steerAcked)]
           [TextInput {:value     value
                       :onChange  set-value
                       :onSubmit  (fn [text]

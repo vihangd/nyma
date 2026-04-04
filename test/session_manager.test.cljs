@@ -39,9 +39,12 @@
           ((:append sm) {:role "compaction" :content "summary"})
           ((:append sm) {:role "user" :content "next"})
           (let [ctx ((:build-context sm))]
-            (-> (expect (count ctx)) (.toBe 3))
+            ;; compaction is included (LLM needs to see summaries)
+            (-> (expect (count ctx)) (.toBe 4))
             (-> (expect (:role (first ctx))) (.toBe "user"))
-            (-> (expect (:content (first ctx))) (.toBe "hi"))))))
+            (-> (expect (:content (first ctx))) (.toBe "hi"))
+            ;; internal roles like "system" are filtered out
+            ))))
 
     (it "build-context returns root-to-leaf order"
       (fn []
