@@ -1,5 +1,6 @@
 (ns agent.extension-context
-  (:require [agent.sessions.compaction :refer [compact]]))
+  (:require [agent.sessions.compaction :refer [compact]]
+            [agent.token-estimation :as te]))
 
 (defn create-extension-context
   "Build the context object passed to event handlers and tool execute.
@@ -56,7 +57,32 @@
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))
 
          ;; Session directory
-         :getSessionDirectory (fn [] (str (.. js/process -env -HOME) "/.nyma/sessions"))}))
+         :getSessionDirectory (fn [] (str (.. js/process -env -HOME) "/.nyma/sessions"))
+
+         ;; Token budget & model info
+         :getTokenBudget     (fn []
+                               (let [model-id (or (.-modelId (:model (:config agent))) "unknown")
+                                     mr       (:model-registry agent)
+                                     window   (if mr ((:context-window mr) model-id) 100000)
+                                     state    @(:state agent)
+                                     used     (te/estimate-messages-tokens (:messages state))
+                                     reserved (js/Math.floor (* window 0.3))]
+                                 #js {:contextWindow   window
+                                      :inputBudget     (- window reserved)
+                                      :tokensUsed      used
+                                      :tokensRemaining (- window reserved used)
+                                      :model           model-id}))
+         :getModelInfo        (fn [& [model-id]]
+                                (let [id (or model-id
+                                             (.-modelId (:model (:config agent)))
+                                             "unknown")
+                                      mr (:model-registry agent)]
+                                  (if mr
+                                    (clj->js ((:get mr) id))
+                                    #js {:context-window 100000})))
+         :estimateTokens      (fn [text] (te/estimate-tokens text))
+         :getContextProviders  (fn []
+                                 (clj->js @(:context-providers agent)))}))
 
 (defn create-command-context
   "Extended context for command handlers. Includes waitForIdle, newSession,

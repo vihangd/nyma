@@ -1,14 +1,7 @@
 (ns agent.sessions.compaction
   (:require ["ai" :refer [generateText]]
-            [clojure.string :as str]))
-
-(defn- estimate-tokens [messages]
-  ;; rough estimate: 4 chars per token
-  (/ (reduce + (map #(count (str (:content %))) messages)) 4))
-
-(defn- get-model-limit [_model]
-  ;; Default to 100k context window
-  100000)
+            [clojure.string :as str]
+            [agent.token-estimation :as te]))
 
 (defn- find-split-point [context limit]
   (loop [i 0 tokens 0]
@@ -16,7 +9,7 @@
             (>= tokens limit))
       i
       (recur (inc i)
-             (+ tokens (/ (count (str (:content (nth context i)))) 4))))))
+             (+ tokens (te/estimate-tokens (str (:content (nth context i)))))))))
 
 (defn extract-files-read
   "Extract file paths from tool_call entries for the 'read' tool."
@@ -47,11 +40,14 @@
 
 (defn ^:async compact
   "Summarize older messages when context approaches model limits.
-   Extensions can intercept via 'before_compact' event."
-  [session model events & [{:keys [custom-instructions]}]]
+   Extensions can intercept via 'before_compact' event.
+   Accepts optional model-registry for accurate context windows."
+  [session model events & [{:keys [custom-instructions model-registry]}]]
   (let [context ((:build-context session))
-        usage   (estimate-tokens context)
-        limit   (get-model-limit model)]
+        usage   (te/estimate-messages-tokens context)
+        limit   (if model-registry
+                  ((:context-window model-registry) (or (.-modelId model) "unknown"))
+                  100000)]
 
     (when (> usage (* limit 0.85))
       (let [evt-ctx #js {:context context :usage usage :summary nil}]

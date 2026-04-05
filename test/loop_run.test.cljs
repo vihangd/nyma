@@ -106,6 +106,59 @@
 
 ;; ── describe blocks ──────────────────────────────────────────
 
+(defn ^:async test-run-provider-request-has-provider-options []
+  (let [agent (make-test-agent)
+        seen  (atom nil)]
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen (some? (.-providerOptions config)))
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    (-> (expect @seen) (.toBe true))))
+
+(defn ^:async test-run-provider-request-mutation-persists []
+  (let [agent   (make-test-agent)
+        final-v (atom nil)]
+    ;; First handler mutates
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (set! (.-system config) "MUTATED BY EXTENSION")
+        nil)
+      10)
+    ;; Second handler reads
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! final-v (.-system config))
+        #js {:block true :reason "ok"})
+      5)
+    (js-await (run agent "test"))
+    (-> (expect @final-v) (.toBe "MUTATED BY EXTENSION"))))
+
+(defn ^:async test-run-context-assembly-fires-before-provider-request []
+  (let [agent (make-test-agent)
+        order (atom [])]
+    ((:on (:events agent)) "context_assembly"
+      (fn [_]
+        (swap! order conj "context_assembly")
+        nil))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [_]
+        (swap! order conj "before_provider_request")
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    (-> (expect (first @order)) (.toBe "context_assembly"))
+    (-> (expect (second @order)) (.toBe "before_provider_request"))))
+
+(defn ^:async test-run-after-provider-request-not-fired-when-blocked []
+  (let [agent (make-test-agent)
+        fired (atom false)]
+    ((:on (:events agent)) "after_provider_request"
+      (fn [_] (reset! fired true)))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [_] #js {:block true :reason "blocked"}))
+    (js-await (run agent "test"))
+    (-> (expect @fired) (.toBe false))))
+
 (describe "agent.loop/run - blocked path" (fn []
   (it "appends user message to state" test-run-appends-user-message)
   (it "emits agent_start and agent_end events" test-run-emits-agent-start-end)
@@ -115,3 +168,9 @@
   (it "before_agent_start modifies system prompt" test-run-before-agent-start-modifies-prompt)
   (it "tracks state via store dispatches" test-run-tracks-usage-via-store)
   (it "injects messages from extensions" test-run-inject-messages-from-extensions)))
+
+(describe "agent.loop/run - new hooks" (fn []
+  (it "before_provider_request config has providerOptions" test-run-provider-request-has-provider-options)
+  (it "before_provider_request mutation persists across handlers" test-run-provider-request-mutation-persists)
+  (it "context_assembly fires before before_provider_request" test-run-context-assembly-fires-before-provider-request)
+  (it "after_provider_request not fired when blocked" test-run-after-provider-request-not-fired-when-blocked)))

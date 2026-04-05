@@ -3,6 +3,7 @@
             [agent.context :refer [build-context get-active-tools]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.pricing :refer [calculate-cost]]
+            [agent.token-estimation :as te]
             [clojure.string :as str]))
 
 (def stream-event-types
@@ -83,10 +84,17 @@
             effective-prompt
             (let [base (:system-prompt config)
                   additions (get before-result "system-prompt-additions")
-                  addition  (get before-result "systemPromptAddition")]
+                  addition  (get before-result "systemPromptAddition")
+                  sections  (get before-result "prompt-sections")
+                  ;; Sort prompt-sections by priority (descending) and concatenate
+                  sections-text
+                  (when (seq sections)
+                    (let [sorted (sort-by #(- (or (get % "priority") 0)) sections)]
+                      (str/join "\n\n" (map #(get % "content") sorted))))]
               (cond-> base
-                addition  (str "\n\n" addition)
-                (seq additions) (str "\n\n" (str/join "\n\n" additions))))
+                addition     (str "\n\n" addition)
+                (seq additions) (str "\n\n" (str/join "\n\n" additions))
+                sections-text (str "\n\n" sections-text)))
 
             ;; Inject messages from extensions
             inject-msgs (get before-result "inject-messages")
@@ -94,13 +102,13 @@
             ;; Resolve model — support runtime model switching via state
             active-model (or (:runtime-model @state) (:model config))
 
-            ;; Allow extensions to inspect/replace LLM request via before_provider_request
-            provider-result (js-await
-                              ((:emit-collect events) "before_provider_request"
-                                #js {:model     active-model
-                                     :system    effective-prompt
-                                     :messages  (clj->js messages)
-                                     :tools     (clj->js (keys tools))}))]
+            ;; Compute token budget for context_assembly
+            model-id (str (or (.-modelId active-model) active-model "unknown"))
+            model-registry (:model-registry agent)
+            context-window (if model-registry
+                             ((:context-window model-registry) model-id)
+                             100000)
+            input-budget (- context-window (js/Math.floor (* context-window 0.3)))]
 
         ;; Inject messages from extensions (outside let binding to avoid doseq-in-let)
         (when (seq inject-msgs)
@@ -108,6 +116,46 @@
             (if-let [store (:store agent)]
               ((:dispatch! store) :message-added {:message msg})
               (swap! state update :messages conj msg))))
+
+        ;; context_assembly event — extensions can replace messages or system prompt
+        (let [assembly-result
+              (js-await
+                ((:emit-collect events) "context_assembly"
+                  #js {:messages     (clj->js messages)
+                       :systemPrompt effective-prompt
+                       :tokenBudget  #js {:contextWindow context-window
+                                          :inputBudget   input-budget
+                                          :tokensUsed    (te/estimate-messages-tokens messages)
+                                          :model         model-id}
+                       :providers    (clj->js @(:context-providers agent))}))
+              ;; Apply replacements from context_assembly
+              effective-prompt (if-let [sys (get assembly-result "system")]
+                                 sys effective-prompt)
+              ;; If extension returned replacement messages, convert JS array to CLJ vector
+              messages (if-let [msgs (get assembly-result "messages")]
+                         (vec (map (fn [m]
+                                     (if (map? m) m
+                                       {:role    (.-role m)
+                                        :content (.-content m)}))
+                                   msgs))
+                         messages)
+
+              ;; Build the full mutable streamText config
+              st-config #js {:model          active-model
+                             :system         effective-prompt
+                             :messages       (clj->js messages)
+                             :tools          (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
+                             :stopWhen       (stepCountIs (:max-steps config))
+                             :providerOptions #js {}
+                             :onError        (fn [e] (throw (.-error e)))
+                             :onStepFinish   (fn [step]
+                                               ((:emit events) "turn_end" step)
+                                               (inject-steer-messages! agent))}
+
+              ;; before_provider_request — extensions can MUTATE st-config in place
+              provider-result (js-await
+                                ((:emit-collect events) "before_provider_request"
+                                  st-config))]
 
         ;; If before_provider_request blocked, skip LLM call
         (if (get provider-result "block")
@@ -123,20 +171,8 @@
           (do
             ((:emit events) "turn_start" {})
 
-            ;; === AI SDK does everything here ===
-            (let [result (js-await
-                           (streamText
-                             #js {:model      active-model
-                                  :system     effective-prompt
-                                  :messages   (clj->js messages)
-                                  :tools      (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
-                                  :stopWhen   (stepCountIs (:max-steps config))
-                                  :onError
-                                  (fn [e] (throw (.-error e)))
-                                  :onStepFinish
-                                  (fn [step]
-                                    ((:emit events) "turn_end" step)
-                                    (inject-steer-messages! agent))}))]
+            ;; === AI SDK does everything here — using the (possibly mutated) config ===
+            (let [result (js-await (streamText st-config))]
 
           ;; Stream events to subscribers
           (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
@@ -161,10 +197,19 @@
             (when (and usage store)
               (let [input-tokens  (or (.-inputTokens usage) 0)
                     output-tokens (or (.-outputTokens usage) 0)
-                    model-id      (str (:model (:config agent)))
-                    cost          (calculate-cost model-id input-tokens output-tokens)]
+                    cost-model-id (str (:model (:config agent)))
+                    cost          (calculate-cost cost-model-id input-tokens output-tokens)]
                 ((:dispatch! store) :usage-updated
-                  {:input-tokens input-tokens :output-tokens output-tokens :cost cost})))
+                  {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
+
+                ;; after_provider_request — inform extensions of usage/cache metrics
+                ((:emit events) "after_provider_request"
+                  #js {:usage        #js {:inputTokens  input-tokens
+                                          :outputTokens output-tokens
+                                          :cost         cost}
+                       :model        cost-model-id
+                       :cachedTokens (.-cachedTokens usage)
+                       :turnCount    (or (:turn-count @state) 0)})))
 
             ((:emit events) "agent_end" {:text final-text :usage usage}))
 
@@ -174,7 +219,7 @@
             (if-let [store (:store agent)]
               ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
               (swap! state update :messages conj {:role "user" :content (:content next)}))
-            (recur)))))))))
+            (recur))))))))))
 
 (defn steer
   "Queue a steering message — delivered after current tool execution."

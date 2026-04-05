@@ -1,6 +1,7 @@
 (ns agent.extensions
   (:require [agent.loop :refer [steer follow-up]]
-            [agent.extension-context :refer [create-extension-context]]))
+            [agent.extension-context :refer [create-extension-context]]
+            [agent.token-estimation :as te]))
 
 (defn create-extension-api
   "Build the API object that extensions receive.
@@ -162,6 +163,48 @@
                               (if (some? (:value flag))
                                 (:value flag)
                                 (:default flag))))
+
+       ;; ── Context providers ──────────────────────────────────────
+       :registerContextProvider
+                          (fn [name config]
+                            (swap! (:context-providers agent) assoc name
+                              {:priority       (or (when config (.-priority config)) 0)
+                               :tokenEstimate  (when config (.-tokenEstimate config))
+                               :provide        (when config (.-provide config))}))
+       :unregisterContextProvider
+                          (fn [name]
+                            (swap! (:context-providers agent) dissoc name))
+
+       ;; ── Token budget ───────────────────────────────────────
+       :getTokenBudget    (fn []
+                            (let [model-id (or (.-modelId (:model (:config agent))) "unknown")
+                                  window   ((:context-window (:model-registry agent)) model-id)
+                                  state    @(:state agent)
+                                  used     (te/estimate-messages-tokens (:messages state))
+                                  reserved (js/Math.floor (* window 0.3))]
+                              #js {:contextWindow   window
+                                   :inputBudget     (- window reserved)
+                                   :tokensUsed      used
+                                   :tokensRemaining (- window reserved used)
+                                   :model           model-id}))
+
+       ;; ── Model info ─────────────────────────────────────────
+       :getModelInfo      (fn [& [model-id]]
+                            (let [id (or model-id
+                                         (.-modelId (:model (:config agent)))
+                                         "unknown")]
+                              (clj->js ((:get (:model-registry agent)) id))))
+       :registerModelInfo (fn [entries]
+                            (let [converted (into {}
+                                              (map (fn [k]
+                                                     [(str k)
+                                                      {:context-window
+                                                       (.-contextWindow (aget entries k))}])
+                                                   (js/Object.keys entries)))]
+                              ((:register (:model-registry agent)) converted)))
+
+       ;; ── Token estimation ───────────────────────────────────
+       :estimateTokens    (fn [text] (te/estimate-tokens text))
 
        ;; ── UI hooks — populated when running in interactive mode ──
        :ui                #js {:available   false

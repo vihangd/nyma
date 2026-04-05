@@ -14,7 +14,8 @@
    "context" "before_agent_start" "input"
    "compact" "before_compact"
    "before_branch_switch" "branch_summarized"
-   "resources_discover" "model_select" "user_bash" "reload"])
+   "resources_discover" "model_select" "user_bash" "reload"
+   "context_assembly" "after_provider_request"])
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys
@@ -23,7 +24,7 @@
 ;; ── Collection keys are concatenated ─────────────────────────────
 (def ^:private collection-keys
   #{"inject-messages" "system-prompt-additions" "paths"
-    "skillPaths" "promptPaths" "themePaths"})
+    "skillPaths" "promptPaths" "themePaths" "prompt-sections"})
 
 (defn- merge-results
   "Merge a sequence of handler return maps with semantic merging:

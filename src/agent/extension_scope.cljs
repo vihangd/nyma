@@ -67,6 +67,14 @@
                                             (.off bus (prefix event) handler))
                                     :emit (fn [event data]
                                             (.emit bus (prefix event) data))}))
+         ;; Context providers (gated)
+         :registerContextProvider   (gate capabilities :context (.-registerContextProvider base-api))
+         :unregisterContextProvider (gate capabilities :context (.-unregisterContextProvider base-api))
+         :getTokenBudget            (gate capabilities :context (.-getTokenBudget base-api))
+         ;; Model info & token estimation (ungated — read-only utilities)
+         :getModelInfo      (.-getModelInfo base-api)
+         :registerModelInfo (.-registerModelInfo base-api)
+         :estimateTokens    (.-estimateTokens base-api)
          ;; Flags (namespace-prefixed)
          :registerFlag     (gate capabilities :flags
                              (fn [name config]

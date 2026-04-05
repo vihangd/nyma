@@ -6,7 +6,8 @@
             [agent.middleware :refer [create-pipeline]]
             [agent.state :refer [create-agent-store]]
             [agent.providers.registry :refer [create-provider-registry]]
-            [agent.providers.builtins :refer [builtin-providers]]))
+            [agent.providers.builtins :refer [builtin-providers]]
+            [agent.model-info :refer [create-model-registry]]))
 
 (defn create-agent
   "Create an agent instance. Config is a plain JS object with:
@@ -33,6 +34,8 @@
         abort-controller  (atom (js/AbortController.))
         inter-events      (create-event-bus)  ;; Inter-extension communication bus
         flags             (atom {})           ;; Extension CLI flags {name → {:description :type :default :value}}
+        context-providers (atom {})           ;; name → {:priority :estimate :provide}
+        model-registry    (create-model-registry)
         state             (atom {:messages           []
                                  :model              model
                                  :active-tools       (set (keys builtin-tools))
@@ -64,6 +67,8 @@
                  :abort-controller  abort-controller
                  :inter-events      inter-events
                  :flags             flags
+                 :context-providers context-providers
+                 :model-registry    model-registry
                  ;; Session is attached later by cli.cljs
                  :session           (atom nil)}]
       ;; Set agent-ref so the middleware pipeline can create extension contexts

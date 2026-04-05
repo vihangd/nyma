@@ -91,6 +91,58 @@
     (-> (expect (some? (:session agent))) (.toBe true))
     (-> (expect @(:session agent)) (.toBeNull))))
 
+;; ── Context provider and token budget tests ──────────────────
+
+(defn test-register-context-provider []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)]
+    (.registerContextProvider api "my-provider"
+      #js {:priority 10 :tokenEstimate (fn [] 100) :provide (fn [_ _] "data")})
+    (-> (expect (some? (get @(:context-providers agent) "my-provider"))) (.toBe true))
+    (.unregisterContextProvider api "my-provider")
+    (-> (expect (get @(:context-providers agent) "my-provider")) (.toBeUndefined))))
+
+(defn test-get-token-budget-shape []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)
+        budget (.getTokenBudget api)]
+    (-> (expect (.-contextWindow budget)) (.toBeGreaterThan 0))
+    (-> (expect (.-inputBudget budget)) (.toBeGreaterThan 0))
+    (-> (expect (some? (.-tokensUsed budget))) (.toBe true))
+    (-> (expect (some? (.-tokensRemaining budget))) (.toBe true))
+    (-> (expect (some? (.-model budget))) (.toBe true))))
+
+(defn test-get-model-info []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)
+        info  (.getModelInfo api "gpt-4o")]
+    ;; Stored as :context-window in CLJ, converted to JS as context-window
+    (-> (expect (aget info "context-window")) (.toBe 128000))))
+
+(defn test-register-model-info []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)]
+    (.registerModelInfo api #js {:custom-model #js {:contextWindow 999000}})
+    (let [info (.getModelInfo api "custom-model")]
+      (-> (expect (aget info "context-window")) (.toBe 999000)))))
+
+(defn test-estimate-tokens []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)
+        est   (.estimateTokens api "hello world this is a test sentence")]
+    (-> (expect est) (.toBeGreaterThan 0))
+    (-> (expect (js/Number.isInteger est)) (.toBe true))))
+
+(defn test-api-has-context-methods []
+  (let [agent (create-agent {:model "test-model" :system-prompt "test"})
+        api   (create-extension-api agent)]
+    (-> (expect (fn? (.-registerContextProvider api))) (.toBe true))
+    (-> (expect (fn? (.-unregisterContextProvider api))) (.toBe true))
+    (-> (expect (fn? (.-getTokenBudget api))) (.toBe true))
+    (-> (expect (fn? (.-getModelInfo api))) (.toBe true))
+    (-> (expect (fn? (.-registerModelInfo api))) (.toBe true))
+    (-> (expect (fn? (.-estimateTokens api))) (.toBe true))))
+
 ;; ── describe blocks ──────────────────────────────────────────
 
 (describe "provider-registry" (fn []
@@ -106,3 +158,11 @@
   (it "supports inter-extension events" test-inter-extension-events)
   (it "manages providers via API" test-provider-via-api)
   (it "agent has session atom" test-session-atom-exists)))
+
+(describe "extension-api - context & token methods" (fn []
+  (it "exposes all context/token API methods" test-api-has-context-methods)
+  (it "registerContextProvider and unregisterContextProvider work" test-register-context-provider)
+  (it "getTokenBudget returns expected shape" test-get-token-budget-shape)
+  (it "getModelInfo returns context window" test-get-model-info)
+  (it "registerModelInfo adds entries" test-register-model-info)
+  (it "estimateTokens returns positive integer" test-estimate-tokens)))
