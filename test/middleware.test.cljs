@@ -370,3 +370,85 @@
             ctx {:tool-name "read" :args {} :result "x" :cancelled false}]
         ;; Should not throw
         ((:leave ic) ctx))))))
+
+;; ── display metadata propagation ──────────────────────────
+
+(defn- mock-tool-with-display [execute-fn display]
+  #js {:execute execute-fn :description "mock" :display (clj->js display)})
+
+(defn ^:async test-display-formatArgs-propagated []
+  (let [events   (create-event-bus)
+        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
+        pipeline (create-pipeline events store)
+        captured (atom nil)]
+    ((:on events) "tool_execution_start"
+      (fn [data] (reset! captured data)))
+    (let [t (mock-tool-with-display
+              (fn [_] "ok")
+              {:formatArgs (fn [args] (str "custom:" (.-url args)))})]
+      (js-await ((:execute pipeline) "scraper" t {:url "https://example.com"})))
+    (-> (expect (get @captured :custom-one-line-args)) (.toBe "custom:https://example.com"))))
+
+(defn ^:async test-display-formatResult-propagated []
+  (let [events   (create-event-bus)
+        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
+        pipeline (create-pipeline events store)
+        captured (atom nil)]
+    ((:on events) "tool_execution_end"
+      (fn [data] (reset! captured data)))
+    (let [t (mock-tool-with-display
+              (fn [_] "line1\nline2\nline3")
+              {:formatResult (fn [r] (str (count (.split r "\n")) " pages"))})]
+      (js-await ((:execute pipeline) "scraper" t {:url "x"})))
+    (-> (expect (get @captured :custom-one-line-result)) (.toBe "3 pages"))))
+
+(defn ^:async test-display-icon-and-verbosity-propagated []
+  (let [events   (create-event-bus)
+        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
+        pipeline (create-pipeline events store)
+        start-captured (atom nil)
+        end-captured   (atom nil)]
+    ((:on events) "tool_execution_start" (fn [data] (reset! start-captured data)))
+    ((:on events) "tool_execution_end" (fn [data] (reset! end-captured data)))
+    (let [t (mock-tool-with-display
+              (fn [_] "ok")
+              {:icon "🌐" :verbosity "one-line"})]
+      (js-await ((:execute pipeline) "scraper" t {:url "x"})))
+    (-> (expect (get @start-captured :custom-icon)) (.toBe "🌐"))
+    (-> (expect (get @start-captured :custom-verbosity)) (.toBe "one-line"))
+    (-> (expect (get @end-captured :custom-icon)) (.toBe "🌐"))
+    (-> (expect (get @end-captured :custom-verbosity)) (.toBe "one-line"))))
+
+(defn ^:async test-display-formatter-error-does-not-crash []
+  (let [events   (create-event-bus)
+        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
+        pipeline (create-pipeline events store)
+        captured (atom nil)]
+    ((:on events) "tool_execution_start"
+      (fn [data] (reset! captured data)))
+    (let [t (mock-tool-with-display
+              (fn [_] "ok")
+              {:formatArgs (fn [_] (throw (js/Error. "boom")))})]
+      (js-await ((:execute pipeline) "scraper" t {:url "x"})))
+    ;; Should not have custom args (formatter threw), but should not crash
+    (-> (expect (get @captured :custom-one-line-args)) (.toBeUndefined))))
+
+(defn ^:async test-no-display-field-works-normally []
+  (let [events   (create-event-bus)
+        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
+        pipeline (create-pipeline events store)
+        captured (atom nil)]
+    ((:on events) "tool_execution_start"
+      (fn [data] (reset! captured data)))
+    (let [t (mock-tool (fn [_] "ok"))]
+      (js-await ((:execute pipeline) "read" t {:path "/tmp"})))
+    ;; No custom fields when tool has no .display
+    (-> (expect (get @captured :custom-one-line-args)) (.toBeUndefined))
+    (-> (expect (get @captured :custom-icon)) (.toBeUndefined))))
+
+(describe "display metadata propagation" (fn []
+  (it "propagates formatArgs to tool_execution_start" test-display-formatArgs-propagated)
+  (it "propagates formatResult to tool_execution_end" test-display-formatResult-propagated)
+  (it "propagates icon and verbosity to both events" test-display-icon-and-verbosity-propagated)
+  (it "handles formatter errors without crashing" test-display-formatter-error-does-not-crash)
+  (it "works normally when tool has no .display" test-no-display-field-works-normally)))

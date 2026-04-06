@@ -97,7 +97,47 @@
                                                          :args {:path "/tmp/test"}
                                                          :verbosity "collapsed"
                                                          :theme test-theme}])]
-        (-> (expect (lastFrame)) (.toContain "read")))))))
+        (-> (expect (lastFrame)) (.toContain "read")))))
+
+  (it "renders custom-one-line-args in one-line mode"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolStartStatus {:tool-name "scraper"
+                                                         :args {}
+                                                         :verbosity "one-line"
+                                                         :custom-one-line-args "https://example.com"
+                                                         :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "https://example.com")))))
+
+  (it "renders custom-status-text over custom-one-line-args"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolStartStatus {:tool-name "scraper"
+                                                         :args {}
+                                                         :verbosity "one-line"
+                                                         :custom-one-line-args "https://example.com"
+                                                         :custom-status-text "Fetching page 2/5..."
+                                                         :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "Fetching page 2/5...")))))
+
+  (it "renders custom-icon instead of spinner"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolStartStatus {:tool-name "scraper"
+                                                         :args {}
+                                                         :verbosity "collapsed"
+                                                         :custom-icon "🌐"
+                                                         :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "🌐")))))
+
+  (it "falls back to built-in when no custom fields"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolStartStatus {:tool-name "bash"
+                                                         :args {:command "ls"}
+                                                         :verbosity "one-line"
+                                                         :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "ls")))))))
 
 (describe "ToolEndStatus" (fn []
   (it "renders tool name with checkmark"
@@ -108,7 +148,39 @@
                                                        :result "file contents"
                                                        :verbosity "collapsed"
                                                        :theme test-theme}])]
-        (-> (expect (lastFrame)) (.toContain "read")))))))
+        (-> (expect (lastFrame)) (.toContain "read")))))
+
+  (it "renders custom-one-line-result in one-line mode"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolEndStatus {:tool-name "scraper"
+                                                       :duration 500
+                                                       :result "lots of html"
+                                                       :verbosity "one-line"
+                                                       :custom-one-line-result "42 pages scraped"
+                                                       :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "42 pages scraped")))))
+
+  (it "renders custom-icon instead of checkmark"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolEndStatus {:tool-name "scraper"
+                                                       :duration 100
+                                                       :result "ok"
+                                                       :verbosity "collapsed"
+                                                       :custom-icon "🌐"
+                                                       :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "🌐")))))
+
+  (it "falls back to built-in when no custom result"
+    (fn []
+      (let [{:keys [lastFrame]} (render
+                                  #jsx [ToolEndStatus {:tool-name "bash"
+                                                       :duration 200
+                                                       :result "short output"
+                                                       :verbosity "one-line"
+                                                       :theme test-theme}])]
+        (-> (expect (lastFrame)) (.toContain "short output")))))))
 
 ;;; ─── Editor ─────────────────────────────────────────────
 

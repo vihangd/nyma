@@ -222,12 +222,15 @@
                 (set-messages
                   (fn [prev]
                     (conj (vec prev)
-                      {:role      "tool-start"
-                       :tool-name (get data :tool-name)
-                       :args      (get data :args)
-                       :exec-id   (get data :exec-id)
-                       :verbosity verbosity
-                       :max-lines max-lines}))))
+                      (cond-> {:role      "tool-start"
+                               :tool-name (get data :tool-name)
+                               :args      (get data :args)
+                               :exec-id   (get data :exec-id)
+                               :verbosity (or (get data :custom-verbosity) verbosity)
+                               :max-lines max-lines}
+                        (get data :custom-one-line-args)  (assoc :custom-one-line-args (get data :custom-one-line-args))
+                        (get data :custom-status-text)    (assoc :custom-status-text (get data :custom-status-text))
+                        (get data :custom-icon)           (assoc :custom-icon (get data :custom-icon)))))))
 
               on-end
               (fn [data]
@@ -240,22 +243,41 @@
                                                  (= (:exec-id msg) exec-id))
                                         (reduced i)))
                                     nil (vec prev))
-                          end-msg {:role      "tool-end"
-                                   :tool-name (get data :tool-name)
-                                   :duration  (get data :duration)
-                                   :result    (get data :result)
-                                   :exec-id   exec-id
-                                   :verbosity verbosity
-                                   :max-lines max-lines}]
+                          end-msg (cond-> {:role      "tool-end"
+                                           :tool-name (get data :tool-name)
+                                           :duration  (get data :duration)
+                                           :result    (get data :result)
+                                           :exec-id   exec-id
+                                           :verbosity (or (get data :custom-verbosity) verbosity)
+                                           :max-lines max-lines}
+                                   (get data :custom-one-line-result) (assoc :custom-one-line-result (get data :custom-one-line-result))
+                                   (get data :custom-icon)            (assoc :custom-icon (get data :custom-icon)))]
                       (if idx
                         (assoc (vec prev) idx end-msg)
-                        (conj (vec prev) end-msg))))))]
+                        (conj (vec prev) end-msg))))))
+
+              on-update
+              (fn [data]
+                (set-messages
+                  (fn [prev]
+                    (let [exec-id (get data :exec-id)
+                          idx     (reduce-kv
+                                    (fn [_ i msg]
+                                      (when (and (= (:role msg) "tool-start")
+                                                 (= (:exec-id msg) exec-id))
+                                        (reduced i)))
+                                    nil (vec prev))]
+                      (if idx
+                        (assoc-in (vec prev) [idx :custom-status-text] (str (get data :data)))
+                        prev)))))]
 
           ((:on events) "tool_execution_start" on-start)
           ((:on events) "tool_execution_end" on-end)
+          ((:on events) "tool_execution_update" on-update)
           (fn []
             ((:off events) "tool_execution_start" on-start)
-            ((:off events) "tool_execution_end" on-end))))
+            ((:off events) "tool_execution_end" on-end)
+            ((:off events) "tool_execution_update" on-update))))
       #js [agent])
 
     ;; Global keyboard handler

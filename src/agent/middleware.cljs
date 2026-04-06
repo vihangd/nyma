@@ -114,21 +114,47 @@
                              (str modified-result)))
         ctx))))
 
+(defn- safe-call
+  "Call f with arg, returning nil if f is nil or throws."
+  [f arg]
+  (when f
+    (try (f arg) (catch :default _ nil))))
+
+(defn- extract-display-fields
+  "Read .display from tool object, invoke formatters on data, return custom fields map."
+  [tool data-for-formatters]
+  (when-let [display (and tool (.-display tool))]
+    (let [custom-args   (safe-call (.-formatArgs display) (clj->js data-for-formatters))
+          status-text   (safe-call (.-statusText display) (clj->js data-for-formatters))
+          icon          (.-icon display)
+          verbosity     (.-verbosity display)]
+      (cond-> {}
+        custom-args (assoc :custom-one-line-args custom-args)
+        status-text (assoc :custom-status-text status-text)
+        icon        (assoc :custom-icon icon)
+        verbosity   (assoc :custom-verbosity verbosity)))))
+
 (defn ^:async tool-tracking-leave
   "Leave phase for tool-tracking: emit tool_result for modification, then tool_execution_end."
   [events store ctx]
   (let [ctx        (js-await (tool-result-leave events ctx))
         duration   (- (js/Date.now) (or (:start-time ctx) 0))
-        result-str (truncate-text (str (:result ctx)) 500)]
+        result-str (truncate-text (str (:result ctx)) 500)
+        display    (and (:tool ctx) (.-display (:tool ctx)))
+        custom-result (when display
+                        (safe-call (.-formatResult display) result-str))]
     (when events
       ((:emit events) "tool_execution_end"
-        {:tool-name       (:tool-name ctx)
-         :exec-id         (:exec-id ctx)
-         :duration        duration
-         :result          result-str
-         :details         (:result-details ctx)
-         :is-error        (:result-is-error ctx)
-         :content-parts   (:result-content-parts ctx)}))
+        (cond-> {:tool-name       (:tool-name ctx)
+                 :exec-id         (:exec-id ctx)
+                 :duration        duration
+                 :result          result-str
+                 :details         (:result-details ctx)
+                 :is-error        (:result-is-error ctx)
+                 :content-parts   (:result-content-parts ctx)}
+          custom-result (assoc :custom-one-line-result custom-result)
+          (and display (.-icon display)) (assoc :custom-icon (.-icon display))
+          (and display (.-verbosity display)) (assoc :custom-verbosity (.-verbosity display)))))
     (when store
       ((:dispatch! store) :tool-execution-ended
         {:exec-id (:exec-id ctx) :duration duration})
@@ -143,12 +169,14 @@
   [events store]
   {:name  :tool-tracking
    :enter (fn [ctx]
-            (let [exec-id (str (js/Date.now) "-" (.toString (js/Math.random) 36))
-                  start-time (js/Date.now)]
+            (let [exec-id    (str (js/Date.now) "-" (.toString (js/Math.random) 36))
+                  start-time (js/Date.now)
+                  display-fields (extract-display-fields (:tool ctx) (:args ctx))]
               (when events
                 ((:emit events) "tool_execution_start"
-                  {:tool-name (:tool-name ctx) :exec-id exec-id :args (:args ctx)
-                   :label (when-let [t (:tool ctx)] (.-label t))}))
+                  (merge {:tool-name (:tool-name ctx) :exec-id exec-id :args (:args ctx)
+                          :label (when-let [t (:tool ctx)] (.-label t))}
+                         display-fields)))
               (when store
                 ((:dispatch! store) :tool-execution-started
                   {:tool-name (:tool-name ctx) :exec-id exec-id})

@@ -1,6 +1,7 @@
 (ns tool-status.test
   (:require ["bun:test" :refer [describe it expect]]
-            ["./agent/ui/tool_status.jsx" :refer [truncate_lines format_args format_result format_duration]]))
+            ["./agent/ui/tool_status.jsx" :refer [truncate_lines format_args format_result format_duration
+                                                   format_one_line_args format_one_line_result]]))
 
 (describe "format-duration" (fn []
   (it "formats sub-second as milliseconds"
@@ -92,4 +93,137 @@
   (it "full with nil max-lines defaults to 500"
     (fn []
       (let [text "short"]
-        (-> (expect (format_result text "full" nil)) (.toBe "short")))))))
+        (-> (expect (format_result text "full" nil)) (.toBe "short")))))
+
+  (it "one-line returns empty string (handled by component)"
+    (fn []
+      (-> (expect (format_result "lots of output" "one-line" 500)) (.toBe ""))))))
+
+(describe "format-one-line-args" (fn []
+  (it "bash shows command"
+    (fn []
+      (-> (expect (format_one_line_args "bash" {:command "ls -la /tmp"}))
+          (.toBe "ls -la /tmp"))))
+
+  (it "bash shows first line of multi-line command"
+    (fn []
+      (let [result (format_one_line_args "bash" {:command "echo hello\necho world"})]
+        (-> (expect result) (.toBe "echo hello")))))
+
+  (it "read shows path"
+    (fn []
+      (-> (expect (format_one_line_args "read" {:path "src/main.ts"}))
+          (.toBe "src/main.ts"))))
+
+  (it "read shows path with range"
+    (fn []
+      (-> (expect (format_one_line_args "read" {:path "src/main.ts" :range [10 50]}))
+          (.toBe "src/main.ts:10-50"))))
+
+  (it "write shows path"
+    (fn []
+      (-> (expect (format_one_line_args "write" {:path "out.txt" :content "data"}))
+          (.toBe "out.txt"))))
+
+  (it "edit shows path"
+    (fn []
+      (-> (expect (format_one_line_args "edit" {:path "src/app.ts" :old_string "foo" :new_string "bar"}))
+          (.toBe "src/app.ts"))))
+
+  (it "ls shows path or dot"
+    (fn []
+      (-> (expect (format_one_line_args "ls" {:path "/tmp"})) (.toBe "/tmp"))
+      (-> (expect (format_one_line_args "ls" {})) (.toBe "."))))
+
+  (it "glob shows pattern"
+    (fn []
+      (-> (expect (format_one_line_args "glob" {:pattern "**/*.tsx"}))
+          (.toBe "**/*.tsx"))))
+
+  (it "glob shows pattern with path"
+    (fn []
+      (-> (expect (format_one_line_args "glob" {:pattern "*.ts" :path "src/"}))
+          (.toBe "*.ts in src/"))))
+
+  (it "grep shows quoted pattern"
+    (fn []
+      (-> (expect (format_one_line_args "grep" {:pattern "TODO"}))
+          (.toBe "\"TODO\""))))
+
+  (it "grep shows pattern with path"
+    (fn []
+      (-> (expect (format_one_line_args "grep" {:pattern "TODO" :path "src/"}))
+          (.toBe "\"TODO\" in src/"))))
+
+  (it "web_fetch shows url"
+    (fn []
+      (-> (expect (format_one_line_args "web_fetch" {:url "https://example.com"}))
+          (.toBe "https://example.com"))))
+
+  (it "web_search shows quoted query"
+    (fn []
+      (-> (expect (format_one_line_args "web_search" {:query "bun runtime"}))
+          (.toBe "\"bun runtime\""))))
+
+  (it "think shows first line of thought"
+    (fn []
+      (-> (expect (format_one_line_args "think" {:thought "Consider the options\nThen decide"}))
+          (.toBe "Consider the options"))))
+
+  (it "unknown tool falls back to key=value pairs"
+    (fn []
+      (let [result (format_one_line_args "custom_tool" {:foo "bar" :baz 42})]
+        (-> (expect (.includes result "foo=bar")) (.toBe true))
+        (-> (expect (.includes result "baz=42")) (.toBe true)))))
+
+  (it "truncates long values"
+    (fn []
+      (let [long-cmd (apply str (repeat 200 "x"))
+            result   (format_one_line_args "bash" {:command long-cmd})]
+        (-> (expect (.endsWith result "…")) (.toBe true))
+        (-> (expect (< (count result) 200)) (.toBe true)))))
+
+  (it "handles nil args gracefully"
+    (fn []
+      (let [result (format_one_line_args "bash" {:command nil})]
+        (-> (expect result) (.toBe "")))))
+
+  (it "handles empty args gracefully"
+    (fn []
+      (let [result (format_one_line_args "bash" {})]
+        (-> (expect result) (.toBe "")))))))
+
+(describe "format-one-line-result" (fn []
+  (it "multi-line result shows line count"
+    (fn []
+      (-> (expect (format_one_line_result "line1\nline2\nline3"))
+          (.toBe "3 lines"))))
+
+  (it "single short line shown directly"
+    (fn []
+      (-> (expect (format_one_line_result "hello world"))
+          (.toBe "hello world"))))
+
+  (it "nil returns empty string"
+    (fn []
+      (-> (expect (format_one_line_result nil)) (.toBe ""))))
+
+  (it "empty string returns empty string"
+    (fn []
+      (-> (expect (format_one_line_result "")) (.toBe ""))))
+
+  (it "long single line is truncated"
+    (fn []
+      (let [long-text (apply str (repeat 200 "x"))
+            result    (format_one_line_result long-text)]
+        (-> (expect (.endsWith result "…")) (.toBe true))
+        (-> (expect (< (count result) 200)) (.toBe true)))))
+
+  (it "two lines shows 2 lines"
+    (fn []
+      (-> (expect (format_one_line_result "a\nb")) (.toBe "2 lines")))))
+
+(describe "format-args one-line delegation" (fn []
+  (it "one-line returns empty string"
+    (fn []
+      (-> (expect (format_args {:path "/tmp"} "one-line")) (.toBe "")))))))

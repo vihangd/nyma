@@ -20,18 +20,23 @@
   (let [role (:role message)]
     (case role
       "tool-start"
-      #jsx [ToolStartStatus {:tool-name (:tool-name message)
-                              :args      (:args message)
-                              :verbosity (:verbosity message)
-                              :theme     theme}]
+      #jsx [ToolStartStatus {:tool-name           (:tool-name message)
+                              :args                (:args message)
+                              :verbosity           (:verbosity message)
+                              :theme               theme
+                              :custom-one-line-args (:custom-one-line-args message)
+                              :custom-status-text   (:custom-status-text message)
+                              :custom-icon          (:custom-icon message)}]
 
       "tool-end"
-      #jsx [ToolEndStatus {:tool-name (:tool-name message)
-                            :duration  (:duration message)
-                            :result    (:result message)
-                            :verbosity (:verbosity message)
-                            :max-lines (:max-lines message)
-                            :theme     theme}]
+      #jsx [ToolEndStatus {:tool-name             (:tool-name message)
+                            :duration              (:duration message)
+                            :result                (:result message)
+                            :verbosity             (:verbosity message)
+                            :max-lines             (:max-lines message)
+                            :theme                 theme
+                            :custom-one-line-result (:custom-one-line-result message)
+                            :custom-icon            (:custom-icon message)}]
 
       ;; Default: text-based messages (user, assistant, error, etc.)
       (let [content (:content message)
