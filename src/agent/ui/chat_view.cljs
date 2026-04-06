@@ -2,7 +2,8 @@
   {:squint/extension "jsx"}
   (:require ["react" :refer [useMemo]]
             ["ink" :refer [Box Text Static]]
-            ["./tool_status.jsx" :refer [ToolStartStatus ToolEndStatus]]))
+            ["./tool_status.jsx" :refer [ToolStartStatus ToolEndStatus]]
+            [agent.utils.markdown :refer [render-markdown]]))
 
 (defn role-prefix [role]
   (case role "user" "❯ " "assistant" "● " "tool-call" "⚙ " "error" "✗ " "  "))
@@ -35,9 +36,18 @@
       ;; Default: text-based messages (user, assistant, error, etc.)
       (let [content (:content message)
             color   (role-color theme role)]
-        #jsx [Box {:flexDirection "column" :marginBottom 1}
-              [Text {:color color :bold (= role "user")}
-               (str (role-prefix role) content)]]))))
+        (if (= role "assistant")
+          ;; Assistant messages: render markdown with ANSI styling
+          (let [rendered (useMemo (fn [] (render-markdown content)) #js [content])]
+            #jsx [Box {:flexDirection "column" :marginBottom 1}
+                  [Box {:flexDirection "row"}
+                   [Text {:color color} (role-prefix role)]
+                   [Box {:flexDirection "column" :flexShrink 1}
+                    [Text rendered]]]])
+          ;; Other roles: keep existing plain text rendering
+          #jsx [Box {:flexDirection "column" :marginBottom 1}
+                [Text {:color color :bold (= role "user")}
+                 (str (role-prefix role) content)]])))))
 
 (defn ChatView [{:keys [messages theme]}]
   (let [completed (when (> (count messages) 1) (butlast messages))
