@@ -55,4 +55,11 @@
         (let [reg (create-registry {"a" 1})]
           ((:set-active reg) ["a"])
           ((:register reg) "b" 2)
-          (-> (expect (count ((:get-active reg)))) (.toBe 2)))))))
+          (-> (expect (count ((:get-active reg)))) (.toBe 2)))))
+
+    (it "registered tool names conform to Anthropic API pattern"
+      (fn []
+        (let [valid-re #"^[a-zA-Z0-9_\-]{1,128}$"
+              reg (create-registry {"read" {:desc "r"} "bash__run" {:desc "b"} "my-tool" {:desc "m"}})]
+          (doseq [name (keys ((:all reg)))]
+            (-> (expect name) (.toMatch valid-re))))))))

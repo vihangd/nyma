@@ -89,7 +89,32 @@
             base-api (create-extension-api agent)
             scoped   (create-scoped-api base-api "no-flags" #{:tools})]
         (-> (expect (fn [] (.registerFlag scoped "x" #js {})))
-            (.toThrow "missing capability")))))))
+            (.toThrow "missing capability")))))
+
+  (it "tool name matches Anthropic API pattern (no slash)"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "git" #{:all})
+            valid-re #"^[a-zA-Z0-9_\-]{1,128}$"]
+        (.registerTool scoped "status" #js {:execute (fn [_] "ok")})
+        (let [all-names (keys ((:all (:tool-registry agent))))
+              ext-name  (first (filter #(.startsWith % "git") all-names))]
+          ;; Must match Anthropic pattern — no / allowed
+          (-> (expect ext-name) (.toMatch valid-re))
+          (-> (expect (.includes ext-name "/")) (.toBe false))))))
+
+  (it "multiple extension tool names all valid for API"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            ext-a    (create-scoped-api base-api "alpha" #{:all})
+            ext-b    (create-scoped-api base-api "beta" #{:all})
+            valid-re #"^[a-zA-Z0-9_\-]{1,128}$"]
+        (.registerTool ext-a "search" #js {:execute (fn [_] "ok")})
+        (.registerTool ext-b "fetch" #js {:execute (fn [_] "ok")})
+        (doseq [name (keys ((:all (:tool-registry agent))))]
+          (-> (expect name) (.toMatch valid-re))))))))
 
 (describe "derive-namespace" (fn []
   (it "derives from simple filename"

@@ -8,7 +8,12 @@
                                       tool-persistence-interceptor]]
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
-            [agent.tools :refer [builtin-tools]]))
+            [agent.tools :refer [builtin-tools]]
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extensions.token-suite.smart-compaction :as smart-compaction]
+            [agent.extensions.token-suite.diff-edit :as diff-edit]
+            [agent.extensions.token-suite.context-folding :as context-folding]
+            [agent.extensions.token-suite.structured-context :as structured-context]))
 
 ;; Integration: interceptor chain → middleware pipeline → tool execution
 
@@ -226,3 +231,33 @@
 (describe "integration: tool-persistence-interceptor" (fn []
   (it "appends tool call result to session" test-persistence-interceptor-appends-result)
   (it "skips persistence when cancelled" test-persistence-interceptor-skips-cancelled)))
+
+;; ── Extension tool contract validation ──────────────────────────
+
+(defn test-extension-registered-tools-pass-schema-validation []
+  ;; Contract guard: every tool registered by token-suite sub-modules must
+  ;; pass asSchema validation — the same check the AI SDK runs before sending
+  ;; tools to the Anthropic API. This would have caught Bug #3 (smart_compaction
+  ;; using raw JS object with parameters instead of tool() with inputSchema).
+  (let [agent    (create-agent {:model "mock" :system-prompt "test"})
+        api      (create-extension-api agent)
+        deact-sc (smart-compaction/activate api)
+        deact-de (diff-edit/activate api)
+        deact-cf (context-folding/activate api)
+        deact-sx (structured-context/activate api)
+        events   (:events agent)
+        pipeline (:middleware agent)
+        active   ((:get-active (:tool-registry agent)))
+        wrapped  (wrap-tools-with-middleware active pipeline events)
+        js-tools (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} wrapped)]
+    ;; Every tool must have inputSchema and produce valid JSON Schema
+    (doseq [name (js/Object.keys js-tools)]
+      (let [t      (aget js-tools name)
+            _      (-> (expect (.-inputSchema t)) (.toBeTruthy))
+            schema (.-jsonSchema (asSchema (.-inputSchema t)))]
+        (-> (expect (.-type schema)) (.toBe "object"))))
+    (deact-sc) (deact-de) (deact-cf) (deact-sx)))
+
+(describe "extension tool contract validation" (fn []
+  (it "all extension-registered tools pass asSchema validation"
+      test-extension-registered-tools-pass-schema-validation)))

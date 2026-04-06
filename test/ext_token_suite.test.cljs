@@ -17,6 +17,7 @@
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.context-folding :as context-folding]
             [agent.extensions :refer [create-extension-api]]
+            ["@ai-sdk/provider-utils" :refer [asSchema]]
             [clojure.string :as str]))
 
 (defn- make-agent []
@@ -196,9 +197,61 @@
     (js-await (run agent "test"))
     (-> (expect (string? @seen-system)) (.toBe true))))
 
+(defn ^:async test-kv-system-array-elements-have-role-system []
+  ;; Contract guard: AI SDK requires SystemModelMessage {role: "system", content: string}
+  ;; NOT {type: "text", text: string}. Anthropic API rejects the latter.
+  (let [model #js {:modelId "claude-sonnet-4-20250514"}
+        ;; Pad system prompt beyond min-system-tokens threshold (~500 chars)
+        long-prompt (str/join " " (repeat 800 "The quick brown fox jumps over the lazy dog."))
+        agent (create-agent {:model model :system-prompt long-prompt})
+        api   (make-api agent)
+        _deact (kv-cache/activate api)
+        seen-system (atom nil)]
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen-system (.-system config))
+        #js {:block true :reason "ok"})
+      50)
+    (js-await (run agent "test"))
+    ;; Must have been restructured into an array
+    (-> (expect (js/Array.isArray @seen-system)) (.toBe true))
+    ;; Every element must have role="system" and content (not type/text)
+    (doseq [i (range (.-length @seen-system))]
+      (let [entry (aget @seen-system i)]
+        (-> (expect (.-role entry)) (.toBe "system"))
+        (-> (expect (.-content entry)) (.toBeDefined))
+        (-> (expect (.-text entry)) (.toBeUndefined))))))
+
+(defn ^:async test-kv-system-array-stable-section-has-cache-control []
+  ;; Contract guard: stable section must carry cacheControl providerOptions
+  (let [model #js {:modelId "claude-sonnet-4-20250514"}
+        long-prompt (str/join " " (repeat 800 "The quick brown fox jumps over the lazy dog."))
+        agent (create-agent {:model model :system-prompt long-prompt})
+        api   (make-api agent)
+        _deact (kv-cache/activate api)
+        seen-system (atom nil)]
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen-system (.-system config))
+        #js {:block true :reason "ok"})
+      50)
+    (js-await (run agent "test"))
+    (when (js/Array.isArray @seen-system)
+      (let [stable (aget @seen-system 0)
+            dynamic (aget @seen-system 1)]
+        ;; Stable section must carry cacheControl
+        (-> (expect (.. stable -providerOptions -anthropic -cacheControl -type))
+            (.toBe "ephemeral"))
+        ;; Dynamic section should NOT have cacheControl
+        (-> (expect (.-providerOptions dynamic)) (.toBeUndefined))))))
+
 (describe "ext-kv-cache" (fn []
   (it "restructures system for Claude models" test-kv-restructures-claude)
   (it "leaves non-Claude models unchanged" test-kv-leaves-non-claude)
+  (it "system array elements have role 'system' and content key"
+      test-kv-system-array-elements-have-role-system)
+  (it "stable section carries cacheControl providerOptions"
+      test-kv-system-array-stable-section-has-cache-control)
   (it "deactivate resets hash state"
     (fn []
       (let [agent (make-agent)
@@ -686,6 +739,54 @@
             h3 (shared/hash-content "different")]
         (-> (expect h1) (.toBe h2))
         (-> (expect (not= h1 h3)) (.toBe true)))))))
+
+;; ═══════════════════════════════════════════════════════════════
+;; Smart Compaction — Schema Contract Validation
+;; ═══════════════════════════════════════════════════════════════
+
+(defn test-retrieve-archived-has-input-schema []
+  ;; Contract guard: retrieve_archived must use AI SDK tool() with inputSchema,
+  ;; NOT a raw JS object with parameters. asSchema must produce {type: "object"}.
+  (let [agent (make-agent)
+        api   (make-api agent)
+        deact (smart-compaction/activate api)
+        tools ((:all (:tool-registry agent)))
+        t     (get tools "retrieve_archived")]
+    ;; Tool must be registered
+    (-> (expect t) (.toBeTruthy))
+    ;; Must have inputSchema (tool() sets this), NOT parameters (raw object pattern)
+    (-> (expect (.-inputSchema t)) (.toBeTruthy))
+    (-> (expect (.-parameters t)) (.toBeUndefined))
+    ;; asSchema must produce a valid JSON Schema with type: "object"
+    (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
+      (-> (expect (.-type schema)) (.toBe "object"))
+      ;; hash property must exist
+      (-> (expect (.. schema -properties -hash)) (.toBeTruthy)))
+    (deact)))
+
+(defn test-all-token-suite-tools-pass-schema-validation []
+  ;; Contract guard: every tool registered by token-suite sub-modules must
+  ;; pass asSchema validation — the same check the AI SDK runs before sending
+  ;; tools to the Anthropic API.
+  (let [agent (make-agent)
+        api   (make-api agent)
+        deact-sc (smart-compaction/activate api)
+        deact-de (diff-edit/activate api)
+        deact-cf (context-folding/activate api)
+        deact-sx (structured-context/activate api)
+        all-tools ((:all (:tool-registry agent)))]
+    ;; Check every registered tool
+    (doseq [[name t] all-tools]
+      (-> (expect (.-inputSchema t)) (.toBeTruthy))
+      (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
+        (-> (expect (.-type schema)) (.toBe "object"))))
+    (deact-sc) (deact-de) (deact-cf) (deact-sx)))
+
+(describe "ext-smart-compaction-schema" (fn []
+  (it "retrieve_archived has valid AI SDK inputSchema"
+      test-retrieve-archived-has-input-schema)
+  (it "all token-suite tools pass asSchema validation"
+      test-all-token-suite-tools-pass-schema-validation)))
 
 ;; ═══════════════════════════════════════════════════════════════
 ;; Context Folding

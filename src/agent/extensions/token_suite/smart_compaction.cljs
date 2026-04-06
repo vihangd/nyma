@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.smart-compaction
-  (:require ["ai" :refer [generateText]]
+  (:require ["ai" :refer [generateText tool]]
+            ["zod" :as z]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.extensions.token-suite.shared :as shared]
@@ -255,23 +256,22 @@
       0)
 
     ;; Tool: retrieve_archived
-    (let [retrieve-tool
-          (js/Object.assign #js {}
-            #js {:description "Retrieve previously archived tool result content from the context cache. Use the hash from archive notices."
-                 :parameters #js {:type "object"
-                                  :properties #js {:hash #js {:type "string"
-                                                              :description "The hash from the archive notice (e.g., 'a1b2c3d4')"}}}
-                 :execute (fn [args]
-                            (let [hash (or (.-hash args) (aget args "hash") "")
-                                  cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
-                                  abs-dir (if (path/isAbsolute cache-dir)
-                                            cache-dir
-                                            (path/join (js/process.cwd) cache-dir))
-                                  fpath (path/join abs-dir (str hash ".txt"))]
-                              (if (fs/existsSync fpath)
-                                (fs/readFileSync fpath "utf8")
-                                (str "No cached content found for hash: " hash))))})]
-      (.registerTool api "retrieve_archived" retrieve-tool))
+    (.registerTool api "retrieve_archived"
+      (tool
+        #js {:description "Retrieve previously archived tool result content from the context cache. Use the hash from archive notices."
+             :inputSchema (.object z
+                            #js {:hash (-> (.string z)
+                                           (.describe "The hash from the archive notice (e.g., 'a1b2c3d4')"))})
+             :execute (fn [args]
+                        (let [hash (or (.-hash args) (aget args "hash") "")
+                              cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
+                              abs-dir (if (path/isAbsolute cache-dir)
+                                        cache-dir
+                                        (path/join (js/process.cwd) cache-dir))
+                              fpath (path/join abs-dir (str hash ".txt"))]
+                          (if (fs/existsSync fpath)
+                            (fs/readFileSync fpath "utf8")
+                            (str "No cached content found for hash: " hash))))}))
 
     ;; Return deactivator
     (fn []
