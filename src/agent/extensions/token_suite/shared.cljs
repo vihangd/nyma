@@ -45,7 +45,9 @@
                         :full-threshold 0.85
                         :offload-min-tokens 2000
                         :cache-dir ".nyma/context-cache"
-                        :max-preview-lines 5}
+                        :max-preview-lines 5
+                        :use-llm-summary false
+                        :summarization-model nil}
    :context-folding    {:enabled true
                         :max-depth 3
                         :inject-instructions true}})

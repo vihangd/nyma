@@ -39,6 +39,48 @@
 - Configuration values must be exact numbers
 - ALL paths from <files-read> and <files-modified> MUST appear in Key References")
 
+;; ── Tagged Serialization ────────────────────────────────────────
+
+(defn- serialize-for-summary
+  "Serialize messages to tagged text for summarization.
+   Uses [Role]: prefix to prevent the model from continuing the conversation.
+   Truncates tool results to max-chars."
+  [messages max-chars]
+  (let [limit (or max-chars 2000)]
+    (->> messages
+         (map (fn [m]
+                (let [role    (shared/msg-role m)
+                      content (str (shared/msg-content m))]
+                  (case role
+                    "user"       (str "[User]: " content)
+                    "assistant"  (str "[Assistant]: " content)
+                    "tool_call"  (let [meta (or (when (map? m) (:metadata m))
+                                                (when (object? m) (.-metadata m)))
+                                      tname (when meta
+                                              (or (when (map? meta) (:tool-name meta))
+                                                  (when (object? meta) (.-tool-name meta))))]
+                                  (str "[Tool Call]: " (or tname "unknown")))
+                    "tool_result" (str "[Tool Result]: "
+                                      (if (> (count content) limit)
+                                        (str (subs content 0 limit) "...[truncated]")
+                                        content))
+                    "compaction" (str "[Previous Summary]: " content)
+                    (str "[" role "]: " content)))))
+         (str/join "\n\n"))))
+
+;; ── File Section Parsing ───────────────────────────────────────
+
+(defn- parse-file-section
+  "Extract file paths from a structured summary section like '## Files Read'."
+  [summary section-name]
+  (when summary
+    (let [pattern (js/RegExp. (str "## " section-name "\\n([\\s\\S]*?)(?:\\n##|$)"))
+          match (.exec pattern summary)]
+      (when match
+        (->> (.split (aget match 1) "\n")
+             (map str/trim)
+             (filter #(and (seq %) (not (.startsWith % "[")))))))))
+
 ;; ── Background Summary Builder (no LLM calls) ─────────────────
 
 (defn- extract-user-intent [messages]
@@ -213,21 +255,45 @@
     ;; Hook C: Structured compaction (before_compact, priority 100)
     (.on api "before_compact"
       (fn [evt-ctx _ctx]
-        (let [context (.-context evt-ctx)
-              ;; Build background summary from context messages
-              messages (if (sequential? context) context
-                         (when (and context (.-length context))
-                           (vec (map (fn [i] (aget context i))
-                                     (range (.-length context))))))
+        (let [;; Use enriched payload fields when available, fall back to full context
+              to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+              messages (if (sequential? to-summarize) to-summarize
+                         (when (and to-summarize (.-length to-summarize))
+                           (vec (map (fn [i] (aget to-summarize i))
+                                     (range (.-length to-summarize))))))
+              ;; Read previous summary for iterative updates
+              previous-summary (or (.-previous-summary evt-ctx)
+                                   (->> messages
+                                        (filter #(= (shared/msg-role %) "compaction"))
+                                        last
+                                        shared/msg-content))
+              ;; Use pre-extracted file lists when available, else extract
+              current-files-read (or (when-let [fr (.-files-read evt-ctx)]
+                                       (js->clj fr))
+                                     (when (seq messages)
+                                       (compaction/extract-files-read messages)))
+              current-files-modified (or (when-let [fm (.-files-modified evt-ctx)]
+                                           (js->clj fm))
+                                         (when (seq messages)
+                                           (compaction/extract-files-modified messages)))
+              ;; Accumulate file lists from previous compaction
+              prev-files-read (when previous-summary
+                                (parse-file-section previous-summary "Files Read"))
+              prev-files-modified (when previous-summary
+                                    (parse-file-section previous-summary "Files Modified"))
+              files-read (vec (distinct (concat (or prev-files-read [])
+                                                (or current-files-read []))))
+              files-modified (vec (distinct (concat (or prev-files-modified [])
+                                                    (or current-files-modified []))))
+              ;; Build summary from messages
               summary (when (seq messages)
-                        (build-background-summary messages))
-              files-read (when (seq messages)
-                           (compaction/extract-files-read messages))
-              files-modified (when (seq messages)
-                               (compaction/extract-files-modified messages))]
-          ;; Set the structured summary (no LLM call — pure extraction)
+                        (build-background-summary messages))]
           (when summary
-            (let [enhanced (str summary
+            (let [enhanced (str ;; Carry forward previous context
+                               (when previous-summary
+                                 (str "## Previous Context\n" previous-summary "\n\n"))
+                               summary
+                               ;; Cumulative file lists
                                (when (seq files-read)
                                  (str "\n\n## Files Read\n" (str/join "\n" files-read)))
                                (when (seq files-modified)
@@ -235,6 +301,55 @@
               (aset evt-ctx "summary" enhanced)
               (swap! shared/suite-stats update-in [:smart-compaction :full-compactions] inc)))))
       100)
+
+    ;; Hook E: Optional LLM-enhanced summary (before_compact, priority 99 — runs after Hook C)
+    (when (:use-llm-summary sc-cfg)
+      (.on api "before_compact"
+        (^:async fn [evt-ctx ctx]
+          ;; Only run if Hook C already set a summary (we enhance it)
+          (when-let [extraction-summary (.-summary evt-ctx)]
+            (let [to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+                  messages (if (sequential? to-summarize) to-summarize
+                             (when (and to-summarize (.-length to-summarize))
+                               (vec (map (fn [i] (aget to-summarize i))
+                                         (range (.-length to-summarize))))))
+                  ;; Resolve summarization model
+                  model-spec (:summarization-model sc-cfg)
+                  model-registry (when ctx (.-modelRegistry ctx))
+                  model (when (and model-spec model-registry)
+                          (try
+                            (let [parts (.split (str model-spec) "/")
+                                  provider (when (> (count parts) 1) (first parts))
+                                  model-id (if (> (count parts) 1) (second parts) (str model-spec))]
+                              (when-let [resolve (.-resolve model-registry)]
+                                (resolve provider model-id)))
+                            (catch :default _ nil)))]
+              (when (and model (seq messages))
+                (try
+                  (let [conversation-text (serialize-for-summary messages 2000)
+                        previous-summary (.-previous-summary evt-ctx)
+                        prompt (str structured-prompt "\n\n"
+                                    (when previous-summary
+                                      (str "<previous-summary>\n" previous-summary
+                                           "\n</previous-summary>\n\n"
+                                           "Update the previous summary with new information.\n\n"))
+                                    "<conversation>\n" conversation-text "\n</conversation>\n\n"
+                                    "<extraction-summary>\n" extraction-summary
+                                    "\n</extraction-summary>\n\n"
+                                    "Use the extraction summary as a reference. "
+                                    "Produce a comprehensive structured summary.")
+                        result (js-await
+                                 (generateText
+                                   #js {:model    model
+                                        :messages #js [#js {:role "user" :content prompt}]
+                                        :maxTokens 4096}))]
+                    (when-let [text (.-text result)]
+                      (when (seq (.trim text))
+                        (aset evt-ctx "summary" text))))
+                  (catch :default _e
+                    ;; Fallback: keep the pure extraction summary from Hook C
+                    nil))))))
+        99))
 
     ;; Hook D: Re-read detection (tool_execution_end, priority 0)
     (.on api "tool_execution_end"

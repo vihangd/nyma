@@ -48,7 +48,7 @@
                   [Box {:flexDirection "row"}
                    [Text {:color color} (role-prefix role)]
                    [Box {:flexDirection "column" :flexShrink 1}
-                    [Text rendered]]]])
+                    [Text {:wrap "word"} rendered]]]])
           ;; Other roles: keep existing plain text rendering
           #jsx [Box {:flexDirection "column" :marginBottom 1}
                 [Text {:color color :bold (= role "user")}

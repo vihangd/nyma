@@ -3,13 +3,31 @@
             [clojure.string :as str]
             [agent.token-estimation :as te]))
 
-(defn- find-split-point [context limit]
-  (loop [i 0 tokens 0]
-    (if (or (>= i (count context))
-            (>= tokens limit))
-      i
-      (recur (inc i)
-             (+ tokens (te/estimate-tokens (str (:content (nth context i)))))))))
+(defn- valid-cut-position?
+  "A valid cut position is before a user or assistant message —
+   never between a tool_call and its tool_result."
+  [context i]
+  (if (>= i (count context))
+    true
+    (contains? #{"user" "assistant" "compaction"} (:role (nth context i)))))
+
+(defn- find-split-point
+  "Find where to split context for summarization. Walks forward counting tokens
+   until limit is reached, then adjusts to a valid turn boundary."
+  [context limit]
+  (let [raw-point (loop [i 0 tokens 0]
+                    (if (or (>= i (count context))
+                            (>= tokens limit))
+                      i
+                      (recur (inc i)
+                             (+ tokens (te/estimate-tokens (str (:content (nth context i))))))))
+        ;; Adjust forward to a valid boundary (user/assistant/compaction start)
+        adjusted (loop [i raw-point]
+                   (cond
+                     (>= i (count context)) raw-point
+                     (valid-cut-position? context i) i
+                     :else (recur (inc i))))]
+    adjusted))
 
 (defn extract-files-read
   "Extract file paths from tool_call entries for the 'read' tool."
@@ -33,9 +51,18 @@
        distinct
        vec))
 
-(defn format-messages [messages]
+(defn format-messages
+  "Serialize messages as tagged text for summarization.
+   Uses [Role]: prefix to prevent the model from continuing the conversation."
+  [messages]
   (->> messages
-       (map (fn [m] (str (:role m) ": " (:content m))))
+       (map (fn [m]
+              (let [role    (:role m)
+                    content (str (:content m))]
+                (str "[" (str/capitalize (or role "unknown")) "]: "
+                     (if (and (= role "tool_result") (> (count content) 2000))
+                       (str (subs content 0 2000) "...[truncated]")
+                       content)))))
        (str/join "\n\n")))
 
 (defn ^:async compact
@@ -50,35 +77,70 @@
                   100000)]
 
     (when (> usage (* limit 0.85))
-      (let [evt-ctx #js {:context context :usage usage :summary nil}]
+      (let [split-point     (find-split-point context (* limit 0.3))
+            to-summarize    (vec (take split-point context))
+            to-keep         (vec (drop split-point context))
+            prev-compaction (->> context (filter #(= (:role %) "compaction")) last)
+            files-read      (extract-files-read to-summarize)
+            files-modified  (extract-files-modified to-summarize)
+            evt-ctx #js {:context              context
+                         :usage                usage
+                         :summary              nil
+                         :split-point          split-point
+                         :messages-to-summarize (clj->js to-summarize)
+                         :messages-to-keep      (clj->js to-keep)
+                         :previous-summary     (:content prev-compaction)
+                         :files-read           (clj->js files-read)
+                         :files-modified       (clj->js files-modified)}]
         (js-await ((:emit-async events) "before_compact" evt-ctx))
 
         (if (.-summary evt-ctx)
           ((:append session)
-            {:role    "compaction"
-             :content (.-summary evt-ctx)})
+            {:role     "compaction"
+             :content  (.-summary evt-ctx)
+             :metadata {:tokens-before  usage
+                        :first-kept     (first to-keep)
+                        :files-read     files-read
+                        :files-modified files-modified}})
 
-          (let [split-point  (find-split-point context (* limit 0.3))
-                to-summarize (take split-point context)
-                summary-result
+          (let [summary-result
                 (js-await
                   (generateText
                     #js {:model  model
                          :messages
                          #js [#js {:role    "user"
-                                   :content (str "Summarize this conversation concisely. "
+                                   :content (str "You are a context summarization assistant. "
+                                              "Do NOT continue the conversation. "
+                                              "ONLY output a structured summary.\n\n"
+                                              "Summarize this conversation concisely. "
                                               "Preserve key decisions, code changes, "
                                               "file paths, and technical context.\n\n"
                                               (when custom-instructions
                                                 (str custom-instructions "\n\n"))
-                                              (format-messages to-summarize))}]}))]
+                                              (when (:content prev-compaction)
+                                                (str "<previous-summary>\n"
+                                                     (:content prev-compaction)
+                                                     "\n</previous-summary>\n\n"
+                                                     "Update the previous summary with new information below.\n\n"))
+                                              "<conversation>\n"
+                                              (format-messages to-summarize)
+                                              "\n</conversation>"
+                                              (when (seq files-read)
+                                                (str "\n\n<read-files>\n"
+                                                     (str/join "\n" files-read)
+                                                     "\n</read-files>"))
+                                              (when (seq files-modified)
+                                                (str "\n\n<modified-files>\n"
+                                                     (str/join "\n" files-modified)
+                                                     "\n</modified-files>")))}]}))]
 
             ((:append session)
               {:role     "compaction"
                :content  (.-text summary-result)
-               :metadata {:tokens-before usage
-                          :first-kept    (when (< split-point (count context))
-                                           (nth context split-point))}})
+               :metadata {:tokens-before  usage
+                          :first-kept     (first to-keep)
+                          :files-read     files-read
+                          :files-modified files-modified}})
 
             ((:emit events) "compact"
               {:summary (.-text summary-result)})))))))
