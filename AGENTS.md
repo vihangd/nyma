@@ -736,7 +736,7 @@ All available macros in `macros.tool-dsl`:
 | Register a command and never unregister | Call `api.unregisterCommand` in cleanup |
 | Assume tool calls will always proceed | Use `before_tool_call` or middleware for pre-execution checks |
 | Subscribe with high-priority for normal work | Reserve high `priority` for security/safety handlers |
-| Register tools without namespace awareness | Tools are auto-prefixed: `"my-ext/tool-name"` |
+| Register tools without namespace awareness | Tools are auto-prefixed: `"my-ext__tool-name"` |
 | Pass capabilities you don't need | List only needed capabilities in `extension.json` |
 
 ### Testing

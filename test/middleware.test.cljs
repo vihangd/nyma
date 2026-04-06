@@ -245,10 +245,10 @@
         registry (create-registry {})
         ;; Simulate extension registering a tool
         ext-tool (make-real-tool (fn [args] (str "ext:" (:input args))))
-        _        ((:register registry) "ext/search" ext-tool)
+        _        ((:register registry) "ext__search" ext-tool)
         active   ((:get-active registry))
         wrapped  (wrap-tools-with-middleware active pipeline events)
-        result   (js-await ((.-execute (get wrapped "ext/search")) {:input "query"}))]
+        result   (js-await ((.-execute (get wrapped "ext__search")) {:input "query"}))]
     (-> (expect result) (.toBe "ext:query"))))
 
 (describe "wrap-tools-with-middleware - real AI SDK tools" (fn []

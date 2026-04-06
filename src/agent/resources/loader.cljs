@@ -7,6 +7,12 @@
 (def global-dir (path/join (os/homedir) ".nyma"))
 (def project-dir ".nyma")
 
+;; Built-in extensions dir: resolved relative to this module's compiled location.
+;; This module compiles to dist/agent/resources/loader.mjs,
+;; so ../extensions/ resolves to dist/agent/extensions/.
+(def builtin-extensions-dir
+  (path/resolve (js* "import.meta.dir") ".." "extensions"))
+
 (def default-system-prompt
   "You are Nyma, an interactive CLI coding agent. You help users with software engineering tasks: fixing bugs, writing features, refactoring code, answering questions, and exploring codebases.
 
@@ -160,5 +166,8 @@ When multiple independent tool calls are needed, make them in parallel.
               (when append (str "\n\n" append)))))
 
      :extension-dirs
-     [(path/join global-dir "extensions")
-      (path/join project-dir "extensions")]}))
+     (let [user-dirs [(path/join global-dir "extensions")
+                      (path/join project-dir "extensions")]]
+       (if (.-NYMA_NO_BUILTIN_EXT js/process.env)
+         user-dirs
+         (into [builtin-extensions-dir] user-dirs)))}))

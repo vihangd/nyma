@@ -9,6 +9,11 @@
   "scripts": {
     "dev": "concurrently \"npx squint watch\" \"bun --watch dist/agent/cli.mjs\"",
     "build": "npx squint compile",
+    "bundle": "bun run build && bun build ./dist/agent/cli.mjs --compile --target=bun-darwin-arm64 --outfile=nyma",
+    "bundle:linux-x64": "bun run build && bun build ./dist/agent/cli.mjs --compile --target=bun-linux-x64 --outfile=nyma-linux-x64",
+    "bundle:linux-arm64": "bun run build && bun build ./dist/agent/cli.mjs --compile --target=bun-linux-arm64 --outfile=nyma-linux-arm64",
+    "bundle:macos-x64": "bun run build && bun build ./dist/agent/cli.mjs --compile --target=bun-darwin-x64 --outfile=nyma-macos-x64",
+    "bundle:windows": "bun run build && bun build ./dist/agent/cli.mjs --compile --target=bun-windows-x64 --outfile=nyma-windows-x64.exe",
     "prestart": "npx squint compile",
     "start": "bun dist/agent/cli.mjs",
     "pretest": "npx squint compile",
@@ -27,12 +32,14 @@
     "nanoid": "^5.0.0",
     "react": "^19.0.0",
     "squint-cljs": "^0.10.186",
+    "shell-quote": "^1.8.1",
     "turndown": "^7.2.2",
     "zod": "^3.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "concurrently": "^9.0.0",
-    "ink-testing-library": "^4.0.0"
+    "ink-testing-library": "^4.0.0",
+    "react-devtools-core": "^7.0.1"
   }
 }

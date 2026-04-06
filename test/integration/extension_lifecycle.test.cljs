@@ -15,7 +15,7 @@
       #js {:execute (fn [args] (str "Hello " (:name args)))
            :description "Greet someone"})
     (let [all-tools ((:all (:tool-registry agent)))]
-      (-> (expect (get all-tools "my-ext/greet")) (.toBeDefined)))))
+      (-> (expect (get all-tools "my-ext__greet")) (.toBeDefined)))))
 
 (defn ^:async test-extension-registers-command []
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
@@ -23,7 +23,7 @@
         scoped   (create-scoped-api base-api "git" #{:all})]
     (.registerCommand scoped "status"
       {:description "Git status" :handler (fn [_ _] "ok")})
-    (-> (expect (get @(:commands agent) "git/status")) (.toBeDefined))))
+    (-> (expect (get @(:commands agent) "git__status")) (.toBeDefined))))
 
 (defn ^:async test-extension-adds-middleware []
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
@@ -54,10 +54,10 @@
         scoped   (create-scoped-api base-api "temp" #{:all})]
     ;; Extension registers a tool
     (.registerTool scoped "helper" #js {:execute (fn [_] "ok") :description "temp"})
-    (-> (expect (get ((:all (:tool-registry agent))) "temp/helper")) (.toBeDefined))
+    (-> (expect (get ((:all (:tool-registry agent))) "temp__helper")) (.toBeDefined))
     ;; Simulated deactivation: unregister
     (.unregisterTool scoped "helper")
-    (-> (expect (get ((:all (:tool-registry agent))) "temp/helper")) (.toBeUndefined))))
+    (-> (expect (get ((:all (:tool-registry agent))) "temp__helper")) (.toBeUndefined))))
 
 (defn ^:async test-scoped-extensions-dont-collide []
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
@@ -67,8 +67,8 @@
     (.registerTool ext-a "run" #js {:execute (fn [_] "a") :description "ext-a run"})
     (.registerTool ext-b "run" #js {:execute (fn [_] "b") :description "ext-b run"})
     (let [all-tools ((:all (:tool-registry agent)))]
-      (-> (expect (get all-tools "ext-a/run")) (.toBeDefined))
-      (-> (expect (get all-tools "ext-b/run")) (.toBeDefined)))))
+      (-> (expect (get all-tools "ext-a__run")) (.toBeDefined))
+      (-> (expect (get all-tools "ext-b__run")) (.toBeDefined)))))
 
 (defn ^:async test-extension-sendMessage []
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})

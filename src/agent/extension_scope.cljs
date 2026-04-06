@@ -11,10 +11,11 @@
 
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.
-   Tools and commands are prefixed with 'namespace/' to prevent collisions.
-   Methods are gated behind the extension's declared capabilities."
+   Tools and commands are prefixed with 'namespace__' to prevent collisions.
+   Uses '__' separator (not '/') to comply with Anthropic API tool name pattern
+   ^[a-zA-Z0-9_-]{1,128}$."
   [base-api ns-str capabilities]
-  (let [prefix (fn [n] (str ns-str "/" n))]
+  (let [prefix (fn [n] (str ns-str "__" n))]
     #js {:on               (gate capabilities :events (.-on base-api))
          :off              (gate capabilities :events (.-off base-api))
          ;; Tool management

@@ -125,14 +125,18 @@
     (.rmSync fs tmp-dir #js {:recursive true})))
 
 (defn ^:async test-loads-manifest []
+  ;; When extension.json exists in the dir, only index.* is loaded as entry point
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
-        ext-path (path/join tmp-dir "my-plugin.mjs")
+        ext-dir  (path/join tmp-dir "my-plugin")
+        _        (.mkdirSync fs ext-dir #js {:recursive true})
+        ext-path (path/join ext-dir "index.mjs")
         _        (.writeFileSync fs ext-path
                    "export default function(api) { }")
-        _        (.writeFileSync fs (path/join tmp-dir "extension.json")
+        _        (.writeFileSync fs (path/join ext-dir "extension.json")
                    (js/JSON.stringify #js {:namespace "custom-ns"
                                            :capabilities #js ["tools" "events"]}))
         result   (js-await (discover-and-load [tmp-dir] (make-test-api)))]
+    (-> (expect (count result)) (.toBe 1))
     (-> (expect (:namespace (first result))) (.toBe "custom-ns"))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
@@ -184,3 +188,61 @@
   (it "reload-extension calls deactivate" test-reload-extension-calls-deactivate)
   (it "reload-extension handles missing deactivate" test-reload-extension-handles-no-deactivate)
   (it "reload-all processes all extensions" test-reload-all-processes-all)))
+
+;; ── Multi-file entry-point filtering ─────────────────────────
+
+(defn ^:async test-multi-file-only-loads-index []
+  ;; Create a multi-file extension dir with extension.json + index.mjs + helper.mjs
+  ;; Only index.mjs should be loaded
+  (let [tmp-dir (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-dir (path/join tmp-dir "my-suite")
+        _       (.mkdirSync fs ext-dir #js {:recursive true})
+        _       (.writeFileSync fs (path/join ext-dir "extension.json")
+                  (js/JSON.stringify #js {:namespace "my-suite"
+                                          :capabilities #js ["tools"]}))
+        _       (.writeFileSync fs (path/join ext-dir "index.mjs")
+                  "export default function(api) { return () => {}; }")
+        _       (.writeFileSync fs (path/join ext-dir "helper.mjs")
+                  "export default function(api) { throw new Error('should not load'); }")
+        _       (.writeFileSync fs (path/join ext-dir "utils.mjs")
+                  "export default function(api) { throw new Error('should not load'); }")
+        result  (js-await (discover-and-load [tmp-dir] (make-test-api)))]
+    ;; Only 1 extension loaded (index.mjs), not 3
+    (-> (expect (count result)) (.toBe 1))
+    (-> (expect (:namespace (first result))) (.toBe "my-suite"))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
+(defn ^:async test-single-file-without-manifest-loads []
+  ;; A single .mjs file without extension.json in its dir should still load
+  (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-path (path/join tmp-dir "standalone.mjs")
+        _        (.writeFileSync fs ext-path
+                   "export default function(api) { return () => {}; }")
+        result   (js-await (discover-and-load [tmp-dir] (make-test-api)))]
+    (-> (expect (count result)) (.toBe 1))
+    (-> (expect (:namespace (first result))) (.toBe "standalone"))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
+(defn ^:async test-manifest-with-dependencies-field []
+  ;; extension.json with dependencies field is parsed and stored
+  (let [tmp-dir (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-dir (path/join tmp-dir "dep-ext")
+        _       (.mkdirSync fs ext-dir #js {:recursive true})
+        _       (.writeFileSync fs (path/join ext-dir "extension.json")
+                  (js/JSON.stringify
+                    #js {:namespace "dep-ext"
+                         :capabilities #js ["tools"]
+                         :dependencies #js {:shell-quote "^1.8.1"}}))
+        ;; shell-quote is already installed, so resolve-dependencies should be a no-op
+        _       (.writeFileSync fs (path/join ext-dir "index.mjs")
+                  "export default function(api) { return () => {}; }")
+        result  (js-await (discover-and-load [tmp-dir] (make-test-api)))]
+    ;; Should load successfully — shell-quote is already in node_modules
+    (-> (expect (count result)) (.toBe 1))
+    (-> (expect (:namespace (first result))) (.toBe "dep-ext"))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
+(describe "agent.extension-loader - multi-file extensions" (fn []
+  (it "only loads index.mjs when extension.json present" test-multi-file-only-loads-index)
+  (it "single-file without manifest still loads" test-single-file-without-manifest-loads)
+  (it "manifest with dependencies field loads when deps available" test-manifest-with-dependencies-field)))

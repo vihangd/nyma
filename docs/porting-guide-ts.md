@@ -170,3 +170,36 @@ When porting, you can optionally use nyma features not in pi-mono:
 5. **Extension CLI flags**: `registerFlag`/`getFlag` with `--ext-*` CLI args
 6. **Inter-extension events**: `api.events.on/off/emit` for cross-extension communication
 7. **Dependency ordering**: `dependsOn` in extension.json for load order control
+8. **NPM dependency declaration**: `dependencies` in extension.json — missing packages are auto-installed via `bun add` before your extension loads
+
+## Extension Manifest Reference
+
+A full `extension.json` with all supported fields:
+
+```json
+{
+  "namespace": "my-ts-ext",
+  "capabilities": ["tools", "events", "middleware", "commands", "exec", "flags", "context"],
+  "dependsOn": ["some-other-ext"],
+  "dependencies": {
+    "lodash": "^4.17.21"
+  }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `namespace` | No | Unique identifier; auto-derived from filename if omitted |
+| `capabilities` | No | Restricts which API methods are callable; defaults to all |
+| `dependsOn` | No | Other extension namespaces to load before this one |
+| `dependencies` | No | npm packages to check/install before loading |
+
+## Discovery Order
+
+Extensions are loaded from three locations in this order:
+
+1. `dist/agent/extensions/` — built-in extensions (pre-compiled with the project)
+2. `~/.nyma/extensions/` — global user extensions
+3. `.nyma/extensions/` — project-local user extensions
+
+For multi-file extensions: create a directory with `extension.json` + an `index.ts` (or `index.mjs`) entry point. Only the `index.*` file is loaded by the extension system; other files are imported by your entry point normally.

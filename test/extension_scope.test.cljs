@@ -15,8 +15,8 @@
             base-api (create-extension-api agent)
             scoped   (create-scoped-api base-api "git" #{:all})]
         (.registerTool scoped "status" #js {:execute (fn [_] "ok")})
-        ;; Tool should be registered as "git/status"
-        (-> (expect (get ((:all (:tool-registry agent))) "git/status")) (.toBeDefined)))))
+        ;; Tool should be registered as "git__status"
+        (-> (expect (get ((:all (:tool-registry agent))) "git__status")) (.toBeDefined)))))
 
   (it "prefixes command registration with namespace"
     (fn []
@@ -24,7 +24,7 @@
             base-api (create-extension-api agent)
             scoped   (create-scoped-api base-api "docker" #{:all})]
         (.registerCommand scoped "ps" {:description "List containers"})
-        (-> (expect (get @(:commands agent) "docker/ps")) (.toBeDefined)))))
+        (-> (expect (get @(:commands agent) "docker__ps")) (.toBeDefined)))))
 
   (it "exposes namespace property"
     (fn []
@@ -73,7 +73,7 @@
             base-api (create-extension-api agent)
             scoped   (create-scoped-api base-api "git" #{:all})]
         (.registerFlag scoped "verbose" #js {:type "boolean" :default false})
-        (-> (expect (get @(:flags agent) "git/verbose")) (.toBeDefined)))))
+        (-> (expect (get @(:flags agent) "git__verbose")) (.toBeDefined)))))
 
   (it "getFlag reads namespace-prefixed flag"
     (fn []

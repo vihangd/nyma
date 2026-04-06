@@ -10,6 +10,47 @@
 (defn- ts-js-extension? [p] (or (.endsWith p ".ts") (.endsWith p ".js")
                                 (.endsWith p ".mjs")))
 
+(defn- entry-point?
+  "Check if a filename is an extension entry point (index.*)."
+  [filename]
+  (let [base (path/basename filename)]
+    (or (= base "index.cljs") (= base "index.cljc")
+        (= base "index.mjs")  (= base "index.js")
+        (= base "index.ts"))))
+
+(defn- dep-resolvable?
+  "Check if an npm package is resolvable from CWD using Bun's resolver."
+  [pkg-name]
+  (try
+    (js/Bun.resolveSync pkg-name (js/process.cwd))
+    true
+    (catch :default _e false)))
+
+(defn ^:async resolve-dependencies
+  "Check declared dependencies in a manifest and auto-install any missing ones.
+   Requires a package.json in CWD. Skips silently if no dependencies declared."
+  [manifest]
+  (when-let [deps (and manifest (.-dependencies manifest))]
+    (let [pkg-names (js/Object.keys deps)
+          missing   (vec (filter #(not (dep-resolvable? %)) pkg-names))]
+      (when (seq missing)
+        (js/console.log
+          (str "[nyma] Installing missing extension deps: "
+               (.join (clj->js missing) ", ")))
+        (if (fs/existsSync (path/join (js/process.cwd) "package.json"))
+          (let [proc (js/Bun.spawn
+                       (clj->js (concat ["bun" "add"] missing))
+                       #js {:stdout "pipe" :stderr "pipe"
+                            :cwd (js/process.cwd)})
+                exit-code (js-await (.-exited proc))]
+            (when (not= exit-code 0)
+              (js/console.error
+                (str "[nyma] Failed to install: "
+                     (.join (clj->js missing) ", ")))))
+          (js/console.warn
+            "[nyma] No package.json in CWD — cannot auto-install extension deps. "
+            (str "Missing: " (.join (clj->js missing) ", "))))))))
+
 (def ^:private cache-dir
   "Squint compilation cache directory."
   (str (.. js/process -env -HOME) "/.nyma/cache"))
@@ -109,24 +150,35 @@
           (doseq [entry entries]
             (let [full-path (path/join dir entry)]
               (when (or (cljs-extension? entry) (ts-js-extension? entry))
-                (try
-                  (let [manifest (js-await (load-manifest full-path))
-                        ns-str   (or (and manifest (.-namespace manifest))
-                                     (derive-namespace full-path))
-                        deps     (when (and manifest (.-dependsOn manifest))
-                                   (vec (js/Array.from (.-dependsOn manifest))))]
-                    (swap! scan-results conj
-                      {:path full-path :entry entry :namespace ns-str
-                       :manifest manifest :deps deps}))
-                  (catch :default e
-                    (js/console.error
-                      (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))
+                ;; Multi-file extension filtering:
+                ;; If the file's directory contains extension.json, only load the
+                ;; entry point (index.*). Skip helper/support files like shared.mjs.
+                (let [dir-of-file    (path/dirname full-path)
+                      has-manifest?  (fs/existsSync
+                                       (path/join dir-of-file "extension.json"))]
+                  (when (or (not has-manifest?)    ;; single-file ext: always load
+                            (entry-point? entry))  ;; multi-file ext: only load index
+                    (try
+                      (let [manifest (js-await (load-manifest full-path))
+                            ns-str   (or (and manifest (.-namespace manifest))
+                                         (derive-namespace full-path))
+                            deps     (when (and manifest (.-dependsOn manifest))
+                                       (vec (js/Array.from (.-dependsOn manifest))))]
+                        (swap! scan-results conj
+                          {:path full-path :entry entry :namespace ns-str
+                           :manifest manifest :deps deps}))
+                      (catch :default e
+                        (js/console.error
+                          (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))))
     ;; Pass 2: Topological sort
     (let [sorted     (topo-sort @scan-results)
           extensions (atom [])]
       ;; Pass 3: Load in sorted order
       (doseq [{:keys [path entry namespace manifest]} sorted]
         (try
+          ;; Resolve npm dependencies before loading
+          (when manifest
+            (js-await (resolve-dependencies manifest)))
           (let [ext-fn (js-await (load-extension path))
                 caps   (parse-capabilities
                          (when manifest (.-capabilities manifest)))
@@ -162,8 +214,9 @@
       (catch :default e
         (js/console.error (str "[nyma] Extension deactivate error during reload:") e))))
   (try
-    (let [ext-fn   (js-await (load-extension (:path ext-info)))
-          manifest (js-await (load-manifest (:path ext-info)))
+    (let [manifest (js-await (load-manifest (:path ext-info)))
+          _        (when manifest (js-await (resolve-dependencies manifest)))
+          ext-fn   (js-await (load-extension (:path ext-info)))
           ns-str   (or (and manifest (.-namespace manifest))
                        (:namespace ext-info))
           caps     (parse-capabilities
