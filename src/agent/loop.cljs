@@ -8,13 +8,16 @@
 
 (def stream-event-types
   "Maps AI SDK stream chunk types to internal event names."
-  {"text-start"   "message_start"
-   "text-delta"   "message_update"
-   "text-end"     "message_end"
-   "tool-call"    "tool_call"
-   "tool-result"  "tool_result"
-   "finish-step"  "turn_end"
-   "finish"       "agent_end"})
+  {"text-start"      "message_start"
+   "text-delta"      "message_update"
+   "text-end"        "message_end"
+   "reasoning-start" "reasoning_start"
+   "reasoning-delta" "reasoning_delta"
+   "reasoning-end"   "reasoning_end"
+   "tool-call"       "tool_call"
+   "tool-result"     "tool_result"
+   "finish-step"     "turn_end"
+   "finish"          "agent_end"})
 
 (defn- event-type [chunk]
   (get stream-event-types (.-type chunk)))
@@ -101,6 +104,8 @@
 
             ;; Resolve model — support runtime model switching via state
             active-model (or (:runtime-model @state) (:model config))
+            _ (when-not active-model
+                (throw (js/Error. "No model configured. Set ANTHROPIC_API_KEY or configure a provider via /login")))
 
             ;; Compute token budget for context_assembly
             model-id (str (or (.-modelId active-model) active-model "unknown"))

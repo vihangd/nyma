@@ -19,14 +19,12 @@
   [pkg-path]
   (let [pkg-json-path (path/join pkg-path "package.json")]
     (when (fs/existsSync pkg-json-path)
-      (let [pkg-json (-> (fs/readFileSync pkg-json-path "utf8")
-                         (js/JSON.parse)
-                         (js->clj :keywordize-keys true))
-            manifest  (or (:agent pkg-json) {})]
-        {:extensions (get manifest :extensions ["extensions"])
-         :skills     (get manifest :skills ["skills"])
-         :prompts    (get manifest :prompts ["prompts"])
-         :themes     (get manifest :themes ["themes"])}))))
+      (let [pkg-json (js/JSON.parse (fs/readFileSync pkg-json-path "utf8"))
+            manifest  (or (.-agent pkg-json) {})]
+        {:extensions (or (.-extensions manifest) ["extensions"])
+         :skills     (or (.-skills manifest) ["skills"])
+         :prompts    (or (.-prompts manifest) ["prompts"])
+         :themes     (or (.-themes manifest) ["themes"])}))))
 
 (defn ^:async install
   "Install a package from npm, git, or local path."

@@ -7,18 +7,21 @@
 (defn editor-prefix [streaming steerAcked]
   (cond steerAcked "↳ queued " streaming "steer❯ " :else "❯ "))
 
-(defn Editor [{:keys [onSubmit streaming steerAcked theme]}]
-  (let [[value set-value] (useState "")
-        border-color      (if streaming
-                            (get-in theme [:colors :warning] "#e0af68")
-                            (get-in theme [:colors :border] "#3b4261"))]
+(defn Editor [{:keys [onSubmit streaming steerAcked theme editorValue setEditorValue hidden overlay]}]
+  (let [muted-color  (get-in theme [:colors :muted] "#565f89")
+        border-color (cond
+                       hidden    muted-color
+                       streaming (get-in theme [:colors :warning] "#e0af68")
+                       :else     (get-in theme [:colors :border] "#3b4261"))]
     #jsx [Box {:borderStyle "round"
                :borderColor border-color
-               :paddingX 1}
-          [Text {:color (get-in theme [:colors :muted] "#565f89")}
-           (editor-prefix streaming steerAcked)]
-          [TextInput {:value     value
-                      :onChange  set-value
-                      :onSubmit  (fn [text]
-                                  (set-value "")
-                                  (onSubmit text))}]]))
+               :paddingX    1
+               :flexShrink  0}
+          [Text {:color muted-color}
+           (if hidden "  thinking..." (editor-prefix streaming steerAcked))]
+          (when-not hidden
+            #jsx [TextInput {:value     editorValue
+                             :onChange  setEditorValue
+                             :focus     (and (not overlay) (not hidden))
+                             :onSubmit  (fn [text]
+                                          (onSubmit text))}])]))

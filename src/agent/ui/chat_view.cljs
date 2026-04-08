@@ -1,22 +1,35 @@
 (ns agent.ui.chat-view
   {:squint/extension "jsx"}
   (:require ["react" :refer [useMemo]]
-            ["ink" :refer [Box Text Static]]
+            ["ink" :refer [Box Text]]
             ["./tool_status.jsx" :refer [ToolStartStatus ToolEndStatus]]
-            [agent.utils.markdown :refer [render-markdown]]))
+            ["./streaming_markdown.mjs" :refer [useStreamingMarkdown]]))
 
 (defn role-prefix [role]
-  (case role "user" "❯ " "assistant" "● " "tool-call" "⚙ " "error" "✗ " "  "))
+  (case role "user" "❯ " "assistant" "● " "thinking" "💭 " "plan" "📋 " "tool-call" "⚙ " "error" "✗ " "  "))
 
 (defn role-color [theme role]
   (case role
     "user"      (get-in theme [:colors :primary])
     "assistant" (get-in theme [:colors :secondary])
+    "thinking"  "gray"
+    "plan"      "cyan"
     "tool-call" (get-in theme [:colors :muted])
     "error"     (get-in theme [:colors :error])
     nil))
 
-(defn MessageBubble [{:keys [message theme]}]
+(defn AssistantMessage
+  "Separate component for assistant messages — uses streaming markdown hook."
+  [{:keys [content theme block-renderers]}]
+  (let [rendered (useStreamingMarkdown content block-renderers)
+        color    (role-color theme "assistant")]
+    #jsx [Box {:flexDirection "column" :marginBottom 1}
+          [Box {:flexDirection "row"}
+           [Text {:color color} (role-prefix "assistant")]
+           [Box {:flexDirection "column" :flexShrink 1}
+            [Text {:wrap "word"} rendered]]]]))
+
+(defn MessageBubble [{:keys [message theme block-renderers]}]
   (let [role (:role message)]
     (case role
       "tool-start"
@@ -41,25 +54,34 @@
       ;; Default: text-based messages (user, assistant, error, etc.)
       (let [content (:content message)
             color   (role-color theme role)]
-        (if (= role "assistant")
-          ;; Assistant messages: render markdown with ANSI styling
-          (let [rendered (useMemo (fn [] (render-markdown content)) #js [content])]
-            #jsx [Box {:flexDirection "column" :marginBottom 1}
-                  [Box {:flexDirection "row"}
-                   [Text {:color color} (role-prefix role)]
-                   [Box {:flexDirection "column" :flexShrink 1}
-                    [Text {:wrap "word"} rendered]]]])
-          ;; Other roles: keep existing plain text rendering
+        (case role
+          "assistant"
+          #jsx [AssistantMessage {:content content :theme theme
+                                  :block-renderers block-renderers}]
+
+          "thinking"
+          ;; Thinking messages: dimmed italic style
+          #jsx [Box {:flexDirection "column" :marginBottom 0}
+                [Text {:color "gray" :dimColor true}
+                 (str (role-prefix role) content)]]
+
+          "plan"
+          ;; Plan messages: structured checklist style
+          #jsx [Box {:flexDirection "column" :marginBottom 1}
+                [Text {:color "cyan" :bold true} (role-prefix role)]
+                [Box {:flexDirection "column" :marginLeft 2}
+                 [Text {:color "cyan" :wrap "word"} content]]]
+
+          ;; Other roles: plain text rendering
           #jsx [Box {:flexDirection "column" :marginBottom 1}
                 [Text {:color color :bold (= role "user")}
                  (str (role-prefix role) content)]])))))
 
-(defn ChatView [{:keys [messages theme]}]
-  (let [completed (when (> (count messages) 1) (butlast messages))
-        current   (last messages)]
-    #jsx [Box {:flexDirection "column" :flexGrow 1}
-          [Static {:items (clj->js (or completed []))}
-           (fn [msg i]
-             #jsx [MessageBubble {:key i :message msg :theme theme}])]
-          (when current
-            #jsx [MessageBubble {:message current :theme theme}])]))
+(defn ChatView [{:keys [messages theme block-renderers]}]
+  #jsx [Box {:flexDirection "column" :flexGrow 1 :overflow "hidden"
+             :justifyContent "flex-end"}
+        (map-indexed
+          (fn [i msg]
+            #jsx [MessageBubble {:key i :message msg :theme theme
+                                  :block-renderers block-renderers}])
+          messages)])

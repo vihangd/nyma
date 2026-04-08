@@ -64,7 +64,8 @@
                        :onChange set-value
                        :placeholder (or placeholder "")
                        :onSubmit (fn [text]
-                                   (when (and on-submit (seq (.trim text)))
-                                     (on-submit (.trim text))))}]]
+                                   (if (seq (.trim text))
+                                     (when on-submit (on-submit (.trim text)))
+                                     (when on-cancel (on-cancel))))}]]
           [Box {:marginTop 1}
            [Text {:color muted} "Enter submit  Esc cancel"]]]))

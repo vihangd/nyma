@@ -269,11 +269,11 @@
                                         shared/msg-content))
               ;; Use pre-extracted file lists when available, else extract
               current-files-read (or (when-let [fr (.-files-read evt-ctx)]
-                                       (js->clj fr))
+                                       (vec fr))
                                      (when (seq messages)
                                        (compaction/extract-files-read messages)))
               current-files-modified (or (when-let [fm (.-files-modified evt-ctx)]
-                                           (js->clj fm))
+                                           (vec fm))
                                          (when (seq messages)
                                            (compaction/extract-files-modified messages)))
               ;; Accumulate file lists from previous compaction

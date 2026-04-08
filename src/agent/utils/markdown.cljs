@@ -5,6 +5,10 @@
 (def ^:private renderer
   (Marked. (markedTerminal #js {:reflowText false})))
 
+(def lexer
+  "Access to the marked lexer for block-level tokenization."
+  (.-lexer renderer))
+
 (defn render-markdown
   "Convert markdown string to ANSI-styled terminal text.
    Returns the original string if rendering fails."

@@ -46,12 +46,12 @@
           ;; Preserve structured metadata for downstream consumers
           details    (when (and (some? raw-result) (not (string? raw-result))
                                (.-details raw-result))
-                       (js->clj (.-details raw-result)))
+                       (.-details raw-result))
           is-error   (boolean (and (some? raw-result) (not (string? raw-result))
                                    (.-isError raw-result)))
           content-parts (when (and (some? raw-result) (not (string? raw-result))
                                    (.-content raw-result))
-                          (js->clj (.-content raw-result)))]
+                          (.-content raw-result))]
       (cond-> (assoc ctx :result result)
         details       (assoc :result-details details)
         is-error      (assoc :result-is-error true)
@@ -86,7 +86,7 @@
       (assoc ctx :cancelled true)
       ;; If input was mutated by handler, use modified args
       (not= (js/JSON.stringify original-input) (js/JSON.stringify (.-input evt-ctx)))
-      (assoc ctx :args (js->clj (.-input evt-ctx) :keywordize-keys true))
+      (assoc ctx :args (.-input evt-ctx))
       ;; No mutations, pass through original args
       :else ctx)))
 
@@ -193,7 +193,7 @@
    :enter (fn [ctx]
             (if-let [prep (and (:tool ctx) (.-prepareArguments (:tool ctx)))]
               (let [prepared (prep (clj->js (:args ctx)))]
-                (assoc ctx :args (js->clj prepared :keywordize-keys true)))
+                (assoc ctx :args prepared))
               ctx))})
 
 (defn create-pipeline

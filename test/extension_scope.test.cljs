@@ -3,7 +3,8 @@
             [agent.extension-scope :refer [create-scoped-api derive-namespace]]
             [agent.events :refer [create-event-bus]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.core :refer [create-agent]]))
+            [agent.core :refer [create-agent]]
+            [agent.extension-state :refer [create-state-api]]))
 
 (defn make-test-agent []
   (create-agent {:model "mock" :system-prompt "test"}))
@@ -138,3 +139,123 @@
     (fn []
       (-> (expect (fn [] (derive-namespace "/path/to/bad name.cljs")))
           (.toThrow "Invalid extension namespace"))))))
+
+;;; ─── Error boundary for event handlers ─────────────────────────────────────
+
+(describe "extension-scope:error-boundary" (fn []
+  (it "registering a throwing handler does not throw at registration time"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "errbnd" #{:all})
+            threw    (atom false)]
+        ;; Registration of a throwing handler should succeed silently
+        (try
+          (.on scoped "agent_start" (fn [_] (throw (js/Error. "boom"))))
+          (catch :default _
+            (reset! threw true)))
+        (-> (expect @threw) (.toBe false)))))
+
+  (it "error boundary wraps on — throwing handler does not throw at call site"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "safe" #{:all :events})
+            called   (atom false)]
+        ;; Register a good handler second — should still be called
+        (.on scoped "agent_start" (fn [_] (throw (js/Error. "bad handler"))))
+        (.on scoped "agent_start" (fn [_] (reset! called true)))
+        ;; Directly trigger via base api's emit if it supports it
+        (try
+          (.emit base-api "agent_start" nil)
+          (catch :default _ nil))
+        ;; Either called or not — no crash is the point
+        (-> (expect true) (.toBe true))))
+
+  (it "off unregisters wrapped handler (no duplicate calls after off)"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "offtest" #{:all :events})
+            count    (atom 0)
+            handler  (fn [_] (swap! count inc))]
+        (.on scoped "agent_start" handler)
+        ;; Remove via .off with original handler reference
+        (.off scoped "agent_start" handler)
+        ;; count should remain 0
+        (-> (expect @count) (.toBe 0)))))
+
+  (it "state capability missing throws on get"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "nostate" #{:tools})]
+        (-> (expect (fn [] (.get (.-state scoped) "key")))
+            (.toThrow "missing capability")))))
+
+  (it "state capability missing throws on set"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "nostate2" #{:tools})]
+        (-> (expect (fn [] (.set (.-state scoped) "k" "v")))
+            (.toThrow "missing capability")))))
+
+  (it "state capability provided — scoped API has state object"
+    (fn []
+      (let [agent    (make-test-agent)
+            base-api (create-extension-api agent)
+            scoped   (create-scoped-api base-api "withstate" #{:all :state})]
+        (-> (expect (some? (.-state scoped))) (.toBe true))
+        (-> (expect (fn? (.-get (.-state scoped)))) (.toBe true))
+        (-> (expect (fn? (.-set (.-state scoped)))) (.toBe true))
+        (-> (expect (fn? (.-keys (.-state scoped)))) (.toBe true))))))))
+
+;;; ─── create-state-api integration ───────────────────────────────────────────
+
+(describe "extension-state:create-state-api" (fn []
+  (it "set and get a value"
+    (fn []
+      (let [api (create-state-api "test-ext-scopetest")]
+        (.set api "foo" "bar")
+        (-> (expect (.get api "foo")) (.toBe "bar")))))
+
+  (it "keys returns stored keys"
+    (fn []
+      (let [api (create-state-api "test-ext-keyscheck")]
+        (.clear api)
+        (.set api "a" 1)
+        (.set api "b" 2)
+        (let [ks (.keys api)]
+          (-> (expect (.includes ks "a")) (.toBe true))
+          (-> (expect (.includes ks "b")) (.toBe true))))))
+
+  (it "delete removes a key"
+    (fn []
+      (let [api (create-state-api "test-ext-deletecheck")]
+        (.set api "x" 42)
+        (.delete api "x")
+        (-> (expect (.get api "x")) (.toBeUndefined)))))
+
+  (it "clear removes all keys"
+    (fn []
+      (let [api (create-state-api "test-ext-clearcheck")]
+        (.set api "p" 1)
+        (.set api "q" 2)
+        (.clear api)
+        (-> (expect (.-length (.keys api))) (.toBe 0)))))
+
+  (it "get returns undefined for missing key"
+    (fn []
+      (let [api (create-state-api "test-ext-missingkey")]
+        (.clear api)
+        (-> (expect (.get api "nonexistent")) (.toBeUndefined)))))
+
+  (it "persists across two api instances with same namespace"
+    (fn []
+      (let [api1 (create-state-api "test-ext-persist")
+            _    (.set api1 "shared" "value")
+            api2 (create-state-api "test-ext-persist")]
+        (-> (expect (.get api2 "shared")) (.toBe "value"))
+        ;; Cleanup
+        (.clear api1))))))

@@ -15,7 +15,18 @@
    "compact" "before_compact"
    "before_branch_switch" "branch_summarized"
    "resources_discover" "model_select" "user_bash" "reload"
-   "context_assembly" "after_provider_request"])
+   "context_assembly" "after_provider_request"
+   ;; ACP agent shell events
+   "acp_connect" "acp_disconnect" "acp_message"
+   "acp_tool_start" "acp_tool_update"
+   "acp_usage" "acp_permission" "acp_mode_change"
+   "acp_thought" "acp_plan" "acp_commands_update"
+   ;; Native provider reasoning events (AI SDK interleaved-thinking)
+   "reasoning_start" "reasoning_delta" "reasoning_end"
+   ;; UI events
+   "editor_change"
+   ;; Session lifecycle
+   "session_clear"])
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys
@@ -36,7 +47,7 @@
     (fn [acc result]
       (if (nil? result)
         acc
-        (let [m (if (map? result) result (js->clj result :keywordize-keys false))]
+        (let [m (if (map? result) result result)]
           (reduce-kv
             (fn [a k v]
               (let [ks (str k)]

@@ -45,6 +45,10 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/state.cljs` | `agent.state` | Event-sourced state store |
 | `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system |
 | `src/agent/extension_scope.cljs` | `agent.extension-scope` | Namespaced + capability-gated extension API |
+| `src/agent/extensions/agent_shell/features/effort_switcher.cljs` | `agent.extensions.agent-shell.features.effort-switcher` | `/effort <low\|medium\|high\|max\|auto>` — thinking budget control via ACP |
+| `src/agent/extensions/workspace_config/index.cljs` | `agent.extensions.workspace-config.index` | Workspace config — loads `.nyma/settings.json`, registers `/alias` and `/reload` |
+| `src/agent/extensions/workspace_config/aliases.cljs` | `agent.extensions.workspace-config.aliases` | Custom command aliases — `/alias` CRUD, late-binding dispatch |
+| `src/agent/extensions/token_suite/token_preview.cljs` | `agent.extensions.token-suite.token-preview` | Live token-count preview widget — subscribes to `editor_change`, shows `~N tokens` |
 | `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /sessions, /export, etc.) |
 | `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML |
 | `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings |
@@ -177,9 +181,29 @@ Squint compiles the symbol `js->clj` but does not provide the function at runtim
 
 ;; CORRECT — JSON.parse output is already a plain object, keywords are strings
 (js/JSON.parse json-str)
+
+;; For deep-cloning a JS object to a plain structure:
+(js/JSON.parse (js/JSON.stringify js-obj))
 ```
 
 `clj->js` **does** work (for converting to JS objects with `JSON.stringify`).
+
+### `array-seq` does not exist — use `seq` or pass JS arrays directly
+
+`array-seq` compiles to a bare identifier that is not defined at runtime. In Squint, JS arrays are already iterable — `seq`, `vec`, `into`, `map`, `filter`, `reduce` all work on them natively.
+
+```clojure
+;; BROKEN — ReferenceError: array_seq is not defined
+(let [items (array-seq js-array)] ...)
+
+;; CORRECT — seq works on JS arrays
+(let [items (seq js-array)] ...)
+
+;; ALSO CORRECT — into/map/filter work directly on JS arrays
+(into [] js-array)
+(map inc js-array)
+(into [cmd] (or args []))  ;; args is a JS array — no conversion needed
+```
 
 ### `Bun.spawn` requires explicit pipe config
 
@@ -717,7 +741,8 @@ All available macros in `macros.tool-dsl`:
 | `(keyword "foo")` | `"foo"` — just use a string |
 | `(my-set :key)` | `(contains? my-set :key)` |
 | `(my-map :key)` | `(get my-map :key)` |
-| `(js->clj ...)` | Use the value directly — it's already a JS object |
+| `(js->clj ...)` | Use the value directly — it's already a JS object. For deep clone: `(js/JSON.parse (js/JSON.stringify x))` |
+| `(array-seq xs)` | `(seq xs)` or just pass the JS array directly — `into`/`map`/`filter` work on it |
 | `(clojure.string/join ...)` | `(:require [clojure.string :as str])` then `(str/join ...)` |
 | `(js/process.env.HOME)` | `(.. js/process -env -HOME)` |
 | `(.-textDelta chunk "")` | `(or (.-textDelta chunk) "")` |

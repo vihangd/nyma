@@ -2,20 +2,20 @@
 
 ;; Model pricing: [input-rate-per-1M-tokens, output-rate-per-1M-tokens] in USD
 (def token-costs
-  {"claude-sonnet-4-20250514"     [3.0 15.0]
-   "claude-opus-4-20250514"       [15.0 75.0]
-   "claude-haiku-3-20240307"      [0.25 1.25]
-   "gpt-4o"                       [2.5 10.0]
-   "gpt-4o-mini"                  [0.15 0.6]
-   "gpt-4-turbo"                  [10.0 30.0]
-   "gemini-2.0-flash"             [0.1 0.4]
-   "gemini-1.5-pro"               [1.25 5.0]})
+  (atom {"claude-sonnet-4-20250514"     [3.0 15.0]
+         "claude-opus-4-20250514"       [15.0 75.0]
+         "claude-haiku-3-20240307"      [0.25 1.25]
+         "gpt-4o"                       [2.5 10.0]
+         "gpt-4o-mini"                  [0.15 0.6]
+         "gpt-4-turbo"                  [10.0 30.0]
+         "gemini-2.0-flash"             [0.1 0.4]
+         "gemini-1.5-pro"               [1.25 5.0]}))
 
 (defn calculate-cost
   "Calculate USD cost for a given model and token counts.
    Returns 0 if model pricing is unknown."
   [model-id input-tokens output-tokens]
-  (if-let [[input-rate output-rate] (get token-costs model-id)]
+  (if-let [[input-rate output-rate] (get @token-costs model-id)]
     (+ (* (/ input-tokens 1000000) input-rate)
        (* (/ output-tokens 1000000) output-rate))
     0))

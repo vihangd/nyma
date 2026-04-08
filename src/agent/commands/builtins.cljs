@@ -4,6 +4,7 @@
             [agent.commands.share :refer [messages->html messages->markdown]]
             [agent.extension-loader :refer [deactivate-all discover-and-load]]
             [agent.resources.loader :refer [discover]]
+            [agent.providers.oauth :as oauth]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]
             [clojure.string :as str]
             ["node:fs" :as fs]))
@@ -72,7 +73,7 @@
   (let [settings (:settings resources)
         current  (when settings ((:get settings)))
         entries  (when current
-                   (mapv (fn [[k v]] (str (name k) " = " (pr-str v)))
+                   (mapv (fn [[k v]] (str k " = " (pr-str v)))
                          (sort-by first current)))]
     (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
       (show-info ctx (str "Settings:\n" (str/join "\n" (map #(str "  " %) entries))))
@@ -81,14 +82,44 @@
           (let [key-name (first (.split choice " = "))
                 new-val  (js-await (.input (.-ui ctx) (str "New value for " key-name ":") ""))]
             (when (and new-val (seq (.trim new-val)))
-              ((:set-override settings) (keyword key-name) (.trim new-val))
+              ((:set-override settings) key-name (.trim new-val))
               (notify ctx (str key-name " = " (.trim new-val))))))))))
 
-(defn ^:async handle-login
+(defn- ^:async handle-oauth-login
+  "Run OAuth flow for a provider. Returns true on success."
+  [provider oauth-cfg ctx agent]
+  (if-not (and ctx (.-ui ctx) (.-input (.-ui ctx)))
+    (notify ctx "OAuth login requires interactive mode" "error")
+    (do
+      (notify ctx (str "Starting OAuth login for " (or (:name oauth-cfg) provider) "..."))
+      (try
+        (let [ui-callbacks #js {:notify (fn [msg] (notify ctx msg))
+                                :input  (fn [prompt placeholder]
+                                          (.input (.-ui ctx) prompt (or placeholder "")))}
+              creds (js-await ((:login oauth-cfg) ui-callbacks))]
+          (when creds
+            (notify ctx (str "Logged in to " provider " via OAuth"))
+            ;; Re-resolve the model now that credentials are available
+            (when-not (.-model (:config agent))
+              (try
+                (let [;; Use first model from provider's registered models
+                      p-info (when-let [reg (:provider-registry agent)]
+                               ((:get reg) provider))
+                      model-id (or (when-let [models (:models p-info)]
+                                     (:id (first models)))
+                                   (str provider "/default"))
+                      model ((:resolve (:provider-registry agent)) provider model-id)]
+                  (set! (.-model (:config agent)) model)
+                  (notify ctx (str "Model resolved: " model-id)))
+                (catch :default e
+                  (notify ctx (str "Model resolution failed: " (.-message e)) "error"))))))
+        (catch :default e
+          (notify ctx (str "OAuth login failed: " (.-message e)) "error"))))))
+
+(defn- ^:async handle-key-login
   "Prompt for API key and save to credentials file."
-  [args ctx]
-  (let [provider  (or (first args) "anthropic")
-        cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
+  [provider ctx]
+  (let [cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
     (if-not (and ctx (.-ui ctx) (.-input (.-ui ctx)))
       (notify ctx "Login requires interactive mode" "error")
       (let [key (js-await (.input (.-ui ctx) (str "API key for " provider ":") "sk-..."))]
@@ -102,6 +133,26 @@
               (fs/mkdirSync dir #js {:recursive true}))
             (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
             (notify ctx (str "Saved " provider " API key"))))))))
+
+(defn ^:async handle-login
+  "Handle /login command.
+   /login [provider]         — prompt for API key
+   /login oauth [provider]   — trigger OAuth flow"
+  [args ctx agent]
+  (let [is-oauth  (= (first args) "oauth")
+        provider  (if is-oauth
+                    (or (second args) "anthropic")
+                    (or (first args) "anthropic"))
+        p-config  (when-let [reg (:provider-registry agent)]
+                    ((:get reg) provider))
+        oauth-cfg (when p-config (:oauth p-config))]
+    (if is-oauth
+      ;; /login oauth [provider] — OAuth flow
+      (if-not oauth-cfg
+        (notify ctx (str "Provider '" provider "' does not support OAuth") "error")
+        (handle-oauth-login provider oauth-cfg ctx agent))
+      ;; /login [provider] — API key
+      (handle-key-login provider ctx))))
 
 ;;; ─── Registration ───────────────────────────────────────────
 
@@ -133,9 +184,10 @@
                      (notify ctx (str "Model: " model-id)))))}
 
      "clear"
-     {:description "Clear messages"
+     {:description "Clear messages and reset agent session"
       :handler (fn [_args ctx]
                  ((:dispatch! (:store agent)) :messages-cleared {})
+                 ((:emit (:events agent)) "session_clear" {})
                  (notify ctx "Messages cleared"))}
 
      "exit"
@@ -369,21 +421,28 @@
                      (notify ctx "No CHANGELOG.md found" "error"))))}
 
      "login"
-     {:description "Set API key for a provider"
+     {:description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"
       :handler (fn [args ctx]
-                 (handle-login args ctx))}
+                 (handle-login args ctx agent))}
 
      "logout"
-     {:description "Remove API key for a provider"
+     {:description "Remove credentials for a provider"
       :handler (fn [args ctx]
                  (let [provider (or (first args) "anthropic")
+                       ;; Check for OAuth credentials
+                       oauth-creds (oauth/load-credentials provider)
                        cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
-                   (if-not (fs/existsSync cred-path)
-                     (notify ctx "No credentials found" "error")
-                     (let [existing (js/JSON.parse (fs/readFileSync cred-path "utf8"))]
-                       (js-delete existing provider)
-                       (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
-                       (notify ctx (str "Removed " provider " API key"))))))}
+                   (if oauth-creds
+                     ;; Clear OAuth credentials
+                     (do (oauth/clear-credentials provider)
+                         (notify ctx (str "Removed OAuth credentials for " provider)))
+                     ;; Clear API key from credentials.json
+                     (if-not (fs/existsSync cred-path)
+                       (notify ctx "No credentials found" "error")
+                       (let [existing (js/JSON.parse (fs/readFileSync cred-path "utf8"))]
+                         (js-delete existing provider)
+                         (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
+                         (notify ctx (str "Removed " provider " API key")))))))}
 
      "scoped-models"
      {:description "Show or set per-extension model overrides"

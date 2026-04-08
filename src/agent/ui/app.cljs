@@ -1,8 +1,9 @@
 (ns agent.ui.app
   {:squint/extension "jsx"}
-  (:require ["react" :refer [useState useEffect useCallback]]
-            ["ink" :refer [Box Text render useInput useApp]]
+  (:require ["react" :refer [useState useEffect useCallback useRef]]
+            ["ink" :refer [Box Text render useInput useApp useStdout]]
             [agent.loop :refer [run steer]]
+            [agent.commands.resolver :refer [resolve-command]]
             ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
             ["./editor.jsx" :refer [Editor]]
@@ -10,17 +11,35 @@
             ["./overlay.jsx" :refer [Overlay]]
             ["./dialogs.jsx" :refer [ConfirmDialog SelectDialog InputDialog]]
             ["./notification.jsx" :refer [Notification]]
-            ["./widget_container.jsx" :refer [WidgetContainer]]))
+            ["./widget_container.jsx" :refer [WidgetContainer]]
+            ["./mention_picker.mjs" :refer [create-picker]]))
 
 (defn- handle-command [agent text set-overlay]
   (let [parts   (.split (.slice text 1) " ")
         cmd     (first parts)
         args    (rest parts)
         commands @(:commands agent)]
-    (when-let [handler (get-in commands [cmd :handler])]
-      (handler args #js {:ui (when-let [ext (.-extension-api agent)] (.-ui ext))}))))
+    (when-let [entry (resolve-command commands cmd)]
+      ((:handler entry) args #js {:ui (when-let [ext (.-extension-api agent)] (.-ui ext))}))))
 
-(defn ^:async do-submit [agent streaming set-overlay set-streaming set-messages set-steerAcked text]
+(defn- add-user-msg!
+  "Add user message to chat. Called synchronously to batch with Editor clear."
+  [set-messages text]
+  (set-messages (fn [prev] (conj (vec prev) {:role "user" :content text}))))
+
+(defn- add-assistant-chunk!
+  "Append a text delta to the last assistant message, or create one."
+  [set-messages text-delta]
+  (set-messages
+    (fn [prev]
+      (let [all      (vec prev)
+            last-msg (last all)]
+        (if (= (:role last-msg) "assistant")
+          (conj (vec (butlast all))
+                (update last-msg :content str text-delta))
+          (conj all {:role "assistant" :content (or text-delta "")}))))))
+
+(defn ^:async do-submit [agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text]
   ;; Emit "input" event — extensions can intercept, transform, or fully handle
   (let [input-result (js-await
                        ((:emit-collect (:events agent)) "input"
@@ -30,42 +49,49 @@
         text         (if (and (some? transformed) (not= transformed text))
                        transformed
                        text)]
-    (when-not handled
-      (cond
-        (.startsWith text "/")
-        (js-await (handle-command agent text set-overlay))
+    (cond
+      ;; ── Extension handled (ACP agent shell streaming) ──
+      (and handled (get input-result "subscribe"))
+      (let [subscribe (get input-result "subscribe")]
+        ;; Hide Editor — prompt text is prefixed in the response stream
+        (set-editor-hidden true)
+        (set-streaming true)
+        (js-await (subscribe set-messages))
+        (set-streaming false)
+        (set-editor-hidden false))
 
-        streaming
-        (do
-          (steer agent {:role "user" :content text})
-          (set-steerAcked true)
-          (js/setTimeout (fn [] (set-steerAcked false)) 1500))
-
-        :else
-        (do
-          (set-streaming true)
+      (and handled (get input-result "response"))
+      (let [response (get input-result "response")]
+        (when (> (count (str response)) 0)
           (set-messages
-            (fn [prev] (conj (vec prev) {:role "user" :content text})))
+            (fn [prev] (conj (vec prev) {:role "assistant" :content response})))))
 
-          ;; fullStream text-delta chunks have `.text` (not `.delta`)
-          ;; The AI SDK remaps internal `delta` → `text` in the fullStream transform.
-          (let [update-handler
-                (fn [chunk]
-                  (set-messages
-                    (fn [prev]
-                      (let [all (vec prev)
-                            last-msg (last all)
-                            text-delta (.-text chunk)]
-                        (if (= (:role last-msg) "assistant")
-                          (conj (vec (butlast all))
-                                (update last-msg :content str text-delta))
-                          (conj all {:role "assistant" :content (or text-delta "")}))))))]
-            ((:on (:events agent)) "message_update" update-handler)
-            (js-await (run agent text))
-            ((:off (:events agent)) "message_update" update-handler)
-            (set-streaming false)
-            ;; Strip any lingering tool-start messages (frozen spinners)
-            (set-messages (fn [prev] (vec (remove #(= (:role %) "tool-start") prev))))))))))
+      handled
+      nil  ;; handled but no response or subscribe
+
+      ;; ── Slash command ──
+      (.startsWith text "/")
+      (js-await (handle-command agent text set-overlay))
+
+      ;; ── Steer (mid-stream follow-up) ──
+      streaming
+      (do
+        (steer agent {:role "user" :content text})
+        (set-steerAcked true)
+        (js/setTimeout (fn [] (set-steerAcked false)) 1500))
+
+      ;; ── Normal LLM prompt ──
+      :else
+      (do
+        (set-streaming true)
+        (add-user-msg! set-messages text)
+        (let [update-handler
+              (fn [chunk] (add-assistant-chunk! set-messages (.-text chunk)))]
+          ((:on (:events agent)) "message_update" update-handler)
+          (js-await (run agent text))
+          ((:off (:events agent)) "message_update" update-handler)
+          (set-streaming false)
+          (set-messages (fn [prev] (vec (remove #(= (:role %) "tool-start") prev)))))))))
 
 (defn with-dismissal
   "Attach timeout and/or abort-signal auto-dismiss to a dialog.
@@ -100,7 +126,12 @@
         [statuses set-statuses]           (useState {})
         [widgets set-widgets]             (useState {})
         [custom-footer-fn set-custom-footer] (useState nil)
+        [editor-value set-editor-value]   (useState "")
+        [editor-hidden set-editor-hidden] (useState false)
         [custom-header-fn set-custom-header] (useState nil)
+        {:keys [stdout]}                  (useStdout)
+        [term-rows set-term-rows]         (useState (or (.-rows stdout) 24))
+        layout-handlers                   (useRef #js [])
         app                               (useApp)]
 
     ;; Wire extension UI hooks
@@ -140,7 +171,7 @@
                     (set-overlay
                       #jsx [SelectDialog
                             {:title title
-                             :options (js->clj options)
+                             :options options
                              :on-select (fn [choice] (cleanup) (dismiss choice))
                              :on-cancel (fn [] (cleanup) (dismiss nil))
                              :theme theme}]))))))
@@ -173,7 +204,7 @@
             (fn [id lines & [pos]]
               (set-widgets
                 (fn [w]
-                  (assoc w id {:lines (if (array? lines) (js->clj lines) lines)
+                  (assoc w id {:lines (if (array? lines) (vec lines) lines)
                                :position (or pos "below")})))))
           (set! (.-clearWidget ui)
             (fn [id]
@@ -204,6 +235,21 @@
               (.on (.-stdin js/process) "data" handler)
               ;; Return cleanup function
               (fn [] (.off (.-stdin js/process) "data" handler))))
+          ;; Layout info for extensions
+          (set! (.-getTerminalSize ui)
+            (fn []
+              #js {:rows    (or (.-rows stdout) 24)
+                   :columns (or (.-columns stdout) 80)}))
+          ;; Layout change subscription
+          (set! (.-onLayoutChange ui)
+            (fn [handler]
+              (.push (.-current layout-handlers) handler)
+              ;; Return cleanup function
+              (fn []
+                (let [handlers (.-current layout-handlers)
+                      idx      (.indexOf handlers handler)]
+                  (when (>= idx 0)
+                    (.splice handlers idx 1))))))
           (when (.-extension-api agent)
             (set! (.-ui (.-extension-api agent)) ui)))
         js/undefined)
@@ -280,6 +326,54 @@
             ((:off events) "tool_execution_update" on-update))))
       #js [agent])
 
+    ;; Track terminal resize for fixed-height layout + notify extensions
+    (useEffect
+      (fn []
+        (let [handler (fn []
+                        (let [rows (or (.-rows stdout) 24)
+                              cols (or (.-columns stdout) 80)]
+                          (set-term-rows rows)
+                          (doseq [h (.-current layout-handlers)]
+                            (try (h #js {:rows rows :columns cols})
+                                 (catch :default _)))))]
+          (.on stdout "resize" handler)
+          (fn [] (.off stdout "resize" handler))))
+      #js [stdout])
+
+    ;; Emit editor_change so extensions can react to typed text (e.g. token preview)
+    (useEffect
+      (fn []
+        (when-let [emit (:emit (:events agent))]
+          (emit "editor_change" {:text editor-value}))
+        js/undefined)
+      #js [editor-value])
+
+    ;; @-mention detection: when user types @, show file picker overlay
+    (useEffect
+      (fn []
+        (when (and (not overlay) (not streaming) (not editor-hidden)
+                   editor-value (.endsWith editor-value "@"))
+          (let [providers (when-let [mp (:mention-providers agent)] @mp)]
+            (when (and providers (seq providers))
+              ;; Gather results from the first provider's search
+              (let [provider (first (vals providers))
+                    search   (:search provider)]
+                (when search
+                  (-> (search "")
+                      (.then (fn [items]
+                               (when (and items (pos? (.-length items)))
+                                 (let [picker (create-picker (vec items) ""
+                                                (fn [selected]
+                                                  (set-overlay nil)
+                                                  (when selected
+                                                    ;; Replace trailing @ with selected value
+                                                    (let [base (subs editor-value 0 (dec (count editor-value)))]
+                                                      (set-editor-value (str base (.-value selected) " "))))))]
+                                   (set-overlay picker)))))
+                      (.catch (fn [_] nil))))))))
+        js/undefined)
+      #js [editor-value overlay streaming editor-hidden])
+
     ;; Global keyboard handler
     (useInput
       (fn [input key]
@@ -293,37 +387,70 @@
                     [Text (str "  " model-id)]
                     [Box {:marginTop 1}
                      [Text {:color "#565f89"} "Press ESC to close"]]]))
-          (and (.-ctrl key) (= input "p")) nil)))
+          (and (.-ctrl key) (= input "p")) nil))
+      #js {:isActive (not (some? overlay))})
 
-    ;; Submit handler — useCallback wraps the async fn, returning its Promise
     (let [handle-submit
           (useCallback
             (fn [text]
-              (do-submit agent streaming set-overlay set-streaming set-messages set-steerAcked text))
+              (set-editor-value "")
+              (-> (do-submit agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text)
+                  (.catch (fn [e]
+                            (set-streaming false)
+                            (set-editor-hidden false)
+                            (when (and (.-extension-api agent) (.-ui (.-extension-api agent)))
+                              (.notify (.-ui (.-extension-api agent))
+                                       (str "Error: " (.-message e)) "error"))))))
             #js [streaming agent])]
 
-      #jsx [Box {:flexDirection "column" :height "100%"}
-            (if custom-header-fn
-              (custom-header-fn)
-              #jsx [Header {:agent agent :resources resources :theme theme}])
+      #jsx [Box {:flexDirection "column" :height (max 1 (dec term-rows))}
+            (let [custom-header (when custom-header-fn (custom-header-fn))]
+              (if custom-header
+                #jsx [Box {:flexShrink 0}
+                      (if (string? custom-header)
+                        #jsx [Box {:paddingX 1 :justifyContent "space-between"
+                                   :borderStyle "round" :borderColor "#7aa2f7"}
+                              [Text {:color "#7aa2f7" :bold true} custom-header]]
+                        custom-header)]
+                #jsx [Header {:agent agent :resources resources :theme theme}]))
             [WidgetContainer {:widgets widgets :position "above"}]
-            [ChatView {:messages messages :theme theme}]
+            [Box {:flexGrow 1 :flexShrink 1 :overflow "hidden"
+                  :flexDirection "column"}
+             [ChatView {:messages messages :theme theme
+                        :block-renderers (when-let [br (:block-renderers agent)]
+                                           @br)}]]
             [WidgetContainer {:widgets widgets :position "below"}]
             (when overlay
               (let [is-transparent (and (some? overlay) (not (string? overlay))
                                        (not (number? overlay)) (.-__transparent overlay))
                     content        (if is-transparent (.-__overlay-content overlay) overlay)]
-                #jsx [Overlay {:onClose (fn [] (set-overlay nil))
-                               :transparent is-transparent}
-                      content]))
-            [Editor {:onSubmit   handle-submit
+                #jsx [Box {:position "absolute"
+                           :flexDirection "column"
+                           :width "100%" :height "100%"
+                           :justifyContent "center"
+                           :alignItems "center"}
+                      [Overlay {:onClose (fn [] (set-overlay nil))
+                                :transparent is-transparent}
+                       content]]))
+            [Editor {:onSubmit       handle-submit
+                     :editorValue    editor-value
+                     :setEditorValue set-editor-value
+                     :hidden         editor-hidden
+                     :overlay        (some? overlay)
                      :streaming  streaming
                      :steerAcked steerAcked
                      :theme      theme}]
             (when notification
-              #jsx [Notification {:message (:message notification)
-                                  :level   (:level notification)
-                                  :theme   theme}])
-            (if custom-footer-fn
-              (custom-footer-fn)
-              #jsx [Footer {:agent agent :theme theme :statuses statuses}])])))
+              #jsx [Box {:flexShrink 0}
+                    [Notification {:message (:message notification)
+                                   :level   (:level notification)
+                                   :theme   theme}]])
+            (let [custom-footer (when custom-footer-fn (custom-footer-fn))]
+              (if custom-footer
+                #jsx [Box {:flexShrink 0}
+                      (if (string? custom-footer)
+                        #jsx [Box {:paddingX 1 :justifyContent "space-between"}
+                              [Text {:color "#7aa2f7"} custom-footer]
+                              [Text {:color "#565f89"} "nyma v0.1.0"]]
+                        custom-footer)]
+                #jsx [Footer {:agent agent :theme theme :statuses statuses}]))])))

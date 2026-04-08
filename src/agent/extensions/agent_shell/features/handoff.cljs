@@ -1,0 +1,92 @@
+(ns agent.extensions.agent-shell.features.handoff
+  "Session handoff between agents. Captures conversation context from
+   the current agent, disconnects, connects to a new agent, and sends
+   the context as the first prompt so the new agent can continue."
+  (:require [agent.extensions.agent-shell.shared :as shared]
+            [agent.extensions.agent-shell.agents.registry :as registry]
+            [agent.extensions.agent-shell.acp.pool :as pool]
+            [agent.extensions.agent-shell.acp.client :as client]
+            [clojure.string :as str]))
+
+(defn- notify [api msg & [level]]
+  (when (and (.-ui api) (.-available (.-ui api)))
+    (.notify (.-ui api) msg (or level "info"))))
+
+(defn- build-context
+  "Build a handoff context string from the current agent's state."
+  [agent-key custom-msg]
+  (let [state (get @shared/agent-state agent-key)
+        agent-def (get registry/agents agent-key)
+        agent-name (or (:name agent-def) (shared/kw-name agent-key))
+        title (:session-title state)
+        mode  (:mode state)
+        lines [(str "I'm continuing a task that was started in " agent-name ".")
+               (when title (str "The session was titled: " title))
+               (when mode (str "The agent was in " mode " mode."))
+               ""
+               (if (seq custom-msg)
+                 (str "Here's what I need you to continue with:\n" custom-msg)
+                 "Please review the project state and continue where the previous agent left off. Start by checking recent git changes and file modifications.")]]
+    (str/join "\n" (remove nil? lines))))
+
+(defn activate
+  "Register the /handoff command."
+  [api]
+  (.registerCommand api "handoff"
+    #js {:description "Hand off current session to another agent with context transfer"
+         :handler
+         (fn [args _ctx]
+           (let [from-key @shared/active-agent]
+             (cond
+               (not from-key)
+               (notify api "No agent connected. Use /agent <name> first." "error")
+
+               (empty? args)
+               (notify api (str "Usage: /handoff <agent> [context message]\n"
+                               "Available agents: "
+                               (str/join ", " (map shared/kw-name (keys registry/agents))))
+                       "info")
+
+               :else
+               (let [to-key-str (first args)
+                     to-def     (get registry/agents to-key-str)
+                     custom-msg (when (> (count args) 1)
+                                  (str/join " " (rest args)))]
+                 (if-not to-def
+                   (notify api (str "Unknown agent: " to-key-str) "error")
+                   (if (= from-key to-key-str)
+                     (notify api "Already connected to that agent" "error")
+                     (do
+                       (notify api (str "Handing off from "
+                                       (shared/kw-name from-key)
+                                       " to " (:name to-def) "..."))
+                       ;; Build context before disconnecting
+                       (let [context (build-context from-key custom-msg)]
+                         ;; Disconnect current
+                         (-> (pool/disconnect from-key)
+                             (.then
+                               (fn [_]
+                                 (reset! shared/active-agent nil)
+                                 ;; Connect new agent
+                                 (pool/get-or-create to-key-str to-def api)))
+                             (.then
+                               (fn [conn]
+                                 (reset! shared/active-agent to-key-str)
+                                 (shared/update-agent-state! to-key-str :connected true)
+                                 (shared/setup-ui!)
+                                 (notify api (str "Connected to " (:name to-def)
+                                                 ". Sending context..."))
+                                 ;; Send context as first prompt
+                                 (client/send-prompt conn context)))
+                             (.then
+                               (fn [result]
+                                 (when-let [usage (:usage result)]
+                                   (shared/update-agent-state! to-key-str :turn-usage usage))
+                                 (notify api "Handoff complete.")))
+                             (.catch
+                               (fn [e]
+                                 (notify api (str "Handoff failed: " (.-message e))
+                                         "error"))))))))))))})
+
+  (fn []
+    (.unregisterCommand api "handoff")))

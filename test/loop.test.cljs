@@ -44,9 +44,24 @@
         (-> (expect (get stream-event-types "finish"))
             (.toBe "agent_end"))))
 
-    (it "contains exactly 7 mappings"
+    (it "maps reasoning-start to reasoning_start"
       (fn []
-        (-> (expect (count stream-event-types)) (.toBe 7))))))
+        (-> (expect (get stream-event-types "reasoning-start"))
+            (.toBe "reasoning_start"))))
+
+    (it "maps reasoning-delta to reasoning_delta"
+      (fn []
+        (-> (expect (get stream-event-types "reasoning-delta"))
+            (.toBe "reasoning_delta"))))
+
+    (it "maps reasoning-end to reasoning_end"
+      (fn []
+        (-> (expect (get stream-event-types "reasoning-end"))
+            (.toBe "reasoning_end"))))
+
+    (it "contains exactly 10 mappings"
+      (fn []
+        (-> (expect (count stream-event-types)) (.toBe 10))))))
 
 ;; --- steer / follow-up queue functions ---
 

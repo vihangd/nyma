@@ -1,0 +1,5 @@
+{
+  "namespace": "desktop-notify",
+  "capabilities": ["events", "flags"],
+  "dependsOn": []
+}

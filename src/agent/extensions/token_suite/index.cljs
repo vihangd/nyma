@@ -10,6 +10,7 @@
             [agent.extensions.token-suite.structured-context :as structured-context]
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.context-folding :as context-folding]
+            [agent.extensions.token-suite.token-preview :as token-preview]
             [clojure.string :as str]))
 
 (defn- format-stats []
@@ -68,6 +69,7 @@
     (swap! deactivators conj (structured-context/activate api))
     (swap! deactivators conj (smart-compaction/activate api))
     (swap! deactivators conj (context-folding/activate api))
+    (swap! deactivators conj (token-preview/activate api))
 
     ;; Register /token-stats command
     (.registerCommand api "token-stats"

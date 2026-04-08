@@ -2,7 +2,8 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
             [agent.commands.builtins :refer [register-builtins]]
-            [agent.commands.share :refer [messages->html messages->markdown]]))
+            [agent.commands.share :refer [messages->html messages->markdown]]
+            [agent.commands.resolver :refer [resolve-command]]))
 
 ;;; ─── Helpers ────────────────────────────────────────────────
 
@@ -249,3 +250,37 @@
     (fn []
       (let [agent (make-agent-with-builtins)]
         (-> (expect (get @(:commands agent) "reload")) (.toBeDefined)))))))
+
+;; ═══════════════════════════════════════════════════════════════
+;; resolve-command — fuzzy command resolution
+;; ═══════════════════════════════════════════════════════════════
+
+(describe "resolve-command" (fn []
+  (it "returns exact match"
+    (fn []
+      (let [cmds {"help" {:handler identity} "agent-shell__agent" {:handler identity}}]
+        (-> (expect (some? (resolve-command cmds "help"))) (.toBe true)))))
+
+  (it "returns suffix match when no exact match"
+    (fn []
+      (let [cmds {"agent-shell__agent" {:handler identity}}
+            result (resolve-command cmds "agent")]
+        (-> (expect (some? result)) (.toBe true))
+        (-> (expect (:handler result)) (.toBe identity)))))
+
+  (it "returns nil when multiple suffix matches (ambiguous)"
+    (fn []
+      (let [cmds {"ext-a__run" {:handler identity} "ext-b__run" {:handler identity}}]
+        (-> (expect (nil? (resolve-command cmds "run"))) (.toBe true)))))
+
+  (it "returns nil when no match"
+    (fn []
+      (let [cmds {"agent-shell__agent" {:handler identity}}]
+        (-> (expect (nil? (resolve-command cmds "missing"))) (.toBe true)))))
+
+  (it "prefers exact match over suffix match"
+    (fn []
+      (let [cmds {"model" {:handler (fn [] "builtin")} "agent-shell__model" {:handler (fn [] "ext")}}
+            result (resolve-command cmds "model")]
+        (-> (expect (some? result)) (.toBe true))
+        (-> (expect ((:handler result))) (.toBe "builtin")))))))

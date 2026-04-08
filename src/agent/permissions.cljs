@@ -3,7 +3,7 @@
 (def all-capabilities
   "All available extension capabilities."
   #{:tools :commands :shortcuts :events :messages :state :ui :middleware :exec
-    :providers :model :session :flags :renderers})
+    :providers :model :session :flags :renderers :spawn :context})
 
 (defn check
   "Check if a capability is granted. :all grants everything."

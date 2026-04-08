@@ -103,7 +103,7 @@
               parsed (js/JSON.parse raw)
               suite  (.-token-suite parsed)]
           (if suite
-            (merge-with merge default-config (js->clj suite :keywordize-keys true))
+            (merge-with merge default-config (js/JSON.parse (js/JSON.stringify suite)))
             default-config))
         (catch :default _e default-config))
       default-config)))

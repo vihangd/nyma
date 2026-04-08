@@ -283,6 +283,11 @@ If your extension only uses packages already in the project's `package.json`, yo
 7. May return deactivate function for cleanup
 8. On `/reload` or process exit, deactivate is called
 
+## System Events
+
+- **`editor_change`** — fired on every keystroke in the editor; payload `{text: string}`. Subscribe to build live previews or debounced analysis widgets.
+- **`session_clear`** — fired when `/clear` is invoked; extensions (e.g. agent-shell) use this to send `session/new` to their backend.
+
 ## Squint Gotchas
 
 - `fn ^:async` does NOT work — use `defn ^:async` instead

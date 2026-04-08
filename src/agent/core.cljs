@@ -36,6 +36,8 @@
         flags             (atom {})           ;; Extension CLI flags {name → {:description :type :default :value}}
         context-providers (atom {})           ;; name → {:priority :estimate :provide}
         model-registry    (create-model-registry)
+        block-renderers   (atom {})
+        mention-providers (atom {})
         state             (atom {:messages           []
                                  :model              model
                                  :active-tools       (set (keys builtin-tools))
@@ -69,6 +71,8 @@
                  :flags             flags
                  :context-providers context-providers
                  :model-registry    model-registry
+                 :block-renderers   block-renderers
+                 :mention-providers  mention-providers
                  ;; Session is attached later by cli.cljs
                  :session           (atom nil)}]
       ;; Set agent-ref so the middleware pipeline can create extension contexts

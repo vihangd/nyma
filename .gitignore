@@ -6,3 +6,8 @@ dist/
 .DS_Store
 .clj-kondo/
 .lsp/
+
+.claude/
+.nyma/
+cli
+nyma

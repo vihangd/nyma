@@ -3,14 +3,15 @@
   (:require ["ink" :refer [Box Text]]))
 
 (defn Footer [{:keys [agent theme statuses]}]
-  (let [muted (get-in theme [:colors :muted] "#565f89")]
+  (let [muted (get-in theme [:colors :muted] "#565f89")
+        status-str (when (and statuses (seq statuses))
+                     (str " " (->> (vals statuses)
+                                   (interpose " | ")
+                                   (apply str))))]
     #jsx [Box {:paddingX 1
-               :justifyContent "space-between"}
+               :flexShrink 0}
+          [Box {:flexGrow 1 :flexShrink 1 :overflow "hidden"}
+           [Text {:color muted :wrap "truncate"}
+            "ctrl+c exit  /help commands  ctrl+l model"]]
           [Text {:color muted}
-           "ctrl+c exit  /help commands  ctrl+l model"]
-          [Box {:gap 2}
-           (when (and statuses (seq statuses))
-             (map (fn [[id text]]
-                    #jsx [Text {:key id} text])
-                  statuses))
-           [Text {:color muted} "nyma v0.1.0"]]]))
+           (str (or status-str "") " | nyma v0.1.0")]]))

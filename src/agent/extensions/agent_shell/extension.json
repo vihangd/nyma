@@ -1,0 +1,6 @@
+{
+  "namespace": "agent-shell",
+  "capabilities": ["spawn", "commands", "events", "ui", "messages",
+                    "session", "renderers", "context", "flags", "state"],
+  "dependsOn": []
+}

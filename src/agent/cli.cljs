@@ -9,16 +9,30 @@
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
             [agent.keybindings :refer [load-keybindings apply-keybindings]]
+            [agent.providers.oauth :as oauth]
             ["./modes/interactive.jsx" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
 
 (defn- resolve-model-via-registry
   "Resolve a model through the agent's provider registry.
-   Falls back to the provider name as a direct model ID."
+   Falls back to the provider name as a direct model ID.
+   Handles OAuth credential refresh for providers that need it."
   [provider-registry values merged]
   (let [model-id  (or (:model values) (:model merged) "claude-sonnet-4-20250514")
-        provider  (or (:provider values) (:provider merged) "anthropic")]
+        provider  (or (:provider values) (:provider merged) "anthropic")
+        p-config  ((:get provider-registry) provider)]
+    ;; Auto-refresh OAuth credentials if needed
+    (when-let [oauth-cfg (:oauth p-config)]
+      (let [creds (oauth/load-credentials provider)]
+        (when (and creds (oauth/needs-refresh? creds))
+          (try
+            ((:refresh-token oauth-cfg)
+              #js {"access"     (:access creds)
+                   "refresh"    (:refresh creds)
+                   "expires-at" (:expires-at creds)})
+            (catch :default e
+              (js/console.warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
     ((:resolve provider-registry) provider model-id)))
 
 (defn- resolve-tools
@@ -89,8 +103,12 @@
                 {:model         nil
                  :system-prompt ((:build-system-prompt resources))
                  :max-steps     20})
-        model (resolve-model-via-registry (:provider-registry agent) values merged)
-        _     (set! (.-model (:config agent)) model)
+        model (try
+                (resolve-model-via-registry (:provider-registry agent) values merged)
+                (catch :default e
+                  (js/console.warn (str "[nyma] " (.-message e)))
+                  nil))
+        _     (when model (set! (.-model (:config agent)) model))
         api (create-extension-api agent)]
 
     ;; Filter active tools if --tools flag was used

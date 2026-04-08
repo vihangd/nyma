@@ -1,7 +1,9 @@
 (ns agent.extensions
   (:require [agent.loop :refer [steer follow-up]]
             [agent.extension-context :refer [create-extension-context]]
-            [agent.token-estimation :as te]))
+            [agent.token-estimation :as te]
+            [agent.providers.registry :refer [build-provider-entry]]
+            [agent.pricing :as pricing]))
 
 (defn create-extension-api
   "Build the API object that extensions receive.
@@ -39,7 +41,7 @@
        :getActiveTools    (fn [] (clj->js (keys ((:get-active (:tool-registry agent))))))
        :getAllTools        (fn [] (clj->js (keys ((:all (:tool-registry agent))))))
        :setActiveTools    (fn [names]
-                            ((:set-active (:tool-registry agent)) (set (js->clj names))))
+                            ((:set-active (:tool-registry agent)) (set (or names []))))
 
        ;; ── Command registration ────────────────────────────
        :registerCommand   (fn [name opts]
@@ -73,7 +75,7 @@
 
        ;; ── Shell execution ─────────────────────────────────
        :exec              (fn [cmd args]
-                            (let [cmd-args (into [cmd] (or (js->clj args) []))
+                            (let [cmd-args (into [cmd] (or args []))
                                   proc     (js/Bun.spawn (clj->js cmd-args)
                                              #js {:cwd    (js/process.cwd)
                                                   :stdout "pipe"
@@ -86,6 +88,24 @@
                                       (.then (fn [results]
                                                #js {:stdout (aget results 0)
                                                     :stderr (aget results 1)})))))))
+
+       ;; ── Long-lived process spawning ────────────────────
+       :spawn             (fn [cmd args opts]
+                            (let [cmd-args (into [cmd] (or args []))
+                                  js-opts  (or opts #js {})
+                                  proc     (js/Bun.spawn (clj->js cmd-args)
+                                             #js {:cwd    (or (.-cwd js-opts) (js/process.cwd))
+                                                  :stdout "pipe"
+                                                  :stderr "pipe"
+                                                  :stdin  "pipe"
+                                                  :env    (or (.-env js-opts) js/process.env)})]
+                              #js {:pid    (.-pid proc)
+                                   :stdin  (.-stdin proc)
+                                   :stdout (.-stdout proc)
+                                   :stderr (.-stderr proc)
+                                   :kill   (fn [& [sig]] (.kill proc (or sig "SIGTERM")))
+                                   :exited (.-exited proc)
+                                   :ref    proc}))
 
        ;; ── Session entries (pi-compat: appendEntry) ────────
        :appendEntry       (fn [entry-type data]
@@ -114,9 +134,83 @@
                           (fn [msg-type renderer]
                             (swap! (:message-renderers agent) assoc (str msg-type) renderer))
 
+       ;; ── Block renderers (streaming markdown) ──────────────
+       :registerBlockRenderer
+                          (fn [type-key render-fn]
+                            (swap! (:block-renderers agent) assoc (str type-key) render-fn))
+       :unregisterBlockRenderer
+                          (fn [type-key]
+                            (swap! (:block-renderers agent) dissoc (str type-key)))
+
+       ;; ── Mention providers (@-mention system) ─────────────
+       :registerMentionProvider
+                          (fn [id config]
+                            (swap! (:mention-providers agent) assoc (str id)
+                              {:id       (str id)
+                               :trigger  (or (.-trigger config) "@")
+                               :label    (or (.-label config) (str id))
+                               :search   (.-search config)
+                               :resolve  (.-resolve config)}))
+       :unregisterMentionProvider
+                          (fn [id]
+                            (swap! (:mention-providers agent) dissoc (str id)))
+
        ;; ── Provider management ─────────────────────────────
        :registerProvider  (fn [name config]
-                            ((:register (:provider-registry agent)) name config))
+                            (let [;; Convert JS config to CLJ via JSON round-trip
+                                  cfg-raw (js/JSON.parse (js/JSON.stringify config))
+                                  ;; Extract functions that survive JSON (they won't — handle separately)
+                                  create-fn (or (.-createModel config) (.-create-model config))
+                                  oauth-obj (.-oauth config)
+                                  stream-fn (.-streamFn config)
+                                  ;; Build CLJ config from JSON-safe fields
+                                  cfg {:create-model  create-fn
+                                       :base-url      (or (.-baseUrl cfg-raw) (.-base-url cfg-raw))
+                                       :api-key-env   (or (.-apiKeyEnv cfg-raw) (.-api-key-env cfg-raw))
+                                       :api           (.-api cfg-raw)
+                                       :stream-fn     stream-fn
+                                       :oauth         (when oauth-obj
+                                                        {:name          (.-name oauth-obj)
+                                                         :login         (.-login oauth-obj)
+                                                         :refresh-token (or (.-refreshToken oauth-obj)
+                                                                           (.-refresh-token oauth-obj))
+                                                         :get-api-key   (or (.-getApiKey oauth-obj)
+                                                                           (.-get-api-key oauth-obj))})}
+                                  ;; Extract model list
+                                  models-arr (.-models config)
+                                  models (when models-arr
+                                           (vec (map (fn [m]
+                                                       {:id             (.-id m)
+                                                        :name           (.-name m)
+                                                        :context-window (or (.-contextWindow m)
+                                                                           (.-context-window m)
+                                                                           100000)
+                                                        :max-tokens     (or (.-maxTokens m) (.-max-tokens m))
+                                                        :reasoning      (.-reasoning m)
+                                                        :input          (when (.-input m) (vec (.-input m)))
+                                                        :cost           (when (.-cost m)
+                                                                         {:input  (.-input (.-cost m))
+                                                                          :output (.-output (.-cost m))})})
+                                                     models-arr)))
+                                  cfg (if models (assoc cfg :models models) cfg)
+                                  ;; Remove nil create-model so build-provider-entry can auto-generate
+                                  cfg (if (:create-model cfg) cfg (dissoc cfg :create-model))
+                                  entry (build-provider-entry name cfg)]
+                              ;; Register provider
+                              ((:register (:provider-registry agent)) name entry)
+                              ;; Auto-register model metadata
+                              (when models
+                                ((:register (:model-registry agent))
+                                  (into {} (map (fn [m]
+                                                  [(:id m) {:context-window (:context-window m)}])
+                                                models)))
+                                ;; Auto-register pricing
+                                (doseq [m models]
+                                  (when-let [cost (:cost m)]
+                                    (let [input-rate  (or (:input cost) 0)
+                                          output-rate (or (:output cost) 0)]
+                                      (swap! pricing/token-costs assoc (:id m)
+                                             [input-rate output-rate])))))))
        :unregisterProvider (fn [name]
                              ((:unregister (:provider-registry agent)) name))
 
@@ -160,6 +254,11 @@
                                :value       nil}))
        :getFlag          (fn [name]
                             (when-let [flag (get @(:flags agent) name)]
+                              (if (some? (:value flag))
+                                (:value flag)
+                                (:default flag))))
+       :getGlobalFlag    (fn [full-name]
+                            (when-let [flag (get @(:flags agent) full-name)]
                               (if (some? (:value flag))
                                 (:value flag)
                                 (:default flag))))

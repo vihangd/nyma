@@ -22,5 +22,5 @@
                     [Text {:color (if (= i selected)
                                     (get-in theme [:colors :primary])
                                     (get-in theme [:colors :muted]))}
-                     (str (name k) ": " (get current-settings k))]])
+                     (str k ": " (get current-settings k))]])
             setting-keys)]))

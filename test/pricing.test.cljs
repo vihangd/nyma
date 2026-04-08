@@ -57,8 +57,8 @@
 (describe "token-costs" (fn []
   (it "has pricing for claude sonnet"
     (fn []
-      (-> (expect (get token-costs "claude-sonnet-4-20250514")) (.toBeDefined))))
+      (-> (expect (get @token-costs "claude-sonnet-4-20250514")) (.toBeDefined))))
 
   (it "has pricing for gpt-4o"
     (fn []
-      (-> (expect (get token-costs "gpt-4o")) (.toBeDefined))))))
+      (-> (expect (get @token-costs "gpt-4o")) (.toBeDefined))))))

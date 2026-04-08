@@ -1,0 +1,5 @@
+{
+  "namespace": "workspace-config",
+  "capabilities": ["commands", "flags", "events", "state"],
+  "dependsOn": []
+}

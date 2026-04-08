@@ -51,7 +51,7 @@
          :compact            (fn [opts]
                                (when-let [session @(:session agent)]
                                  (compact session (:model (:config agent)) (:events agent)
-                                   (when opts (js->clj opts :keywordize-keys true)))))
+                                   opts)))
 
          ;; System prompt
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))

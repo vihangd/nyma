@@ -21,9 +21,10 @@
   "Simulates what App.useEffect does — populates extension API UI hooks.
    Returns atoms for overlay state and resolve tracking."
   [base-api]
-  (let [overlay-state (atom nil)
-        resolved      (atom :pending)
-        ui            (.-ui base-api)]
+  (let [overlay-state    (atom nil)
+        resolved         (atom :pending)
+        layout-handlers  (atom [])
+        ui               (.-ui base-api)]
     (set! (.-available ui) true)
     (set! (.-showOverlay ui)
       (fn [content] (reset! overlay-state content)))
@@ -34,7 +35,28 @@
             (when (and (some? component) (not (string? component)) (not (number? component)))
               (set! (.-__resolve component) (fn [v] (reset! resolved v) (resolve v))))
             (reset! overlay-state component)))))
-    {:overlay-state overlay-state :resolved resolved}))
+    ;; Dialog stubs (needed for API contract test)
+    (set! (.-confirm ui) (fn [& _] (js/Promise.resolve true)))
+    (set! (.-select ui) (fn [& _] (js/Promise.resolve nil)))
+    (set! (.-input ui) (fn [& _] (js/Promise.resolve nil)))
+    (set! (.-notify ui) (fn [_ _] nil))
+    ;; Layout methods
+    (set! (.-setFooter ui) (fn [_] nil))
+    (set! (.-setHeader ui) (fn [_] nil))
+    (set! (.-setStatus ui) (fn [_ _] nil))
+    (set! (.-setWidget ui) (fn [_ _ & _] nil))
+    (set! (.-clearWidget ui) (fn [_] nil))
+    ;; Terminal methods
+    (set! (.-setTitle ui) (fn [_] nil))
+    (set! (.-onTerminalInput ui) (fn [handler] (fn [] nil)))
+    ;; Layout info (new extension API)
+    (set! (.-getTerminalSize ui)
+      (fn [] #js {:rows 24 :columns 80}))
+    (set! (.-onLayoutChange ui)
+      (fn [handler]
+        (swap! layout-handlers conj handler)
+        (fn [] (swap! layout-handlers (fn [hs] (filterv #(not= % handler) hs))))))
+    {:overlay-state overlay-state :resolved resolved :layout-handlers layout-handlers}))
 
 ;;; ─── 1. CustomComponentAdapter: render() output ─────────────
 
@@ -246,6 +268,62 @@
             scoped        (create-scoped-api base-api "restricted" #{:tools})]
         ;; ui should be unavailable
         (-> (expect (.-available (.-ui scoped))) (.toBe false)))))))
+
+;;; ─── 6b. Extension UI API surface contract ──────────────────
+
+(describe "Extension UI API contract" (fn []
+  (it "wired UI object has all expected methods"
+    (fn []
+      (let [agent    (create-agent {:model "mock" :system-prompt "test"})
+            base-api (create-extension-api agent)
+            _        (wire-ui-hooks base-api)
+            ui       (.-ui base-api)]
+        ;; Dialog methods
+        (-> (expect (fn? (.-confirm ui))) (.toBe true))
+        (-> (expect (fn? (.-select ui))) (.toBe true))
+        (-> (expect (fn? (.-input ui))) (.toBe true))
+        ;; Notification
+        (-> (expect (fn? (.-notify ui))) (.toBe true))
+        ;; Overlay
+        (-> (expect (fn? (.-showOverlay ui))) (.toBe true))
+        (-> (expect (fn? (.-custom ui))) (.toBe true))
+        ;; Layout
+        (-> (expect (fn? (.-setFooter ui))) (.toBe true))
+        (-> (expect (fn? (.-setHeader ui))) (.toBe true))
+        (-> (expect (fn? (.-setStatus ui))) (.toBe true))
+        (-> (expect (fn? (.-setWidget ui))) (.toBe true))
+        (-> (expect (fn? (.-clearWidget ui))) (.toBe true))
+        ;; Terminal
+        (-> (expect (fn? (.-setTitle ui))) (.toBe true))
+        (-> (expect (fn? (.-onTerminalInput ui))) (.toBe true))
+        ;; Layout info (new)
+        (-> (expect (fn? (.-getTerminalSize ui))) (.toBe true))
+        (-> (expect (fn? (.-onLayoutChange ui))) (.toBe true))
+        ;; Availability
+        (-> (expect (.-available ui)) (.toBe true)))))
+
+  (it "getTerminalSize returns rows and columns"
+    (fn []
+      (let [agent    (create-agent {:model "mock" :system-prompt "test"})
+            base-api (create-extension-api agent)
+            _        (wire-ui-hooks base-api)
+            ui       (.-ui base-api)]
+        (when (fn? (.-getTerminalSize ui))
+          (let [size (.getTerminalSize ui)]
+            (-> (expect (.-rows size)) (.toBeGreaterThan 0))
+            (-> (expect (.-columns size)) (.toBeGreaterThan 0)))))))
+
+  (it "onLayoutChange returns a cleanup function"
+    (fn []
+      (let [agent    (create-agent {:model "mock" :system-prompt "test"})
+            base-api (create-extension-api agent)
+            _        (wire-ui-hooks base-api)
+            ui       (.-ui base-api)]
+        (when (fn? (.-onLayoutChange ui))
+          (let [cleanup (.onLayoutChange ui (fn [_size] nil))]
+            (-> (expect (fn? cleanup)) (.toBe true))
+            ;; Cleanup should not throw
+            (cleanup))))))))
 
 ;;; ─── 7. Key mapping ────────────────────────────────────────
 

@@ -244,8 +244,11 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 | `integration/tool_pipeline.test.cljs` | Full middleware chain | 6 |
 | `integration/extension_lifecycle.test.cljs` | Extension load/use/deactivate | 7 |
 | `integration/state_events.test.cljs` | State + event bus integration | 5 |
+| `workspace_config.test.cljs` | Workspace config + command aliases | 20 |
+| `token_preview.test.cljs` | Live token count preview | 10 |
+| `clear_session.test.cljs` | /clear session reset | 9 |
 
-**Total: ~235 tests**
+**Total: ~274 tests**
 
 ## Running the Agent
 
@@ -331,6 +334,22 @@ Settings are resolved in priority order:
 3. **Global settings** (`~/.nyma/settings.json`)
 4. **Defaults**
 
+### Workspace Config
+
+The built-in `workspace-config` extension reads `.nyma/settings.json` at startup and registers per-project command aliases and flags:
+
+```json
+{
+  "aliases": {
+    "cc": "/model claude-sonnet-4-6",
+    "bye": "/exit"
+  },
+  "flags": {}
+}
+```
+
+Aliases become `/slash` commands immediately — `/cc` would switch to claude-sonnet-4-6 in the example above. Manage aliases at runtime with `/alias` and reload the file with `/workspace-config__reload`.
+
 ### Default Settings
 
 ```json
@@ -350,6 +369,19 @@ Settings are resolved in priority order:
 ## Extensions
 
 Extensions add tools, commands, keyboard shortcuts, middleware, and UI hooks. They can be written in ClojureScript or TypeScript.
+
+### Built-in Extensions
+
+Nyma ships with several extension suites in `src/agent/extensions/`:
+
+| Extension | Namespace | Purpose |
+|-----------|-----------|---------|
+| `agent_shell` | `agent-shell` | Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.) |
+| `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
+| `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
+| `bash_suite` | `bash-suite` | Shell execution helpers |
+| `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
+| `mention_files` | `mention-files` | `@filename` file insertion in the editor |
 
 ### Extension Locations
 
@@ -525,6 +557,8 @@ The event bus provides lifecycle hooks for extensions:
 | `before_compact` / `compact` | Context compaction |
 | `context` | Context building |
 | `input` | User input |
+| `editor_change` | User typing in editor — `{text: string}` payload |
+| `session_clear` | `/clear` invoked — extensions may reset their agent sessions |
 
 ### Async Events
 

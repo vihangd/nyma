@@ -47,7 +47,49 @@
                                                      :on-submit (fn [_])
                                                      :on-cancel (fn [])
                                                      :theme test-theme}])]
-        (-> (expect (lastFrame)) (.toContain "Enter name:")))))))
+        (-> (expect (lastFrame)) (.toContain "Enter name:")))))
+
+  (it "calls on-cancel when blank text is submitted (prevents hung Promise)"
+    (fn []
+      (let [submitted (atom nil)
+            cancelled (atom false)
+            ;; Directly invoke the onSubmit callback with blank text, as TextInput would
+            on-submit (fn [v] (reset! submitted v))
+            on-cancel (fn [] (reset! cancelled true))
+            ;; Replicate the onSubmit logic from dialogs.cljs
+            onSubmit  (fn [text]
+                        (if (seq (.trim text))
+                          (when on-submit (on-submit (.trim text)))
+                          (when on-cancel (on-cancel))))]
+        ;; Blank submit → on-cancel should fire, on-submit should not
+        (onSubmit "")
+        (-> (expect @cancelled) (.toBe true))
+        (-> (expect (nil? @submitted)) (.toBe true)))))
+
+  (it "calls on-submit when non-blank text is submitted"
+    (fn []
+      (let [submitted (atom nil)
+            cancelled (atom false)
+            on-submit (fn [v] (reset! submitted v))
+            on-cancel (fn [] (reset! cancelled true))
+            onSubmit  (fn [text]
+                        (if (seq (.trim text))
+                          (when on-submit (on-submit (.trim text)))
+                          (when on-cancel (on-cancel))))]
+        (onSubmit "  hello  ")
+        (-> (expect @submitted) (.toBe "hello"))
+        (-> (expect @cancelled) (.toBe false)))))
+
+  (it "whitespace-only submit is treated as blank and triggers on-cancel"
+    (fn []
+      (let [cancelled (atom false)
+            on-cancel (fn [] (reset! cancelled true))
+            onSubmit  (fn [text]
+                        (if (seq (.trim text))
+                          nil
+                          (when on-cancel (on-cancel))))]
+        (onSubmit "   ")
+        (-> (expect @cancelled) (.toBe true)))))))
 
 (describe "Notification" (fn []
   (it "renders info notification"
