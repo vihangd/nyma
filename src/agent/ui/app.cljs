@@ -4,6 +4,9 @@
             ["ink" :refer [Box Text render useInput useApp useStdout]]
             [agent.loop :refer [run steer]]
             [agent.commands.resolver :refer [resolve-command]]
+            [agent.keybinding-registry :as kbr]
+            [agent.ui.bracketed-paste :as paste]
+            [agent.ui.autocomplete-provider :as ac]
             ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
             ["./editor.jsx" :refer [Editor]]
@@ -12,6 +15,9 @@
             ["./dialogs.jsx" :refer [ConfirmDialog SelectDialog InputDialog]]
             ["./notification.jsx" :refer [Notification]]
             ["./widget_container.jsx" :refer [WidgetContainer]]
+            ["./help_overlay.jsx" :refer [HelpOverlay]]
+            ["./status_line.jsx" :refer [StatusLine]]
+            ["./welcome.jsx" :refer [WelcomeScreen]]
             ["./mention_picker.mjs" :refer [create-picker]]))
 
 (defn- handle-command [agent text set-overlay]
@@ -40,8 +46,15 @@
           (conj all {:role "assistant" :content (or text-delta "")}))))))
 
 (defn ^:async do-submit [agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text]
-  ;; Emit "input" event — extensions can intercept, transform, or fully handle
-  (let [input-result (js-await
+  ;; Expand bracketed-paste markers to their original content before the
+  ;; prompt is handed to extensions or the model.
+  (let [paste-handler (when-let [ph (.-__paste-handler agent)] ph)
+        pastes-map    (when paste-handler @(:pastes paste-handler))
+        text          (if pastes-map
+                        (paste/expand-paste-markers text pastes-map)
+                        text)
+        ;; Emit "input" event — extensions can intercept, transform, or fully handle
+        input-result (js-await
                        ((:emit-collect (:events agent)) "input"
                          #js {:input text :text text}))
         handled      (get input-result "handle")
@@ -82,16 +95,22 @@
 
       ;; ── Normal LLM prompt ──
       :else
-      (do
-        (set-streaming true)
-        (add-user-msg! set-messages text)
-        (let [update-handler
-              (fn [chunk] (add-assistant-chunk! set-messages (.-text chunk)))]
-          ((:on (:events agent)) "message_update" update-handler)
-          (js-await (run agent text))
-          ((:off (:events agent)) "message_update" update-handler)
-          (set-streaming false)
-          (set-messages (fn [prev] (vec (remove #(= (:role %) "tool-start") prev)))))))))
+      (let [;; emit-collect input_submit — extensions can cancel or transform text
+            submit-result (js-await
+                            ((:emit-collect (:events agent)) "input_submit"
+                              #js {:text text :timestamp (js/Date.now)}))
+            cancelled     (get submit-result "cancel")
+            text          (or (get submit-result "text") text)]
+        (when-not cancelled
+          (set-streaming true)
+          (add-user-msg! set-messages text)
+          (let [update-handler
+                (fn [chunk] (add-assistant-chunk! set-messages (.-text chunk)))]
+            ((:on (:events agent)) "message_update" update-handler)
+            (js-await (run agent text))
+            ((:off (:events agent)) "message_update" update-handler)
+            (set-streaming false)
+            (set-messages (fn [prev] (vec (remove #(= (:role %) "tool-start") prev))))))))))
 
 (defn with-dismissal
   "Attach timeout and/or abort-signal auto-dismiss to a dialog.
@@ -201,11 +220,12 @@
                     (dissoc prev id))))))
           ;; Widget system
           (set! (.-setWidget ui)
-            (fn [id lines & [pos]]
+            (fn [id lines & [pos priority]]
               (set-widgets
                 (fn [w]
                   (assoc w id {:lines (if (array? lines) (vec lines) lines)
-                               :position (or pos "below")})))))
+                               :position (or pos "below")
+                               :priority (or priority 0)})))))
           (set! (.-clearWidget ui)
             (fn [id]
               (set-widgets (fn [w] (dissoc w id)))))
@@ -250,6 +270,9 @@
                       idx      (.indexOf handlers handler)]
                   (when (>= idx 0)
                     (.splice handlers idx 1))))))
+          ;; Editor value accessors for extensions (prompt history, etc.)
+          (set! (.-setEditorValue ui) (fn [text] (set-editor-value (or text ""))))
+          (set! (.-getEditorValue ui) (fn [] editor-value))
           (when (.-extension-api agent)
             (set! (.-ui (.-extension-api agent)) ui)))
         js/undefined)
@@ -340,6 +363,29 @@
           (fn [] (.off stdout "resize" handler))))
       #js [stdout])
 
+    ;; Bracketed paste: enable terminal mode, install raw stdin listener, and
+    ;; attach the handler to `agent` so do-submit can expand markers.
+    (useEffect
+      (fn []
+        (paste/enable-bracketed-paste)
+        (let [handler     (paste/create-paste-handler)
+              process-fn  (:process handler)
+              stdin-fn    (fn [data]
+                            (let [result (process-fn data)]
+                              (when (and (:handled result) (:marker result))
+                                ;; Append the marker to the editor value so
+                                ;; the user sees '[paste #N +X lines]' where
+                                ;; they would have seen the raw content.
+                                (set-editor-value
+                                  (fn [prev] (str (or prev "") (:marker result)))))))]
+          (set! (.-__paste-handler agent) handler)
+          (.on (.-stdin js/process) "data" stdin-fn)
+          (fn []
+            (.off (.-stdin js/process) "data" stdin-fn)
+            (paste/disable-bracketed-paste)
+            (set! (.-__paste-handler agent) js/undefined))))
+      #js [agent])
+
     ;; Emit editor_change so extensions can react to typed text (e.g. token preview)
     (useEffect
       (fn []
@@ -348,46 +394,82 @@
         js/undefined)
       #js [editor-value])
 
-    ;; @-mention detection: when user types @, show file picker overlay
+    ;; General autocomplete trigger detection. Runs whenever the editor
+    ;; text changes: detects slash/at/path triggers, invokes
+    ;; complete-all on the autocomplete registry, opens a picker overlay
+    ;; when any provider returns results.
     (useEffect
       (fn []
         (when (and (not overlay) (not streaming) (not editor-hidden)
-                   editor-value (.endsWith editor-value "@"))
-          (let [providers (when-let [mp (:mention-providers agent)] @mp)]
-            (when (and providers (seq providers))
-              ;; Gather results from the first provider's search
-              (let [provider (first (vals providers))
-                    search   (:search provider)]
-                (when search
-                  (-> (search "")
-                      (.then (fn [items]
-                               (when (and items (pos? (.-length items)))
-                                 (let [picker (create-picker (vec items) ""
-                                                (fn [selected]
-                                                  (set-overlay nil)
-                                                  (when selected
-                                                    ;; Replace trailing @ with selected value
-                                                    (let [base (subs editor-value 0 (dec (count editor-value)))]
-                                                      (set-editor-value (str base (.-value selected) " "))))))]
-                                   (set-overlay picker)))))
-                      (.catch (fn [_] nil))))))))
+                   editor-value (seq editor-value))
+          (let [triggers (ac/detect-trigger editor-value)
+                ;; Only open the picker on 'active' triggers — not :any
+                ;; alone, because that fires on every keystroke.
+                active?  (or (contains? triggers :slash)
+                             (contains? triggers :at)
+                             (contains? triggers :path))]
+            (when (and active? (:autocomplete-registry agent))
+              (-> (ac/complete-all (:autocomplete-registry agent) editor-value)
+                  (.then
+                    (fn [items]
+                      (when (and items (pos? (count items)))
+                        (let [item-array (clj->js (vec items))
+                              picker (create-picker item-array ""
+                                       (fn [selected]
+                                         (set-overlay nil)
+                                         (when selected
+                                           ;; Replace the current trigger-query
+                                           ;; token with the selected value.
+                                           (let [val (.-value selected)
+                                                 txt editor-value]
+                                             (cond
+                                               ;; Slash: replace the whole /cmd
+                                               (.startsWith txt "/")
+                                               (set-editor-value (str val " "))
+
+                                               ;; At: replace everything from last @ onward
+                                               (.endsWith txt "@")
+                                               (set-editor-value
+                                                 (str (.slice txt 0 (dec (count txt))) val " "))
+
+                                               ;; Path: replace the last segment
+                                               :else
+                                               (let [idx (.lastIndexOf txt "/")]
+                                                 (set-editor-value
+                                                   (if (>= idx 0)
+                                                     (str (.slice txt 0 (inc idx)) val)
+                                                     val))))))))]
+                          (set-overlay picker)))))
+                  (.catch (fn [_] nil))))))
         js/undefined)
       #js [editor-value overlay streaming editor-hidden])
 
-    ;; Global keyboard handler
+    ;; Global keyboard handler — routes through keybinding-registry so
+    ;; user overrides in ~/.nyma/keybindings.json take effect.
     (useInput
       (fn [input key]
-        (cond
-          (.-escape key) (when streaming ((:abort agent)))
-          (and (.-ctrl key) (= input "l"))
-          (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
-            (set-overlay
-              #jsx [Box {:flexDirection "column"}
-                    [Text {:bold true} "Current Model"]
-                    [Text (str "  " model-id)]
-                    [Box {:marginTop 1}
-                     [Text {:color "#565f89"} "Press ESC to close"]]]))
-          (and (.-ctrl key) (= input "p")) nil))
+        (let [reg @(:keybinding-registry agent)]
+          (cond
+            (kbr/matches? reg input key "app.interrupt")
+            (when streaming ((:abort agent)))
+
+            (kbr/matches? reg input key "app.help")
+            ;; Open help overlay only when editor is empty — matches oh-my-pi UX.
+            (when (and (empty? editor-value) (not streaming))
+              (set-overlay
+                #jsx [HelpOverlay {:registry reg
+                                   :shortcuts (when-let [s (:shortcuts agent)] @s)
+                                   :theme theme
+                                   :onClose (fn [] (set-overlay nil))}]))
+
+            (kbr/matches? reg input key "app.model.show")
+            (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
+              (set-overlay
+                #jsx [Box {:flexDirection "column"}
+                      [Text {:bold true} "Current Model"]
+                      [Text (str "  " model-id)]
+                      [Box {:marginTop 1}
+                       [Text {:color "#565f89"} "Press ESC to close"]]])))))
       #js {:isActive (not (some? overlay))})
 
     (let [handle-submit
@@ -416,10 +498,20 @@
             [WidgetContainer {:widgets widgets :position "above"}]
             [Box {:flexGrow 1 :flexShrink 1 :overflow "hidden"
                   :flexDirection "column"}
-             [ChatView {:messages messages :theme theme
-                        :block-renderers (when-let [br (:block-renderers agent)]
-                                           @br)}]]
+             (if (and (empty? messages) (not streaming))
+               #jsx [WelcomeScreen {:agent agent :theme theme
+                                    :sessions-dir (:sessions-dir resources)}]
+               #jsx [ChatView {:messages messages :theme theme
+                               :block-renderers (when-let [br (:block-renderers agent)]
+                                                  @br)}])]
             [WidgetContainer {:widgets widgets :position "below"}]
+            ;; Status line sits directly above the editor (oh-my-pi style,
+            ;; and consistent with Claude Code / Codex / Gemini CLI).
+            [StatusLine {:agent    agent
+                         :theme    theme
+                         :settings (when-let [sm (:settings resources)]
+                                     ((:get sm)))
+                         :max-width (or (.-columns stdout) 80)}]
             (when overlay
               (let [is-transparent (and (some? overlay) (not (string? overlay))
                                        (not (number? overlay)) (.-__transparent overlay))

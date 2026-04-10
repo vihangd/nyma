@@ -13,7 +13,19 @@
    :follow-up-mode "one-at-a-time"
    :transport              "auto"
    :tool-display           "collapsed"
-   :tool-display-max-lines 500})
+   :tool-display-max-lines 500
+   :status-line            {:preset "default"
+                            :left-segments nil
+                            :right-segments nil
+                            :separator nil}
+   :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+           :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
+           :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+           :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
+                     :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
+                     :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
+           :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"
+                     :allowed-tools ["read" "bash" "glob" "grep" "edit" "write"]}}})
 
 (defn- load-json [file-path]
   (when (fs/existsSync file-path)

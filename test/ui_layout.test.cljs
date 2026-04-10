@@ -108,7 +108,9 @@
       (let [{:keys [lastFrame]} (render
                                   #jsx [Footer {:agent {} :theme test-theme :statuses {}}])]
         (-> (expect (lastFrame)) (.toContain "nyma v0.1.0"))
-        (-> (expect (lastFrame)) (.toContain "ctrl+c exit")))))
+        ;; Footer hints come from the keybinding registry (or the nil-agent
+        ;; fallback in footer.cljs). Both emit a visible "help" label.
+        (-> (expect (lastFrame)) (.toContain "help")))))
 
   (it "renders status items"
     (fn []

@@ -91,6 +91,90 @@
     :else (let [secs (/ ms 1000)]
             (str (.toFixed secs 1) "s"))))
 
+;;; ─── Grouping ───────────────────────────────────────────
+
+(def ^:private groupable-tools
+  "Tools that can be grouped when consecutive. Read-only tools only."
+  #{"read" "glob" "grep" "ls"})
+
+(defn- corrected-suffix
+  "When a tool's args carry :corrected-path (set by the path resolver when it
+   fixes a typo), append a ' (was: original)' suffix to the label."
+  [args]
+  (if-let [orig (or (get args :corrected-path) (get args "corrected-path"))]
+    (str " (was: " orig ")")
+    ""))
+
+(defn tool-group-label
+  "Extract the meaningful display label from a tool call's args.
+   If the path resolver corrected a typo, appends ' (was: original)'."
+  [tool-name args]
+  (let [base (case tool-name
+               "read" (or (get args :path) (get args "path") "?")
+               "glob" (or (get args :pattern) (get args "pattern") "?")
+               "grep" (let [p (or (get args :pattern) (get args "pattern") "?")]
+                        (str "\"" p "\""))
+               "ls"   (or (get args :path) (get args "path") ".")
+               "?")]
+    (str base (corrected-suffix args))))
+
+(defn- item-status-icon
+  "Return the status icon for a grouped tool item:
+   ✓ when the result is non-empty, ✖ when nil/empty."
+  [item]
+  (if (and (:result item) (seq (str (:result item))))
+    "✓"
+    "✖"))
+
+(defn group-messages
+  "Collapse consecutive same-tool tool-end messages into :tool-group entries.
+   Only groups tools in groupable-tools set. Minimum 2 to trigger grouping."
+  [messages]
+  (loop [msgs messages
+         acc  []
+         group nil]  ;; {:tool-name :items [{:args :duration :result}]}
+    (if (empty? msgs)
+      ;; Flush remaining group
+      (if (and group (>= (count (:items group)) 2))
+        (conj acc {:role "tool-group"
+                   :tool-name (:tool-name group)
+                   :items (:items group)})
+        (into acc (when group
+                    (mapv (fn [item] (:original item)) (:items group)))))
+      (let [msg  (first msgs)
+            rest-msgs (rest msgs)]
+        (if (and (= (:role msg) "tool-end")
+                 (contains? groupable-tools (:tool-name msg)))
+          ;; This is a groupable tool-end
+          (if (and group (= (:tool-name group) (:tool-name msg)))
+            ;; Same tool as current group — extend
+            (recur rest-msgs acc
+              (update group :items conj {:args     (:args msg)
+                                         :duration (:duration msg)
+                                         :result   (:result msg)
+                                         :original msg}))
+            ;; Different tool or no group — flush old, start new
+            (let [flushed (if (and group (>= (count (:items group)) 2))
+                            (conj acc {:role "tool-group"
+                                       :tool-name (:tool-name group)
+                                       :items (:items group)})
+                            (into acc (when group
+                                        (mapv (fn [item] (:original item)) (:items group)))))]
+              (recur rest-msgs flushed
+                {:tool-name (:tool-name msg)
+                 :items [{:args     (:args msg)
+                          :duration (:duration msg)
+                          :result   (:result msg)
+                          :original msg}]})))
+          ;; Non-groupable message — flush group, emit message
+          (let [flushed (if (and group (>= (count (:items group)) 2))
+                          (conj acc {:role "tool-group"
+                                     :tool-name (:tool-name group)
+                                     :items (:items group)})
+                          (into acc (when group
+                                      (mapv (fn [item] (:original item)) (:items group)))))]
+            (recur rest-msgs (conj flushed msg) nil)))))))
+
 ;;; ─── Components ─────────────────────────────────────────
 
 (defn ToolStartStatus [{:keys [tool-name args verbosity theme
@@ -145,3 +229,33 @@
                  #jsx [Text {:color muted} (str " " dur-text)])]
               (when (and (seq result-text) (not= result-text ""))
                 #jsx [Text {:color muted} result-text])]))))
+
+(defn ToolGroupStatus
+  "Render a group of consecutive same-tool calls as a compact tree.
+   Each child row shows a per-item status icon (✓ success, ✖ empty result)
+   and, when the path resolver corrected a typo, the original path."
+  [{:keys [tool-name items theme]}]
+  (let [success    (get-in theme [:colors :success] "#9ece6a")
+        muted      (get-in theme [:colors :muted] "#565f89")
+        error-c    (get-in theme [:colors :error] "#f7768e")
+        n          (count items)
+        total-dur  (reduce + 0 (keep :duration items))
+        dur-text   (format-duration total-dur)]
+    #jsx [Box {:flexDirection "column" :marginBottom 0}
+          [Box {:flexDirection "row"}
+           [Text {:color success} (str "✓ " tool-name " ×" n)]
+           (when (seq dur-text)
+             #jsx [Text {:color muted} (str " (" dur-text ")")])]
+          [Box {:flexDirection "column" :marginLeft 2}
+           (map-indexed
+             (fn [i item]
+               (let [last? (= i (dec n))
+                     connector (if last? "└─ " "├─ ")
+                     icon (item-status-icon item)
+                     ok?  (= icon "✓")
+                     label (tool-group-label tool-name (:args item))]
+                 #jsx [Box {:key i :flexDirection "row"}
+                       [Text {:color muted} connector]
+                       [Text {:color (if ok? success error-c)} (str icon " ")]
+                       [Text {:color muted} label]]))
+             items)]]))

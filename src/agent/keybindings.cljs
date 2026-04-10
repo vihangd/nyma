@@ -1,7 +1,8 @@
 (ns agent.keybindings
   (:require ["node:path" :as path]
             ["node:fs" :as fs]
-            ["node:os" :as os]))
+            ["node:os" :as os]
+            [agent.keybinding-registry :as kbr]))
 
 (def keybindings-path
   "Path to user keybindings file."
@@ -35,3 +36,24 @@
                           commands @commands-atom]
                       (when-let [cmd (get commands cmd-name)]
                         ((:handler cmd) [] nil)))))})))
+
+(defn rebuild-registry!
+  "Rebuild the keybinding-registry atom from user overrides.
+   Any binding whose action starts with 'app.' is treated as an
+   action-id override; bindings like 'ctrl+k → command:clear' are
+   left to :shortcuts only and ignored by the registry.
+   Warns on conflicts."
+  [registry-atom bindings]
+  (let [overrides (into {}
+                        (filter (fn [[_ action]]
+                                  (and (string? action)
+                                       (.startsWith action "app."))))
+                        bindings)
+        registry  (kbr/create-registry overrides)]
+    (reset! registry-atom registry)
+    (when (seq (:conflicts registry))
+      (doseq [{:keys [key action-ids]} (:conflicts registry)]
+        (js/console.warn
+          (str "[nyma] keybinding conflict: " key
+               " → " (.join (clj->js action-ids) ", ")))))
+    registry))

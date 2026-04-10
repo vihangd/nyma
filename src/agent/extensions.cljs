@@ -3,7 +3,9 @@
             [agent.extension-context :refer [create-extension-context]]
             [agent.token-estimation :as te]
             [agent.providers.registry :refer [build-provider-entry]]
-            [agent.pricing :as pricing]))
+            [agent.pricing :as pricing]
+            [agent.ui.tool-renderer-registry :as tool-renderers]
+            [agent.ui.status-line-segments :as status-segments]))
 
 (defn create-extension-api
   "Build the API object that extensions receive.
@@ -141,6 +143,37 @@
        :unregisterBlockRenderer
                           (fn [type-key]
                             (swap! (:block-renderers agent) dissoc (str type-key)))
+
+       ;; ── Tool renderers (per-tool display in chat view) ──
+       :registerToolRenderer
+                          (fn [tool-name renderer]
+                            (tool-renderers/register-renderer (str tool-name) renderer))
+       :unregisterToolRenderer
+                          (fn [tool-name]
+                            (tool-renderers/unregister-renderer (str tool-name)))
+
+       ;; ── Status line segments ────────────────────────────
+       :registerStatusSegment
+                          (fn [id config]
+                            (status-segments/register-segment (str id)
+                              {:category (or (.-category config) :extension)
+                               :render   (.-render config)}))
+       :unregisterStatusSegment
+                          (fn [id]
+                            (status-segments/unregister-segment (str id)))
+
+       ;; ── Completion providers (autocomplete) ─────────────
+       :registerCompletionProvider
+                          (fn [id config]
+                            (when-let [reg (:autocomplete-registry agent)]
+                              ((:register reg) (str id)
+                               {:trigger  (or (.-trigger config) :any)
+                                :priority (or (.-priority config) 0)
+                                :complete (.-complete config)})))
+       :unregisterCompletionProvider
+                          (fn [id]
+                            (when-let [reg (:autocomplete-registry agent)]
+                              ((:unregister reg) (str id))))
 
        ;; ── Mention providers (@-mention system) ─────────────
        :registerMentionProvider
@@ -320,4 +353,6 @@
                                :setTitle    nil
                                :setEditorComponent nil
                                :onTerminalInput nil
-                               :custom      nil}}))
+                               :custom      nil
+                               :setEditorValue nil
+                               :getEditorValue nil}}))

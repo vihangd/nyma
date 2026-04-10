@@ -8,8 +8,10 @@
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
-            [agent.keybindings :refer [load-keybindings apply-keybindings]]
+            [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
             [agent.providers.oauth :as oauth]
+            [agent.file-access :as file-access]
+            [agent.hooks :as hooks]
             ["./modes/interactive.jsx" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
@@ -94,7 +96,10 @@
 
         settings  (create-settings-manager)
         merged    ((:get settings))
-        resources (assoc (js-await (discover)) :settings settings)
+        sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
+        resources (-> (js-await (discover))
+                      (assoc :settings settings)
+                      (assoc :sessions-dir sessions-dir))
         session   (resolve-session values)
 
         active-tools (resolve-tools values merged)
@@ -128,16 +133,49 @@
       ;; Resolve --ext-* CLI flags against registered extension flags
       (resolve-ext-flags agent)
 
+      ;; Register .nymaignore file access restrictions
+      (file-access/register-access-check (:events agent) (js/process.cwd))
+
+      ;; Load declarative hooks from .nyma/hooks.json
+      (when-let [hooks-map (hooks/load-hooks (js/process.cwd))]
+        (hooks/register-hooks (:events agent) hooks-map (js/process.cwd)))
+
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)
 
-      ;; Load user keybindings
+      ;; Load user keybindings and rebuild the action-id registry
       (let [bindings (load-keybindings)]
         (when (seq bindings)
-          (apply-keybindings (:shortcuts agent) (:commands agent) bindings)))
+          (apply-keybindings (:shortcuts agent) (:commands agent) bindings))
+        (rebuild-registry! (:keybinding-registry agent) bindings))
 
-      ;; Deactivate extensions on process exit
-      (.on js/process "exit" (fn [] (deactivate-all @extensions-atom)))
+      ;; Emit session_ready — all extensions loaded, session attached, model resolved
+      (js-await ((:emit-async (:events agent)) "session_ready"
+        #js {:cwd        (js/process.cwd)
+             :model      (str (or model "unknown"))
+             :extensions (count @extensions-atom)}))
+
+      ;; Deactivate extensions on process exit with session_end_summary
+      (.on js/process "SIGINT" (fn []
+        (-> ((:emit-async (:events agent)) "session_end_summary"
+              #js {:totalCost    (or (:total-cost @(:state agent)) 0)
+                   :turnCount    (or (:turn-count @(:state agent)) 0)
+                   :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
+                   :outputTokens (or (:total-output-tokens @(:state agent)) 0)
+                   :messageCount (count (:messages @(:state agent)))})
+            (.finally (fn []
+              (deactivate-all @extensions-atom)
+              (js/process.exit 0))))))
+      (.on js/process "exit" (fn []
+        (try
+          ((:emit (:events agent)) "session_end_summary"
+            #js {:totalCost    (or (:total-cost @(:state agent)) 0)
+                 :turnCount    (or (:turn-count @(:state agent)) 0)
+                 :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
+                 :outputTokens (or (:total-output-tokens @(:state agent)) 0)
+                 :messageCount (count (:messages @(:state agent)))})
+          (catch :default _ nil))
+        (deactivate-all @extensions-atom)))
 
       ;; Dispatch to mode
       (let [mode (or (:mode values)

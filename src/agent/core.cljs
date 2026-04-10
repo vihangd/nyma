@@ -7,7 +7,9 @@
             [agent.state :refer [create-agent-store]]
             [agent.providers.registry :refer [create-provider-registry]]
             [agent.providers.builtins :refer [builtin-providers]]
-            [agent.model-info :refer [create-model-registry]]))
+            [agent.model-info :refer [create-model-registry]]
+            [agent.keybinding-registry :as kbr]
+            [agent.ui.autocomplete-provider :as ac]))
 
 (defn create-agent
   "Create an agent instance. Config is a plain JS object with:
@@ -27,6 +29,11 @@
         follow-queue      (atom [])
         commands          (atom {})
         shortcuts         (atom {})
+        ;; Keybinding registry — action-id → combo, built from defaults
+        ;; + optional user overrides (applied later by cli.cljs).
+        keybinding-registry (atom (kbr/create-registry))
+        ;; Autocomplete provider registry — fresh per agent.
+        autocomplete-registry (ac/create-provider-registry)
         ;; Phase 2 additions
         provider-registry (create-provider-registry builtin-providers)
         message-renderers (atom {})
@@ -47,7 +54,8 @@
                                  :turn-count          0
                                  :active-executions   #{}
                                  :tool-calls          {}
-                                 :active-skills       #{}})
+                                 :active-skills       #{}
+                                 :active-role         :default})
         ;; Event-sourced store shares the same atom as :state
         store             (create-agent-store @state state)]
     (let [agent {:events            events
@@ -60,6 +68,8 @@
                  :follow-queue      follow-queue
                  :commands          commands
                  :shortcuts         shortcuts
+                 :keybinding-registry keybinding-registry
+                 :autocomplete-registry autocomplete-registry
                  :state             state
                  :store             store
                  :extensions        extensions

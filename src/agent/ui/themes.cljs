@@ -13,7 +13,11 @@
             :editor-border {:off    "#3b4261"
                             :low    "#9ece6a"
                             :medium "#e0af68"
-                            :high   "#f7768e"}}
+                            :high   "#f7768e"}
+            :context-ok      "#9ece6a"
+            :context-warning "#e0af68"
+            :context-purple  "#bb9af7"
+            :context-error   "#f7768e"}
    :icons  {:user "❯" :assistant "●" :tool "⚙" :error "✗"}})
 
 (def default-light
@@ -27,7 +31,11 @@
             :editor-border {:off    "#d0d5e3"
                             :low    "#587539"
                             :medium "#8c6c3e"
-                            :high   "#c64343"}}
+                            :high   "#c64343"}
+            :context-ok      "#587539"
+            :context-warning "#8c6c3e"
+            :context-purple  "#7847bd"
+            :context-error   "#c64343"}
    :icons  {:user "❯" :assistant "●" :tool "⚙" :error "✗"}})
 
 (defn ^:async load-theme [path]
