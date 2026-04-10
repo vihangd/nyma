@@ -46,7 +46,8 @@
                                  :total-cost          0.0
                                  :turn-count          0
                                  :active-executions   #{}
-                                 :tool-calls          {}})
+                                 :tool-calls          {}
+                                 :active-skills       #{}})
         ;; Event-sourced store shares the same atom as :state
         store             (create-agent-store @state state)]
     (let [agent {:events            events

@@ -6,6 +6,8 @@
             [agent.resources.loader :refer [discover]]
             [agent.providers.oauth :as oauth]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]
+            [agent.resources.skills :as skills]
+            [agent.ui.skill-picker :as skill-picker]
             [clojure.string :as str]
             ["node:fs" :as fs]))
 
@@ -477,4 +479,51 @@
                        (when-not (fs/existsSync ext-dir)
                          (fs/mkdirSync ext-dir #js {:recursive true}))
                        (fs/writeFileSync file (scaffold-extension ext-name))
-                       (notify ctx (str "Created extension: " file))))))}}))
+                       (notify ctx (str "Created extension: " file))))))}
+
+     "skill"
+     {:description "Activate a skill by name. Usage: /skill <name>"
+      :handler
+      (fn [args ctx]
+        (let [skill-name (first args)
+              all-skills (:skills resources)]
+          (cond
+            (empty? skill-name)
+            (notify ctx "Usage: /skill <name>  or  /skills to browse" "error")
+
+            (not (get all-skills skill-name))
+            (notify ctx (str "Unknown skill: \"" skill-name "\". Use /skills to see available.") "error")
+
+            (contains? (:active-skills @(:state agent)) skill-name)
+            (notify ctx (str "Skill \"" skill-name "\" is already active") "info")
+
+            :else
+            (-> (skills/activate-skill all-skills skill-name agent)
+                (.then (fn [_]
+                         (notify ctx (str "Skill \"" skill-name "\" activated"))))
+                (.catch (fn [e]
+                          (notify ctx (str "Failed to activate skill: " (.-message e)) "error")))))))}
+
+     "skills"
+     {:description "Browse and activate available skills"
+      :handler
+      (fn [_args ctx]
+        (let [all-skills (:skills resources)
+              active     (:active-skills @(:state agent))
+              skill-list (mapv (fn [[sname {:keys [markdown]}]]
+                                 {:name   sname
+                                  :active (contains? active sname)
+                                  :desc   (skills/first-skill-line markdown)})
+                               all-skills)]
+          (if (empty? skill-list)
+            (notify ctx "No skills found. Place skill directories in ~/.nyma/skills/ or .nyma/skills/")
+            (let [picker (skill-picker/create-picker
+                           skill-list
+                           (fn [chosen]
+                             (when chosen
+                               (-> (skills/activate-skill all-skills chosen agent)
+                                   (.then (fn [_]
+                                            (notify ctx (str "Skill \"" chosen "\" activated"))))
+                                   (.catch (fn [e]
+                                             (notify ctx (str "Failed: " (.-message e)) "error")))))))]
+              (.custom (.-ui ctx) picker)))))}}))

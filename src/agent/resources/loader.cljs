@@ -155,9 +155,14 @@ When multiple independent tool calls are needed, make them in parallel.
                             "- Platform: " (.-platform js/process) " " (.-arch js/process) "\n"
                             "- Date: " (.toISOString (js/Date.)) "\n")
              skills-block (when (seq skills)
-                            (str "\n\n## Available Skills (slash commands)\n"
+                            (str "\n\n## Available Skills\n"
+                                 "Use /skill <name> to activate, or /skills to browse.\n"
                                  (->> skills
-                                      (map (fn [[name _]] (str "- /" name)))
+                                      (map (fn [[sname {:keys [markdown]}]]
+                                             (let [desc (->> (str/split-lines (or markdown ""))
+                                                             (remove #(or (str/blank? %) (str/starts-with? % "#")))
+                                                             first)]
+                                               (str "- " sname (when (seq desc) (str ": " desc))))))
                                       (str/join "\n"))))]
          (str (or system-md default-system-prompt)
               env-block

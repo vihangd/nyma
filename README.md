@@ -247,8 +247,9 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 | `workspace_config.test.cljs` | Workspace config + command aliases | 20 |
 | `token_preview.test.cljs` | Live token count preview | 10 |
 | `clear_session.test.cljs` | /clear session reset | 9 |
+| `commands_skills.test.cljs` | Skills activation (/skill, /skills, dedup) | 16 |
 
-**Total: ~274 tests**
+**Total: ~290 tests**
 
 ## Running the Agent
 
@@ -574,6 +575,19 @@ Use `emit-async` when handlers need to complete before the caller proceeds:
 ### Skills
 
 Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/`. Skills inject system prompt instructions and can register additional tools.
+
+**Activating skills:**
+- `/skills` — opens a fuzzy picker to browse and activate available skills
+- `/skill <name>` — activate a skill directly by name
+
+Active skills are tracked in agent state (`:active-skills`) to prevent duplicate injection. The system prompt lists available skills with their description (first non-heading line of `SKILL.md`).
+
+```
+~/.nyma/skills/
+  git-helper/
+    SKILL.md      ← # Git Helper\nAutomates git workflows.
+    tools.cljs    ← optional extra tools (loaded on activation)
+```
 
 ### Prompts
 
