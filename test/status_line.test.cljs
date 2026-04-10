@@ -6,7 +6,8 @@
                      get-segment
                      segment-registry
                      builtin-segments
-                     render-segments]]
+                     render-segments
+                     token-rate-per-sec]]
             [agent.ui.status-line-presets :refer [get-preset]]
             [agent.ui.status-line-separators :refer [get-separator]]))
 
@@ -162,3 +163,58 @@
   (it "falls back for unknown style"
     (fn []
       (-> (expect (some? (get-separator "weird"))) (.toBe true))))))
+
+;;; ─── token-rate-per-sec ───────────────────────────────
+
+(describe "token-rate-per-sec" (fn []
+  (it "returns 0 for an empty sample list"
+    (fn []
+      (-> (expect (token-rate-per-sec [] 60000 10000)) (.toBe 0))))
+
+  (it "returns 0 for a single sample"
+    (fn []
+      (-> (expect (token-rate-per-sec [{:ts 1000 :delta-tokens 100}]
+                                      60000 10000))
+          (.toBe 0))))
+
+  (it "computes tokens/sec across a 1-second span"
+    (fn []
+      ;; Two samples 1000ms apart, second adds 500 tokens.
+      (let [r (token-rate-per-sec
+                [{:ts 1000 :delta-tokens 0}
+                 {:ts 2000 :delta-tokens 500}]
+                60000 3000)]
+        (-> (expect r) (.toBe 500)))))
+
+  (it "excludes samples older than the window"
+    (fn []
+      ;; Window is 60s, now is 120000 → cutoff 60000.
+      ;; Sample at ts=10000 is outside, only 2 samples remain.
+      (let [r (token-rate-per-sec
+                [{:ts 10000  :delta-tokens 1000}   ;; outside
+                 {:ts 110000 :delta-tokens 0}      ;; baseline inside
+                 {:ts 120000 :delta-tokens 100}]   ;; inside
+                60000 120000)]
+        (-> (expect r) (.toBe 10)))))
+
+  (it "returns 0 when span is zero"
+    (fn []
+      (let [r (token-rate-per-sec
+                [{:ts 1000 :delta-tokens 50}
+                 {:ts 1000 :delta-tokens 50}]
+                60000 2000)]
+        (-> (expect r) (.toBe 0)))))
+
+  (it "accepts JS-style sample objects (deltaTokens)"
+    (fn []
+      (let [samples [#js {:ts 1000 :deltaTokens 0}
+                     #js {:ts 2000 :deltaTokens 200}]
+            r (token-rate-per-sec samples 60000 3000)]
+        (-> (expect r) (.toBe 200)))))
+
+  (it "handles out-of-order samples"
+    (fn []
+      (let [samples [{:ts 2000 :delta-tokens 100}
+                     {:ts 1000 :delta-tokens 0}]
+            r (token-rate-per-sec samples 60000 3000)]
+        (-> (expect r) (.toBe 100)))))))

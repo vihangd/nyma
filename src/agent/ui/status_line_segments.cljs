@@ -79,6 +79,41 @@
     :warning (get-in theme [:colors :context-warning] "#e0af68")
     (get-in theme [:colors :context-ok] "#9ece6a")))
 
+;;; ─── Token rate (sliding window) ───────────────────────
+
+(defn- sample-ts [s] (or (get s :ts) (get s "ts") 0))
+(defn- sample-delta [s]
+  (or (get s :delta-tokens) (get s "deltaTokens") 0))
+
+(defn token-rate-per-sec
+  "Compute tokens/second from a sequence of sample maps over the
+   trailing `window-ms` milliseconds.
+
+   Samples are {:ts :delta-tokens}. `now` is passed in to keep the
+   function pure. Returns 0 when there are fewer than 2 samples in the
+   window or when the span is zero."
+  [samples window-ms now]
+  (let [window (or window-ms 60000)
+        n0     (or now 0)
+        cutoff (- n0 window)
+        in-win (filter (fn [s] (>= (sample-ts s) cutoff))
+                       (or samples []))
+        ordered (sort-by sample-ts in-win)
+        n       (count ordered)]
+    (if (< n 2)
+      0
+      (let [first-ts (sample-ts (first ordered))
+            last-ts  (sample-ts (last ordered))
+            span-ms  (- last-ts first-ts)
+            ;; Sum deltas from samples after the first — the first acts
+            ;; as the baseline timestamp for the window.
+            total    (reduce (fn [acc s] (+ acc (sample-delta s)))
+                             0
+                             (rest ordered))]
+        (if (pos? span-ms)
+          (* 1000.0 (/ total span-ms))
+          0)))))
+
 ;;; ─── Formatting helpers ─────────────────────────────────
 
 (defn- compact-number

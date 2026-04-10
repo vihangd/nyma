@@ -13,7 +13,7 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:child_process" :refer [exec]]
-            [agent.ui.status-line-segments :refer [render-segments]]
+            [agent.ui.status-line-segments :refer [render-segments token-rate-per-sec]]
             [agent.ui.status-line-presets :refer [get-preset]]
             [agent.ui.status-line-separators :refer [get-separator]]))
 
@@ -178,7 +178,11 @@
   (let [[git-branch set-git-branch]   (useState nil)
         [git-status set-git-status]   (useState nil)
         [pr-info set-pr-info]         (useState nil)
-        [tick _set-tick]              (useState 0)
+        [tick set-tick]               (useState 0)
+        ;; Sliding window of {:ts :delta-tokens} samples fed from
+        ;; "after_provider_request" events. useRef keeps the vector
+        ;; between renders without triggering re-renders on push.
+        samples-ref                   (useRef #js [])
         sl-settings (get-in settings [:status-line] {})
         preset-name (get sl-settings :preset "default")
         preset      (get-preset preset-name)
@@ -191,14 +195,21 @@
         separator   (get-separator sep-style)
         muted       (get-in theme [:colors :muted] "#565f89")]
 
-    ;; Initial git branch + status fetch
+    ;; Initial git branch + status fetch, then poll status every 5s so
+    ;; dirty/clean flips during the session stay live without requiring
+    ;; a new branch event to fire.
     (useEffect
       (fn []
-        (-> (read-git-branch)
-            (.then (fn [b] (set-git-branch (or b nil)))))
-        (-> (read-git-status)
-            (.then (fn [s] (set-git-status (js->clj s :keywordize-keys true)))))
-        js/undefined)
+        (let [refresh-status (fn []
+                               (-> (read-git-status)
+                                   (.then (fn [s]
+                                            (set-git-status
+                                              (js->clj s :keywordize-keys true))))))]
+          (-> (read-git-branch)
+              (.then (fn [b] (set-git-branch (or b nil)))))
+          (refresh-status)
+          (let [id (js/setInterval refresh-status 5000)]
+            (fn [] (js/clearInterval id)))))
       #js [])
 
     ;; Watch .git/HEAD to detect branch changes
@@ -231,10 +242,44 @@
         js/undefined)
       #js [git-branch])
 
-    (let [ctx (assoc (build-context agent theme)
+    ;; Subscribe to after_provider_request for token-rate accumulation.
+    ;; Each event adds an entry to the samples ref; we prune anything
+    ;; older than 120 s to keep the buffer small.
+    (useEffect
+      (fn []
+        (let [events  (:events agent)
+              handler (fn [data]
+                        (let [usage (.-usage data)
+                              input  (or (.-inputTokens usage) 0)
+                              output (or (.-outputTokens usage) 0)
+                              delta  (+ input output)
+                              now    (js/Date.now)
+                              buf    (.-current samples-ref)
+                              cutoff (- now 120000)]
+                          (.push buf #js {:ts now :deltaTokens delta})
+                          ;; Prune in-place: drop entries older than cutoff.
+                          (while (and (pos? (.-length buf))
+                                      (< (.-ts (aget buf 0)) cutoff))
+                            (.shift buf))))]
+          ((:on events) "after_provider_request" handler)
+          (fn [] ((:off events) "after_provider_request" handler))))
+      #js [agent])
+
+    ;; Re-render every 5 s so the token-rate (and time-of-day segment)
+    ;; update smoothly even when no other state changes.
+    (useEffect
+      (fn []
+        (let [id (js/setInterval (fn [] (set-tick (fn [t] (inc t)))) 5000)]
+          (fn [] (js/clearInterval id))))
+      #js [])
+
+    (let [samples    (vec (.-current samples-ref))
+          token-rate (token-rate-per-sec samples 60000 (js/Date.now))
+          ctx (assoc (build-context agent theme)
                      :git-branch git-branch
                      :git-status git-status
-                     :pr-info    pr-info)
+                     :pr-info    pr-info
+                     :token-rate token-rate)
           left-items  (render-segments left-ids ctx)
           right-items (render-segments right-ids ctx)
           cap         (or max-width 80)

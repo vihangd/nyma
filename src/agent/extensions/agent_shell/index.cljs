@@ -15,7 +15,8 @@
             [agent.extensions.agent-shell.features.session-mgmt :as session-mgmt]
             [agent.extensions.agent-shell.features.cost-tracker :as cost-tracker]
             [agent.extensions.agent-shell.features.handoff :as handoff]
-            [agent.extensions.agent-shell.features.mcp-discovery :as mcp-discovery]))
+            [agent.extensions.agent-shell.features.mcp-discovery :as mcp-discovery]
+            [agent.extensions.agent-shell.features.status-segments :as status-segments]))
 
 ;; Note: UI components (header, status_line) use JSX and are loaded
 ;; via setHeader/setFooter factory functions that return JSX elements.
@@ -69,17 +70,20 @@
                               (when (and ui (.-available ui))
                                 (.notify ui (str "Session reset failed: " (.-message e)) "error"))))))))))
 
-      ;; Auto-connect if configured
-      (when (and (:default-agent config) (:auto-connect config))
-        (let [agent-key (:default-agent config)]
-          (when-not (get @shared/connections agent-key)
-            (js/setTimeout
-              (fn []
+      ;; session_ready — UI guaranteed available, setup header + status
+      ;; segments and auto-connect.
+      (.on api "session_ready"
+        (fn [_data]
+          (shared/setup-ui!)
+          (status-segments/register-all! api)
+          ;; Auto-connect if configured
+          (when (and (:default-agent config) (:auto-connect config))
+            (let [agent-key (:default-agent config)]
+              (when-not (get @shared/connections agent-key)
                 (when (and (.-ui api) (.-available (.-ui api)))
-                  (.notify (.-ui api) (str "Auto-connecting to " (:default-agent config) "...") "info"))
+                  (.notify (.-ui api) (str "Auto-connecting to " (str agent-key) "...") "info"))
                 (when-let [agent-def (registry/get-agent agent-key)]
-                  (pool/get-or-create agent-key agent-def api)))
-              1000))))
+                  (pool/get-or-create agent-key agent-def api)))))))
 
       ;; Return combined deactivator
       (fn []

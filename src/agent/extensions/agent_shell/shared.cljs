@@ -149,12 +149,17 @@
         (.join (clj->js parts) " ")))))
 
 (defn setup-ui!
-  "Install custom footer/header. Called lazily on first agent connect,
-   because api.ui is not available at extension activation time."
+  "Install the custom header. Called lazily on first agent connect,
+   because api.ui is not available at extension activation time.
+
+   Footer was historically installed here via .setFooter, but ACP
+   status now flows through registerStatusSegment in
+   features/status_segments.cljs (registered from index.cljs on
+   session_ready). Only the Header remains here because it's a
+   different slot with different UX requirements."
   []
   (when-not @footer-set?
     (when-let [api @api-ref]
       (when (and (.-ui api) (.-available (.-ui api)))
         (reset! footer-set? true)
-        (.setFooter (.-ui api) footer-factory)
         (.setHeader (.-ui api) header-factory)))))
