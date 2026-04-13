@@ -17,10 +17,10 @@
   "Build an in-memory index from entries: id → {:idx n, :parent-id pid, :role r}"
   [entries]
   (into {}
-    (map-indexed
-      (fn [idx entry]
-        [(:id entry) {:idx idx :parent-id (:parent-id entry) :role (:role entry)}]))
-    entries))
+        (map-indexed
+         (fn [idx entry]
+           [(:id entry) {:idx idx :parent-id (:parent-id entry) :role (:role entry)}]))
+        entries))
 
 (defn- walk-branch
   "Walk from leaf-id to root using the index. Returns vector of array indices
@@ -54,19 +54,19 @@
         load-fn
         (fn []
           (let [fp @file-path]
-          (when (and fp (fs/existsSync fp))
-            (let [content (.readFileSync fs fp "utf8")
-                  lines   (->> (.split content "\n")
-                               (filter seq)
-                               (mapv #(js/JSON.parse %)))]
-              (reset! entries lines)
-              (reset! leaf-id (:id (last lines)))
-              (reset! index (build-index lines))
+            (when (and fp (fs/existsSync fp))
+              (let [content (.readFileSync fs fp "utf8")
+                    lines   (->> (.split content "\n")
+                                 (filter seq)
+                                 (mapv #(js/JSON.parse %)))]
+                (reset! entries lines)
+                (reset! leaf-id (:id (last lines)))
+                (reset! index (build-index lines))
               ;; Sync to SQLite if available
-              (when sqlite-store
-                (doseq [entry lines]
-                  ((:upsert-entry sqlite-store)
-                    (assoc entry :session-file session-file))))))))
+                (when sqlite-store
+                  (doseq [entry lines]
+                    ((:upsert-entry sqlite-store)
+                     (assoc entry :session-file session-file))))))))
 
         build-context-fn
         (fn []
@@ -84,7 +84,7 @@
         (fn [entry-data]
           (let [id    (nanoid)
                 entry (assoc entry-data :id id :parent-id @leaf-id
-                                        :timestamp (js/Date.now))]
+                             :timestamp (js/Date.now))]
             (let [new-idx (count @entries)]
               (swap! entries conj entry)
               (reset! leaf-id id)
@@ -94,7 +94,7 @@
             ;; Mirror to SQLite
             (when sqlite-store
               ((:upsert-entry sqlite-store)
-                (assoc entry :session-file session-file)))
+               (assoc entry :session-file session-file)))
             id))
 
         branch-fn
@@ -103,7 +103,7 @@
             ;; Emit branch switch event if events available
             (when events
               ((:emit events) "before_branch_switch"
-                {:old-leaf old-leaf :new-leaf entry-id}))
+                              {:old-leaf old-leaf :new-leaf entry-id}))
             (reset! leaf-id entry-id)
             old-leaf))
 
@@ -138,14 +138,22 @@
              ;; Runtime session switching (for /resume, /import)
              :get-file-path    (fn [] @file-path)
              :switch-file      (fn [new-path]
-                                 (reset! file-path new-path)
-                                 (reset! entries [])
-                                 (reset! index {})
-                                 (reset! leaf-id nil)
-                                 (reset! session-name nil)
-                                 (reset! entry-labels {})
-                                 (load-fn)
-                                 new-path)}]
+                                 (let [old-path @file-path]
+                                   (when events
+                                     ((:emit events) "session_before_switch"
+                                                     {:old-path old-path :new-path new-path}))
+                                   (reset! file-path new-path)
+                                   (reset! entries [])
+                                   (reset! index {})
+                                   (reset! leaf-id nil)
+                                   (reset! session-name nil)
+                                   (reset! entry-labels {})
+                                   (load-fn)
+                                   (when events
+                                     ((:emit events) "session_switch"
+                                                     {:old-path old-path :new-path new-path
+                                                      :entry-count (count @entries)}))
+                                   new-path))}]
 
     ;; Protocol conformance — set Symbol keys for protocol dispatch
     (aset mgr ISessionStore_session_load (fn [_] (load-fn)))

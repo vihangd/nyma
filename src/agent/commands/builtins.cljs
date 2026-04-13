@@ -336,6 +336,7 @@
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
                         (let [leaf ((:leaf-id s))]
+                          ((:emit (:events agent)) "session_before_fork" {:leaf-id leaf})
                           ((:branch s) leaf)
                           ((:emit (:events agent)) "session_start" {:reason "fork"})
                           (notify ctx "Session forked"))))}

@@ -85,13 +85,16 @@
         (cond
           ;; Security analysis / permissions vetoed the call.
           (or (get result "block") (get result "cancel"))
-          {:blocked?  true
-           :reason    (or (get result "reason")
-                          "Command blocked by bash_suite")
-           :command   command
-           :stdout    ""
-           :stderr    ""
-           :exit-code -1}
+          (let [reason (or (get result "reason") "Command blocked by bash_suite")]
+            ((:emit events) "user_bash"
+                            {:command command :blocked? true :reason reason
+                             :stdout "" :stderr "" :exit-code -1})
+            {:blocked?  true
+             :reason    reason
+             :command   command
+             :stdout    ""
+             :stderr    ""
+             :exit-code -1})
 
           :else
           ;; Extensions may have rewritten the command (env_filter
@@ -102,8 +105,15 @@
                                   (.-command))
                 final-cmd (or rewritten command)
                 raw       (js-await (tools/bash-execute #js {:command final-cmd}))
-                parsed    (exec/parse-exec-json raw)]
-            (merge {:blocked? false :command final-cmd} parsed)))))))
+                parsed    (exec/parse-exec-json raw)
+                outcome   (merge {:blocked? false :command final-cmd} parsed)]
+            ((:emit events) "user_bash"
+                            {:command   final-cmd
+                             :stdout    (:stdout outcome)
+                             :stderr    (:stderr outcome)
+                             :exit-code (:exit-code outcome)
+                             :blocked?  false})
+            outcome))))))
 
 ;;; ─── Pure: formatting the rendered message ──────────────
 

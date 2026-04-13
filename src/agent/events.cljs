@@ -26,11 +26,17 @@
    ;; UI events
    "editor_change"
    ;; Session lifecycle
-   "session_clear"])
+   "session_clear"
+   ;; Editor-mode execution events
+   "user_eval"
+   ;; Extended tool lifecycle
+   "tool_complete" "permission_request"
+   ;; Input pipeline
+   "input_submit"])
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys
-  #{"block" "cancel" "handle" "blocked" "cancelled"})
+  #{"block" "cancel" "handle" "blocked" "cancelled" "skip"})
 
 ;; ── Collection keys are concatenated ─────────────────────────────
 (def ^:private collection-keys
@@ -44,27 +50,27 @@
    - scalar keys → last-writer-wins"
   [results]
   (reduce
-    (fn [acc result]
-      (if (nil? result)
-        acc
-        (let [m (if (map? result) result result)]
-          (reduce-kv
-            (fn [a k v]
-              (let [ks (str k)]
-                (cond
-                  (contains? boolean-keys ks)
-                  (assoc a k (or (get a k false) (boolean v)))
+   (fn [acc result]
+     (if (nil? result)
+       acc
+       (let [m (if (map? result) result result)]
+         (reduce-kv
+          (fn [a k v]
+            (let [ks (str k)]
+              (cond
+                (contains? boolean-keys ks)
+                (assoc a k (or (get a k false) (boolean v)))
 
-                  (contains? collection-keys ks)
-                  (update a k (fn [existing]
-                                (into (or existing [])
-                                      (if (sequential? v) v [v]))))
+                (contains? collection-keys ks)
+                (update a k (fn [existing]
+                              (into (or existing [])
+                                    (if (sequential? v) v [v]))))
 
-                  :else
-                  (assoc a k v))))
-            acc m))))
-    {}
-    results))
+                :else
+                (assoc a k v))))
+          acc m))))
+   {}
+   results))
 
 (defn- get-sorted-handlers
   "Get sorted handlers for an event from the cache, rebuilding if stale."
@@ -85,7 +91,7 @@
             (js-await result)))
         (catch :default e
           (js/console.error
-            (str "[nyma] Async handler error on '" event "':") e))))))
+           (str "[nyma] Async handler error on '" event "':") e))))))
 
 (defn ^:async run-handlers-collect
   "Run handlers in priority order, collect non-nil returns, merge them.
@@ -104,7 +110,7 @@
             (swap! results conj result)))
         (catch :default e
           (js/console.error
-            (str "[nyma] Collect handler error on '" event "':") e))))
+           (str "[nyma] Collect handler error on '" event "':") e))))
     (merge-results @results)))
 
 (defn create-event-bus
@@ -118,7 +124,7 @@
         sorted-cache (atom {})]
     {:on   (fn [event handler & [priority]]
              (swap! handlers update event (fnil conj [])
-               {:handler handler :priority (or priority 0)})
+                    {:handler handler :priority (or priority 0)})
              ;; Invalidate cache for this event
              (swap! sorted-cache dissoc event))
 
@@ -129,7 +135,7 @@
                    (handler data)
                    (catch :default e
                      (js/console.error
-                       (str "[nyma] Extension handler error on '" event "':") e))))))
+                      (str "[nyma] Extension handler error on '" event "':") e))))))
 
      :emit-async (fn [event data]
                    (run-handlers-async handlers sorted-cache event data))
@@ -139,6 +145,6 @@
 
      :off  (fn [event handler]
              (swap! handlers update event
-               (fn [hs] (vec (remove #(= (:handler %) handler) hs))))
+                    (fn [hs] (vec (remove #(= (:handler %) handler) hs))))
              ;; Invalidate cache for this event
              (swap! sorted-cache dissoc event))}))

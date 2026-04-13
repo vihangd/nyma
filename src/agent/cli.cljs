@@ -30,9 +30,9 @@
         (when (and creds (oauth/needs-refresh? creds))
           (try
             ((:refresh-token oauth-cfg)
-              #js {"access"     (:access creds)
-                   "refresh"    (:refresh creds)
-                   "expires-at" (:expires-at creds)})
+             #js {"access"     (:access creds)
+                  "refresh"    (:refresh creds)
+                  "expires-at" (:expires-at creds)})
             (catch :default e
               (js/console.warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
     ((:resolve provider-registry) provider model-id)))
@@ -80,19 +80,19 @@
 (defn ^:async main []
   (let [{:keys [values positionals]}
         (parseArgs
-          #js {:args    (.slice js/process.argv 2)
-               :options #js {:provider     #js {:type "string"}
-                             :model        #js {:type "string" :short "m"}
-                             :mode         #js {:type "string"}
-                             :print        #js {:type "boolean" :short "p"}
-                             :continue     #js {:type "boolean" :short "c"}
-                             :resume       #js {:type "boolean" :short "r"}
-                             :tools        #js {:type "string"}
-                             :thinking     #js {:type "string"}
-                             :session      #js {:type "string"}
-                             :fork         #js {:type "string"}
-                             :no-session   #js {:type "boolean"}}
-               :allowPositionals true})
+         #js {:args    (.slice js/process.argv 2)
+              :options #js {:provider     #js {:type "string"}
+                            :model        #js {:type "string" :short "m"}
+                            :mode         #js {:type "string"}
+                            :print        #js {:type "boolean" :short "p"}
+                            :continue     #js {:type "boolean" :short "c"}
+                            :resume       #js {:type "boolean" :short "r"}
+                            :tools        #js {:type "string"}
+                            :thinking     #js {:type "string"}
+                            :session      #js {:type "string"}
+                            :fork         #js {:type "string"}
+                            :no-session   #js {:type "boolean"}}
+              :allowPositionals true})
 
         settings  (create-settings-manager)
         merged    ((:get settings))
@@ -105,9 +105,9 @@
         active-tools (resolve-tools values merged)
         ;; Create agent first, then resolve model via its provider registry
         agent (create-agent
-                {:model         nil
-                 :system-prompt ((:build-system-prompt resources))
-                 :max-steps     20})
+               {:model         nil
+                :system-prompt ((:build-system-prompt resources))
+                :max-steps     20})
         model (try
                 (resolve-model-via-registry (:provider-registry agent) values merged)
                 (catch :default e
@@ -151,31 +151,36 @@
 
       ;; Emit session_ready — all extensions loaded, session attached, model resolved
       (js-await ((:emit-async (:events agent)) "session_ready"
-        #js {:cwd        (js/process.cwd)
-             :model      (str (or model "unknown"))
-             :extensions (count @extensions-atom)}))
+                                               #js {:cwd        (js/process.cwd)
+                                                    :model      (str (or model "unknown"))
+                                                    :extensions (count @extensions-atom)}))
 
       ;; Deactivate extensions on process exit with session_end_summary
       (.on js/process "SIGINT" (fn []
-        (-> ((:emit-async (:events agent)) "session_end_summary"
-              #js {:totalCost    (or (:total-cost @(:state agent)) 0)
-                   :turnCount    (or (:turn-count @(:state agent)) 0)
-                   :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
-                   :outputTokens (or (:total-output-tokens @(:state agent)) 0)
-                   :messageCount (count (:messages @(:state agent)))})
-            (.finally (fn []
-              (deactivate-all @extensions-atom)
-              (js/process.exit 0))))))
+                                 (let [stats #js {:totalCost    (or (:total-cost @(:state agent)) 0)
+                                                  :turnCount    (or (:turn-count @(:state agent)) 0)
+                                                  :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
+                                                  :outputTokens (or (:total-output-tokens @(:state agent)) 0)
+                                                  :messageCount (count (:messages @(:state agent)))}]
+          ;; session_shutdown fires first so extensions can do cleanup before exit
+                                   ((:emit (:events agent)) "session_shutdown" {:reason "sigint"})
+                                   (-> ((:emit-async (:events agent)) "session_end_summary" stats)
+                                       (.then  (fn [] ((:emit-async (:events agent)) "session_end" stats)))
+                                       (.finally (fn []
+                                                   (deactivate-all @extensions-atom)
+                                                   (js/process.exit 0)))))))
       (.on js/process "exit" (fn []
-        (try
-          ((:emit (:events agent)) "session_end_summary"
-            #js {:totalCost    (or (:total-cost @(:state agent)) 0)
-                 :turnCount    (or (:turn-count @(:state agent)) 0)
-                 :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
-                 :outputTokens (or (:total-output-tokens @(:state agent)) 0)
-                 :messageCount (count (:messages @(:state agent)))})
-          (catch :default _ nil))
-        (deactivate-all @extensions-atom)))
+                               (try
+                                 (let [stats #js {:totalCost    (or (:total-cost @(:state agent)) 0)
+                                                  :turnCount    (or (:turn-count @(:state agent)) 0)
+                                                  :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
+                                                  :outputTokens (or (:total-output-tokens @(:state agent)) 0)
+                                                  :messageCount (count (:messages @(:state agent)))}]
+                                   ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
+                                   ((:emit (:events agent)) "session_end_summary" stats)
+                                   ((:emit (:events agent)) "session_end" stats))
+                                 (catch :default _ nil))
+                               (deactivate-all @extensions-atom)))
 
       ;; Dispatch to mode
       (let [mode (or (:mode values)

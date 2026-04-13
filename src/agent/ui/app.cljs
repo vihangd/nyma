@@ -134,7 +134,7 @@
             hidden? (= kind :eval-hidden)]
         (set-streaming true)
         (add-user-msg! set-messages (str (if hidden? "$$" "$") expr))
-        (let [result  (js-await (editor-eval/run-eval! expr))
+        (let [result  (js-await (editor-eval/run-eval! expr (:events agent)))
               content (editor-eval/format-eval-output result)
               msg     (cond-> {:role         "assistant"
                                :kind         :eval

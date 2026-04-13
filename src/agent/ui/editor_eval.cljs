@@ -145,34 +145,46 @@
      {:unavailable? true :expr expr
       :install-hint \"...\" :stdout \"\" :stderr \"\" :exit-code -1}
    when bb is missing. Never throws — any internal failure surfaces
-   in :stderr so the caller can render it like any other eval error."
-  [expr]
-  (if-not (js-await (bb-available?))
-    {:unavailable? true
-     :expr         expr
-     :install-hint install-hint
-     :stdout       ""
-     :stderr       ""
-     :exit-code    -1}
-    (try
-      (let [proc   (js/Bun.spawn #js ["bb" "-e" expr]
-                                 #js {:timeout 30000
-                                      :stdout  "pipe"
-                                      :stderr  "pipe"})
-            stdout (js-await (.text (js/Response. (.-stdout proc))))
-            stderr (js-await (.text (js/Response. (.-stderr proc))))
-            code   (js-await (.-exited proc))]
-        {:unavailable? false
-         :expr         expr
-         :stdout       (or stdout "")
-         :stderr       (or stderr "")
-         :exit-code    (or code 0)})
-      (catch :default e
-        {:unavailable? false
-         :expr         expr
-         :stdout       ""
-         :stderr       (str "bb spawn failed: " (.-message e))
-         :exit-code    -1}))))
+   in :stderr so the caller can render it like any other eval error.
+
+   Optional `events` — when provided, emits `user_eval` with the
+   result payload after execution (or after the unavailable check)."
+  [expr & [events]]
+  (let [result
+        (if-not (js-await (bb-available?))
+          {:unavailable? true
+           :expr         expr
+           :install-hint install-hint
+           :stdout       ""
+           :stderr       ""
+           :exit-code    -1}
+          (try
+            (let [proc   (js/Bun.spawn #js ["bb" "-e" expr]
+                                       #js {:timeout 30000
+                                            :stdout  "pipe"
+                                            :stderr  "pipe"})
+                  stdout (js-await (.text (js/Response. (.-stdout proc))))
+                  stderr (js-await (.text (js/Response. (.-stderr proc))))
+                  code   (js-await (.-exited proc))]
+              {:unavailable? false
+               :expr         expr
+               :stdout       (or stdout "")
+               :stderr       (or stderr "")
+               :exit-code    (or code 0)})
+            (catch :default e
+              {:unavailable? false
+               :expr         expr
+               :stdout       ""
+               :stderr       (str "bb spawn failed: " (.-message e))
+               :exit-code    -1})))]
+    (when events
+      ((:emit events) "user_eval"
+                      {:expr         (:expr result)
+                       :stdout       (:stdout result)
+                       :stderr       (:stderr result)
+                       :exit-code    (:exit-code result)
+                       :unavailable? (:unavailable? result)}))
+    result))
 
 ;;; ─── Pure: formatting the rendered message ──────────────
 

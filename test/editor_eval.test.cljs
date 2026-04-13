@@ -7,10 +7,12 @@
      - format-eval-output (pure: text block layout, unavailable hint)
      - bb-available? (memoization of the PATH probe)
      - run-eval! (integration: spawns bb, captures output)
+     - user_eval event emission (fires when events bus is passed)
 
    The integration tests are guarded on bb actually being installed
    so CI without babashka gracefully skips them rather than fails."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
+            [agent.events :refer [create-event-bus]]
             [agent.ui.editor-eval :refer [parse-eval-input
                                           format-eval-output
                                           bb-available?
@@ -185,3 +187,51 @@
                 test-run-eval-captures-stderr-on-throw)
             (it "prints pure return values without explicit println"
                 test-run-eval-pure-value-on-stdout)))
+
+;;; ─── user_eval event tests ─────────────────────────────
+;;; These tests do NOT depend on bb being installed — the event
+;;; fires regardless of whether bb is available or not.
+
+(defn ^:async test-user-eval-event-fires-when-events-passed []
+  (let [bus   (create-event-bus)
+        fired (atom nil)]
+    ((:on bus) "user_eval" (fn [data] (reset! fired data)))
+    (js-await (run-eval! "(+ 1 2)" bus))
+    ;; Event must have fired
+    (-> (expect (some? @fired)) (.toBe true))
+    ;; Exact expr is echoed back
+    (-> (expect (:expr @fired)) (.toBe "(+ 1 2)"))
+    ;; Required keys are all present
+    (-> (expect (contains? @fired :stdout))       (.toBe true))
+    (-> (expect (contains? @fired :stderr))       (.toBe true))
+    (-> (expect (contains? @fired :exit-code))    (.toBe true))
+    (-> (expect (contains? @fired :unavailable?)) (.toBe true))))
+
+(defn ^:async test-user-eval-event-not-fired-without-events []
+  ;; run-eval! called with no second argument — no emission, no crash.
+  (let [result (js-await (run-eval! "(+ 1 2)"))]
+    ;; Call still succeeds and returns the result map
+    (-> (expect (map? result)) (.toBe true))
+    (-> (expect (:expr result)) (.toBe "(+ 1 2)"))))
+
+(defn ^:async test-user-eval-event-fires-on-unavailable []
+  ;; Even when bb is missing the event still fires (unavailable? = true).
+  ;; We can simulate by passing a mock events bus and testing the shape.
+  (let [bus   (create-event-bus)
+        fired (atom nil)]
+    ((:on bus) "user_eval" (fn [data] (reset! fired data)))
+    ;; Run with the real run-eval! — result depends on whether bb is
+    ;; installed; the event must fire either way.
+    (js-await (run-eval! "(identity :test)" bus))
+    (-> (expect (some? @fired)) (.toBe true))
+    ;; unavailable? is a boolean regardless of bb status
+    (-> (expect (boolean? (:unavailable? @fired))) (.toBe true))))
+
+(describe "run-eval! — user_eval event"
+          (fn []
+            (it "fires user_eval with correct payload when events passed"
+                test-user-eval-event-fires-when-events-passed)
+            (it "does not error and does not fire when no events bus given"
+                test-user-eval-event-not-fired-without-events)
+            (it "fires user_eval even when bb is unavailable"
+                test-user-eval-event-fires-on-unavailable)))

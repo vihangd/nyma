@@ -189,3 +189,63 @@
                 test-run-bash-without-events-falls-back)
             (it "captures non-zero exit codes without throwing"
                 test-run-bash-captures-nonzero-exit)))
+
+;;; ─── user_bash event tests ─────────────────────────────
+
+(defn ^:async test-user-bash-event-fires-on-success []
+  (let [agent  (fake-agent)
+        events (:events agent)
+        fired  (atom nil)]
+    ((:on events) "user_bash" (fn [data] (reset! fired data)))
+    (js-await (run-bash! agent "echo user-bash-event-test"))
+    (-> (expect (some? @fired)) (.toBe true))
+    (-> (expect (:blocked? @fired)) (.toBe false))
+    (-> (expect (.includes (:stdout @fired) "user-bash-event-test")) (.toBe true))
+    (-> (expect (:exit-code @fired)) (.toBe 0))))
+
+(defn ^:async test-user-bash-event-fires-when-blocked []
+  (let [agent  (fake-agent)
+        events (:events agent)
+        fired  (atom nil)]
+    ((:on events) "before_tool_call"
+                  (fn [_] #js {:block true :reason "BLOCKED: sentinel"})
+                  100)
+    ((:on events) "user_bash" (fn [data] (reset! fired data)))
+    (js-await (run-bash! agent "echo should-not-run"))
+    (-> (expect (some? @fired)) (.toBe true))
+    (-> (expect (:blocked? @fired)) (.toBe true))
+    (-> (expect (.includes (:reason @fired) "sentinel")) (.toBe true))
+    (-> (expect (:stdout @fired)) (.toBe ""))
+    (-> (expect (:exit-code @fired)) (.toBe -1))))
+
+(defn ^:async test-user-bash-event-not-fired-without-event-bus []
+  ;; No event bus — run-bash! falls back to direct execution;
+  ;; no user_bash emission, no error.
+  (let [result (js-await (run-bash! {} "echo no-events-bus"))]
+    (-> (expect (:blocked? result)) (.toBe false))
+    (-> (expect (.includes (:stdout result) "no-events-bus")) (.toBe true))))
+
+(defn ^:async test-user-bash-event-payload-has-all-keys []
+  (let [agent  (fake-agent)
+        events (:events agent)
+        fired  (atom nil)]
+    ((:on events) "user_bash" (fn [data] (reset! fired data)))
+    (js-await (run-bash! agent "echo payload-check"))
+    (let [p @fired]
+      ;; All five keys must be present
+      (-> (expect (contains? p :command))   (.toBe true))
+      (-> (expect (contains? p :stdout))    (.toBe true))
+      (-> (expect (contains? p :stderr))    (.toBe true))
+      (-> (expect (contains? p :exit-code)) (.toBe true))
+      (-> (expect (contains? p :blocked?))  (.toBe true)))))
+
+(describe "run-bash! — user_bash event"
+          (fn []
+            (it "fires user_bash with correct payload on success"
+                test-user-bash-event-fires-on-success)
+            (it "fires user_bash with :blocked? true when command is vetoed"
+                test-user-bash-event-fires-when-blocked)
+            (it "does not error when no event bus is present"
+                test-user-bash-event-not-fired-without-event-bus)
+            (it "user_bash payload contains all required keys"
+                test-user-bash-event-payload-has-all-keys)))
