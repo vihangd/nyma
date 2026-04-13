@@ -13,7 +13,7 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:child_process" :refer [exec]]
-            [agent.ui.status-line-segments :refer [render-segments token-rate-per-sec]]
+            [agent.ui.status-line-segments :refer [render-segments token-rate-per-sec auto-append-ids]]
             [agent.ui.status-line-presets :refer [get-preset]]
             [agent.ui.status-line-separators :refer [get-separator]]))
 
@@ -24,14 +24,14 @@
    or nil on any non-zero exit."
   [command]
   (js/Promise.
-    (fn [resolve _reject]
-      (try
-        (exec command #js {:timeout 3000 :cwd (js/process.cwd)}
-              (fn [err stdout _stderr]
-                (if err
-                  (resolve nil)
-                  (resolve (.trim (or stdout ""))))))
-        (catch :default _ (resolve nil))))))
+   (fn [resolve _reject]
+     (try
+       (exec command #js {:timeout 3000 :cwd (js/process.cwd)}
+             (fn [err stdout _stderr]
+               (if err
+                 (resolve nil)
+                 (resolve (.trim (or stdout ""))))))
+       (catch :default _ (resolve nil))))))
 
 ;;; ─── Git watchers ───────────────────────────────────────
 
@@ -44,7 +44,7 @@
   (-> (exec-capture "git status --porcelain")
       (.then (fn [out]
                (if (or (nil? out) (= out ""))
-                 #js {:staged 0 :unstaged 0 :untracked 0}
+                 {:staged 0 :unstaged 0 :untracked 0}
                  (let [lines (.split out "\n")
                        counts (atom {:staged 0 :unstaged 0 :untracked 0})]
                    (doseq [line lines]
@@ -58,9 +58,7 @@
                            (swap! counts update :staged inc)
                            (not= y " ")
                            (swap! counts update :unstaged inc)))))
-                   #js {:staged    (:staged @counts)
-                        :unstaged  (:unstaged @counts)
-                        :untracked (:untracked @counts)}))))))
+                   @counts))))))
 
 ;;; ─── PR fetch with cache ───────────────────────────────
 
@@ -186,10 +184,16 @@
         sl-settings (get-in settings [:status-line] {})
         preset-name (get sl-settings :preset "default")
         preset      (get-preset preset-name)
-        left-ids    (or (get sl-settings :left-segments)
+        ;; Extensions can mark their segments as :auto-append? to have
+        ;; them rendered without being in the user's preset. We merge
+        ;; them onto the configured ids here so the rest of the pipeline
+        ;; (fit-segments, render-segments) doesn't need to know about it.
+        base-left   (or (get sl-settings :left-segments)
                         (:left-segments preset))
-        right-ids   (or (get sl-settings :right-segments)
+        base-right  (or (get sl-settings :right-segments)
                         (:right-segments preset))
+        left-ids    (concat base-left (auto-append-ids :left base-left))
+        right-ids   (concat base-right (auto-append-ids :right base-right))
         sep-style   (or (get sl-settings :separator)
                         (:separator preset))
         separator   (get-separator sep-style)
@@ -199,79 +203,77 @@
     ;; dirty/clean flips during the session stay live without requiring
     ;; a new branch event to fire.
     (useEffect
-      (fn []
-        (let [refresh-status (fn []
-                               (-> (read-git-status)
-                                   (.then (fn [s]
-                                            (set-git-status
-                                              (js->clj s :keywordize-keys true))))))]
-          (-> (read-git-branch)
-              (.then (fn [b] (set-git-branch (or b nil)))))
-          (refresh-status)
-          (let [id (js/setInterval refresh-status 5000)]
-            (fn [] (js/clearInterval id)))))
-      #js [])
+     (fn []
+       (let [refresh-status (fn []
+                              (-> (read-git-status)
+                                  (.then (fn [s] (set-git-status s)))))]
+         (-> (read-git-branch)
+             (.then (fn [b] (set-git-branch (or b nil)))))
+         (refresh-status)
+         (let [id (js/setInterval refresh-status 5000)]
+           (fn [] (js/clearInterval id)))))
+     #js [])
 
     ;; Watch .git/HEAD to detect branch changes
     (useEffect
-      (fn []
-        (let [head-path (path/join (js/process.cwd) ".git" "HEAD")
-              debounce  (atom nil)]
-          (try
-            (let [watcher (fs/watch head-path
-                            (fn [_ _]
-                              (when-let [t @debounce] (js/clearTimeout t))
-                              (reset! debounce
-                                (js/setTimeout
-                                  (fn []
-                                    (-> (read-git-branch)
-                                        (.then (fn [b] (set-git-branch (or b nil))))))
-                                  150))))]
-              (fn []
-                (when-let [t @debounce] (js/clearTimeout t))
-                (try (.close watcher) (catch :default _))))
-            (catch :default _ js/undefined))))
-      #js [])
+     (fn []
+       (let [head-path (path/join (js/process.cwd) ".git" "HEAD")
+             debounce  (atom nil)]
+         (try
+           (let [watcher (fs/watch head-path
+                                   (fn [_ _]
+                                     (when-let [t @debounce] (js/clearTimeout t))
+                                     (reset! debounce
+                                             (js/setTimeout
+                                              (fn []
+                                                (-> (read-git-branch)
+                                                    (.then (fn [b] (set-git-branch (or b nil))))))
+                                              150))))]
+             (fn []
+               (when-let [t @debounce] (js/clearTimeout t))
+               (try (.close watcher) (catch :default _))))
+           (catch :default _ js/undefined))))
+     #js [])
 
     ;; Fetch PR info after branch is known
     (useEffect
-      (fn []
-        (when (seq git-branch)
-          (-> (fetch-pr-info git-branch)
-              (.then (fn [info] (set-pr-info info)))))
-        js/undefined)
-      #js [git-branch])
+     (fn []
+       (when (seq git-branch)
+         (-> (fetch-pr-info git-branch)
+             (.then (fn [info] (set-pr-info info)))))
+       js/undefined)
+     #js [git-branch])
 
     ;; Subscribe to after_provider_request for token-rate accumulation.
     ;; Each event adds an entry to the samples ref; we prune anything
     ;; older than 120 s to keep the buffer small.
     (useEffect
-      (fn []
-        (let [events  (:events agent)
-              handler (fn [data]
-                        (let [usage (.-usage data)
-                              input  (or (.-inputTokens usage) 0)
-                              output (or (.-outputTokens usage) 0)
-                              delta  (+ input output)
-                              now    (js/Date.now)
-                              buf    (.-current samples-ref)
-                              cutoff (- now 120000)]
-                          (.push buf #js {:ts now :deltaTokens delta})
+     (fn []
+       (let [events  (:events agent)
+             handler (fn [data]
+                       (let [usage (.-usage data)
+                             input  (or (.-inputTokens usage) 0)
+                             output (or (.-outputTokens usage) 0)
+                             delta  (+ input output)
+                             now    (js/Date.now)
+                             buf    (.-current samples-ref)
+                             cutoff (- now 120000)]
+                         (.push buf #js {:ts now :deltaTokens delta})
                           ;; Prune in-place: drop entries older than cutoff.
-                          (while (and (pos? (.-length buf))
-                                      (< (.-ts (aget buf 0)) cutoff))
-                            (.shift buf))))]
-          ((:on events) "after_provider_request" handler)
-          (fn [] ((:off events) "after_provider_request" handler))))
-      #js [agent])
+                         (while (and (pos? (.-length buf))
+                                     (< (.-ts (aget buf 0)) cutoff))
+                           (.shift buf))))]
+         ((:on events) "after_provider_request" handler)
+         (fn [] ((:off events) "after_provider_request" handler))))
+     #js [agent])
 
     ;; Re-render every 5 s so the token-rate (and time-of-day segment)
     ;; update smoothly even when no other state changes.
     (useEffect
-      (fn []
-        (let [id (js/setInterval (fn [] (set-tick (fn [t] (inc t)))) 5000)]
-          (fn [] (js/clearInterval id))))
-      #js [])
+     (fn []
+       (let [id (js/setInterval (fn [] (set-tick (fn [t] (inc t)))) 5000)]
+         (fn [] (js/clearInterval id))))
+     #js [])
 
     (let [samples    (vec (.-current samples-ref))
           token-rate (token-rate-per-sec samples 60000 (js/Date.now))

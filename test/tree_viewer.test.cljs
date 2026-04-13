@@ -33,20 +33,17 @@
         ;; First entry should have the > cursor
         (-> (expect output) (.toContain "> ")))))
 
-  (it "down moves selection"
+  (it "down arrow moves selection"
     (fn []
       (let [tv (create-tree-viewer (make-session (make-entries)))]
-        (.onInput tv "down")
-        (let [output (.render tv 80 24)
-              lines  (.split output "\n")]
-          ;; Second content entry (index 2, after header + blank) should be selected
-          ;; The > cursor should appear on a different line than the first entry
+        (.onInput tv nil #js {:downArrow true})
+        (let [output (.render tv 80 24)]
           (-> (expect output) (.toContain "> "))))))
 
   (it "escape returns close signal"
     (fn []
       (let [tv     (create-tree-viewer (make-session (make-entries)))
-            result (.onInput tv "escape")]
+            result (.onInput tv nil #js {:escape true})]
         (-> (expect (.-close result)) (.toBe true)))))
 
   (it "renders empty tree gracefully"
@@ -55,11 +52,10 @@
             output (.render tv 80 24)]
         (-> (expect output) (.toContain "Session Tree")))))
 
-  (it "up at top stays at 0"
+  (it "up arrow at top stays at 0"
     (fn []
       (let [tv (create-tree-viewer (make-session (make-entries)))]
-        (.onInput tv "up")
-        (.onInput tv "up")
-        ;; Should not crash, render should still work
+        (.onInput tv nil #js {:upArrow true})
+        (.onInput tv nil #js {:upArrow true})
         (let [output (.render tv 80 24)]
           (-> (expect output) (.toContain "Session Tree"))))))))

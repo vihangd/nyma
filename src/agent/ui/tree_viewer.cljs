@@ -45,7 +45,10 @@
 
 (defn create-tree-viewer
   "Create a pi-mono render object for interactive tree browsing.
-   Returns an object with .render(w,h), .onInput(key), .dispose()."
+   Returns an object with .render(w,h), .onInput(input, key), .dispose().
+   onInput receives Ink's (input, key) pair — we branch on key properties
+   (.-upArrow, .-return, .-escape) for consistency with the other pickers
+   in the codebase and with CustomComponentAdapter's calling convention."
   [session]
   (let [tree      ((:get-tree session))
         selected  (atom 0)
@@ -66,20 +69,20 @@
           (.join (clj->js lines) "\n"))))
 
     (set! (.-onInput component)
-      (fn [key]
+      (fn [_input key]
         (let [visible (compute-visible tree @collapsed)
               max-idx (max 0 (dec (count visible)))]
-          (case key
-            "up"     (do (swap! selected (fn [s] (max 0 (dec s)))) nil)
-            "down"   (do (swap! selected (fn [s] (min max-idx (inc s)))) nil)
-            "enter"  (do (let [entry (:entry (nth visible @selected nil))]
-                           (when (and entry (has-children? tree (:id entry)))
-                             (swap! collapsed
-                               (fn [c] (if (contains? c (:id entry))
-                                          (disj c (:id entry))
-                                          (conj c (:id entry)))))))
-                         nil)
-            "escape" #js {:close true}
-            nil))))
+          (cond
+            (.-upArrow key)   (do (swap! selected (fn [s] (max 0 (dec s)))) nil)
+            (.-downArrow key) (do (swap! selected (fn [s] (min max-idx (inc s)))) nil)
+            (.-return key)    (do (let [entry (:entry (nth visible @selected nil))]
+                                    (when (and entry (has-children? tree (:id entry)))
+                                      (swap! collapsed
+                                        (fn [c] (if (contains? c (:id entry))
+                                                   (disj c (:id entry))
+                                                   (conj c (:id entry)))))))
+                                  nil)
+            (.-escape key)    #js {:close true}
+            :else             nil))))
 
     component))

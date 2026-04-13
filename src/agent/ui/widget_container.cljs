@@ -6,7 +6,9 @@
   "Renders extension widgets filtered by position (above or below the chat).
    widgets is a map of {id → {:lines [strings], :position \"above\"|\"below\"}}."
   [{:keys [widgets position]}]
-  (let [filtered (filter (fn [[_ w]] (= (:position w) position)) widgets)]
+  (let [filtered (->> widgets
+                      (filter (fn [[_ w]] (= (:position w) position)))
+                      (sort-by (fn [[_ w]] (- (or (:priority w) 0)))))]
     (when (seq filtered)
       #jsx [Box {:flexDirection "column"}
             (map (fn [[id w]]

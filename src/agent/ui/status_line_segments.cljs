@@ -39,6 +39,25 @@
 (defn segment-registry []
   @registry)
 
+(defn auto-append-ids
+  "Return segment ids marked `:auto-append? true` for the given position
+   (`:left` or `:right`), excluding any ids already present in `preset-ids`.
+
+   Used by StatusLine to let extensions inject their own segments without
+   requiring the user to hand-edit their preset. Segments that aren't
+   relevant at the moment self-hide via `{:visible? false}`, so this is
+   safe to call unconditionally."
+  [position preset-ids]
+  (let [existing (set preset-ids)]
+    (->> @registry
+         (filter (fn [[_ seg]]
+                   (and (:auto-append? seg)
+                        (= (:position seg) position))))
+         (map first)
+         (remove existing)
+         sort
+         vec)))
+
 (defn reset-registry!
   "Test helper — clears the registry and reinstalls built-ins."
   []

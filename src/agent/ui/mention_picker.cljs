@@ -1,7 +1,9 @@
 (ns agent.ui.mention-picker
   "Fuzzy-searchable mention picker for @-mention system.
    Uses the same pi-mono {render, onInput, dispose} protocol as model_picker."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
+            [agent.ui.picker-input :refer [dispatch-input]]))
 
 (defn- fuzzy-match
   "Simple case-insensitive substring match on label + value."
@@ -29,59 +31,26 @@
         max-visible  15]
     #js {:render
          (fn [w h]
-           (let [filtered (filter-items @filter-text items)
-                 total    (count filtered)
-                 idx      (min @selected-idx (max 0 (dec total)))
-                 visible  (min max-visible (or h 20) total)
-                 scroll-start (max 0 (- idx (quot visible 2)))
-                 scroll-end   (min total (+ scroll-start visible))
-                 scroll-start (max 0 (- scroll-end visible))
-                 window   (subvec (vec filtered) scroll-start scroll-end)]
-             (str "Select file (type to filter, Enter to select, Esc to cancel)\n"
-                  "@ " @filter-text "\n"
-                  (when (> scroll-start 0)
-                    (str "  ... " scroll-start " more above\n"))
-                  (str/join "\n"
-                    (map-indexed
-                      (fn [i item]
-                        (let [abs-idx (+ scroll-start i)
-                              prefix  (if (= abs-idx idx) "  \u25b6 " "    ")]
-                          (if (:description item)
-                            (str prefix (:label item) "  (" (:description item) ")")
-                            (str prefix (:label item)))))
-                      window))
-                  (when (< scroll-end total)
-                    (str "\n  ... " (- total scroll-end) " more below"))
-                  (when (zero? total)
-                    "\n  No matches"))))
+           (render-frame
+            {:title         "Select file (type to filter, Enter to select, Esc to cancel)"
+             :prompt-prefix "@ "
+             :filter-text   @filter-text
+             :items         (filter-items @filter-text items)
+             :selected-idx  @selected-idx
+             :max-visible   (min max-visible (or h 20))
+             :max-width     (overlay-max-width w)
+             :render-item   (fn [item _focused?]
+                              (if (:description item)
+                                (str (:label item) "  (" (:description item) ")")
+                                (str (:label item))))
+             :no-match-text "No matches"}))
 
          :onInput
-         (fn [input key]
-           (cond
-             (.-escape key)
-             (on-resolve nil)
-
-             (.-return key)
-             (let [filtered (filter-items @filter-text items)
-                   idx      (min @selected-idx (max 0 (dec (count filtered))))]
-               (when (seq filtered)
-                 (on-resolve (nth filtered idx))))
-
-             (or (.-upArrow key) (and (.-ctrl key) (= input "p")))
-             (swap! selected-idx #(max 0 (dec %)))
-
-             (or (.-downArrow key) (and (.-ctrl key) (= input "n")))
-             (let [filtered (filter-items @filter-text items)]
-               (swap! selected-idx #(min (dec (count filtered)) (inc %))))
-
-             (.-backspace key)
-             (do (swap! filter-text #(if (empty? %) "" (subs % 0 (dec (count %)))))
-                 (reset! selected-idx 0))
-
-             (.-tab key) nil
-
-             (and input (= (count input) 1))
-             (do (swap! filter-text str input)
-                 (reset! selected-idx 0))))
+         (dispatch-input
+          {:filter-text-atom  filter-text
+           :selected-idx-atom selected-idx
+           :filtered-fn       (fn [] (filter-items @filter-text items))
+           :on-select         on-resolve
+           :on-cancel         (fn [] (on-resolve nil))})
 
          :dispose (fn [] nil)}))

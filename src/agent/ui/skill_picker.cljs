@@ -1,13 +1,15 @@
 (ns agent.ui.skill-picker
   "Fuzzy-searchable skill picker component for ui.custom()."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
+            [agent.ui.picker-input :refer [dispatch-input]]))
 
 (defn- filter-skills [query skills]
   (if (empty? query)
     skills
     (filterv #(str/includes?
-                (str/lower-case (or (:name %) ""))
-                (str/lower-case query))
+               (str/lower-case (or (:name %) ""))
+               (str/lower-case query))
              skills)))
 
 (defn create-picker
@@ -19,68 +21,27 @@
         selected-idx (atom 0)
         max-visible  12]
     #js {:render
-         (fn [_w _h]
-           (let [filtered (filter-skills @filter-text skills)
-                 total    (count filtered)
-                 idx      (min @selected-idx (max 0 (dec total)))
-                 visible  (min max-visible total)
-                 ;; Scroll window centred on selection
-                 scroll-start (max 0 (- idx (quot visible 2)))
-                 scroll-end   (min total (+ scroll-start visible))
-                 scroll-start (max 0 (- scroll-end visible))
-                 window   (subvec (vec filtered) scroll-start scroll-end)]
-             (str "Select skill (type to filter, Enter to activate, Esc to cancel)\n"
-                  "> " @filter-text "\n"
-                  (when (> scroll-start 0)
-                    (str "  ... " scroll-start " more above\n"))
-                  (str/join "\n"
-                    (map-indexed
-                      (fn [i s]
-                        (let [abs-idx (+ scroll-start i)
-                              prefix  (if (= abs-idx idx) "  \u25b6 " "    ")]
-                          (str prefix (:name s)
-                               (when (:active s) " \u2713")
-                               (when (seq (:desc s)) (str "  \u2014 " (:desc s))))))
-                      window))
-                  (when (< scroll-end total)
-                    (str "\n  ... " (- total scroll-end) " more below"))
-                  (when (zero? total)
-                    "\n  No matching skills"))))
+         (fn [w _h]
+           (render-frame
+            {:title         "Select skill (type to filter, Enter to activate, Esc to cancel)"
+             :prompt-prefix "> "
+             :filter-text   @filter-text
+             :items         (filter-skills @filter-text skills)
+             :selected-idx  @selected-idx
+             :max-visible   max-visible
+             :max-width     (overlay-max-width w)
+             :render-item   (fn [s _focused?]
+                              (str (:name s)
+                                   (when (:active s) " \u2713")
+                                   (when (seq (:desc s)) (str "  \u2014 " (:desc s)))))
+             :no-match-text "No matching skills"}))
 
          :onInput
-         (fn [input key]
-           (cond
-             ;; Escape → cancel
-             (.-escape key)
-             (on-resolve nil)
-
-             ;; Enter → activate selected
-             (.-return key)
-             (let [filtered (filter-skills @filter-text skills)
-                   idx      (min @selected-idx (max 0 (dec (count filtered))))]
-               (when (seq filtered)
-                 (on-resolve (:name (nth filtered idx)))))
-
-             ;; Up arrow / Ctrl+P
-             (or (.-upArrow key) (and (.-ctrl key) (= input "p")))
-             (swap! selected-idx #(max 0 (dec %)))
-
-             ;; Down arrow / Ctrl+N
-             (or (.-downArrow key) (and (.-ctrl key) (= input "n")))
-             (let [filtered (filter-skills @filter-text skills)]
-               (swap! selected-idx #(min (dec (count filtered)) (inc %))))
-
-             ;; Backspace
-             (.-backspace key)
-             (do (swap! filter-text #(if (empty? %) "" (subs % 0 (dec (count %)))))
-                 (reset! selected-idx 0))
-
-             ;; Tab → skip
-             (.-tab key) nil
-
-             ;; Character input → filter
-             (and input (= (count input) 1))
-             (do (swap! filter-text str input)
-                 (reset! selected-idx 0))))
+         (dispatch-input
+          {:filter-text-atom  filter-text
+           :selected-idx-atom selected-idx
+           :filtered-fn       (fn [] (filter-skills @filter-text skills))
+           :on-select         (fn [skill] (on-resolve (:name skill)))
+           :on-cancel         (fn [] (on-resolve nil))})
 
          :dispose (fn [] nil)}))

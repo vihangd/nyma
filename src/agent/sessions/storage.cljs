@@ -36,7 +36,15 @@
       files_modified TEXT,
       timestamp INTEGER
     )"
-   "CREATE INDEX IF NOT EXISTS idx_branch_session ON branch_summaries(session_file)"])
+   "CREATE INDEX IF NOT EXISTS idx_branch_session ON branch_summaries(session_file)"
+
+   "CREATE TABLE IF NOT EXISTS prompt_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      text TEXT NOT NULL,
+      session_file TEXT,
+      timestamp INTEGER
+    )"
+   "CREATE INDEX IF NOT EXISTS idx_prompt_ts ON prompt_history(timestamp DESC)"])
 
 (def ^:private branch-path-sql
   "WITH RECURSIVE branch(id, parent_id, role, content, metadata, timestamp, depth) AS (
@@ -164,6 +172,86 @@
                   :files-modified (when (.-files_modified row) (js/JSON.parse (.-files_modified row)))
                   :timestamp      (.-timestamp row)})
            rows)))
+
+     ;; ─── Prompt history ────────────────────────────────────
+     :insert-prompt
+     (fn [text session-file]
+       (let [stmt (.prepare db
+                    "INSERT INTO prompt_history (text, session_file, timestamp) VALUES (?, ?, ?)")]
+         (.run stmt (or text "") (or session-file "") (js/Date.now))))
+
+     :search-prompts
+     (fn [query limit]
+       (let [escaped (-> (or query "")
+                         (.replace "\\" "\\\\")
+                         (.replace "%" "\\%")
+                         (.replace "_" "\\_"))
+             stmt (.prepare db
+                    "SELECT text, session_file, timestamp FROM prompt_history
+                     WHERE text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?")
+             rows (.all stmt (str "%" escaped "%") (or limit 50))]
+         (mapv (fn [row] {:text (.-text row) :session-file (.-session_file row) :timestamp (.-timestamp row)})
+           rows)))
+
+     :recent-prompts
+     (fn [limit]
+       (let [stmt (.prepare db
+                    "SELECT text, session_file, timestamp FROM prompt_history
+                     ORDER BY id DESC LIMIT ?")
+             rows (.all stmt (or limit 50))]
+         (mapv (fn [row] {:text (.-text row) :session-file (.-session_file row) :timestamp (.-timestamp row)})
+           rows)))
+
+     ;; ─── Aggregate usage queries ────────────────────────────
+     :get-usage-by-model
+     (fn []
+       (let [stmt (.prepare db
+                    "SELECT model, SUM(input_tokens) as total_input,
+                            SUM(output_tokens) as total_output,
+                            SUM(cost_usd) as total_cost, COUNT(*) as turns
+                       FROM usage GROUP BY model ORDER BY total_cost DESC")
+             rows (.all stmt)]
+         (mapv (fn [row]
+                 {:model (.-model row)
+                  :total-input  (or (.-total_input row) 0)
+                  :total-output (or (.-total_output row) 0)
+                  :total-cost   (or (.-total_cost row) 0)
+                  :turns        (or (.-turns row) 0)})
+           rows)))
+
+     :get-usage-by-day
+     (fn [limit]
+       (let [stmt (.prepare db
+                    "SELECT date(timestamp/1000, 'unixepoch') as day,
+                            SUM(input_tokens) as total_input,
+                            SUM(output_tokens) as total_output,
+                            SUM(cost_usd) as total_cost, COUNT(*) as turns
+                       FROM usage GROUP BY day ORDER BY day DESC LIMIT ?")
+             rows (.all stmt (or limit 30))]
+         (mapv (fn [row]
+                 {:day          (.-day row)
+                  :total-input  (or (.-total_input row) 0)
+                  :total-output (or (.-total_output row) 0)
+                  :total-cost   (or (.-total_cost row) 0)
+                  :turns        (or (.-turns row) 0)})
+           rows)))
+
+     :get-usage-totals
+     (fn []
+       (let [stmt (.prepare db
+                    "SELECT SUM(input_tokens) as total_input,
+                            SUM(output_tokens) as total_output,
+                            SUM(cost_usd) as total_cost,
+                            COUNT(*) as turn_count,
+                            COUNT(DISTINCT session_file) as session_count
+                       FROM usage")
+             row (first (.all stmt))]
+         (when row
+           {:total-input    (or (.-total_input row) 0)
+            :total-output   (or (.-total_output row) 0)
+            :total-cost     (or (.-total_cost row) 0)
+            :turn-count     (or (.-turn_count row) 0)
+            :session-count  (or (.-session_count row) 0)})))
 
      :close
      (fn [] (.close db))
