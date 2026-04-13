@@ -35,7 +35,7 @@
   [title body]
   (try
     (.write (.-stdout js/process)
-      (str "\u001b]777;notify;" title ";" body "\u0007"))
+            (str "\u001b]777;notify;" title ";" body "\u0007"))
     (catch :default _ nil)))
 
 ;;; ─── Extension activation ──────────────────────────────────
@@ -59,7 +59,12 @@
                                   (if (some? flag-val) flag-val true))
                                 true)]
                   (when enabled
-                    (send-notification! "nyma" "Response ready")))))))
+                    (send-notification! "nyma" "Response ready")
+                    (when (.-emitGlobal api)
+                      (.emitGlobal api "notification"
+                                   {:title  "nyma"
+                                    :body   "Response ready"
+                                    :source "desktop-notify"}))))))))
 
         check-enabled
         (fn []
@@ -74,22 +79,22 @@
           (let [dur (or (.-duration data) 0)]
             (when (and (> dur 10000) (check-enabled))
               (send-notification! "nyma"
-                (str (.-toolName data) " completed ("
-                     (js/Math.round (/ dur 1000)) "s)")))))
+                                  (str (.-toolName data) " completed ("
+                                       (js/Math.round (/ dur 1000)) "s)")))))
 
         ;; Notify with session summary on exit
         on-session-end
         (fn [data _ctx]
           (when (check-enabled)
             (send-notification! "nyma"
-              (str "Session: " (or (.-turnCount data) 0) " turns, $"
-                   (.toFixed (or (.-totalCost data) 0) 2)))))]
+                                (str "Session: " (or (.-turnCount data) 0) " turns, $"
+                                     (.toFixed (or (.-totalCost data) 0) 2)))))]
 
     ;; Register enable/disable flag
     (when (.-registerFlag api)
       (.registerFlag api "enabled"
-        #js {:description "Enable desktop notifications"
-             :default     (:enabled config)}))
+                     #js {:description "Enable desktop notifications"
+                          :default     (:enabled config)}))
 
     ;; Listen to lifecycle events
     (.on api "turn_start" on-turn-start)

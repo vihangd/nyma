@@ -277,6 +277,13 @@
                                    :off  (:off bus)
                                    :emit (:emit bus)})
 
+       ;; ── Global event bus emit (main agent bus) ──────────
+       ;; Complements api.on/api.off which subscribe to the main bus.
+       ;; Use api.emitGlobal to fire events that other extensions
+       ;; subscribed to via api.on rather than api.events.on.
+         :emitGlobal        (fn [event data]
+                              ((:emit (:events agent)) event data))
+
        ;; ── Flags ──────────────────────────────────────────────
          :registerFlag     (fn [name config]
                              (swap! (:flags agent) assoc name

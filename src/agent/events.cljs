@@ -25,6 +25,10 @@
    "reasoning_start" "reasoning_delta" "reasoning_end"
    ;; UI events
    "editor_change"
+   "overlay_open" "overlay_dismiss"
+   "keybinding_activated"
+   "autocomplete_open" "autocomplete_close" "autocomplete_select"
+   "notification"
    ;; Session lifecycle
    "session_clear"
    ;; Editor-mode execution events

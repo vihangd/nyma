@@ -32,13 +32,13 @@
       ;; and `:append-message` are the new handles commands need to
       ;; push rendered output into the chat view (e.g. /bash running
       ;; through the same path as editor bash mode).
-      ((:handler entry) args
-                        #js {:ui            (when-let [ext (.-extension-api agent)] (.-ui ext))
-                             :agent         agent
-                             :set-messages  set-messages
-                             :append-message (fn [msg]
-                                               (set-messages
-                                                (fn [prev] (conj (vec prev) msg))))}))))
+      (let [h (:handler entry)]
+        (h args #js {:ui            (when-let [ext (.-extension-api agent)] (.-ui ext))
+                     :agent         agent
+                     :set-messages  set-messages
+                     :append-message (fn [msg]
+                                       (set-messages
+                                        (fn [prev] (conj (vec prev) msg))))})))))
 
 (defn- add-user-msg!
   "Add user message to chat. Called synchronously to batch with Editor clear."
@@ -67,8 +67,8 @@
                         text)
         ;; Emit "input" event — extensions can intercept, transform, or fully handle
         input-result (js-await
-                      ((:emit-collect (:events agent)) "input"
-                                                       #js {:input text :text text}))
+                      (let [ec (:emit-collect (:events agent))]
+                        (ec "input" #js {:input text :text text})))
         handled      (get input-result "handle")
         transformed  (get input-result "input")
         text         (if (and (some? transformed) (not= transformed text))
@@ -164,8 +164,8 @@
       :else
       (let [;; emit-collect input_submit — extensions can cancel or transform text
             submit-result (js-await
-                           ((:emit-collect (:events agent)) "input_submit"
-                                                            #js {:text text :timestamp (js/Date.now)}))
+                           (let [ec (:emit-collect (:events agent))]
+                             (ec "input_submit" #js {:text text :timestamp (js/Date.now)})))
             cancelled     (get submit-result "cancel")
             text          (or (get submit-result "text") text)]
         (when-not cancelled
@@ -234,7 +234,13 @@
         {:keys [stdout]}                  (useStdout)
         [term-rows set-term-rows]         (useState (or (.-rows stdout) 24))
         layout-handlers                   (useRef #js [])
-        app                               (useApp)]
+        app                               (useApp)
+        ;; Convenience helper — fire-and-forget emit on the agent's main event bus.
+        ;; Defined here so all closures below (showOverlay, keybinding, autocomplete)
+        ;; can share the same null-safe wrapper.
+        emit!                             (fn [event data]
+                                            (when-let [e (:emit (:events agent))]
+                                              (e event data)))]
 
     ;; Wire extension UI hooks
     (useEffect
@@ -244,7 +250,8 @@
                (fn [content & [opts]]
                  (if (and opts (.-transparent opts))
                    (set-overlay #js {:__overlay-content content :__transparent true})
-                   (set-overlay content))))
+                   (set-overlay content))
+                 (emit! "overlay_open" {:overlay-type "custom"})))
          (set! (.-setWidget ui)
                (fn [_position _component] nil))
          (set! (.-confirm ui)
@@ -256,19 +263,26 @@
                        opts      (if has-title (second rest-args) (first rest-args))]
                    (js/Promise.
                     (fn [resolve]
-                      (let [dismiss (fn [val] (set-overlay nil) (resolve val))
+                      (let [dismiss (fn [val]
+                                      (emit! "overlay_dismiss" {:overlay-type "confirm"})
+                                      (set-overlay nil)
+                                      (resolve val))
                             cleanup (with-dismissal dismiss opts)]
                         (set-overlay
                          #jsx [ConfirmDialog
                                {:title title
                                 :message msg
                                 :on-confirm (fn [] (cleanup) (dismiss true))
-                                :on-cancel  (fn [] (cleanup) (dismiss false))}])))))))
+                                :on-cancel  (fn [] (cleanup) (dismiss false))}])
+                        (emit! "overlay_open" {:overlay-type "confirm"})))))))
          (set! (.-select ui)
                (fn [title options opts]
                  (js/Promise.
                   (fn [resolve]
-                    (let [dismiss (fn [val] (set-overlay nil) (resolve val))
+                    (let [dismiss (fn [val]
+                                    (emit! "overlay_dismiss" {:overlay-type "select"})
+                                    (set-overlay nil)
+                                    (resolve val))
                           cleanup (with-dismissal dismiss opts)]
                       (set-overlay
                        #jsx [SelectDialog
@@ -276,12 +290,16 @@
                               :options options
                               :on-select (fn [choice] (cleanup) (dismiss choice))
                               :on-cancel (fn [] (cleanup) (dismiss nil))
-                              :theme theme}]))))))
+                              :theme theme}])
+                      (emit! "overlay_open" {:overlay-type "select"}))))))
          (set! (.-input ui)
                (fn [title placeholder opts]
                  (js/Promise.
                   (fn [resolve]
-                    (let [dismiss (fn [val] (set-overlay nil) (resolve val))
+                    (let [dismiss (fn [val]
+                                    (emit! "overlay_dismiss" {:overlay-type "input"})
+                                    (set-overlay nil)
+                                    (resolve val))
                           cleanup (with-dismissal dismiss opts)]
                       (set-overlay
                        #jsx [InputDialog
@@ -289,7 +307,8 @@
                               :placeholder (or placeholder "")
                               :on-submit (fn [text] (cleanup) (dismiss text))
                               :on-cancel (fn [] (cleanup) (dismiss nil))
-                              :theme theme}]))))))
+                              :theme theme}])
+                      (emit! "overlay_open" {:overlay-type "input"}))))))
          (set! (.-notify ui)
                (fn [msg level]
                  (set-notification {:message msg :level (or level "info")})
@@ -331,7 +350,8 @@
                   ;; Attach resolve so Overlay/CustomComponentAdapter can call it
                     (when (and (some? component) (not (string? component)) (not (number? component)))
                       (set! (.-__resolve component) resolve))
-                    (set-overlay component)))))
+                    (set-overlay component)
+                    (emit! "overlay_open" {:overlay-type "custom"})))))
           ;; Raw terminal input
          (set! (.-onTerminalInput ui)
                (fn [handler]
@@ -518,6 +538,10 @@
                                                 (set-overlay nil)
                                                 (if selected
                                                   (do
+                                                    (emit! "autocomplete_select"
+                                                           {:value (.-value selected)
+                                                            :label (.-label selected)
+                                                            :query trigger-text})
                                                     (set-editor-value
                                                      (ac/replace-trigger-token
                                                       trigger-text
@@ -531,9 +555,14 @@
                                                   ;; trigger-text so the outer
                                                   ;; useEffect doesn't
                                                   ;; immediately reopen.
-                                                  (set! (.-current dismissed-trigger-ref)
-                                                        trigger-text))))]
-                    (set-overlay picker)))))
+                                                  (do
+                                                    (emit! "autocomplete_close"
+                                                           {:query trigger-text :reason "escape"})
+                                                    (set! (.-current dismissed-trigger-ref)
+                                                          trigger-text)))))]
+                    (set-overlay picker)
+                    (emit! "autocomplete_open"
+                           {:query trigger-text :item-count (count items)})))))
              (.catch (fn [_] nil))))
        js/undefined)
      #js [editor-value overlay streaming editor-hidden])
@@ -545,11 +574,14 @@
        (let [reg @(:keybinding-registry agent)]
          (cond
            (kbr/matches? reg input key "app.interrupt")
-           (when streaming ((:abort agent)))
+           (do
+             (emit! "keybinding_activated" {:action-id "app.interrupt" :input input})
+             (when streaming ((:abort agent))))
 
            (kbr/matches? reg input key "app.help")
             ;; Open help overlay only when editor is empty — matches oh-my-pi UX.
            (when (and (empty? editor-value) (not streaming))
+             (emit! "keybinding_activated" {:action-id "app.help" :input input})
              (set-overlay
               #jsx [HelpOverlay {:registry reg
                                  :shortcuts (when-let [s (:shortcuts agent)] @s)
@@ -557,7 +589,8 @@
                                  :onClose (fn [] (set-overlay nil))}]))
 
            (kbr/matches? reg input key "app.model.show")
-           (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
+           (let [_ (emit! "keybinding_activated" {:action-id "app.model.show" :input input})
+                 model-id (or (.-modelId (:model (:config agent))) "unknown")]
              (set-overlay
               #jsx [Box {:flexDirection "column"}
                     [Text {:bold true} "Current Model"]

@@ -17,7 +17,12 @@
         (swap! (:prompt-state conn) update :text str text)
         ;; Stream chunk to UI via callback
         (when-let [cb @shared/stream-callback]
-          (cb text))))))
+          (cb text))
+        ;; Emit acp_message so extensions can observe agent output
+        (when-let [emit (:emit conn)]
+          (emit "acp_message" #js {:agent-key (:agent-key conn)
+                                   :text      text
+                                   :type      "chunk"}))))))
 
 (defn- handle-thought-chunk
   "Handle agent thinking/reasoning chunks."
