@@ -46,11 +46,11 @@
     ;; Emit for UI rendering (reuse nyma's tool execution events)
     (when-let [emit (:emit conn)]
       (emit "acp_tool_start"
-        #js {:agent-key   (:agent-key conn)
-             :tool-id     tool-id
-             :title       (or title "tool")
-             :kind        kind
-             :status      status}))))
+            #js {:agent-key   (:agent-key conn)
+                 :tool-id     tool-id
+                 :title       (or title "tool")
+                 :kind        kind
+                 :status      status}))))
 
 (defn- handle-tool-call-update
   "Handle tool_call_update notification — status/result updates."
@@ -64,16 +64,16 @@
              (mapv #(if (= (:id %) tool-id)
                       (cond-> (assoc % :status status)
                         content (assoc :content (if (string? content) content
-                                                  (js/JSON.stringify content))))
+                                                    (js/JSON.stringify content))))
                       %)
                    calls)))
     ;; Emit for UI
     (when-let [emit (:emit conn)]
       (emit "acp_tool_update"
-        #js {:agent-key (:agent-key conn)
-             :tool-id   tool-id
-             :status    status
-             :content   content}))))
+            #js {:agent-key (:agent-key conn)
+                 :tool-id   tool-id
+                 :status    status
+                 :content   content}))))
 
 ;;; ─── Plan handling ─────────────────────────────────────────
 
@@ -105,25 +105,29 @@
       ;; Unregister previous dynamic commands
       (doseq [cmd-name (shared/get-agent-state agent-key :dynamic-commands)]
         (try (.unregisterCommand api cmd-name) (catch :default _ nil)))
-      ;; Register new ones
+      ;; Register new ones. Tag each with :forward-to so that the
+      ;; /help splitter and the slash picker can tell agent-provided
+      ;; commands apart from nyma's built-ins.
       (let [cmd-names (atom [])]
         (doseq [cmd commands]
           (let [name (.-name cmd)
                 desc (or (.-description cmd) "")]
             (.registerCommand api name
-              #js {:description desc
-                   :handler    (fn [args _ctx]
-                                 (let [conn (get @shared/connections agent-key)
-                                       text (str "/" name
-                                                 (when (seq args) (str " " (str/join " " args))))]
-                                   (when conn
-                                     (client/send-prompt conn text))))})
+                              #js {:description desc
+                                   :forward-to  "agent-shell"
+                                   :agent-key   agent-key
+                                   :handler    (fn [args _ctx]
+                                                 (let [conn (get @shared/connections agent-key)
+                                                       text (str "/" name
+                                                                 (when (seq args) (str " " (str/join " " args))))]
+                                                   (when conn
+                                                     (client/send-prompt conn text))))})
             (swap! cmd-names conj name)))
         (shared/update-agent-state! agent-key :dynamic-commands @cmd-names)
         ;; Emit event so other extensions can react to command changes
         (when-let [emit (:emit conn)]
           (emit "acp_commands_update"
-            (clj->js {:agent-key agent-key :commands @cmd-names})))))))
+                (clj->js {:agent-key agent-key :commands @cmd-names})))))))
 
 ;;; ─── Mode/config updates ───────────────────────────────────
 
@@ -165,10 +169,10 @@
                {:amount   (.-amount c)
                 :currency (or (.-currency c) "USD")})]
     (shared/update-agent-state! (:agent-key conn) :usage
-      (cond-> {}
-        used (assoc :used used)
-        size (assoc :size size)
-        cost (assoc :cost cost)))
+                                (cond-> {}
+                                  used (assoc :used used)
+                                  size (assoc :size size)
+                                  cost (assoc :cost cost)))
     (when-let [emit (:emit conn)]
       (emit "acp_usage" #js {:agent-key (:agent-key conn)
                              :used used :size size
