@@ -49,7 +49,9 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/extensions/workspace_config/index.cljs` | `agent.extensions.workspace-config.index` | Workspace config — loads `.nyma/settings.json`, registers `/alias` and `/reload` |
 | `src/agent/extensions/workspace_config/aliases.cljs` | `agent.extensions.workspace-config.aliases` | Custom command aliases — `/alias` CRUD, late-binding dispatch |
 | `src/agent/extensions/token_suite/token_preview.cljs` | `agent.extensions.token-suite.token-preview` | Live token-count preview widget — subscribes to `editor_change`, shows `~N tokens` |
-| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /sessions, /export, etc.) |
+| `src/agent/resources/skills.cljs` | `agent.resources.skills` | Skill discovery + `activate-skill` (deduped, tracked in `:active-skills`), `deactivate-skill`, `first-skill-line` |
+| `src/agent/ui/skill_picker.cljs` | `agent.ui.skill-picker` | Fuzzy skill picker for `/skills` — same `{render, onInput, dispose}` pattern as model picker |
+| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /sessions, /export, etc.) |
 | `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML |
 | `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings |
 | `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-cost` for all supported models |

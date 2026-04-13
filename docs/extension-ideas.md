@@ -219,3 +219,162 @@ Save and retrieve code snippets across sessions — a personal library of patter
 - Tool: `snippet_search` lets the LLM find relevant snippets
 
 **Complexity**: Low
+
+---
+
+## Roadmap: Inspired by oh-my-pi (can1357/oh-my-pi)
+
+Features identified from oh-my-pi that add clear value to nyma, organized by adoption priority.
+
+### Tier 1 — High Value, Easy to Adopt
+
+#### Model Roles
+
+Named model presets (`default`, `fast`, `deep`, `plan`, `commit`) with per-role model assignment and automatic fallback chains. Users switch with `/role fast` instead of remembering model IDs.
+
+**Capabilities**: `commands`, `state`, `providers`
+**Complexity**: Low
+**See**: [Implementation Plan](./plan-model-roles.md)
+
+#### Grouped Tool Display
+
+Consecutive tool calls of the same type (e.g., multiple reads) rendered as a compact file tree instead of N separate blocks. Dramatically improves chat scanability.
+
+**Capabilities**: `ui` (chat_view rendering change)
+**Complexity**: Low
+**See**: [Implementation Plan](./plan-grouped-tool-display.md)
+
+#### Prompt History + Ctrl+R Search
+
+SQLite-backed persistent prompt history across sessions with Ctrl+R fuzzy search overlay. Every terminal power user expects this.
+
+**Capabilities**: `ui`, `state`, `commands`
+**Complexity**: Low-Medium
+**See**: [Implementation Plan](./plan-prompt-history.md)
+
+#### AST Tools (ast-grep)
+
+`ast_grep` and `ast_edit` tools for syntax-aware code search and structural codemods. Wraps the `sg` (ast-grep) binary.
+
+**Capabilities**: `tools`, `exec`
+**Complexity**: Low
+**See**: [Implementation Plan](./plan-ast-tools.md)
+
+#### Stats Dashboard
+
+`/stats` command showing usage analytics — cost over time, tokens/turn, cache hit rate, model breakdown. Queries existing SQLite usage data.
+
+**Capabilities**: `commands`, `ui`, `state`
+**Complexity**: Low
+**See**: [Implementation Plan](./plan-stats-dashboard.md)
+
+#### Code Review Command
+
+`/review` with mode selection (branch diff, uncommitted changes, specific commit). Structured findings with priority levels.
+
+**Capabilities**: `commands`, `tools`, `exec`
+**Complexity**: Low-Medium
+
+#### Multi-Credential Round-Robin
+
+Multiple API keys per provider with usage-aware selection and automatic fallback on rate limits.
+
+**Capabilities**: `providers`
+**Complexity**: Medium
+
+### Tier 2 — High Value, Medium Effort
+
+#### TTSR (Time Traveling Streamed Rules)
+
+Zero-context-cost rules that watch the LLM output stream in real-time via regex patterns. On match: abort stream, inject rule as system message, retry. Most innovative feature in oh-my-pi.
+
+**Capabilities**: `events`, `middleware` (needs new `stream_filter` event — see hooks plan)
+**Complexity**: Medium
+**Requires**: New `stream_filter` event in loop.cljs
+
+#### Universal Config Discovery
+
+Read configs from Claude Code (`.claude/`), Cursor (`.cursor/`), Windsurf, Gemini, Codex, Cline, GitHub Copilot. Discovers MCP servers, rules, context files, and tools.
+
+**Capabilities**: `context`, `events`, `tools`
+**Complexity**: Medium
+
+#### Autonomous Memory Pipeline
+
+Background extraction of durable knowledge from past sessions, consolidated into project memory and skill playbooks. Runs post-session.
+
+**Capabilities**: `events`, `state`, `exec`
+**Complexity**: Medium
+
+#### AI Git Commits
+
+Agentic commit with `git-overview`, `git-file-diff`, `git-hunk` tools. Auto-split unrelated changes with dependency ordering. Hunk-level staging.
+
+**Capabilities**: `tools`, `commands`, `exec`
+**Complexity**: Medium
+
+#### Subagent Parallel Tasks
+
+Named sub-agents (explore, plan, reviewer) running in parallel with git worktree isolation and real-time artifact streaming.
+
+**Capabilities**: `tools`, `exec`, `events`, `state`
+**Complexity**: High
+**Requires**: Worktree isolation primitives
+
+### Ready to Build — Hooks Complete, Needs Extension Code
+
+#### Checkpoint System (G16)
+
+Git-based snapshots after every file-modifying tool call. `/checkpoint list|revert|diff` commands. Subscribes to the `tool_complete` event (already implemented). Enables safe exploration, non-destructive undo, and branch-from-checkpoint workflows.
+
+**Capabilities**: `events` (`tool_complete`), `exec` (git), `commands`
+**Complexity**: Medium (~100 LOC extension)
+**Enables**: Cline-style checkpoints, Windsurf-style revert, CI validation after each edit
+**Depends on**: `tool_complete` event (done)
+
+#### Native Subagent System (G17)
+
+A `task` tool that spawns child agent sessions with isolated context, restricted tools, and budget limits. Parent receives summarized results. Enables orchestrator mode, parallel research, and specialist delegation.
+
+**Capabilities**: `tools`, `events`, `state`, `exec`
+**Complexity**: High (~300 LOC, new subsystem)
+**Enables**: Roo Code boomerang orchestration, Cline subagents, Kilo parallel agents, Cursor /worktree isolation
+**Depends on**: `tool_access_check` (done), `tool_complete` (done), session management
+
+### Tier 3 — High Value, High Effort (Long-term)
+
+#### Hashline Edits
+
+Content-hash anchors per line — model references anchors instead of reproducing text. Up to 10x edit accuracy for weaker models. Fundamental change to the edit tool.
+
+**Complexity**: High
+
+#### LSP Integration
+
+Full language server protocol: diagnostics, go-to-definition, references, hover, rename, format-on-write. 40+ language configurations.
+
+**Complexity**: Very High
+
+#### Python/IPython Tool
+
+Persistent IPython kernel with streaming output, rich rendering (HTML, images, Mermaid), and custom module loading.
+
+**Complexity**: High
+
+#### Browser Tool (Puppeteer)
+
+Headless browser with stealth scripts, accessibility snapshots, article extraction. Navigate, click, type, screenshot.
+
+**Complexity**: High
+
+#### Todo/Task Panel
+
+Phased task list with visual panel above editor (Ctrl+T toggle). Auto-normalization ensures exactly one task in-progress. Completion reminders.
+
+**Complexity**: Medium
+
+#### Handoff Command
+
+`/handoff` creates a new session pre-loaded with context summary from current session. Combines session branching + compaction.
+
+**Complexity**: Low-Medium

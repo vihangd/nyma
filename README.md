@@ -248,8 +248,13 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 | `token_preview.test.cljs` | Live token count preview | 10 |
 | `clear_session.test.cljs` | /clear session reset | 9 |
 | `commands_skills.test.cljs` | Skills activation (/skill, /skills, dedup) | 16 |
+| `model_roles.test.cljs` | Model roles, settings, model_resolve event | 12 |
+| `grouped_tool_display.test.cljs` | Grouped tool display, message grouping | 12 |
+| `ast_tools.test.cljs` | AST tool command building, truncation | 10 |
+| `prompt_history.test.cljs` | Prompt history SQLite + picker | 11 |
+| `stats_dashboard.test.cljs` | Usage stats aggregate queries | 9 |
 
-**Total: ~290 tests**
+**Total: ~344 tests**
 
 ## Running the Agent
 
