@@ -2,10 +2,13 @@
   (:require [agent.sessions.compaction :refer [compact]]
             [agent.sessions.listing :refer [list-sessions]]
             [agent.commands.share :refer [messages->html messages->markdown]]
+            [agent.commands.parser :as cmd-parser]
             [agent.extension-loader :refer [deactivate-all discover-and-load]]
             [agent.resources.loader :refer [discover]]
             [agent.providers.oauth :as oauth]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]
+            [agent.ui.editor-bash :as editor-bash]
+            [agent.ui.editor-eval :as editor-eval]
             [agent.resources.skills :as skills]
             [agent.ui.skill-picker :as skill-picker]
             [clojure.string :as str]
@@ -52,15 +55,15 @@
       (reload-fn)))
   ;; 3. Rediscover resources
   (let [new-resources (js-await (discover {:events (:events agent)
-                                            :reason "reload"}))]
+                                           :reason "reload"}))]
     ;; 4. Rebuild system prompt
     (when-let [build-fn (:build-system-prompt new-resources)]
       (set! (.-system-prompt (:config agent)) (build-fn)))
     ;; 5. Reload extensions
     (when (and extensions-atom (.-extension-api agent))
       (let [loaded (js-await (discover-and-load
-                                (:extension-dirs new-resources)
-                                (.-extension-api agent)))]
+                              (:extension-dirs new-resources)
+                              (.-extension-api agent)))]
         (reset! extensions-atom loaded)))
     ;; 6. Re-resolve CLI flags
     (when resolve-flags-fn
@@ -165,365 +168,488 @@
    resume, import, settings, changelog, login, logout, scoped-models."
   [agent session resources & [extensions-atom resolve-flags-fn]]
   (swap! (:commands agent) merge
-    {"help"
-     {:description "Show available commands"
-      :handler (fn [_args ctx]
-                 (let [cmds  @(:commands agent)
-                       lines (mapv (fn [[name cmd]]
-                                     (str "  /" name " - " (or (:description cmd) "")))
-                                   (sort-by first cmds))]
-                   (show-info ctx (str "Available commands:\n" (str/join "\n" lines)))))}
+         {"help"
+          {:description "Show available commands"
+           :aliases     ["?"]
+           :handler (fn [_args ctx]
+                      ;; Phase 21: split help output into a nyma
+                      ;; section and an (optional) agent-forwarded
+                      ;; section so the user can tell which commands go
+                      ;; to the ACP agent (`//name`) and which are
+                      ;; local to nyma (`/name`).
+                      (let [cmds        @(:commands agent)
+                            agent-fwd?  (fn [cmd]
+                                          (= "agent-shell"
+                                             (or (:forward-to cmd)
+                                                 (when (some? cmd)
+                                                   (try (.-forward-to cmd)
+                                                        (catch :default _ nil))))))
+                            split       (group-by (fn [[_ cmd]] (agent-fwd? cmd)) cmds)
+                            nyma-cmds   (get split false [])
+                            agent-cmds  (get split true [])
+                            display-map (cmd-parser/compute-display-names
+                                         (mapv first nyma-cmds))
+                            fmt         (fn [prefix shown cmd]
+                                          (let [alias-seq (:aliases cmd)
+                                                alias-str (when (seq alias-seq)
+                                                            (str " (" (str/join ", " alias-seq) ")"))]
+                                            (str "  " prefix (.trimEnd shown)
+                                                 (or alias-str "")
+                                                 " — " (or (:description cmd) ""))))
+                            nyma-lines  (mapv (fn [[name cmd]]
+                                                (fmt "/" (get display-map name name) cmd))
+                                              (sort-by first nyma-cmds))
+                            agent-lines (mapv (fn [[name cmd]]
+                                                (fmt "//" name cmd))
+                                              (sort-by first agent-cmds))
+                            sections    (cond-> []
+                                          (seq nyma-lines)
+                                          (conj (str "Available commands:\n"
+                                                     (str/join "\n" nyma-lines)))
+                                          (seq agent-lines)
+                                          (conj (str "\nAgent commands (forwarded via //):\n"
+                                                     (str/join "\n" agent-lines))))]
+                        (show-info ctx (str/join "\n" sections))))}
 
-     "model"
-     {:description "Show or change current model"
-      :handler (fn [args ctx]
-                 (if (seq args)
-                   (let [model-spec (str/join " " args)]
-                     (when-let [api (.-extension-api agent)]
-                       (.setModel api model-spec))
-                     (notify ctx (str "Model changed to: " model-spec)))
-                   (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
-                     (notify ctx (str "Model: " model-id)))))}
+          "model"
+          {:description "Show or change current model"
+           :handler (fn [args ctx]
+                      (if (seq args)
+                        (let [model-spec (str/join " " args)]
+                          (when-let [api (.-extension-api agent)]
+                            (.setModel api model-spec))
+                          (notify ctx (str "Model changed to: " model-spec)))
+                        (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
+                          (notify ctx (str "Model: " model-id)))))}
 
-     "clear"
-     {:description "Clear messages and reset agent session"
-      :handler (fn [_args ctx]
-                 ((:dispatch! (:store agent)) :messages-cleared {})
-                 ((:emit (:events agent)) "session_clear" {})
-                 (notify ctx "Messages cleared"))}
+          "clear"
+          {:description "Clear messages and reset agent session"
+           :handler (fn [_args ctx]
+                      ((:dispatch! (:store agent)) :messages-cleared {})
+                      ((:emit (:events agent)) "session_clear" {})
+                      (notify ctx "Messages cleared"))}
 
-     "exit"
-     {:description "Exit the agent"
-      :handler (fn [_args _ctx]
-                 ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
-                 (js/process.exit 0))}
+          "cls"
+     ;; Borrowed from cc-kit's clearCommand at packages/ui/src/commands/
+     ;; builtins.ts:28-36 — /clear is nyma's 'reset the session', and
+     ;; users sometimes want to ALSO wipe the terminal scrollback. cls
+     ;; issues the same ANSI escape sequence (CSI 2J + CSI 3J + CSI H)
+     ;; as cc-kit, which clears both the visible screen AND the
+     ;; scrollback on terminals that support the CSI 3J extension.
+          {:description "Clear the terminal screen and scrollback"
+           :handler (fn [_args _ctx]
+                      (.write (.-stdout js/process) "\u001b[2J\u001b[3J\u001b[H"))}
 
-     "new"
-     {:description "Start a new session"
-      :handler (fn [_args ctx]
-                 ((:dispatch! (:store agent)) :messages-cleared {})
-                 ((:emit (:events agent)) "session_start" {:reason "new"})
-                 (notify ctx "New session started"))}
+          "exit"
+          {:description "Exit the agent"
+           :aliases     ["quit" "q"]
+           :handler (fn [_args _ctx]
+                      ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
+                      (js/process.exit 0))}
 
-     "fork"
-     {:description "Fork conversation at current point"
-      :handler (fn [_args ctx]
-                 (when-let [s @(:session agent)]
-                   (let [leaf ((:leaf-id s))]
-                     ((:branch s) leaf)
-                     ((:emit (:events agent)) "session_start" {:reason "fork"})
-                     (notify ctx "Session forked"))))}
+          "bash"
+          ;; Discovery wrapper over editor bash mode — the `/bash ls`
+          ;; picker entry is identical to typing `!ls`. Runs the full
+          ;; bash_suite middleware chain via editor-bash/run-bash! and
+          ;; appends a :kind :bash message so the chat view renders it
+          ;; through the same styled component.
+          {:description "Run a shell command through bash_suite (alias: !cmd in the editor)"
+           :handler (fn [args ctx]
+                      (let [command (str/join " " args)
+                            append  (.-append-message ctx)]
+                        (cond
+                          (empty? command)
+                          (notify ctx "Usage: /bash <command> — or type !cmd directly in the editor" "info")
 
-     "tree"
-     {:description "Show session tree"
-      :handler (fn [_args ctx]
-                 (when-let [s @(:session agent)]
-                   (if (and ctx (.-ui ctx) (.-custom (.-ui ctx)))
+                          (nil? append)
+                          ;; No message sink available (headless ctx) —
+                          ;; still run the command, but fall back to a
+                          ;; notification for the first line of output.
+                          (-> (editor-bash/run-bash! agent command)
+                              (.then (fn [result]
+                                       (notify ctx
+                                               (editor-bash/format-bash-output result)
+                                               (if (:blocked? result) "error" "info")))))
+
+                          :else
+                          (-> (editor-bash/run-bash! agent command)
+                              (.then
+                               (fn [result]
+                                 (let [content (editor-bash/format-bash-output result)]
+                                   (append {:role      "assistant"
+                                            :kind      :bash
+                                            :content   content
+                                            :command   command
+                                            :stdout    (:stdout result)
+                                            :stderr    (:stderr result)
+                                            :exit-code (:exit-code result)
+                                            :blocked?  (:blocked? result)
+                                            :reason    (:reason result)}))))))))}
+
+          "bb"
+          ;; Discovery wrapper over editor eval mode — `/bb (+ 1 2)`
+          ;; is identical to typing `$(+ 1 2)`. Uses the exact same
+          ;; code path: run-eval! + format-eval-output + :kind :eval
+          ;; message append. See agent.ui.editor-eval for the
+          ;; documented security gap.
+          {:description "Evaluate a Babashka expression (alias: $expr in the editor)"
+           :handler (fn [args ctx]
+                      (let [expr   (str/join " " args)
+                            append (.-append-message ctx)]
+                        (cond
+                          (empty? expr)
+                          (notify ctx "Usage: /bb <expr> — or type $expr directly in the editor" "info")
+
+                          (nil? append)
+                          ;; Headless ctx — run anyway and surface
+                          ;; the first line via notify.
+                          (-> (editor-eval/run-eval! expr)
+                              (.then (fn [result]
+                                       (notify ctx
+                                               (editor-eval/format-eval-output result)
+                                               (if (:unavailable? result) "error" "info")))))
+
+                          :else
+                          (-> (editor-eval/run-eval! expr)
+                              (.then
+                               (fn [result]
+                                 (let [content (editor-eval/format-eval-output result)]
+                                   (append {:role         "assistant"
+                                            :kind         :eval
+                                            :content      content
+                                            :expr         expr
+                                            :stdout       (:stdout result)
+                                            :stderr       (:stderr result)
+                                            :exit-code    (:exit-code result)
+                                            :unavailable? (:unavailable? result)
+                                            :install-hint (:install-hint result)}))))))))}
+
+          "new"
+          {:description "Start a new session"
+           :handler (fn [_args ctx]
+                      ((:dispatch! (:store agent)) :messages-cleared {})
+                      ((:emit (:events agent)) "session_start" {:reason "new"})
+                      (notify ctx "New session started"))}
+
+          "fork"
+          {:description "Fork conversation at current point"
+           :handler (fn [_args ctx]
+                      (when-let [s @(:session agent)]
+                        (let [leaf ((:leaf-id s))]
+                          ((:branch s) leaf)
+                          ((:emit (:events agent)) "session_start" {:reason "fork"})
+                          (notify ctx "Session forked"))))}
+
+          "tree"
+          {:description "Show session tree"
+           :handler (fn [_args ctx]
+                      (when-let [s @(:session agent)]
+                        (if (and ctx (.-ui ctx) (.-custom (.-ui ctx)))
                      ;; Interactive tree viewer via custom overlay
-                     (.custom (.-ui ctx) (create-tree-viewer s))
+                          (.custom (.-ui ctx) (create-tree-viewer s))
                      ;; Fallback: text dump
-                     (let [tree ((:get-tree s))
-                           lines (->> (take 20 tree)
-                                      (map (fn [e]
-                                             (str "  " (:id e) " [" (:role e) "] "
-                                                  (subs (or (:content e) "") 0
-                                                        (min 60 (count (or (:content e) ""))))))))]
-                       (show-info ctx
-                         (str "Session tree (" (count tree) " entries):\n"
-                              (str/join "\n" lines)
-                              (when (> (count tree) 20) "\n  ... more entries")))))))}
+                          (let [tree ((:get-tree s))
+                                lines (->> (take 20 tree)
+                                           (map (fn [e]
+                                                  (str "  " (:id e) " [" (:role e) "] "
+                                                       (subs (or (:content e) "") 0
+                                                             (min 60 (count (or (:content e) ""))))))))]
+                            (show-info ctx
+                                       (str "Session tree (" (count tree) " entries):\n"
+                                            (str/join "\n" lines)
+                                            (when (> (count tree) 20) "\n  ... more entries")))))))}
 
-     "compact"
-     {:description "Compact conversation context"
-      :handler (fn [_args ctx]
-                 (when-let [s @(:session agent)]
-                   (compact s (:model (:config agent)) (:events agent))
-                   (notify ctx "Compaction complete")))}
+          "compact"
+          {:description "Compact conversation context"
+           :handler (fn [_args ctx]
+                      (when-let [s @(:session agent)]
+                        (compact s (:model (:config agent)) (:events agent))
+                        (notify ctx "Compaction complete")))}
 
-     "debug"
-     {:description "Show debug information"
-      :handler (fn [_args ctx]
-                 (let [s @(:state agent)]
-                   (show-info ctx
-                     (str "--- Debug Info ---\n"
-                          "Messages: " (count (:messages s)) "\n"
-                          "Input tokens: " (or (:total-input-tokens s) 0) "\n"
-                          "Output tokens: " (or (:total-output-tokens s) 0) "\n"
-                          "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
-                          "Turns: " (or (:turn-count s) 0) "\n"
-                          "Active tools: " (count (:active-tools s)) "\n"
-                          "Active executions: " (count (:active-executions s)) "\n"
-                          "Thinking level: " @(:thinking-level agent) "\n"
-                          "------------------"))))}
+          "debug"
+          {:description "Show debug information"
+           :handler (fn [_args ctx]
+                      (let [s @(:state agent)]
+                        (show-info ctx
+                                   (str "--- Debug Info ---\n"
+                                        "Messages: " (count (:messages s)) "\n"
+                                        "Input tokens: " (or (:total-input-tokens s) 0) "\n"
+                                        "Output tokens: " (or (:total-output-tokens s) 0) "\n"
+                                        "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
+                                        "Turns: " (or (:turn-count s) 0) "\n"
+                                        "Active tools: " (count (:active-tools s)) "\n"
+                                        "Active executions: " (count (:active-executions s)) "\n"
+                                        "Thinking level: " @(:thinking-level agent) "\n"
+                                        "------------------"))))}
 
-     "reload"
-     {:description "Reload extensions and configuration"
-      :handler (fn [_args ctx]
-                 (handle-reload agent resources extensions-atom resolve-flags-fn ctx))}
+          "reload"
+          {:description "Reload extensions and configuration"
+           :handler (fn [_args ctx]
+                      (handle-reload agent resources extensions-atom resolve-flags-fn ctx))}
 
      ;; ── New pi-mono-compatible commands ─────────────────────
 
-     "name"
-     {:description "Set or show session display name"
-      :handler (fn [args ctx]
-                 (if (seq args)
-                   (let [name (str/join " " args)]
-                     (when-let [s @(:session agent)]
-                       ((:set-session-name s) name))
-                     (notify ctx (str "Session named: " name)))
-                   (let [current (when-let [s @(:session agent)]
-                                   ((:get-session-name s)))]
-                     (notify ctx (str "Session: " (or current "(unnamed)"))))))}
+          "name"
+          {:description "Set or show session display name"
+           :handler (fn [args ctx]
+                      (if (seq args)
+                        (let [name (str/join " " args)]
+                          (when-let [s @(:session agent)]
+                            ((:set-session-name s) name))
+                          (notify ctx (str "Session named: " name)))
+                        (let [current (when-let [s @(:session agent)]
+                                        ((:get-session-name s)))]
+                          (notify ctx (str "Session: " (or current "(unnamed)"))))))}
 
-     "session"
-     {:description "Show session info and stats"
-      :handler (fn [_args ctx]
-                 (let [s    @(:state agent)
-                       sess @(:session agent)
-                       fp   (when sess ((:get-file-path sess)))
-                       tree (when sess ((:get-tree sess)))
-                       name (when sess ((:get-session-name sess)))]
-                   (show-info ctx
-                     (str "--- Session Info ---\n"
-                          "Name: " (or name "(unnamed)") "\n"
-                          "Path: " (or fp "(ephemeral)") "\n"
-                          "Entries: " (count (or tree [])) "\n"
-                          "Messages: " (count (:messages s)) "\n"
-                          "Input tokens: " (or (:total-input-tokens s) 0) "\n"
-                          "Output tokens: " (or (:total-output-tokens s) 0) "\n"
-                          "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
-                          "Turns: " (or (:turn-count s) 0) "\n"
-                          "--------------------"))))}
+          "session"
+          {:description "Show session info and stats"
+           :handler (fn [_args ctx]
+                      (let [s    @(:state agent)
+                            sess @(:session agent)
+                            fp   (when sess ((:get-file-path sess)))
+                            tree (when sess ((:get-tree sess)))
+                            name (when sess ((:get-session-name sess)))]
+                        (show-info ctx
+                                   (str "--- Session Info ---\n"
+                                        "Name: " (or name "(unnamed)") "\n"
+                                        "Path: " (or fp "(ephemeral)") "\n"
+                                        "Entries: " (count (or tree [])) "\n"
+                                        "Messages: " (count (:messages s)) "\n"
+                                        "Input tokens: " (or (:total-input-tokens s) 0) "\n"
+                                        "Output tokens: " (or (:total-output-tokens s) 0) "\n"
+                                        "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
+                                        "Turns: " (or (:turn-count s) 0) "\n"
+                                        "--------------------"))))}
 
-     "copy"
-     {:description "Copy last assistant message to clipboard"
-      :handler (fn [_args ctx]
-                 (let [msgs     (:messages @(:state agent))
-                       last-asst (last (filter #(= (:role %) "assistant") msgs))]
-                   (if-not last-asst
-                     (notify ctx "No assistant message to copy" "error")
-                     (let [text     (:content last-asst)
-                           platform (.-platform js/process)
-                           cmd      (case platform
-                                      "darwin" "pbcopy"
-                                      "win32"  "clip"
-                                      "xclip -selection clipboard")
-                           proc     (js/Bun.spawn #js ["sh" "-c" cmd]
-                                      #js {:stdin "pipe" :stdout "pipe" :stderr "pipe"})]
-                       (.write (.-stdin proc) text)
-                       (.end (.-stdin proc))
-                       (.then (.-exited proc)
-                         (fn [_] (notify ctx "Copied to clipboard")))))))}
+          "copy"
+          {:description "Copy last assistant message to clipboard"
+           :handler (fn [_args ctx]
+                      (let [msgs     (:messages @(:state agent))
+                            last-asst (last (filter #(= (:role %) "assistant") msgs))]
+                        (if-not last-asst
+                          (notify ctx "No assistant message to copy" "error")
+                          (let [text     (:content last-asst)
+                                platform (.-platform js/process)
+                                cmd      (case platform
+                                           "darwin" "pbcopy"
+                                           "win32"  "clip"
+                                           "xclip -selection clipboard")
+                                proc     (js/Bun.spawn #js ["sh" "-c" cmd]
+                                                       #js {:stdin "pipe" :stdout "pipe" :stderr "pipe"})]
+                            (.write (.-stdin proc) text)
+                            (.end (.-stdin proc))
+                            (.then (.-exited proc)
+                                   (fn [_] (notify ctx "Copied to clipboard")))))))}
 
-     "hotkeys"
-     {:description "Show keyboard shortcuts"
-      :handler (fn [_args ctx]
-                 (let [ext-shortcuts @(:shortcuts agent)
-                       builtins [["Escape"  "Abort current generation"]
-                                 ["Ctrl+L"  "Show current model"]
-                                 ["Ctrl+P"  "Reserved"]]
-                       lines (concat
-                               ["Built-in:"]
-                               (map (fn [[k d]] (str "  " k " - " d)) builtins)
-                               (when (seq ext-shortcuts)
-                                 (concat ["" "Extensions:"]
-                                   (map (fn [[k _]] (str "  " k)) ext-shortcuts))))]
-                   (show-info ctx (str/join "\n" lines))))}
+          "hotkeys"
+          {:description "Show keyboard shortcuts"
+           :handler (fn [_args ctx]
+                      (let [ext-shortcuts @(:shortcuts agent)
+                            builtins [["Escape"  "Abort current generation"]
+                                      ["Ctrl+L"  "Show current model"]
+                                      ["Ctrl+P"  "Reserved"]]
+                            lines (concat
+                                   ["Built-in:"]
+                                   (map (fn [[k d]] (str "  " k " - " d)) builtins)
+                                   (when (seq ext-shortcuts)
+                                     (concat ["" "Extensions:"]
+                                             (map (fn [[k _]] (str "  " k)) ext-shortcuts))))]
+                        (show-info ctx (str/join "\n" lines))))}
 
-     "export"
-     {:description "Export session to file (html, md, jsonl)"
-      :handler (fn [args ctx]
-                 (let [format  (or (first args) "html")
-                       sess    @(:session agent)
-                       msgs    (or (when sess ((:build-context sess)))
-                                   (:messages @(:state agent)))
-                       name    (or (when sess ((:get-session-name sess))) "session")
-                       ts      (js/Date.now)
-                       ext     (case format "md" "md" "jsonl" "jsonl" "html")
-                       out-dir (str (js/process.cwd) "/.nyma/exports")
-                       out-path (str out-dir "/" name "-" ts "." ext)
-                       content (case format
-                                 "md"    (messages->markdown msgs name)
-                                 "jsonl" (str/join "\n"
-                                           (map #(js/JSON.stringify (clj->js %)) msgs))
-                                 (messages->html msgs name))]
-                   (when-not (fs/existsSync out-dir)
-                     (fs/mkdirSync out-dir #js {:recursive true}))
-                   (.then (js/Bun.write out-path content)
-                     (fn [_] (notify ctx (str "Exported to " out-path))))))}
+          "export"
+          {:description "Export session to file (html, md, jsonl)"
+           :handler (fn [args ctx]
+                      (let [format  (or (first args) "html")
+                            sess    @(:session agent)
+                            msgs    (or (when sess ((:build-context sess)))
+                                        (:messages @(:state agent)))
+                            name    (or (when sess ((:get-session-name sess))) "session")
+                            ts      (js/Date.now)
+                            ext     (case format "md" "md" "jsonl" "jsonl" "html")
+                            out-dir (str (js/process.cwd) "/.nyma/exports")
+                            out-path (str out-dir "/" name "-" ts "." ext)
+                            content (case format
+                                      "md"    (messages->markdown msgs name)
+                                      "jsonl" (str/join "\n"
+                                                        (map #(js/JSON.stringify (clj->js %)) msgs))
+                                      (messages->html msgs name))]
+                        (when-not (fs/existsSync out-dir)
+                          (fs/mkdirSync out-dir #js {:recursive true}))
+                        (.then (js/Bun.write out-path content)
+                               (fn [_] (notify ctx (str "Exported to " out-path))))))}
 
-     "resume"
-     {:description "Resume a previous session"
-      :handler (fn [_args ctx]
-                 (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
-                       sessions (list-sessions dir)]
-                   (if (empty? sessions)
-                     (notify ctx "No sessions found" "error")
-                     (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
+          "resume"
+          {:description "Resume a previous session"
+           :handler (fn [_args ctx]
+                      (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
+                            sessions (list-sessions dir)]
+                        (if (empty? sessions)
+                          (notify ctx "No sessions found" "error")
+                          (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
                        ;; Non-interactive: just list sessions
-                       (show-info ctx
-                         (str "Available sessions:\n"
-                              (str/join "\n"
-                                (map-indexed (fn [i s]
-                                               (str "  " (inc i) ". " (:name s)
-                                                    " (" (:entry-count s) " entries)"))
-                                             sessions))))
+                            (show-info ctx
+                                       (str "Available sessions:\n"
+                                            (str/join "\n"
+                                                      (map-indexed (fn [i s]
+                                                                     (str "  " (inc i) ". " (:name s)
+                                                                          " (" (:entry-count s) " entries)"))
+                                                                   sessions))))
                        ;; Interactive: show selector
-                       (let [options (mapv (fn [s]
-                                            (str (:name s) " (" (:entry-count s) " entries)"))
-                                          sessions)]
-                         (.then (.select (.-ui ctx) "Resume session:" (clj->js options))
-                           (fn [choice]
-                             (when choice
-                               (let [idx  (.indexOf options choice)
-                                     sess (nth sessions idx)
-                                     sm   @(:session agent)]
-                                 ((:switch-file sm) (:path sess))
-                                 ((:dispatch! (:store agent)) :messages-cleared {})
-                                 (doseq [msg ((:build-context sm))]
-                                   ((:dispatch! (:store agent)) :message-added {:message msg}))
-                                 ((:emit (:events agent)) "session_start"
-                                   {:reason "resume" :previousSessionFile (:path sess)})
-                                 (notify ctx (str "Resumed: " (:name sess))))))))))))}
+                            (let [options (mapv (fn [s]
+                                                  (str (:name s) " (" (:entry-count s) " entries)"))
+                                                sessions)]
+                              (.then (.select (.-ui ctx) "Resume session:" (clj->js options))
+                                     (fn [choice]
+                                       (when choice
+                                         (let [idx  (.indexOf options choice)
+                                               sess (nth sessions idx)
+                                               sm   @(:session agent)]
+                                           ((:switch-file sm) (:path sess))
+                                           ((:dispatch! (:store agent)) :messages-cleared {})
+                                           (doseq [msg ((:build-context sm))]
+                                             ((:dispatch! (:store agent)) :message-added {:message msg}))
+                                           ((:emit (:events agent)) "session_start"
+                                                                    {:reason "resume" :previousSessionFile (:path sess)})
+                                           (notify ctx (str "Resumed: " (:name sess))))))))))))}
 
-     "import"
-     {:description "Import and resume a session from a JSONL file"
-      :handler (fn [args ctx]
-                 (let [file-path (first args)]
-                   (cond
-                     (or (nil? file-path) (empty? (str file-path)))
-                     (notify ctx "Usage: /import <path.jsonl>" "error")
+          "import"
+          {:description "Import and resume a session from a JSONL file"
+           :handler (fn [args ctx]
+                      (let [file-path (first args)]
+                        (cond
+                          (or (nil? file-path) (empty? (str file-path)))
+                          (notify ctx "Usage: /import <path.jsonl>" "error")
 
-                     (not (fs/existsSync file-path))
-                     (notify ctx (str "File not found: " file-path) "error")
+                          (not (fs/existsSync file-path))
+                          (notify ctx (str "File not found: " file-path) "error")
 
-                     :else
-                     (let [sm @(:session agent)]
-                       ((:switch-file sm) file-path)
-                       ((:dispatch! (:store agent)) :messages-cleared {})
-                       (doseq [msg ((:build-context sm))]
-                         ((:dispatch! (:store agent)) :message-added {:message msg}))
-                       ((:emit (:events agent)) "session_start"
-                         {:reason "resume" :previousSessionFile file-path})
-                       (notify ctx (str "Imported session from " file-path))))))}
+                          :else
+                          (let [sm @(:session agent)]
+                            ((:switch-file sm) file-path)
+                            ((:dispatch! (:store agent)) :messages-cleared {})
+                            (doseq [msg ((:build-context sm))]
+                              ((:dispatch! (:store agent)) :message-added {:message msg}))
+                            ((:emit (:events agent)) "session_start"
+                                                     {:reason "resume" :previousSessionFile file-path})
+                            (notify ctx (str "Imported session from " file-path))))))}
 
      ;; ── Phase 3 commands ───────────────────────────────────
 
-     "settings"
-     {:description "View or change settings"
-      :handler (fn [_args ctx]
-                 (handle-settings resources ctx))}
+          "settings"
+          {:description "View or change settings"
+           :handler (fn [_args ctx]
+                      (handle-settings resources ctx))}
 
-     "changelog"
-     {:description "Show changelog"
-      :handler (fn [_args ctx]
-                 (let [path "CHANGELOG.md"]
-                   (if (fs/existsSync path)
-                     (show-info ctx (fs/readFileSync path "utf8"))
-                     (notify ctx "No CHANGELOG.md found" "error"))))}
+          "changelog"
+          {:description "Show changelog"
+           :handler (fn [_args ctx]
+                      (let [path "CHANGELOG.md"]
+                        (if (fs/existsSync path)
+                          (show-info ctx (fs/readFileSync path "utf8"))
+                          (notify ctx "No CHANGELOG.md found" "error"))))}
 
-     "login"
-     {:description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"
-      :handler (fn [args ctx]
-                 (handle-login args ctx agent))}
+          "login"
+          {:description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"
+           :handler (fn [args ctx]
+                      (handle-login args ctx agent))}
 
-     "logout"
-     {:description "Remove credentials for a provider"
-      :handler (fn [args ctx]
-                 (let [provider (or (first args) "anthropic")
+          "logout"
+          {:description "Remove credentials for a provider"
+           :handler (fn [args ctx]
+                      (let [provider (or (first args) "anthropic")
                        ;; Check for OAuth credentials
-                       oauth-creds (oauth/load-credentials provider)
-                       cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
-                   (if oauth-creds
+                            oauth-creds (oauth/load-credentials provider)
+                            cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
+                        (if oauth-creds
                      ;; Clear OAuth credentials
-                     (do (oauth/clear-credentials provider)
-                         (notify ctx (str "Removed OAuth credentials for " provider)))
+                          (do (oauth/clear-credentials provider)
+                              (notify ctx (str "Removed OAuth credentials for " provider)))
                      ;; Clear API key from credentials.json
-                     (if-not (fs/existsSync cred-path)
-                       (notify ctx "No credentials found" "error")
-                       (let [existing (js/JSON.parse (fs/readFileSync cred-path "utf8"))]
-                         (js-delete existing provider)
-                         (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
-                         (notify ctx (str "Removed " provider " API key")))))))}
+                          (if-not (fs/existsSync cred-path)
+                            (notify ctx "No credentials found" "error")
+                            (let [existing (js/JSON.parse (fs/readFileSync cred-path "utf8"))]
+                              (js-delete existing provider)
+                              (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
+                              (notify ctx (str "Removed " provider " API key")))))))}
 
-     "scoped-models"
-     {:description "Show or set per-extension model overrides"
-      :handler (fn [args ctx]
-                 (let [settings (:settings resources)
-                       current  (when settings ((:get settings)))
-                       scoped   (or (:scoped-models current) {})]
-                   (if (>= (count args) 2)
+          "scoped-models"
+          {:description "Show or set per-extension model overrides"
+           :handler (fn [args ctx]
+                      (let [settings (:settings resources)
+                            current  (when settings ((:get settings)))
+                            scoped   (or (:scoped-models current) {})]
+                        (if (>= (count args) 2)
                      ;; Set: /scoped-models ext-name model-id
-                     (let [ext-name (first args)
-                           model-id (str/join " " (rest args))
-                           updated  (assoc scoped ext-name model-id)]
-                       ((:set-override settings) :scoped-models updated)
-                       (notify ctx (str ext-name " → " model-id)))
+                          (let [ext-name (first args)
+                                model-id (str/join " " (rest args))
+                                updated  (assoc scoped ext-name model-id)]
+                            ((:set-override settings) :scoped-models updated)
+                            (notify ctx (str ext-name " → " model-id)))
                      ;; Show all
-                     (if (empty? scoped)
-                       (notify ctx "No scoped model overrides set")
-                       (show-info ctx
-                         (str "Scoped models:\n"
-                              (str/join "\n"
-                                (map (fn [[k v]] (str "  " k " → " v)) scoped))))))))}
+                          (if (empty? scoped)
+                            (notify ctx "No scoped model overrides set")
+                            (show-info ctx
+                                       (str "Scoped models:\n"
+                                            (str/join "\n"
+                                                      (map (fn [[k v]] (str "  " k " → " v)) scoped))))))))}
 
-     "new-extension"
-     {:description "Create a new extension from template"
-      :handler (fn [args ctx]
-                 (let [ext-name (or (first args) "my-extension")
-                       ext-dir  (str (.. js/process -env -HOME) "/.nyma/extensions")
-                       file     (str ext-dir "/" ext-name ".cljs")]
-                   (if (fs/existsSync file)
-                     (notify ctx (str "Extension already exists: " file) "error")
-                     (do
-                       (when-not (fs/existsSync ext-dir)
-                         (fs/mkdirSync ext-dir #js {:recursive true}))
-                       (fs/writeFileSync file (scaffold-extension ext-name))
-                       (notify ctx (str "Created extension: " file))))))}
+          "new-extension"
+          {:description "Create a new extension from template"
+           :handler (fn [args ctx]
+                      (let [ext-name (or (first args) "my-extension")
+                            ext-dir  (str (.. js/process -env -HOME) "/.nyma/extensions")
+                            file     (str ext-dir "/" ext-name ".cljs")]
+                        (if (fs/existsSync file)
+                          (notify ctx (str "Extension already exists: " file) "error")
+                          (do
+                            (when-not (fs/existsSync ext-dir)
+                              (fs/mkdirSync ext-dir #js {:recursive true}))
+                            (fs/writeFileSync file (scaffold-extension ext-name))
+                            (notify ctx (str "Created extension: " file))))))}
 
-     "skill"
-     {:description "Activate a skill by name. Usage: /skill <name>"
-      :handler
-      (fn [args ctx]
-        (let [skill-name (first args)
-              all-skills (:skills resources)]
-          (cond
-            (empty? skill-name)
-            (notify ctx "Usage: /skill <name>  or  /skills to browse" "error")
+          "skill"
+          {:description "Activate a skill by name. Usage: /skill <name>"
+           :handler
+           (fn [args ctx]
+             (let [skill-name (first args)
+                   all-skills (:skills resources)]
+               (cond
+                 (empty? skill-name)
+                 (notify ctx "Usage: /skill <name>  or  /skills to browse" "error")
 
-            (not (get all-skills skill-name))
-            (notify ctx (str "Unknown skill: \"" skill-name "\". Use /skills to see available.") "error")
+                 (not (get all-skills skill-name))
+                 (notify ctx (str "Unknown skill: \"" skill-name "\". Use /skills to see available.") "error")
 
-            (contains? (:active-skills @(:state agent)) skill-name)
-            (notify ctx (str "Skill \"" skill-name "\" is already active") "info")
+                 (contains? (:active-skills @(:state agent)) skill-name)
+                 (notify ctx (str "Skill \"" skill-name "\" is already active") "info")
 
-            :else
-            (-> (skills/activate-skill all-skills skill-name agent)
-                (.then (fn [_]
-                         (notify ctx (str "Skill \"" skill-name "\" activated"))))
-                (.catch (fn [e]
-                          (notify ctx (str "Failed to activate skill: " (.-message e)) "error")))))))}
+                 :else
+                 (-> (skills/activate-skill all-skills skill-name agent)
+                     (.then (fn [_]
+                              (notify ctx (str "Skill \"" skill-name "\" activated"))))
+                     (.catch (fn [e]
+                               (notify ctx (str "Failed to activate skill: " (.-message e)) "error")))))))}
 
-     "skills"
-     {:description "Browse and activate available skills"
-      :handler
-      (fn [_args ctx]
-        (let [all-skills (:skills resources)
-              active     (:active-skills @(:state agent))
-              skill-list (mapv (fn [[sname {:keys [markdown]}]]
-                                 {:name   sname
-                                  :active (contains? active sname)
-                                  :desc   (skills/first-skill-line markdown)})
-                               all-skills)]
-          (if (empty? skill-list)
-            (notify ctx "No skills found. Place skill directories in ~/.nyma/skills/ or .nyma/skills/")
-            (let [picker (skill-picker/create-picker
-                           skill-list
-                           (fn [chosen]
-                             (when chosen
-                               (-> (skills/activate-skill all-skills chosen agent)
-                                   (.then (fn [_]
-                                            (notify ctx (str "Skill \"" chosen "\" activated"))))
-                                   (.catch (fn [e]
-                                             (notify ctx (str "Failed: " (.-message e)) "error")))))))]
-              (.custom (.-ui ctx) picker)))))}}))
+          "skills"
+          {:description "Browse and activate available skills"
+           :handler
+           (fn [_args ctx]
+             (let [all-skills (:skills resources)
+                   active     (:active-skills @(:state agent))
+                   skill-list (mapv (fn [[sname {:keys [markdown]}]]
+                                      {:name   sname
+                                       :active (contains? active sname)
+                                       :desc   (skills/first-skill-line markdown)})
+                                    all-skills)]
+               (if (empty? skill-list)
+                 (notify ctx "No skills found. Place skill directories in ~/.nyma/skills/ or .nyma/skills/")
+                 (let [picker (skill-picker/create-picker
+                               skill-list
+                               (fn [chosen]
+                                 (when chosen
+                                   (-> (skills/activate-skill all-skills chosen agent)
+                                       (.then (fn [_]
+                                                (notify ctx (str "Skill \"" chosen "\" activated"))))
+                                       (.catch (fn [e]
+                                                 (notify ctx (str "Failed: " (.-message e)) "error")))))))]
+                   (.custom (.-ui ctx) picker)))))}}))
