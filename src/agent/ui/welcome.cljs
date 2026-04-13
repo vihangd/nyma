@@ -56,9 +56,8 @@
   [["?" "keyboard help"]
    ["/" "slash commands"]
    ["@" "reference files"]
-   ["#" "thread tags"]
    ["!" "shell mode"]
-   ["$" "python mode"]])
+   ["$" "babashka mode"]])
 
 (defn- TipsPanel [{:keys [theme]}]
   (let [primary (get-in theme [:colors :primary] "#7aa2f7")
@@ -103,13 +102,13 @@
         {:keys [dual-column?]}           (compute-layout cols)
         [recent-sessions set-sessions]   (useState [])]
     (useEffect
-      (fn []
-        (when (seq sessions-dir)
-          (try
-            (set-sessions (list-sessions sessions-dir))
-            (catch :default _ (set-sessions []))))
-        js/undefined)
-      #js [sessions-dir])
+     (fn []
+       (when (seq sessions-dir)
+         (try
+           (set-sessions (list-sessions sessions-dir))
+           (catch :default _ (set-sessions []))))
+       js/undefined)
+     #js [sessions-dir])
     #jsx [Box {:flexDirection "column" :paddingX 2 :paddingY 1
                :flexGrow 1}
           (if dual-column?
