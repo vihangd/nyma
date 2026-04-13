@@ -147,14 +147,20 @@ These Clojure core functions compile to bare identifiers (`name(k)`, `keyword_QM
 
 ### Sets are not callable
 
-In Clojure, sets work as functions: `(#{:a :b} :a) ;=> :a`. In squint, sets compile to JS `Set` objects which are **not callable**.
+In Clojure, sets work as functions: `(#{:a :b} :a) ;=> :a`. In Squint, sets compile to JS `Set` objects which are **not callable**. This also applies when the set is held in an atom — `@atom` returns the JS Set, and calling it still fails.
 
 ```clojure
 ;; BROKEN — TypeError: ac is not a function
 (filter (fn [[k _]] (my-set k)) items)
 
+;; BROKEN — same error even with atom deref
+(let [seen (atom #{})]
+  (when (@seen id) ...))            ;; TypeError: squint_core.deref(seen) is not a function
+
 ;; CORRECT
 (filter (fn [[k _]] (contains? my-set k)) items)
+(let [seen (atom #{})]
+  (when (contains? @seen id) ...))  ;; use contains? on the dereferenced set
 ```
 
 ### Maps/objects are not callable — use `get`
@@ -190,21 +196,25 @@ Squint compiles the symbol `js->clj` but does not provide the function at runtim
 
 `clj->js` **does** work (for converting to JS objects with `JSON.stringify`).
 
-### `array-seq` does not exist — use `seq` or pass JS arrays directly
+### `array-seq` does not exist — use JS arrays directly
 
-`array-seq` compiles to a bare identifier that is not defined at runtime. In Squint, JS arrays are already iterable — `seq`, `vec`, `into`, `map`, `filter`, `reduce` all work on them natively.
+`array-seq` compiles to a bare identifier that is not defined at runtime. In Squint, JS arrays are already seqable — `map`, `filter`, `reduce`, `into`, `vec` all accept them directly. Use `js/Array.from` when you explicitly need a JS array from an array-like (NodeList, `arguments`, etc.).
 
 ```clojure
 ;; BROKEN — ReferenceError: array_seq is not defined
-(let [items (array-seq js-array)] ...)
+(reduce + 0 (array-seq js-array))
 
-;; CORRECT — seq works on JS arrays
-(let [items (seq js-array)] ...)
+;; CORRECT — reduce works directly on JS arrays
+(reduce + 0 js-array)
 
-;; ALSO CORRECT — into/map/filter work directly on JS arrays
+;; ALSO CORRECT — all seq ops work directly on JS arrays
 (into [] js-array)
 (map inc js-array)
 (into [cmd] (or args []))  ;; args is a JS array — no conversion needed
+
+;; Use js/Array.from only for non-array iterables (NodeList, Set, arguments, etc.)
+(js/Array.from (.-childNodes node))
+(js/Array.from js-set)  ;; when you need a plain array from a JS Set
 ```
 
 ### `Bun.spawn` requires explicit pipe config
@@ -741,10 +751,10 @@ All available macros in `macros.tool-dsl`:
 | `(name :my-key)` | Use string literal directly (keywords are strings in Squint) |
 | `(keyword? x)` | `(string? x)` |
 | `(keyword "foo")` | `"foo"` — just use a string |
-| `(my-set :key)` | `(contains? my-set :key)` |
+| `(my-set :key)` or `(@atom-set :key)` | `(contains? my-set :key)` or `(contains? @atom-set :key)` |
 | `(my-map :key)` | `(get my-map :key)` |
 | `(js->clj ...)` | Use the value directly — it's already a JS object. For deep clone: `(js/JSON.parse (js/JSON.stringify x))` |
-| `(array-seq xs)` | `(seq xs)` or just pass the JS array directly — `into`/`map`/`filter` work on it |
+| `(array-seq xs)` | Pass the JS array directly — `map`/`filter`/`reduce`/`into` all accept JS arrays natively; use `(js/Array.from xs)` only for non-array iterables |
 | `(clojure.string/join ...)` | `(:require [clojure.string :as str])` then `(str/join ...)` |
 | `(js/process.env.HOME)` | `(.. js/process -env -HOME)` |
 | `(.-textDelta chunk "")` | `(or (.-textDelta chunk) "")` |
