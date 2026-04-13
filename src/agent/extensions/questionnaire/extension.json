@@ -1,0 +1,5 @@
+{
+  "namespace": "questionnaire",
+  "capabilities": ["tools", "ui"],
+  "dependsOn": []
+}
