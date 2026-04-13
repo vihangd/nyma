@@ -51,39 +51,40 @@
       (let [on-fn (.-on events)]
         (when (fn? on-fn)
           (on-fn "bash:classification"
-            (fn [data]
-              (reset! last-classification
-                {:level (.-level data)
-                 :reasons (vec (or (.-reasons data) []))
-                 :command (.-command data)}))))))
+                 (fn [data]
+                   (reset! last-classification
+                           {:level (.-level data)
+                            :reasons (vec (or (.-reasons data) []))
+                            :command (.-command data)}))))))
 
     ;; Permission check via shared permission_request event
     (.on api "permission_request"
-      (fn [data]
-        (when (and (:enabled perm-config) (= (str (.-tool data)) "bash"))
-          (let [args     (.-args data)
-                cmd      (str (or (.-command args) (aget args "command") ""))
-                classif  @last-classification
-                decision (check-decision cmd classif perm-config session-approvals)]
-            (case decision
-              :denied
-              (do (swap! shared/suite-stats update-in [:permissions :denied] inc)
-                  #js {:decision "deny" :reason "Permission denied: command matches denylist"})
+         (fn [data]
+           (when (and (:enabled perm-config) (= (str (.-tool data)) "bash"))
+             (let [args     (.-args data)
+                   cmd      (str (or (.-command args) (aget args "command") ""))
+                   classif  @last-classification
+                   decision (check-decision cmd classif perm-config session-approvals)]
+               (case decision
+                 :denied
+                 (do (swap! shared/suite-stats update-in [:permissions :denied] inc)
+                     #js {:decision "deny" :reason "Permission denied: command matches denylist"})
 
-              :approved
-              (do (swap! session-approvals assoc cmd :approved)
-                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
-                  #js {:decision "allow"})
+                 :approved
+                 (do (swap! session-approvals assoc cmd :approved)
+                     (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                     #js {:decision "allow"})
 
-              :remembered
-              (do (swap! shared/suite-stats update-in [:permissions :remembered] inc)
-                  #js {:decision "allow"})
+                 :remembered
+                 (do (swap! shared/suite-stats update-in [:permissions :remembered] inc)
+                     #js {:decision "allow"})
 
-              ;; :needs-approval — auto-approve for now
-              (do (swap! session-approvals assoc cmd :approved)
-                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
-                  #js {:decision "allow"})))))
-      90)
+              ;; :needs-approval — persist to project settings for cross-session approval.
+              ;; The middleware fast-path then bypasses permission_request on future runs.
+              ;; security_analysis before_tool_call hooks still run — only the prompt is skipped.
+                 (do (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                     #js {:decision "allow_always_project"})))))
+         90)
 
     ;; Return deactivator
     (fn []

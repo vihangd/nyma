@@ -99,21 +99,21 @@
 
 (defn- check-destructive-patterns [cmd]
   (reduce
-    (fn [reasons pattern]
-      (if (re-find (:regex pattern) cmd)
-        (conj reasons (:reason pattern))
-        reasons))
-    []
-    destructive-patterns))
+   (fn [reasons pattern]
+     (if (re-find (:regex pattern) cmd)
+       (conj reasons (:reason pattern))
+       reasons))
+   []
+   destructive-patterns))
 
 (defn- check-obfuscation [cmd]
   (reduce
-    (fn [reasons pattern]
-      (if (re-find (:regex pattern) cmd)
-        (conj reasons (:reason pattern))
-        reasons))
-    []
-    obfuscation-patterns))
+   (fn [reasons pattern]
+     (if (re-find (:regex pattern) cmd)
+       (conj reasons (:reason pattern))
+       reasons))
+   []
+   obfuscation-patterns))
 
 (defn- classify-token-group
   "Classify a group of tokens (a single subcommand) by its command name and arguments."
@@ -146,14 +146,14 @@
       (swap! groups conj {:tokens @current :piped-from @last-op}))
     ;; Check if any piped-to group starts with an interpreter
     (reduce
-      (fn [reasons group]
-        (if (and (= (:piped-from group) "|")
-                 (seq (:tokens group))
-                 (contains? interpreter-commands (first (:tokens group))))
-          (conj reasons (str "piped output to interpreter: " (first (:tokens group))))
-          reasons))
-      []
-      @groups)))
+     (fn [reasons group]
+       (if (and (= (:piped-from group) "|")
+                (seq (:tokens group))
+                (contains? interpreter-commands (first (:tokens group))))
+         (conj reasons (str "piped output to interpreter: " (first (:tokens group))))
+         reasons))
+     []
+     @groups)))
 
 (defn classify-command
   "Parse and classify a shell command. Returns {:level :reasons :command}."
@@ -220,29 +220,31 @@
         sec-config (:security-analysis config)]
 
     (.on api "before_tool_call"
-      (fn [data]
-        (when (and (:enabled sec-config)
-                   (shared/is-bash-tool? (.-name data)))
-          (let [args   (.-args data)
-                cmd    (or (.-command args) (aget args "command"))
-                result (classify-command cmd sec-config)]
+         (fn [data]
+           (when (and (:enabled sec-config)
+                      (shared/is-bash-tool? (.-name data)))
+             (let [args   (.-args data)
+                   cmd    (or (.-command args) (aget args "command"))
+                   result (classify-command cmd sec-config)]
             ;; Emit classification on inter-extension bus
-            (when-let [events (.-events api)]
-              (let [emit-fn (.-emit events)]
-                (when (fn? emit-fn)
-                  (emit-fn "bash:classification" (clj->js result)))))
+               (when-let [events (.-events api)]
+                 (let [emit-fn (.-emit events)]
+                   (when (fn? emit-fn)
+                     (emit-fn "bash:classification" (clj->js result)))))
             ;; Update stats
-            (swap! shared/suite-stats update :security-analysis
-              (fn [s] (-> s
-                          (update :commands-analyzed inc)
-                          (update-in [:classified (:level result)] inc))))
-            ;; Block via return value
-            (when (should-block? result sec-config)
-              (swap! shared/suite-stats update-in [:security-analysis :blocked] inc)
-              #js {:block true
-                   :reason (str "BLOCKED [" (str (:level result)) "]: "
-                                (str/join "; " (:reasons result)))}))))
-      100)
+               (swap! shared/suite-stats update :security-analysis
+                      (fn [s] (-> s
+                                  (update :commands-analyzed inc)
+                                  (update-in [:classified (:level result)] inc))))
+            ;; Skip via clean result string — model gets actionable guidance, not an error marker
+               (when (should-block? result sec-config)
+                 (swap! shared/suite-stats update-in [:security-analysis :blocked] inc)
+                 #js {:skip true
+                      :result (str "Command blocked by security analysis ["
+                                   (str (:level result)) "]: "
+                                   (str/join "; " (:reasons result))
+                                   "\n\nPlease use an alternative approach or ask the user for clarification.")}))))
+         100)
 
     ;; Return deactivator
     (fn [] nil)))
