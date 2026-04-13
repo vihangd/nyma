@@ -93,17 +93,26 @@
 ;;; ─── Registration ─────────────────────────────────────
 
 (def segments
-  "Map of {id → render-fn} for every ACP segment this file contributes."
-  {"acp.agent"      acp-agent-segment
-   "acp.model"      acp-model-segment
-   "acp.mode"       acp-mode-segment
-   "acp.context"    acp-context-segment
-   "acp.cost"       acp-cost-segment
-   "acp.turn-usage" acp-turn-usage-segment})
+  "Map of {id → {:render :position}} for every ACP segment this file
+   contributes. :position decides which group (:left or :right) the
+   segment auto-appends onto when an ACP agent is connected — it
+   mirrors the layout of the old ui.setFooter-based rich footer."
+  {"acp.agent"      {:render acp-agent-segment      :position "left"}
+   "acp.model"      {:render acp-model-segment      :position "left"}
+   "acp.mode"       {:render acp-mode-segment       :position "left"}
+   "acp.context"    {:render acp-context-segment    :position "right"}
+   "acp.cost"       {:render acp-cost-segment       :position "right"}
+   "acp.turn-usage" {:render acp-turn-usage-segment :position "right"}})
 
 (defn register-all!
-  "Register every ACP segment with the given extension API."
+  "Register every ACP segment with the given extension API. Segments
+   auto-append onto the user's status line — no preset edit required —
+   and self-hide (return {:visible? false}) when no ACP agent is
+   currently connected, so non-ACP users see zero change."
   [api]
-  (doseq [[id render-fn] segments]
+  (doseq [[id {:keys [render position]}] segments]
     (when-let [reg (.-registerStatusSegment api)]
-      (reg id #js {:category "acp-agent" :render render-fn}))))
+      (reg id #js {:category   "acp-agent"
+                   :autoAppend true
+                   :position   position
+                   :render     render}))))

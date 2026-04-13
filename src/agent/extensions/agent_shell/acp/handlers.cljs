@@ -17,6 +17,10 @@
     (str/starts-with? resolved (str root "/"))))
 
 ;;; ─── Permission handling ───────────────────────────────────
+;; TODO: Integrate with shared permission_request event (emit-collect) when
+;; ACP handlers support async. Currently synchronous for JSON-RPC response timing.
+;; Future: (let [result (js-await ((:emit-collect events) "permission_request" ...))]
+;;           (case (get result "decision") "allow" ... "deny" ...))
 
 (defn handle-permission-request
   "Handle permission request from agent. Shows UI dialog or auto-approves."

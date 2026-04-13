@@ -80,8 +80,24 @@
                           (.notify (.-ui ctx) text "info"))
                         text))})
 
-    ;; Return combined deactivate
-    (fn []
-      (doseq [deactivate @deactivators]
-        (when (fn? deactivate)
-          (deactivate))))))
+    ;; Budget-aware tool filtering — disable expensive tools when context is near full
+    (let [budget-handler
+          (fn [data]
+            (when-let [budget (.getTokenBudget api)]
+              (let [used   (or (.-tokensUsed budget) 0)
+                    window (or (.-contextWindow budget) 100000)
+                    pct    (/ used window)]
+                ;; When >80% full, disable expensive tools
+                (when (> pct 0.80)
+                  (let [tools (vec (.-tools data))
+                        cheap (vec (remove #{"web_fetch" "web_search"} tools))]
+                    (when (not= (count tools) (count cheap))
+                      #js {:allowed (clj->js cheap)}))))))]
+      (.on api "tool_access_check" budget-handler)
+
+      ;; Return combined deactivate
+      (fn []
+        (.off api "tool_access_check" budget-handler)
+        (doseq [deactivate @deactivators]
+          (when (fn? deactivate)
+            (deactivate)))))))

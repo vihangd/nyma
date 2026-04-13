@@ -125,9 +125,8 @@
       (let [agent (make-agent)
             api   (make-api agent)
             _     (security-analysis/activate api)
-            evt   #js {:toolName "bash" :input #js {:command "ls -la"}
-                       :cancelled false :reason nil}]
-        ;; Simulate the event
+            evt   #js {:name "bash" :args #js {:command "ls -la"}}]
+        ;; Simulate the event via emit-collect (handler returns value)
         ((:emit (:events agent)) "before_tool_call" evt)
         (let [s (:security-analysis @shared/suite-stats)]
           (-> (expect (:commands-analyzed s)) (.toBe 1))
@@ -302,9 +301,7 @@
       (let [agent (make-agent)
             api   (make-api agent)
             _     (env-filter/activate api)
-            evt   #js {:toolName "bash"
-                       :input #js {:command "echo hello"}
-                       :cancelled false}]
+            evt   #js {:name "bash" :args #js {:command "echo hello"}}]
         ((:emit (:events agent)) "before_tool_call" evt)
         (let [s (:env-filter @shared/suite-stats)]
           (-> (expect (:commands-filtered s)) (.toBe 1))))))
@@ -314,21 +311,17 @@
       (let [agent (make-agent)
             api   (make-api agent)
             _     (env-filter/activate api)
-            evt   #js {:toolName "read"
-                       :input #js {:path "/tmp/test.txt"}
-                       :cancelled false}]
+            evt   #js {:name "read" :args #js {:path "/tmp/test.txt"}}]
         ((:emit (:events agent)) "before_tool_call" evt)
         (let [s (:env-filter @shared/suite-stats)]
           (-> (expect (:commands-filtered s)) (.toBe 0))))))
 
-  (it "skips cancelled commands"
+  (it "skips when tool name is not bash"
     (fn []
       (let [agent (make-agent)
             api   (make-api agent)
             _     (env-filter/activate api)
-            evt   #js {:toolName "bash"
-                       :input #js {:command "rm -rf /"}
-                       :cancelled true}]
+            evt   #js {:name "write" :args #js {:path "/tmp/x" :content "y"}}]
         ((:emit (:events agent)) "before_tool_call" evt)
         (let [s (:env-filter @shared/suite-stats)]
           (-> (expect (:commands-filtered s)) (.toBe 0))))))))
@@ -435,54 +428,48 @@
       (let [agent      (make-agent)
             api        (make-api agent)
             deactivate ((.-default suite-index) api)
-            evt        #js {:toolName "bash"
-                            :input #js {:command "rm -rf /"}
-                            :cancelled false :reason nil}]
-        ((:emit (:events agent)) "before_tool_call" evt)
-        (-> (expect (.-cancelled evt)) (.toBe true))
-        (-> (expect (.-reason evt)) (.toContain "BLOCKED"))
-        (deactivate))))
+            evt        #js {:name "bash" :args #js {:command "rm -rf /"}}
+            p          ((:emit-collect (:events agent)) "before_tool_call" evt)]
+        (.then p (fn [result]
+          (-> (expect (get result "block")) (.toBe true))
+          (-> (expect (get result "reason")) (.toContain "BLOCKED"))
+          (deactivate))))))
 
   (it "full pipeline allows safe commands"
     (fn []
       (let [agent      (make-agent)
             api        (make-api agent)
             deactivate ((.-default suite-index) api)
-            evt        #js {:toolName "bash"
-                            :input #js {:command "echo hello"}
-                            :cancelled false :reason nil}]
-        ((:emit (:events agent)) "before_tool_call" evt)
-        (-> (expect (.-cancelled evt)) (.toBe false))
-        (deactivate))))
+            evt        #js {:name "bash" :args #js {:command "echo hello"}}
+            p          ((:emit-collect (:events agent)) "before_tool_call" evt)]
+        (.then p (fn [result]
+          (-> (expect (get result "block")) (.toBeFalsy))
+          (deactivate))))))
 
   (it "env filter modifies command in pipeline"
     (fn []
       (let [agent      (make-agent)
             api        (make-api agent)
             deactivate ((.-default suite-index) api)
-            evt        #js {:toolName "bash"
-                            :input #js {:command "echo hello"}
-                            :cancelled false :reason nil}]
-        ((:emit (:events agent)) "before_tool_call" evt)
-        ;; Command should have unset preamble prepended
-        (-> (expect (.-command (.-input evt))) (.toContain "unset"))
-        (deactivate))))
+            evt        #js {:name "bash" :args #js {:command "echo hello"}}
+            p          ((:emit-collect (:events agent)) "before_tool_call" evt)]
+        (.then p (fn [result]
+          ;; Env filter returns {args: {command: "unset ... ; echo hello"}}
+          (let [modified-args (get result "args")]
+            (-> (expect (.-command modified-args)) (.toContain "unset")))
+          (deactivate))))))
 
   (it "stats are tracked across all sub-extensions"
     (fn []
       (let [agent      (make-agent)
             api        (make-api agent)
             deactivate ((.-default suite-index) api)
-            ;; Run a safe command through the pipeline
-            evt        #js {:toolName "bash"
-                            :input #js {:command "ls -la"}
-                            :cancelled false :reason nil}]
+            evt        #js {:name "bash" :args #js {:command "ls -la"}}]
+        ;; Use emit (fire-and-forget) to trigger handlers, then check stats
         ((:emit (:events agent)) "before_tool_call" evt)
         (let [sa (:security-analysis @shared/suite-stats)
-              pm (:permissions @shared/suite-stats)
               ef (:env-filter @shared/suite-stats)]
           (-> (expect (:commands-analyzed sa)) (.toBe 1))
-          (-> (expect (:auto-approved pm)) (.toBeGreaterThan 0))
           (-> (expect (:commands-filtered ef)) (.toBe 1)))
         (deactivate))))))
 

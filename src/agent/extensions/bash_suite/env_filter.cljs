@@ -20,18 +20,17 @@
         preamble   (build-preamble (:strip-vars env-config))]
 
     (.on api "before_tool_call"
-      (fn [evt-ctx]
+      (fn [data]
         (when (and (:enabled env-config)
-                   (shared/is-bash-tool? (.-toolName evt-ctx))
-                   (not (.-cancelled evt-ctx))
+                   (shared/is-bash-tool? (.-name data))
                    (not (str/blank? preamble)))
-          (let [input (.-input evt-ctx)
-                cmd   (.-command input)]
-            (aset input "command" (str preamble cmd))
+          (let [args (.-args data)
+                cmd  (or (.-command args) (aget args "command") "")]
             (swap! shared/suite-stats update :env-filter
               (fn [s] (-> s
                           (update :vars-stripped + (count (:strip-vars env-config)))
-                          (update :commands-filtered inc)))))))
+                          (update :commands-filtered inc))))
+            #js {:args #js {:command (str preamble cmd)}})))
       80)
 
     (fn [] nil)))

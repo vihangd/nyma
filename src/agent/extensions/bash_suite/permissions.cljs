@@ -57,31 +57,32 @@
                  :reasons (vec (or (.-reasons data) []))
                  :command (.-command data)}))))))
 
-    ;; Permission check on bash tool calls
-    (.on api "before_tool_call"
-      (fn [evt-ctx]
-        (when (and (:enabled perm-config)
-                   (shared/is-bash-tool? (.-toolName evt-ctx))
-                   (not (.-cancelled evt-ctx)))
-          (let [cmd      (.-command (.-input evt-ctx))
+    ;; Permission check via shared permission_request event
+    (.on api "permission_request"
+      (fn [data]
+        (when (and (:enabled perm-config) (= (str (.-tool data)) "bash"))
+          (let [args     (.-args data)
+                cmd      (str (or (.-command args) (aget args "command") ""))
                 classif  @last-classification
                 decision (check-decision cmd classif perm-config session-approvals)]
             (case decision
               :denied
               (do (swap! shared/suite-stats update-in [:permissions :denied] inc)
-                  (set! (.-cancelled evt-ctx) true)
-                  (set! (.-reason evt-ctx) "Permission denied: command matches denylist"))
+                  #js {:decision "deny" :reason "Permission denied: command matches denylist"})
 
               :approved
-              (do (swap! session-approvals assoc (str cmd) :approved)
-                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc))
+              (do (swap! session-approvals assoc cmd :approved)
+                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                  #js {:decision "allow"})
 
               :remembered
-              (swap! shared/suite-stats update-in [:permissions :remembered] inc)
+              (do (swap! shared/suite-stats update-in [:permissions :remembered] inc)
+                  #js {:decision "allow"})
 
-              ;; :needs-approval — auto-approve for now, track as auto-approved
-              (do (swap! session-approvals assoc (str cmd) :approved)
-                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc))))))
+              ;; :needs-approval — auto-approve for now
+              (do (swap! session-approvals assoc cmd :approved)
+                  (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                  #js {:decision "allow"})))))
       90)
 
     ;; Return deactivator

@@ -54,13 +54,36 @@
           (when-let [start @turn-start]
             (let [elapsed (- (js/Date.now) start)]
               (when (> elapsed threshold-ms)
-                ;; Check flag (allows runtime toggle)
                 (let [enabled (if (and (.-getFlag api))
                                 (let [flag-val (.getFlag api "enabled")]
                                   (if (some? flag-val) flag-val true))
                                 true)]
                   (when enabled
-                    (send-notification! "nyma" "Response ready")))))))]
+                    (send-notification! "nyma" "Response ready")))))))
+
+        check-enabled
+        (fn []
+          (if (.-getFlag api)
+            (let [flag-val (.getFlag api "enabled")]
+              (if (some? flag-val) flag-val true))
+            true))
+
+        ;; Notify on long-running tool completions (>10s)
+        on-tool-complete
+        (fn [data _ctx]
+          (let [dur (or (.-duration data) 0)]
+            (when (and (> dur 10000) (check-enabled))
+              (send-notification! "nyma"
+                (str (.-toolName data) " completed ("
+                     (js/Math.round (/ dur 1000)) "s)")))))
+
+        ;; Notify with session summary on exit
+        on-session-end
+        (fn [data _ctx]
+          (when (check-enabled)
+            (send-notification! "nyma"
+              (str "Session: " (or (.-turnCount data) 0) " turns, $"
+                   (.toFixed (or (.-totalCost data) 0) 2)))))]
 
     ;; Register enable/disable flag
     (when (.-registerFlag api)
@@ -68,11 +91,15 @@
         #js {:description "Enable desktop notifications"
              :default     (:enabled config)}))
 
-    ;; Listen to turn lifecycle events
+    ;; Listen to lifecycle events
     (.on api "turn_start" on-turn-start)
     (.on api "turn_end" on-turn-end)
+    (.on api "tool_complete" on-tool-complete)
+    (.on api "session_end_summary" on-session-end)
 
     ;; Return deactivator
     (fn []
       (.off api "turn_start" on-turn-start)
-      (.off api "turn_end" on-turn-end))))
+      (.off api "turn_end" on-turn-end)
+      (.off api "tool_complete" on-tool-complete)
+      (.off api "session_end_summary" on-session-end))))

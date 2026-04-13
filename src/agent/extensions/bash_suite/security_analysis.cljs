@@ -220,12 +220,13 @@
         sec-config (:security-analysis config)]
 
     (.on api "before_tool_call"
-      (fn [evt-ctx]
+      (fn [data]
         (when (and (:enabled sec-config)
-                   (shared/is-bash-tool? (.-toolName evt-ctx)))
-          (let [cmd    (.-command (.-input evt-ctx))
+                   (shared/is-bash-tool? (.-name data)))
+          (let [args   (.-args data)
+                cmd    (or (.-command args) (aget args "command"))
                 result (classify-command cmd sec-config)]
-            ;; Emit on inter-extension bus for permissions
+            ;; Emit classification on inter-extension bus
             (when-let [events (.-events api)]
               (let [emit-fn (.-emit events)]
                 (when (fn? emit-fn)
@@ -235,13 +236,12 @@
               (fn [s] (-> s
                           (update :commands-analyzed inc)
                           (update-in [:classified (:level result)] inc))))
-            ;; Block if configured
+            ;; Block via return value
             (when (should-block? result sec-config)
               (swap! shared/suite-stats update-in [:security-analysis :blocked] inc)
-              (set! (.-cancelled evt-ctx) true)
-              (set! (.-reason evt-ctx)
-                (str "BLOCKED [" (str (:level result)) "]: "
-                     (str/join "; " (:reasons result))))))))
+              #js {:block true
+                   :reason (str "BLOCKED [" (str (:level result)) "]: "
+                                (str/join "; " (:reasons result)))}))))
       100)
 
     ;; Return deactivator
