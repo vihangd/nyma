@@ -107,7 +107,8 @@
         agent (create-agent
                {:model         nil
                 :system-prompt ((:build-system-prompt resources))
-                :max-steps     20})
+                :max-steps     20
+                :settings      settings})
         model (try
                 (resolve-model-via-registry (:provider-registry agent) values merged)
                 (catch :default e

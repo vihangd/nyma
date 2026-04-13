@@ -13,8 +13,8 @@
 
 (defn create-agent
   "Create an agent instance. Config is a plain JS object with:
-   :model, :system-prompt, :tools, :max-steps, :extensions"
-  [{:keys [model system-prompt tools max-steps extensions]
+   :model, :system-prompt, :tools, :max-steps, :extensions, :settings"
+  [{:keys [model system-prompt tools max-steps extensions settings]
     :or   {max-steps 20}}]
   (let [events            (create-event-bus)
         ;; :tools must be a map of {name → tool-object} or nil.
@@ -24,7 +24,7 @@
         ;; agent-ref is an atom set after agent creation so the pipeline
         ;; can lazily create extension contexts during tool execution.
         agent-ref         (atom nil)
-        middleware        (create-pipeline events nil agent-ref)
+        middleware        (create-pipeline events nil agent-ref settings)
         steer-queue       (atom [])
         follow-queue      (atom [])
         commands          (atom {})

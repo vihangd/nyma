@@ -135,7 +135,7 @@
   "Read, duplicate-key-scan, and parse a settings JSON file. Any
    duplicate-key warnings are sent through `d/warn` so they show up
    on stderr but don't block load. Returns nil when the file is
-   missing (the caller handles this case)."
+   missing or unparseable (the caller handles this case)."
   [file-path]
   (when (fs/existsSync file-path)
     (let [text   (fs/readFileSync file-path "utf8")
@@ -144,7 +144,11 @@
         (d/warn "settings" (str "Duplicate keys in " file-path)
                 {:count (count issues)
                  :details (mapv v/format-issue issues)}))
-      (js/JSON.parse text))))
+      (try
+        (js/JSON.parse text)
+        (catch :default e
+          (d/warn "settings" (str "Failed to parse " file-path ": " (.-message e)))
+          nil)))))
 
 (defn- save-json [file-path data]
   (let [dir (path/dirname file-path)]
@@ -154,34 +158,70 @@
 
 (defn create-settings-manager
   "Two-scope settings: global + project. Project overrides global.
-   Supports :reload to re-read files from disk without restarting."
-  []
-  (let [global-path      (path/join (os/homedir) ".nyma" "settings.json")
-        project-path     ".nyma/settings.json"
-        global-settings  (atom (load-json global-path))
-        project-settings (atom (load-json project-path))
-        overrides        (atom {})]
+   Supports :reload to re-read files from disk without restarting.
+   Accepts an optional opts map:
+     :global-path  — override the global settings file path (default: ~/.nyma/settings.json)
+     :project-path — override the project settings file path (default: .nyma/settings.json)"
+  ([] (create-settings-manager {}))
+  ([{:keys [global-path project-path]}]
+   (let [global-path   (or global-path (path/join (os/homedir) ".nyma" "settings.json"))
+         project-path  (or project-path ".nyma/settings.json")
+         global-settings  (atom (load-json global-path))
+         project-settings (atom (load-json project-path))
+         overrides        (atom {})]
 
-    {:get (fn []
-            (merge defaults
-                   (or @global-settings {})
-                   (or @project-settings {})
-                   @overrides))
+     {:get (fn []
+             (merge defaults
+                    (or @global-settings {})
+                    (or @project-settings {})
+                    @overrides))
 
-     :set-override (fn [k v]
-                     (swap! overrides assoc k v))
+      :set-override (fn [k v]
+                      (swap! overrides assoc k v))
 
-     :apply-overrides (fn [m]
-                        (swap! overrides merge m))
+      :apply-overrides (fn [m]
+                         (swap! overrides merge m))
 
-     :reload (fn []
-               (reset! global-settings (load-json global-path))
-               (reset! project-settings (load-json project-path)))
+      :reload (fn []
+                (reset! global-settings (load-json global-path))
+                (reset! project-settings (load-json project-path)))
 
-     :save-global (fn [settings]
-                    (save-json global-path
-                               (merge @global-settings settings)))
+      :save-global (fn [settings]
+                     (save-json global-path
+                                (merge @global-settings settings)))
 
-     :save-project (fn [settings]
-                     (save-json project-path
-                                (merge @project-settings settings)))}))
+      :save-project (fn [settings]
+                      (save-json project-path
+                                 (merge @project-settings settings)))
+
+      :tool-allowed? (fn [tool-name]
+                      ;; Union of project + global allow-lists.
+                      ;; Settings are plain JS objects from JSON.parse.
+                       (let [js-allow (fn [s]
+                                        (when s
+                                          (let [perms (.-permissions s)]
+                                            (when perms
+                                              (.-allow perms)))))
+                             global-allow  (or (js-allow @global-settings) #js [])
+                             project-allow (or (js-allow @project-settings) #js [])
+                             all-allowed   (into #{} (concat (js/Array.from global-allow)
+                                                             (js/Array.from project-allow)))]
+                         (contains? all-allowed tool-name)))
+
+      :append-allow-tool! (fn [tool-name]
+                           ;; Add tool-name to project permissions.allow (idempotent).
+                           ;; Settings are plain JS objects; build/merge without js->clj.
+                            (let [ps        @project-settings
+                                  perms     (when ps (.-permissions ps))
+                                  current   (if (and perms (.-allow perms))
+                                              (js/Array.from (.-allow perms))
+                                              [])
+                                  as-set    (into #{} current)]
+                              (when-not (contains? as-set tool-name)
+                                (let [new-allow  (clj->js (conj current tool-name))
+                                      new-perms  (doto (js/Object.assign #js {} (or perms #js {}))
+                                                   (aset "allow" new-allow))
+                                      updated    (doto (js/Object.assign #js {} (or ps #js {}))
+                                                   (aset "permissions" new-perms))]
+                                  (save-json project-path updated)
+                                  (reset! project-settings (load-json project-path))))))})))

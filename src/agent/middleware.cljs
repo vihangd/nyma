@@ -246,26 +246,44 @@
 
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
-   Handlers return {decision: 'allow'|'deny'|'ask', reason?: string}."
-  [events ctx]
+   Handlers return {decision: 'allow'|'deny'|'allow_always_project', reason?: string}.
+
+   If settings is provided and the tool is in the project/global allow-list,
+   the permission_request event is skipped entirely (no subscribers fire).
+
+   allow_always_project persists the decision to .nyma/settings.json so
+   future calls skip the prompt automatically."
+  [events settings ctx]
   (let [tool-name (:tool-name ctx)
-        args      (:args ctx)
-        result    (js-await
-                   ((:emit-collect events) "permission_request"
-                                           #js {:tool     tool-name
-                                                :args     (clj->js args)
-                                                :category (categorize-tool tool-name)
-                                                :path     (or (get args :path) (get args "path"))}))]
-    (if (= (get result "decision") "deny")
-      (assoc ctx :cancelled true
-             :cancel-reason (or (get result "reason") "Permission denied"))
-      ctx)))
+        args      (:args ctx)]
+    ;; Fast-path: tool is in the persistent allow-list — skip the prompt
+    (if (and settings ((:tool-allowed? settings) tool-name))
+      ctx
+      (let [result (js-await
+                    ((:emit-collect events) "permission_request"
+                                            #js {:tool     tool-name
+                                                 :args     (clj->js args)
+                                                 :category (categorize-tool tool-name)
+                                                 :path     (or (get args :path) (get args "path"))}))]
+        (cond
+          (= (get result "decision") "deny")
+          (assoc ctx :cancelled true
+                 :cancel-reason (or (get result "reason") "Permission denied"))
+
+          (= (get result "decision") "allow_always_project")
+          (do
+            (when settings
+              ((:append-allow-tool! settings) tool-name))
+            ctx)
+
+          :else ctx)))))
 
 (defn permission-check-interceptor
-  "Interceptor that emits permission_request for custom approval workflows."
-  [events]
+  "Interceptor that emits permission_request for custom approval workflows.
+   Accepts an optional settings manager for allow-list persistence."
+  [events & [settings]]
   {:name  :permission-check
-   :enter (fn [ctx] (permission-check-enter events ctx))})
+   :enter (fn [ctx] (permission-check-enter events settings ctx))})
 
 (def prepare-arguments-interceptor
   "Interceptor that calls tool.prepareArguments if defined, transforming args before execution."
@@ -280,9 +298,10 @@
   "Create a middleware pipeline for tool execution.
    Interceptors run in order: user middleware → before-hook-compat → execute-tool.
    Returns a map with :add, :remove, :execute, and :chain.
-   Optionally accepts a store for tool execution tracking and an agent-ref
-   atom for injecting extension context into tool execution."
-  [events & [store agent-ref]]
+   Optionally accepts a store for tool execution tracking, an agent-ref
+   atom for injecting extension context, and a settings manager for
+   allow-list persistence."
+  [events & [store agent-ref settings]]
   (let [chain (atom [(tool-tracking-interceptor events store)])]
     {:add
      (fn [interceptor & [opts]]
@@ -309,7 +328,7 @@
                        :abort-controller (when agent (:abort-controller agent))}
              full     (vec (concat @chain
                                    [prepare-arguments-interceptor
-                                    (permission-check-interceptor events)
+                                    (permission-check-interceptor events settings)
                                     (before-hook-compat events)
                                     tool-execution-interceptor]))]
          (ic/execute full ctx)))
