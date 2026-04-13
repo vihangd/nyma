@@ -13,14 +13,16 @@
    shape and extended with :network? and :long-running? so downstream
    consumers can make routing decisions.
 
-   Schema (all fields optional; omitted = false, category = nil):
+   Schema (all fields optional; omitted = false/nil, category = nil):
 
      {:read-only?             tool only reads; no mutation
       :destructive?           may overwrite, delete, or mutate state
       :requires-confirmation? prompt user before running
       :network?               tool makes network calls (hide in air-gap)
       :long-running?          may exceed normal tool timeouts
-      :category               one of #{:file :search :shell :network :meta}}
+      :category               one of #{:file :search :shell :network :meta}
+      :result-policy          optional override map for agent.tool-result-policy;
+                              keys: :max-string-length (int), :prefer-summary-only (bool)}
 
    Unknown tools fall back to a conservative 'nothing known' default:
    not read-only, not destructive, no confirmation required. Callers
@@ -80,7 +82,8 @@
    :requires-confirmation? false
    :network?               false
    :long-running?          false
-   :category               nil})
+   :category               nil
+   :result-policy          nil})
 
 (defn tool-safety
   "Return the merged safety map for a tool name. Order of precedence

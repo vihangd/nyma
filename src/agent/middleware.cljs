@@ -1,6 +1,7 @@
 (ns agent.middleware
   (:require [agent.interceptors :as ic]
             [agent.extension-context :refer [create-extension-context]]
+            [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]))
 
 (defn normalize-tool-result
@@ -176,6 +177,14 @@
         ctx        (if-let [mod-result (get complete-result "result")]
                      (assoc ctx :result (str mod-result))
                      ctx)
+        ;; Apply per-tool result policy: truncates to :max-string-length and builds
+        ;; structured envelope {:ok :summary :data :error :error-kind}.
+        ;; ctx :result is replaced with the policy-truncated model-visible string.
+        ;; The full envelope is stored as :result-envelope for UI consumers.
+        envelope   (policy/apply-policy (:result ctx) (:tool-name ctx))
+        ctx        (-> ctx
+                       (assoc :result (policy/model-string envelope))
+                       (assoc :result-envelope envelope))
         result-str (truncate-text (str (:result ctx)) 500)
         display    (and (:tool ctx) (.-display (:tool ctx)))
         custom-result (when display
@@ -186,6 +195,7 @@
                                :exec-id         (:exec-id ctx)
                                :duration        duration
                                :result          result-str
+                               :result-envelope (:result-envelope ctx)
                                :details         (:result-details ctx)
                                :is-error        (:result-is-error ctx)
                                :content-parts   (:result-content-parts ctx)}
