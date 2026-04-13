@@ -17,6 +17,9 @@
                         ;; If overriding an existing tool, preserve the original
                         (when (and (contains? @tools name) (not (contains? @overridden name)))
                           (swap! overridden assoc name (get @tools name)))
+                        ;; Attach __original so overriding tools can chain
+                        (when-let [orig (get @overridden name)]
+                          (set! (.-__original t) orig))
                         (swap! tools assoc name t)
                         (swap! active conj name))
         unregister-fn (fn [name]

@@ -63,36 +63,31 @@
    :enter execute-tool-fn})
 
 (defn ^:async before-hook-compat-enter
-  "Enter stage for before-hook-compat interceptor. Uses emit-async to
-   ensure async handlers complete before checking cancelled/blocked flag.
-   Supports both legacy before_tool_call and pi-compatible tool_call events.
-   Handlers can block execution or mutate event.input to modify args."
+  "Enter stage: emit-collect before_tool_call so handlers can cancel or transform args.
+   Handlers return {block: true, reason: '...'} to cancel, {args: modified} to transform.
+   Also fires tool_call for pi-compatibility."
   [events ctx]
-  (let [original-input (clj->js (:args ctx))
-        evt-ctx #js {:name      (:tool-name ctx)
-                     :toolName  (:tool-name ctx)
-                     :args      (:args ctx)
-                     :input     original-input
-                     :cancelled false
-                     :blocked   false
-                     :reason    nil}]
-    (js-await ((:emit-async events) "before_tool_call" evt-ctx))
-    (js-await ((:emit-async events) "tool_call" evt-ctx))
+  (let [data #js {:name     (:tool-name ctx)
+                  :toolName (:tool-name ctx)
+                  :args     (clj->js (:args ctx))
+                  :execId   (:exec-id ctx)}
+        result (js-await ((:emit-collect events) "before_tool_call" data))
+        ;; Also emit tool_call for pi-compat (fire-and-forget)
+        _      ((:emit events) "tool_call" data)]
     (cond
-      (.-blocked evt-ctx)
+      (or (get result "block") (get result "cancel"))
       (assoc ctx :cancelled true
-                 :cancel-reason (or (.-reason evt-ctx) "Blocked by extension"))
-      (.-cancelled evt-ctx)
-      (assoc ctx :cancelled true)
-      ;; If input was mutated by handler, use modified args
-      (not= (js/JSON.stringify original-input) (js/JSON.stringify (.-input evt-ctx)))
-      (assoc ctx :args (.-input evt-ctx))
-      ;; No mutations, pass through original args
+                 :cancel-reason (or (get result "reason") "Blocked by extension"))
+
+      ;; Allow arg transformation via returned {args: ...}
+      (get result "args")
+      (assoc ctx :args (get result "args"))
+
       :else ctx)))
 
 (defn before-hook-compat
-  "Backwards-compatible interceptor that bridges old before_tool_call events.
-   Extensions using (on \"before_tool_call\" handler) still work."
+  "Interceptor that emits before_tool_call as emit-collect.
+   Handlers can block via {block: true} or transform via {args: modified}."
   [events]
   {:name  :before-hook-compat
    :enter (fn [ctx] (before-hook-compat-enter events ctx))})
@@ -135,10 +130,24 @@
         verbosity   (assoc :custom-verbosity verbosity)))))
 
 (defn ^:async tool-tracking-leave
-  "Leave phase for tool-tracking: emit tool_result for modification, then tool_execution_end."
+  "Leave phase: tool_result (modify), tool_complete (structured), tool_execution_end (UI)."
   [events store ctx]
   (let [ctx        (js-await (tool-result-leave events ctx))
         duration   (- (js/Date.now) (or (:start-time ctx) 0))
+        ;; tool_complete — structured emit-collect, extensions can modify result
+        complete-result (when events
+                          (js-await
+                            ((:emit-collect events) "tool_complete"
+                              #js {:toolName   (:tool-name ctx)
+                                   :toolCallId (:exec-id ctx)
+                                   :args       (clj->js (:args ctx))
+                                   :result     (:result ctx)
+                                   :duration   duration
+                                   :isError    (boolean (:result-is-error ctx))
+                                   :details    (:result-details ctx)})))
+        ctx        (if-let [mod-result (get complete-result "result")]
+                     (assoc ctx :result (str mod-result))
+                     ctx)
         result-str (truncate-text (str (:result ctx)) 500)
         display    (and (:tool ctx) (.-display (:tool ctx)))
         custom-result (when display
@@ -187,6 +196,39 @@
    :leave (fn [ctx]
             (tool-tracking-leave events store ctx))})
 
+(defn- categorize-tool
+  "Categorize a tool for permission checking."
+  [tool-name]
+  (cond
+    (#{"bash"} tool-name)                     "exec"
+    (#{"write" "edit"} tool-name)             "write"
+    (#{"read" "glob" "grep" "ls"} tool-name)  "read"
+    (#{"web_fetch" "web_search"} tool-name)   "network"
+    :else                                      "other"))
+
+(defn ^:async permission-check-enter
+  "Check permission_request before tool execution.
+   Handlers return {decision: 'allow'|'deny'|'ask', reason?: string}."
+  [events ctx]
+  (let [tool-name (:tool-name ctx)
+        args      (:args ctx)
+        result    (js-await
+                    ((:emit-collect events) "permission_request"
+                      #js {:tool     tool-name
+                           :args     (clj->js args)
+                           :category (categorize-tool tool-name)
+                           :path     (or (get args :path) (get args "path"))}))]
+    (if (= (get result "decision") "deny")
+      (assoc ctx :cancelled true
+                 :cancel-reason (or (get result "reason") "Permission denied"))
+      ctx)))
+
+(defn permission-check-interceptor
+  "Interceptor that emits permission_request for custom approval workflows."
+  [events]
+  {:name  :permission-check
+   :enter (fn [ctx] (permission-check-enter events ctx))})
+
 (def prepare-arguments-interceptor
   "Interceptor that calls tool.prepareArguments if defined, transforming args before execution."
   {:name  :prepare-arguments
@@ -229,6 +271,7 @@
                        :abort-controller (when agent (:abort-controller agent))}
              full     (vec (concat @chain
                                   [prepare-arguments-interceptor
+                                   (permission-check-interceptor events)
                                    (before-hook-compat events)
                                    tool-execution-interceptor]))]
          (ic/execute full ctx)))

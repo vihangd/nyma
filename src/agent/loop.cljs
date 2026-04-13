@@ -1,6 +1,6 @@
 (ns agent.loop
   (:require ["ai" :refer [streamText stepCountIs]]
-            [agent.context :refer [build-context get-active-tools]]
+            [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.pricing :refer [calculate-cost]]
             [agent.token-estimation :as te]
@@ -71,12 +71,11 @@
 
     ;; Main loop — re-enters for follow-up messages
     (loop []
-      (let [messages (build-context agent)
-            tools    (if middleware
-                       (wrap-tools-with-middleware
-                         (get-active-tools agent) middleware events)
-                       (wrap-tools-with-before-hook
-                         (get-active-tools agent) events))
+      (let [messages  (build-context agent)
+            raw-tools (js-await (get-active-tools-filtered agent))
+            tools     (if middleware
+                        (wrap-tools-with-middleware raw-tools middleware events)
+                        (wrap-tools-with-before-hook raw-tools events))
 
             ;; Allow extensions to modify system prompt via before_agent_start (emit-collect)
             before-result (js-await
@@ -102,8 +101,14 @@
             ;; Inject messages from extensions
             inject-msgs (get before-result "inject-messages")
 
-            ;; Resolve model — support runtime model switching via state
-            active-model (or (:runtime-model @state) (:model config))
+            ;; Resolve model — emit model_resolve so extensions (e.g. model roles) can override
+            resolve-result (js-await
+                             ((:emit-collect events) "model_resolve"
+                               #js {:default   (or (:runtime-model @state) (:model config))
+                                    :context   "generation"
+                                    :turnCount (or (:turn-count @state) 0)}))
+            active-model (or (get resolve-result "model")
+                             (or (:runtime-model @state) (:model config)))
             _ (when-not active-model
                 (throw (js/Error. "No model configured. Set ANTHROPIC_API_KEY or configure a provider via /login")))
 
@@ -176,8 +181,19 @@
           (do
             ((:emit events) "turn_start" {})
 
-            ;; === AI SDK does everything here — using the (possibly mutated) config ===
-            (let [result (js-await (streamText st-config))]
+            ;; === AI SDK — with provider_error fallback ===
+            (let [result (try
+                           (js-await (streamText st-config))
+                           (catch :default e
+                             (let [err-result (js-await
+                                               ((:emit-collect events) "provider_error"
+                                                 #js {:error   e
+                                                      :message (.-message e)
+                                                      :model   model-id
+                                                      :config  st-config}))]
+                               (if (get err-result "retry")
+                                 (js-await (streamText st-config))
+                                 (throw e)))))]
 
           ;; Stream events to subscribers
           (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
@@ -193,10 +209,16 @@
                 usage      (js-await (.-totalUsage result))
                 store      (:store agent)]
 
+            ;; message_before_store — extensions can modify content before storage
+            (let [store-result (js-await
+                                 ((:emit-collect events) "message_before_store"
+                                   #js {:role "assistant" :content final-text
+                                        :model model-id}))
+                  final-text (or (get store-result "content") final-text)]
             ;; Append assistant message via event store
             (if store
               ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
-              (swap! state update :messages conj {:role "assistant" :content final-text}))
+              (swap! state update :messages conj {:role "assistant" :content final-text})))
 
             ;; Dispatch usage to event-sourced store
             (when (and usage store)

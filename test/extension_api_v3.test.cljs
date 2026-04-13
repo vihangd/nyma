@@ -38,7 +38,6 @@
     (-> (expect (fn? (.-setSessionName api))) (.toBe true))
     (-> (expect (fn? (.-getSessionName api))) (.toBe true))
     (-> (expect (fn? (.-setLabel api))) (.toBe true))
-    (-> (expect (fn? (.-registerMessageRenderer api))) (.toBe true))
     (-> (expect (fn? (.-registerProvider api))) (.toBe true))
     (-> (expect (fn? (.-unregisterProvider api))) (.toBe true))
     (-> (expect (fn? (.-setModel api))) (.toBe true))
@@ -60,13 +59,6 @@
     (-> (expect (.getThinkingLevel api)) (.toBe "high"))
     ;; Invalid level should throw
     (-> (expect (fn [] (.setThinkingLevel api "invalid"))) (.toThrow "Invalid thinking level"))))
-
-(defn test-message-renderer-registration []
-  (let [agent (create-agent {:model "test" :system-prompt "test"})
-        api   (create-extension-api agent)
-        renderer (fn [msg] "custom render")]
-    (.registerMessageRenderer api "custom-type" renderer)
-    (-> (expect (get @(:message-renderers agent) "custom-type")) (.toBe renderer))))
 
 (defn test-inter-extension-events []
   (let [agent (create-agent {:model "test" :system-prompt "test"})
@@ -97,7 +89,7 @@
   (let [agent (create-agent {:model "test-model" :system-prompt "test"})
         api   (create-extension-api agent)]
     (.registerContextProvider api "my-provider"
-      #js {:priority 10 :tokenEstimate (fn [] 100) :provide (fn [_ _] "data")})
+                              #js {:priority 10 :tokenEstimate (fn [] 100) :provide (fn [_ _] "data")})
     (-> (expect (some? (get @(:context-providers agent) "my-provider"))) (.toBe true))
     (.unregisterContextProvider api "my-provider")
     (-> (expect (get @(:context-providers agent) "my-provider")) (.toBeUndefined))))
@@ -146,23 +138,22 @@
 ;; ── describe blocks ──────────────────────────────────────────
 
 (describe "provider-registry" (fn []
-  (it "register and unregister providers" test-provider-register-unregister)
-  (it "resolves providers to models" test-provider-resolve)
-  (it "throws on unknown provider" test-provider-resolve-unknown-throws)
-  (it "lists all providers" test-provider-list)))
+                                (it "register and unregister providers" test-provider-register-unregister)
+                                (it "resolves providers to models" test-provider-resolve)
+                                (it "throws on unknown provider" test-provider-resolve-unknown-throws)
+                                (it "lists all providers" test-provider-list)))
 
 (describe "extension-api-v3" (fn []
-  (it "exposes all new Phase 2 methods" test-api-has-new-methods)
-  (it "validates thinking levels" test-thinking-level-validation)
-  (it "registers message renderers" test-message-renderer-registration)
-  (it "supports inter-extension events" test-inter-extension-events)
-  (it "manages providers via API" test-provider-via-api)
-  (it "agent has session atom" test-session-atom-exists)))
+                               (it "exposes all new Phase 2 methods" test-api-has-new-methods)
+                               (it "validates thinking levels" test-thinking-level-validation)
+                               (it "supports inter-extension events" test-inter-extension-events)
+                               (it "manages providers via API" test-provider-via-api)
+                               (it "agent has session atom" test-session-atom-exists)))
 
 (describe "extension-api - context & token methods" (fn []
-  (it "exposes all context/token API methods" test-api-has-context-methods)
-  (it "registerContextProvider and unregisterContextProvider work" test-register-context-provider)
-  (it "getTokenBudget returns expected shape" test-get-token-budget-shape)
-  (it "getModelInfo returns context window" test-get-model-info)
-  (it "registerModelInfo adds entries" test-register-model-info)
-  (it "estimateTokens returns positive integer" test-estimate-tokens)))
+                                                      (it "exposes all context/token API methods" test-api-has-context-methods)
+                                                      (it "registerContextProvider and unregisterContextProvider work" test-register-context-provider)
+                                                      (it "getTokenBudget returns expected shape" test-get-token-budget-shape)
+                                                      (it "getModelInfo returns context window" test-get-model-info)
+                                                      (it "registerModelInfo adds entries" test-register-model-info)
+                                                      (it "estimateTokens returns positive integer" test-estimate-tokens)))

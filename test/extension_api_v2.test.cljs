@@ -63,9 +63,8 @@
         events   (:events agent)
         pipeline (:middleware agent)
         called   (atom false)]
-    ((:on events) "tool_call"
-      (fn [evt] (set! (.-blocked evt) true)
-                (set! (.-reason evt) "Dangerous")))
+    ((:on events) "before_tool_call"
+      (fn [_data] #js {:block true :reason "Dangerous"}))
     (let [tool #js {:execute (fn [_] (reset! called true) "nope") :description "t"}
           ctx  (js-await ((:execute pipeline) "bash" tool {:command "rm -rf /"}))]
       (-> (expect @called) (.toBe false))

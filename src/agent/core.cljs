@@ -36,7 +36,6 @@
         autocomplete-registry (ac/create-provider-registry)
         ;; Phase 2 additions
         provider-registry (create-provider-registry builtin-providers)
-        message-renderers (atom {})
         thinking-level    (atom "off")
         abort-controller  (atom (js/AbortController.))
         inter-events      (create-event-bus)  ;; Inter-extension communication bus
@@ -75,7 +74,6 @@
                  :extensions        extensions
                  ;; Phase 2 additions
                  :provider-registry provider-registry
-                 :message-renderers message-renderers
                  :thinking-level    thinking-level
                  :abort-controller  abort-controller
                  :inter-events      inter-events

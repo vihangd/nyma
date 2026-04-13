@@ -33,31 +33,60 @@
 
 ;;; ─── Combo canonicalization ─────────────────────────────
 
+(defn key-name
+  "Extract the canonical base key name from Ink's (input, key) pair.
+   Returns nil if nothing maps.
+
+   Mirrors cc-kit's getKeyName (packages/ui/src/keybindings/match.ts:29-47)
+   — one place for platform quirks, so pickers and the action registry
+   can't drift. Does NOT include modifiers; use combo-from-ink for that.
+
+   Canonical names:
+     escape, return, tab, backspace, delete, space,
+     up, down, left, right, pageup, pagedown, home, end,
+     and any single-character input (lowercased)."
+  [input key]
+  (cond
+    (.-escape key)     "escape"
+    (.-return key)     "return"
+    (.-tab key)        "tab"
+    (.-backspace key)  "backspace"
+    (.-delete key)     "delete"
+    (.-upArrow key)    "up"
+    (.-downArrow key)  "down"
+    (.-leftArrow key)  "left"
+    (.-rightArrow key) "right"
+    (.-pageUp key)     "pageup"
+    (.-pageDown key)   "pagedown"
+    (.-home key)       "home"
+    (.-end key)        "end"
+    (= input " ")      "space"
+    (and (string? input) (pos? (count input)))
+    (.toLowerCase input)
+    :else nil))
+
 (defn combo-from-ink
   "Convert Ink's (input, key) pair to a canonical combo string.
-   Modifier order: ctrl+ then alt+ then shift+ then base.
-   Shift modifier is NOT emitted for alphabetic bare input — Ink already
-   uppercases it via input."
+   Modifier order: ctrl+ then alt+ then base.
+   Shift is NOT emitted for alphabetic bare input — Ink already
+   uppercases it via input.
+
+   QUIRK: Ink's parse-keypress sets key.meta=true whenever the escape
+   key is pressed — the escape sequence leader leaks through as the
+   meta flag (see ink's use-input.js:
+     meta: keypress.meta || keypress.name === 'escape' || keypress.option).
+   Without the strip below, a plain Escape press would canonicalize to
+   'alt+escape' and bindings like 'escape' (the default for
+   app.interrupt) would silently never match. cc-kit handles the same
+   quirk at packages/ui/src/keybindings/match.ts:93-95."
   [input key]
-  (let [ctrl?  (.-ctrl key)
-        alt?   (.-meta key)
-        base   (cond
-                 (.-escape key)     "escape"
-                 (.-return key)     "return"
-                 (.-tab key)        "tab"
-                 (.-upArrow key)    "up"
-                 (.-downArrow key)  "down"
-                 (.-leftArrow key)  "left"
-                 (.-rightArrow key) "right"
-                 (.-backspace key)  "backspace"
-                 (.-delete key)     "delete"
-                 (= input " ")      "space"
-                 (and (string? input) (pos? (count input)))
-                 (.toLowerCase input)
-                 :else nil)]
-    (when base
+  (when-let [base (key-name input key)]
+    (let [escape? (= base "escape")
+          ctrl?   (.-ctrl key)
+          ;; Strip the meta flag when the key is Escape — see QUIRK above.
+          alt?    (and (.-meta key) (not escape?))]
       (str (when ctrl? "ctrl+")
-           (when alt? "alt+")
+           (when alt?  "alt+")
            base))))
 
 (defn- parse-combo-internal
@@ -152,10 +181,10 @@
   ([user-overrides]
    (let [actions default-actions
          user-by-action (reduce-kv
-                          (fn [acc combo action]
-                            (update acc action (fnil conj #{}) (normalize-combo combo)))
-                          {}
-                          (or user-overrides {}))
+                         (fn [acc combo action]
+                           (update acc action (fnil conj #{}) (normalize-combo combo)))
+                         {}
+                         (or user-overrides {}))
          conflicts (detect-conflicts actions user-overrides)]
      {:actions        actions
       :user-overrides (or user-overrides {})

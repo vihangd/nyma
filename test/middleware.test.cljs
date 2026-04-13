@@ -87,10 +87,10 @@
   (let [events   (create-event-bus)
         pipeline (create-pipeline events)
         _        ((:on events) "before_tool_call"
-                   (fn [ctx] (set! (.-cancelled ctx) true)))
+                   (fn [_data] #js {:block true}))
         tool     (mock-tool (fn [_] "should not run"))
         ctx      (js-await ((:execute pipeline) "blocked" tool {}))]
-    (-> (expect (:result ctx)) (.toContain "cancelled"))))
+    (-> (expect (:result ctx)) (.toContain "Blocked"))))
 
 (defn ^:async test-add-middleware-first-position []
   (let [events   (create-event-bus)
@@ -166,13 +166,13 @@
 (defn ^:async test-before-hook-compat-async-cancellation []
   (let [events   (create-event-bus)
         pipeline (create-pipeline events)
-        ;; Register an async handler that sets cancelled
+        ;; Register a handler that returns block (emit-collect pattern)
         _        ((:on events) "before_tool_call"
-                   (fn [ctx]
-                     (js/Promise.resolve (set! (.-cancelled ctx) true))))
+                   (fn [_data]
+                     (js/Promise.resolve #js {:block true :reason "async block"})))
         tool     (mock-tool (fn [_] "should not run"))
         ctx      (js-await ((:execute pipeline) "blocked" tool {}))]
-    (-> (expect (:result ctx)) (.toContain "cancelled"))))
+    (-> (expect (:result ctx)) (.toContain "async block"))))
 
 (describe "wrap-tools-with-middleware" (fn []
   (it "wraps tools to use pipeline" test-wrap-tools-with-middleware)))
