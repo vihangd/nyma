@@ -35,14 +35,14 @@
 
 (def ^:private builtin-policies
   "Tighter limits for tools that typically produce large list output.
-   Search/list tools cap at 8k; bash caps at 10k so the bash_suite
-   output-handling middleware still has priority for oversized runs."
+   Search/list tools cap at 4–8k chars.
+   Note: bash limit is registered dynamically by bash_suite/output_handling
+   when that extension is active; falls back to default-policy (12000) when not."
   {"ls"         {:max-string-length 4000}
    "glob"       {:max-string-length 4000}
    "grep"       {:max-string-length 8000}
    "web_search" {:max-string-length 8000}
    "read"       {:max-string-length 12000}
-   "bash"       {:max-string-length 10000}
    "think"      {:max-string-length 4000}})
 
 ;;; ─── Extension-contributed policies ─────────────────────

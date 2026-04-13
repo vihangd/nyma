@@ -5,6 +5,7 @@
             ["ai" :refer [tool]]
             ["zod" :as z]
             [agent.extensions.bash-suite.shared :as shared]
+            [agent.tool-result-policy :as policy]
             [clojure.string :as str]))
 
 ;; ── Output registry ──────────────────────────────────────────
@@ -46,7 +47,7 @@
                 (fs/mkdirSync temp-dir #js {:recursive true}))
               (fs/writeFileSync fpath stdout "utf8")
               (swap! output-registry assoc id
-                {:path fpath :byte-size stdout-size :created-at (js/Date.now)})
+                     {:path fpath :byte-size stdout-size :created-at (js/Date.now)})
               (swap! shared/suite-stats update-in [:output-handling :temp-files-created] inc)
               (catch :default _e nil))
             ;; Middle-truncate
@@ -57,43 +58,43 @@
                   truncated  (shared/truncate-middle stdout head-lines tail-lines notice)
                   saved      (- stdout-size (byte-size truncated))]
               (swap! shared/suite-stats update :output-handling
-                (fn [s] (-> s
-                            (update :truncations inc)
-                            (update :bytes-saved + saved))))
+                     (fn [s] (-> s
+                                 (update :truncations inc)
+                                 (update :bytes-saved + saved))))
               (js/JSON.stringify
-                #js {:stdout   truncated
-                     :stderr   stderr
-                     :exitCode exit-code}))))))))
+               #js {:stdout   truncated
+                    :stderr   stderr
+                    :exitCode exit-code}))))))))
 
 ;; ── Retrieve tool ────────────────────────────────────────────
 
 (defn- make-retrieve-tool []
   (tool
-    #js {:description "Retrieve full output from a previously truncated bash command result."
-         :inputSchema (.object z
-                        #js {:id     (-> (.string z) (.describe "Output ID from truncation notice"))
-                             :offset (-> (.number z) (.optional)
-                                         (.describe "Line offset to start from (0-based)"))
-                             :limit  (-> (.number z) (.optional)
-                                         (.describe "Max lines to return (default: all)"))})
-         :execute (fn [args]
-                    (let [id     (.-id args)
-                          offset (or (.-offset args) 0)
-                          limit  (.-limit args)
-                          entry  (get @output-registry (str id))]
-                      (if-not entry
-                        (str "No output found for id: " id)
-                        (let [fpath (:path entry)]
-                          (if-not (fs/existsSync fpath)
-                            (str "Output file not found: " fpath)
-                            (let [content (fs/readFileSync fpath "utf8")
-                                  lines   (.split content "\n")
-                                  sliced  (if limit
-                                            (.slice lines offset (+ offset limit))
-                                            (.slice lines offset))]
-                              (swap! shared/suite-stats update-in
-                                [:output-handling :retrievals] inc)
-                              (.join sliced "\n")))))))}))
+   #js {:description "Retrieve full output from a previously truncated bash command result."
+        :inputSchema (.object z
+                              #js {:id     (-> (.string z) (.describe "Output ID from truncation notice"))
+                                   :offset (-> (.number z) (.optional)
+                                               (.describe "Line offset to start from (0-based)"))
+                                   :limit  (-> (.number z) (.optional)
+                                               (.describe "Max lines to return (default: all)"))})
+        :execute (fn [args]
+                   (let [id     (.-id args)
+                         offset (or (.-offset args) 0)
+                         limit  (.-limit args)
+                         entry  (get @output-registry (str id))]
+                     (if-not entry
+                       (str "No output found for id: " id)
+                       (let [fpath (:path entry)]
+                         (if-not (fs/existsSync fpath)
+                           (str "Output file not found: " fpath)
+                           (let [content (fs/readFileSync fpath "utf8")
+                                 lines   (.split content "\n")
+                                 sliced  (if limit
+                                           (.slice lines offset (+ offset limit))
+                                           (.slice lines offset))]
+                             (swap! shared/suite-stats update-in
+                                    [:output-handling :retrievals] inc)
+                             (.join sliced "\n")))))))}))
 
 ;; ── Extension activation ─────────────────────────────────────
 
@@ -101,25 +102,31 @@
   (let [config  (shared/load-config)
         oh-cfg  (:output-handling config)]
 
+    ;; Register bash policy so the tool-result-policy envelope reflects this
+    ;; extension's configured limit. Overrides the default (12000).
+    ;; When output_handling is not loaded, bash falls back to the default policy.
+    (policy/register-policy! "bash" {:max-string-length (:max-bytes oh-cfg)})
+
     ;; Middleware leave phase for output truncation
     (.addMiddleware api
-      #js {:name  "bash-suite/output-handling"
-           :leave (fn [ctx]
-                    (let [tool-name (.-tool-name ctx)]
-                      (if (and (:enabled oh-cfg)
-                               (shared/is-bash-tool? tool-name))
-                        (let [result    (.-result ctx)
-                              truncated (truncate-and-save result oh-cfg)]
-                          (when truncated
-                            (aset ctx "result" truncated))
-                          ctx)
-                        ctx)))})
+                    #js {:name  "bash-suite/output-handling"
+                         :leave (fn [ctx]
+                                  (let [tool-name (.-tool-name ctx)]
+                                    (if (and (:enabled oh-cfg)
+                                             (shared/is-bash-tool? tool-name))
+                                      (let [result    (.-result ctx)
+                                            truncated (truncate-and-save result oh-cfg)]
+                                        (when truncated
+                                          (aset ctx "result" truncated))
+                                        ctx)
+                                      ctx)))})
 
     ;; Register retrieve tool
     (.registerTool api "retrieve_bash_output" (make-retrieve-tool))
 
     ;; Return deactivator
     (fn []
+      (policy/unregister-policy! "bash")
       (.removeMiddleware api "bash-suite/output-handling")
       (.unregisterTool api "retrieve_bash_output")
       (reset! output-registry {}))))

@@ -52,9 +52,11 @@
                 (fn []
                   (-> (expect (:max-string-length (policy-for "grep"))) (.toBe 8000))))
 
-            (it "bash cap is 10000"
+            (it "bash falls back to default 12000 when output_handling extension not loaded"
+                ;; bash limit is registered dynamically by bash_suite/output_handling;
+                ;; without that extension, the default-policy (12000) applies.
                 (fn []
-                  (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 10000))))
+                  (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 12000))))
 
             (it "read cap is 12000"
                 (fn []
@@ -325,3 +327,27 @@
                 (fn []
                   (let [e (apply-policy {:isError true :content "TOOL_FAILED: oops"} "bash")]
                     (-> (expect (.includes (model-string e) "TOOL_FAILED")) (.toBe true)))))))
+
+;;; ─── output_handling dynamic bash policy ──────────────────
+
+(describe "bash policy — dynamic registration (output_handling integration)"
+          (fn []
+            (it "register-policy! for bash overrides the default"
+                (fn []
+                  (register-policy! "bash" {:max-string-length 30000})
+                  (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 30000))
+                  (unregister-policy! "bash")))
+
+            (it "registered limit matches the configured value"
+                (fn []
+                  ;; Simulate output_handling registering its max-bytes config value
+                  (let [configured-max 20000]
+                    (register-policy! "bash" {:max-string-length configured-max})
+                    (-> (expect (:max-string-length (policy-for "bash"))) (.toBe configured-max))
+                    (unregister-policy! "bash"))))
+
+            (it "unregister-policy! restores bash to default 12000"
+                (fn []
+                  (register-policy! "bash" {:max-string-length 30000})
+                  (unregister-policy! "bash")
+                  (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 12000))))))
