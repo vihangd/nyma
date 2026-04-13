@@ -1,0 +1,4 @@
+{
+  "namespace": "ast-tools",
+  "capabilities": ["tools", "exec"]
+}
