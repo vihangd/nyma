@@ -219,7 +219,11 @@
                           (when-let [api (.-extension-api agent)]
                             (.setModel api model-spec))
                           (notify ctx (str "Model changed to: " model-spec)))
-                        (let [model-id (or (.-modelId (:model (:config agent))) "unknown")]
+                        (let [m        (:model (:config agent))
+                              model-id (cond
+                                         (nil? m)    "unknown"
+                                         (string? m) m
+                                         :else       (or (.-modelId m) "unknown"))]
                           (notify ctx (str "Model: " model-id)))))}
 
           "clear"

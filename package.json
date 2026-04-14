@@ -4,7 +4,8 @@
   "description": "Nyma Yokai Mystic Agent — a minimal coding agent built with Squint + Bun + Vercel AI SDK + Ink",
   "type": "module",
   "bin": {
-    "nyma": "./dist/agent/cli.mjs"
+    "nyma": "./dist/agent/cli.mjs",
+    "nyma-gateway": "./dist/gateway/entry.mjs"
   },
   "scripts": {
     "dev": "concurrently \"npx squint watch\" \"bun --watch dist/agent/cli.mjs\"",

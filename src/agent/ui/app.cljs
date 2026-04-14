@@ -590,7 +590,11 @@
 
            (kbr/matches? reg input key "app.model.show")
            (let [_ (emit! "keybinding_activated" {:action-id "app.model.show" :input input})
-                 model-id (or (.-modelId (:model (:config agent))) "unknown")]
+                 m        (:model (:config agent))
+                 model-id (cond
+                            (nil? m)    "unknown"
+                            (string? m) m
+                            :else       (or (.-modelId m) "unknown"))]
              (set-overlay
               #jsx [Box {:flexDirection "column"}
                     [Text {:bold true} "Current Model"]

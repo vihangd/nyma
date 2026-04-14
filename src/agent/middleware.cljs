@@ -53,7 +53,16 @@
                                  ((:emit events) "tool_execution_update"
                                                  {:tool-name (:tool-name ctx)
                                                   :exec-id   (:exec-id ctx)
-                                                  :data      data})))))
+                                                  :data      data}))))
+                       ;; G18 — expose active model ID string so tools can adapt behaviour.
+                       ;; :model in config is either a resolved provider model object
+                       ;; (with a .-modelId property) or a plain string (legacy / tests).
+                       (aset ext-ctx "modelId"
+                             (let [m (:model (:config (:agent ctx)))]
+                               (cond
+                                 (nil? m)    "unknown"
+                                 (string? m) m
+                                 :else       (or (.-modelId m) "unknown")))))
           raw-result (js-await ((.-execute (:tool ctx)) (:args ctx) ext-ctx))
           result     (normalize-tool-result raw-result)
           ;; Preserve structured metadata for downstream consumers
@@ -294,15 +303,57 @@
                 (assoc ctx :args prepared))
               ctx))})
 
+(defn approval-check-interceptor
+  "Interceptor that runs registered approval-check functions before tool execution.
+   Designed for gateway channels that need a human operator to approve tool calls
+   (e.g. posting a Slack confirmation prompt and waiting for a reaction).
+
+   Each check-fn receives a plain JS object {toolName, args} and must return a
+   Promise (or plain value) resolving to one of:
+     {allow: true}                   — proceed
+     {deny: true, reason?: string}   — block with optional message
+
+   Checks run sequentially; the first deny short-circuits the rest.
+   When approval-checks is empty (the default) this interceptor is a no-op,
+   so existing :tui behaviour is completely unchanged."
+  [approval-checks]
+  {:name  :approval-check
+   :enter (fn [ctx]
+            (if (or (:cancelled ctx) (empty? @approval-checks))
+              ctx
+              (let [check-data #js {:toolName (:tool-name ctx)
+                                    :args     (clj->js (:args ctx))}]
+                ;; Sequential reduction: Promise<ctx> → run check → Promise<ctx>
+                (reduce
+                 (fn [p check-fn]
+                   (.then p
+                          (fn [c]
+                            (if (:cancelled c)
+                              c
+                              (.. (js/Promise.resolve (check-fn check-data))
+                                  (then (fn [r]
+                                          (if (get r "deny")
+                                            (assoc c :cancelled true
+                                                   :cancel-reason
+                                                   (or (get r "reason")
+                                                       "Approval denied"))
+                                            c))))))))
+                 (js/Promise.resolve ctx)
+                 @approval-checks))))})
+
 (defn create-pipeline
   "Create a middleware pipeline for tool execution.
    Interceptors run in order: user middleware → before-hook-compat → execute-tool.
-   Returns a map with :add, :remove, :execute, and :chain.
+   Returns a map with :add, :remove, :execute, :chain, :add-approval-check!,
+   :remove-approval-check!, and :clear-approval-checks!.
    Optionally accepts a store for tool execution tracking, an agent-ref
    atom for injecting extension context, and a settings manager for
    allow-list persistence."
   [events & [store agent-ref settings]]
-  (let [chain (atom [(tool-tracking-interceptor events store)])]
+  (let [chain          (atom [(tool-tracking-interceptor events store)])
+        ;; Approval pipeline — empty by default (approve everything).
+        ;; Gateway adapters register check-fns here; :tui never touches this.
+        approval-checks (atom [])]
     {:add
      (fn [interceptor & [opts]]
        (let [position (if opts (:position opts) nil)]
@@ -318,22 +369,38 @@
      (fn [tool-name tool args]
        (let [agent    (when agent-ref @agent-ref)
              ext-ctx  (when agent (create-extension-context agent))
-             ctx      {:tool-name        tool-name
-                       :tool             tool
-                       :args             args
-                       :cancelled        false
-                       :result           nil
+             ctx      {:tool-name         tool-name
+                       :tool              tool
+                       :args              args
+                       :cancelled         false
+                       :result            nil
                        :extension-context ext-ctx
-                       :events           events
-                       :abort-controller (when agent (:abort-controller agent))}
+                       :events            events
+                       :agent             agent
+                       :abort-controller  (when agent (:abort-controller agent))}
              full     (vec (concat @chain
                                    [prepare-arguments-interceptor
                                     (permission-check-interceptor events settings)
+                                    (approval-check-interceptor approval-checks)
                                     (before-hook-compat events)
                                     tool-execution-interceptor]))]
          (ic/execute full ctx)))
 
-     :chain (fn [] @chain)}))
+     :chain (fn [] @chain)
+
+     ;; Approval pipeline management — used by gateway channel adapters.
+     ;; Each check-fn: (fn [js-obj]) → Promise<{allow}|{deny, reason?}>
+     :add-approval-check!
+     (fn [check-fn]
+       (swap! approval-checks conj check-fn))
+
+     :remove-approval-check!
+     (fn [check-fn]
+       (swap! approval-checks (fn [cs] (vec (remove #{check-fn} cs)))))
+
+     :clear-approval-checks!
+     (fn []
+       (reset! approval-checks []))}))
 
 (defn wrap-tools-with-middleware
   "Wrap each tool's execute fn to run through the middleware pipeline.

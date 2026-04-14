@@ -51,7 +51,7 @@
          :compact            (fn [opts]
                                (when-let [session @(:session agent)]
                                  (compact session (:model (:config agent)) (:events agent)
-                                   opts)))
+                                          opts)))
 
          ;; System prompt
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))
@@ -61,7 +61,12 @@
 
          ;; Token budget & model info
          :getTokenBudget     (fn []
-                               (let [model-id (or (.-modelId (:model (:config agent))) "unknown")
+                               ;; Model may be nil before login or string in tests.
+                               (let [m        (:model (:config agent))
+                                     model-id (cond
+                                                (nil? m)    "unknown"
+                                                (string? m) m
+                                                :else       (or (.-modelId m) "unknown"))
                                      mr       (:model-registry agent)
                                      window   (if mr ((:context-window mr) model-id) 100000)
                                      state    @(:state agent)
@@ -73,8 +78,12 @@
                                       :tokensRemaining (- window reserved used)
                                       :model           model-id}))
          :getModelInfo        (fn [& [model-id]]
-                                (let [id (or model-id
-                                             (.-modelId (:model (:config agent)))
+                                (let [m  (:model (:config agent))
+                                      id (or model-id
+                                             (cond
+                                               (nil? m)    nil
+                                               (string? m) m
+                                               :else       (.-modelId m))
                                              "unknown")
                                       mr (:model-registry agent)]
                                   (if mr
@@ -91,32 +100,32 @@
   (let [base (create-extension-context agent)]
     ;; Extend with command-only methods
     (aset base "waitForIdle"
-      (fn []
-        (js/Promise.
-          (fn [resolve]
-            (let [check (fn check []
-                          (if (empty? (:active-executions @(:state agent)))
-                            (resolve)
-                            (js/setTimeout check 100)))]
-              (check))))))
+          (fn []
+            (js/Promise.
+             (fn [resolve]
+               (let [check (fn check []
+                             (if (empty? (:active-executions @(:state agent)))
+                               (resolve)
+                               (js/setTimeout check 100)))]
+                 (check))))))
 
     (aset base "newSession"
-      (fn [_opts]
-        ((:dispatch! (:store agent)) :messages-cleared {})
-        nil))
+          (fn [_opts]
+            ((:dispatch! (:store agent)) :messages-cleared {})
+            nil))
 
     (aset base "fork"
-      (fn [entry-id]
-        (when-let [session @(:session agent)]
-          ((:branch session) entry-id))))
+          (fn [entry-id]
+            (when-let [session @(:session agent)]
+              ((:branch session) entry-id))))
 
     (aset base "navigateTree"
-      (fn [target-id _opts]
-        (when-let [session @(:session agent)]
-          ((:branch session) target-id))))
+          (fn [target-id _opts]
+            (when-let [session @(:session agent)]
+              ((:branch session) target-id))))
 
     (aset base "reload"
-      (fn []
-        ((:emit (:events agent)) "reload" {})))
+          (fn []
+            ((:emit (:events agent)) "reload" {})))
 
     base))

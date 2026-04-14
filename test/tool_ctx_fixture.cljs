@@ -69,10 +69,12 @@
                         :notify    (fn [msg _level] nil)
                         :showOverlay noop1
                         :setTitle    noop1})
-        base   #js {;; Middleware-enriched fields
+        base   #js {;; Middleware-enriched fields (set by execute-tool-fn)
                     :toolCallId  tool-call-id
                     :abortSignal (.-signal ctrl)
                     :onUpdate    (fn [data] (swap! upd conj data))
+                    ;; G18: active model ID string (set by execute-tool-fn from agent config)
+                    :modelId     (str (or (and model (.-modelId model)) model "unknown"))
 
                     ;; create-extension-context fields
                     :ui    ui-obj

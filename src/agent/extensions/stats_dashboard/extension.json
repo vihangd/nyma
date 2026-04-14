@@ -1,0 +1,5 @@
+{
+  "namespace": "stats-dashboard",
+  "capabilities": ["commands", "events", "state", "ui"],
+  "dependsOn": []
+}

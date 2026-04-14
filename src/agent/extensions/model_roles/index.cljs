@@ -30,15 +30,17 @@
   "Format roles map for display."
   [roles active-role]
   (str/join "\n"
-    (map (fn [[rname rconf]]
-           (let [model-id (or (:model rconf) (get rconf "model") "?")
-                 provider (or (:provider rconf) (get rconf "provider") "?")
-                 marker   (if (= (keyword rname) (keyword active-role)) " ◀" "")]
-             (let [allowed (or (:allowed-tools rconf) (get rconf "allowed-tools"))
-                   tools-hint (when (seq allowed) (str " [" (count allowed) " tools]"))]
-               (str "  " (name rname) " → " provider "/" model-id
-                    (or tools-hint "") marker))))
-         roles)))
+            (map (fn [[rname rconf]]
+                   (let [model-id (or (:model rconf) (get rconf "model") "?")
+                         provider (or (:provider rconf) (get rconf "provider") "?")
+                 ;; Squint: keywords ARE strings, so :default == "default".
+                 ;; rname (map key) and active-role (state) are both strings.
+                         marker   (if (= rname active-role) " ◀" "")]
+                     (let [allowed (or (:allowed-tools rconf) (get rconf "allowed-tools"))
+                           tools-hint (when (seq allowed) (str " [" (count allowed) " tools]"))]
+                       (str "  " rname " → " provider "/" model-id
+                            (or tools-hint "") marker))))
+                 roles)))
 
 (defn ^:export default [api]
   (let [handlers (atom [])
@@ -49,7 +51,9 @@
           (let [state    (.getState api)
                 role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                role-cfg (get roles (keyword role))]
+                ;; Squint: keywords ARE strings, so (get roles "default")
+                ;; matches a map keyed by :default.
+                role-cfg (get roles role)]
             (when role-cfg
               (let [provider (or (:provider role-cfg) (get role-cfg "provider"))
                     model-id (or (:model role-cfg) (get role-cfg "model"))]
@@ -63,7 +67,7 @@
           (let [state    (.getState api)
                 role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                role-cfg (get roles (keyword role))
+                role-cfg (get roles role)
                 allowed  (or (:allowed-tools role-cfg)
                              (get role-cfg "allowed-tools"))]
             (when (seq allowed)
@@ -75,10 +79,10 @@
           (let [state    (.getState api)
                 role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                role-cfg (get roles (keyword role))
+                role-cfg (get roles role)
                 perms    (or (:permissions role-cfg) (get role-cfg "permissions"))
                 tool     (str (.-tool data))]
-            (when-let [decision (or (get perms tool) (get perms (keyword tool)))]
+            (when-let [decision (get perms tool)]
               #js {:decision (str decision)})))]
 
     (.on api "model_resolve" on-resolve)
@@ -92,56 +96,58 @@
 
     ;; /role command
     (.registerCommand api "role"
-      #js {:description "Switch model role. Usage: /role [name]"
-           :handler
-           (fn [args ctx]
-             (let [role-name (first args)
-                   roles     (get-roles api)
-                   state     (.getState api)
-                   current   (or (:active-role state) :default)]
-               (cond
+                      #js {:description "Switch model role. Usage: /role [name]"
+                           :handler
+                           (fn [args ctx]
+                             (let [role-name (first args)
+                                   roles     (get-roles api)
+                                   state     (.getState api)
+                                   current   (or (:active-role state) :default)]
+                               (cond
                  ;; No args — show current role and list
-                 (empty? role-name)
-                 (let [msg (str "Active role: " (name current) "\n\n"
-                                "Available roles:\n"
-                                (format-role-list roles current)
-                                "\n\nUsage: /role <name>")]
-                   (.notify (.-ui ctx) msg "info"))
+                                 (empty? role-name)
+                                 ;; Squint: keywords are strings, so `current` is already the name.
+                                 (let [msg (str "Active role: " current "\n\n"
+                                                "Available roles:\n"
+                                                (format-role-list roles current)
+                                                "\n\nUsage: /role <name>")]
+                                   (.notify (.-ui ctx) msg "info"))
 
                  ;; "reset" — revert to default
-                 (= role-name "reset")
-                 (do
-                   (.dispatch api "role-changed" {:role :default})
-                   (swap! (.-__state-atom api) assoc :active-role :default)
-                   (.notify (.-ui ctx) "Role reset to default" "info"))
+                                 (= role-name "reset")
+                                 (do
+                                   (.dispatch api "role-changed" {:role :default})
+                                   (swap! (.-__state-atom api) assoc :active-role :default)
+                                   (.notify (.-ui ctx) "Role reset to default" "info"))
 
-                 ;; Known role — switch
-                 (get roles (keyword role-name))
-                 (let [role-cfg (get roles (keyword role-name))
-                       model-id (or (:model role-cfg) (get role-cfg "model"))
-                       provider (or (:provider role-cfg) (get role-cfg "provider"))]
-                   (swap! (.-__state-atom api) assoc :active-role (keyword role-name))
-                   (when (and provider model-id)
-                     (.setModel api (str provider "/" model-id)))
-                   (.notify (.-ui ctx) (str "Role: " role-name " → " provider "/" model-id)))
+                 ;; Known role — switch (keywords are strings in squint, so
+                 ;; role-name is already the lookup key).
+                                 (get roles role-name)
+                                 (let [role-cfg (get roles role-name)
+                                       model-id (or (:model role-cfg) (get role-cfg "model"))
+                                       provider (or (:provider role-cfg) (get role-cfg "provider"))]
+                                   (swap! (.-__state-atom api) assoc :active-role role-name)
+                                   (when (and provider model-id)
+                                     (.setModel api (str provider "/" model-id)))
+                                   (.notify (.-ui ctx) (str "Role: " role-name " → " provider "/" model-id)))
 
                  ;; Unknown role
-                 :else
-                 (.notify (.-ui ctx)
-                   (str "Unknown role: \"" role-name "\". Available: "
-                        (str/join ", " (map name (keys roles))))
-                   "error"))))})
+                                 :else
+                                 (.notify (.-ui ctx)
+                                          (str "Unknown role: \"" role-name "\". Available: "
+                                               (str/join ", " (keys roles)))
+                                          "error"))))})
 
     ;; /roles command — list all
     (.registerCommand api "roles"
-      #js {:description "List available model roles"
-           :handler
-           (fn [_args ctx]
-             (let [roles   (get-roles api)
-                   state   (.getState api)
-                   current (or (:active-role state) :default)]
-               (.notify (.-ui ctx)
-                 (str "Model Roles:\n" (format-role-list roles current)))))})
+                      #js {:description "List available model roles"
+                           :handler
+                           (fn [_args ctx]
+                             (let [roles   (get-roles api)
+                                   state   (.getState api)
+                                   current (or (:active-role state) :default)]
+                               (.notify (.-ui ctx)
+                                        (str "Model Roles:\n" (format-role-list roles current)))))})
 
     ;; Cleanup
     (fn []

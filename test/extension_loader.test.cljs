@@ -4,7 +4,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.extension-loader :refer [deactivate-all discover-and-load
-                                              reload-extension reload-all]]
+                                            reload-extension reload-all topo-sort]]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]))
 
@@ -16,51 +16,123 @@
 ;; --- deactivate-all (pure logic, no I/O) ---
 
 (describe "agent.extension-loader - deactivate-all"
-  (fn []
-    (it "calls deactivate function on each extension that has one"
-      (fn []
-        (let [called (atom [])]
-          (deactivate-all
-            [{:path "ext-a.ts" :deactivate (fn [] (swap! called conj "a"))}
-             {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
-          (-> (expect (count @called)) (.toBe 2))
-          (-> (expect (first @called)) (.toBe "a"))
-          (-> (expect (second @called)) (.toBe "b")))))
+          (fn []
+            (it "calls deactivate function on each extension that has one"
+                (fn []
+                  (let [called (atom [])]
+                    (deactivate-all
+                     [{:path "ext-a.ts" :deactivate (fn [] (swap! called conj "a"))}
+                      {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
+                    (-> (expect (count @called)) (.toBe 2))
+                    (-> (expect (first @called)) (.toBe "a"))
+                    (-> (expect (second @called)) (.toBe "b")))))
 
-    (it "skips extensions without deactivate"
-      (fn []
-        (let [called (atom [])]
-          (deactivate-all
-            [{:path "ext-a.ts" :deactivate nil}
-             {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
-          (-> (expect (count @called)) (.toBe 1))
-          (-> (expect (first @called)) (.toBe "b")))))
+            (it "skips extensions without deactivate"
+                (fn []
+                  (let [called (atom [])]
+                    (deactivate-all
+                     [{:path "ext-a.ts" :deactivate nil}
+                      {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
+                    (-> (expect (count @called)) (.toBe 1))
+                    (-> (expect (first @called)) (.toBe "b")))))
 
-    (it "continues if one deactivate throws"
-      (fn []
-        (let [called (atom [])
-              orig   js/console.error]
-          (set! js/console.error (fn [& _]))
-          (deactivate-all
-            [{:path "ext-a.ts" :deactivate (fn [] (throw (js/Error. "fail")))}
-             {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
-          (set! js/console.error orig)
-          (-> (expect (count @called)) (.toBe 1))
-          (-> (expect (first @called)) (.toBe "b")))))
+            (it "continues if one deactivate throws"
+                (fn []
+                  (let [called (atom [])
+                        orig   js/console.error]
+                    (set! js/console.error (fn [& _]))
+                    (deactivate-all
+                     [{:path "ext-a.ts" :deactivate (fn [] (throw (js/Error. "fail")))}
+                      {:path "ext-b.ts" :deactivate (fn [] (swap! called conj "b"))}])
+                    (set! js/console.error orig)
+                    (-> (expect (count @called)) (.toBe 1))
+                    (-> (expect (first @called)) (.toBe "b")))))
 
-    (it "error in deactivate is logged"
-      (fn []
-        (let [logged (atom nil)
-              orig   js/console.error]
-          (set! js/console.error (fn [& args] (reset! logged args)))
-          (deactivate-all
-            [{:path "bad-ext.ts" :deactivate (fn [] (throw (js/Error. "boom")))}])
-          (set! js/console.error orig)
-          (-> (expect @logged) (.toBeTruthy)))))
+            (it "error in deactivate is logged"
+                (fn []
+                  (let [logged (atom nil)
+                        orig   js/console.error]
+                    (set! js/console.error (fn [& args] (reset! logged args)))
+                    (deactivate-all
+                     [{:path "bad-ext.ts" :deactivate (fn [] (throw (js/Error. "boom")))}])
+                    (set! js/console.error orig)
+                    (-> (expect @logged) (.toBeTruthy)))))
 
-    (it "handles empty extension list"
-      (fn []
-        (deactivate-all [])))))
+            (it "handles empty extension list"
+                (fn []
+                  (deactivate-all [])))))
+
+;; --- topo-sort: dependency ordering and duplicate-namespace handling ---
+;; The recent loader bug was caused by topo-sort silently deduplicating
+;; entries with the same namespace via its by-ns map. These tests pin the
+;; current behaviour so we notice if it changes.
+
+(describe "agent.extension-loader - topo-sort"
+          (fn []
+            (it "preserves order when there are no dependencies"
+                (fn []
+                  (let [entries [{:namespace "a" :deps []}
+                                 {:namespace "b" :deps []}
+                                 {:namespace "c" :deps []}]
+                        sorted  (topo-sort entries)]
+                    (-> (expect (count sorted)) (.toBe 3))
+                    (-> (expect (:namespace (nth sorted 0))) (.toBe "a"))
+                    (-> (expect (:namespace (nth sorted 1))) (.toBe "b"))
+                    (-> (expect (:namespace (nth sorted 2))) (.toBe "c")))))
+
+            (it "places dependencies before their dependents"
+                (fn []
+                  (let [entries [{:namespace "consumer" :deps ["provider"]}
+                                 {:namespace "provider" :deps []}]
+                        sorted  (topo-sort entries)
+                        order   (mapv :namespace sorted)]
+                    (-> (expect (.indexOf (clj->js order) "provider"))
+                        (.toBeLessThan (.indexOf (clj->js order) "consumer"))))))
+
+            (it "handles a chain of three deps in order"
+                (fn []
+                  (let [entries [{:namespace "c" :deps ["b"]}
+                                 {:namespace "b" :deps ["a"]}
+                                 {:namespace "a" :deps []}]
+                        sorted  (topo-sort entries)
+                        order   (mapv :namespace sorted)]
+                    (-> (expect (.indexOf (clj->js order) "a"))
+                        (.toBeLessThan (.indexOf (clj->js order) "b")))
+                    (-> (expect (.indexOf (clj->js order) "b"))
+                        (.toBeLessThan (.indexOf (clj->js order) "c"))))))
+
+            (it "ignores deps that point to unknown namespaces"
+                (fn []
+                  ;; "consumer" depends on "missing" which doesn't exist;
+                  ;; topo-sort filters unknown deps so the entry still loads.
+                  (let [entries [{:namespace "consumer" :deps ["missing"]}
+                                 {:namespace "other"    :deps []}]
+                        sorted  (topo-sort entries)]
+                    (-> (expect (count sorted)) (.toBe 2)))))
+
+            (it "falls back to scan order on cycle (no infinite loop)"
+                (fn []
+                  ;; Mute the warning so test output stays clean.
+                  (let [orig js/console.warn]
+                    (set! js/console.warn (fn [& _]))
+                    (let [entries [{:namespace "a" :deps ["b"]}
+                                   {:namespace "b" :deps ["a"]}]
+                          sorted  (topo-sort entries)]
+                      (-> (expect (count sorted)) (.toBe 2)))
+                    (set! js/console.warn orig))))
+
+            (it "DUPLICATE NAMESPACES — current behaviour: silently deduplicates via by-ns map"
+                (fn []
+                  ;; This pins the bug class. Two entries with the same
+                  ;; namespace collapse to a single entry in the result.
+                  ;; If you change topo-sort to detect duplicates and warn
+                  ;; or throw, update this test accordingly.
+                  (let [entries [{:namespace "dup" :deps [] :path "/a"}
+                                 {:namespace "dup" :deps [] :path "/b"}]
+                        sorted  (topo-sort entries)
+                        nses    (set (map :namespace sorted))]
+                    (-> (expect (count nses)) (.toBe 1))
+                    (-> (expect (contains? nses "dup")) (.toBe true)))))))
 
 ;; --- discover-and-load with real filesystem ---
 
@@ -72,7 +144,7 @@
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
         ext-path (path/join tmp-dir "test-ext.mjs")
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { api._test_loaded = true; }")
+                                 "export default function(api) { api._test_loaded = true; }")
         api      (make-test-api)
         result   (js-await (discover-and-load [tmp-dir] api))]
     (-> (expect (count result)) (.toBe 1))
@@ -85,7 +157,7 @@
         ext-path (path/join tmp-dir "lifecycle-ext.mjs")
         cleaned  (atom false)
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { return () => { globalThis.__nyma_test_cleaned = true; }; }")
+                                 "export default function(api) { return () => { globalThis.__nyma_test_cleaned = true; }; }")
         api      (make-test-api)
         result   (js-await (discover-and-load [tmp-dir] api))]
     (-> (expect (:deactivate (first result))) (.toBeTruthy))
@@ -98,7 +170,7 @@
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
         ext-path (path/join tmp-dir "simple-ext.mjs")
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { /* no return */ }")
+                                 "export default function(api) { /* no return */ }")
         api      (make-test-api)
         result   (js-await (discover-and-load [tmp-dir] api))]
     (-> (expect (:deactivate (first result))) (.toBeNull))
@@ -116,7 +188,7 @@
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
         ext-path (path/join tmp-dir "bad-ext.mjs")
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { throw new Error('init fail'); }")
+                                 "export default function(api) { throw new Error('init fail'); }")
         orig     js/console.error
         _        (set! js/console.error (fn [& _]))
         result   (js-await (discover-and-load [tmp-dir] (make-test-api)))]
@@ -131,24 +203,24 @@
         _        (.mkdirSync fs ext-dir #js {:recursive true})
         ext-path (path/join ext-dir "index.mjs")
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { }")
+                                 "export default function(api) { }")
         _        (.writeFileSync fs (path/join ext-dir "extension.json")
-                   (js/JSON.stringify #js {:namespace "custom-ns"
-                                           :capabilities #js ["tools" "events"]}))
+                                 (js/JSON.stringify #js {:namespace "custom-ns"
+                                                         :capabilities #js ["tools" "events"]}))
         result   (js-await (discover-and-load [tmp-dir] (make-test-api)))]
     (-> (expect (count result)) (.toBe 1))
     (-> (expect (:namespace (first result))) (.toBe "custom-ns"))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
 (describe "agent.extension-loader - discover-and-load"
-  (fn []
-    (it "skips missing directories gracefully" test-skips-missing-dirs)
-    (it "discovers and loads .mjs extension files" test-discovers-mjs-files)
-    (it "stores deactivate function when extension returns one" test-stores-deactivate)
-    (it "deactivate is nil when extension returns nothing" test-deactivate-nil-when-no-return)
-    (it "skips non-extension files" test-skips-non-extension-files)
-    (it "handles extension that throws during load" test-handles-throwing-extension)
-    (it "loads extension.json manifest for namespace" test-loads-manifest)))
+          (fn []
+            (it "skips missing directories gracefully" test-skips-missing-dirs)
+            (it "discovers and loads .mjs extension files" test-discovers-mjs-files)
+            (it "stores deactivate function when extension returns one" test-stores-deactivate)
+            (it "deactivate is nil when extension returns nothing" test-deactivate-nil-when-no-return)
+            (it "skips non-extension files" test-skips-non-extension-files)
+            (it "handles extension that throws during load" test-handles-throwing-extension)
+            (it "loads extension.json manifest for namespace" test-loads-manifest)))
 
 ;; ── Extension reload ─────────────────────────────────────────
 
@@ -185,9 +257,9 @@
     (-> (expect @count-atom) (.toBe 2))))
 
 (describe "agent.extension-loader - reload" (fn []
-  (it "reload-extension calls deactivate" test-reload-extension-calls-deactivate)
-  (it "reload-extension handles missing deactivate" test-reload-extension-handles-no-deactivate)
-  (it "reload-all processes all extensions" test-reload-all-processes-all)))
+                                              (it "reload-extension calls deactivate" test-reload-extension-calls-deactivate)
+                                              (it "reload-extension handles missing deactivate" test-reload-extension-handles-no-deactivate)
+                                              (it "reload-all processes all extensions" test-reload-all-processes-all)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────
 
@@ -198,14 +270,14 @@
         ext-dir (path/join tmp-dir "my-suite")
         _       (.mkdirSync fs ext-dir #js {:recursive true})
         _       (.writeFileSync fs (path/join ext-dir "extension.json")
-                  (js/JSON.stringify #js {:namespace "my-suite"
-                                          :capabilities #js ["tools"]}))
+                                (js/JSON.stringify #js {:namespace "my-suite"
+                                                        :capabilities #js ["tools"]}))
         _       (.writeFileSync fs (path/join ext-dir "index.mjs")
-                  "export default function(api) { return () => {}; }")
+                                "export default function(api) { return () => {}; }")
         _       (.writeFileSync fs (path/join ext-dir "helper.mjs")
-                  "export default function(api) { throw new Error('should not load'); }")
+                                "export default function(api) { throw new Error('should not load'); }")
         _       (.writeFileSync fs (path/join ext-dir "utils.mjs")
-                  "export default function(api) { throw new Error('should not load'); }")
+                                "export default function(api) { throw new Error('should not load'); }")
         result  (js-await (discover-and-load [tmp-dir] (make-test-api)))]
     ;; Only 1 extension loaded (index.mjs), not 3
     (-> (expect (count result)) (.toBe 1))
@@ -217,7 +289,7 @@
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
         ext-path (path/join tmp-dir "standalone.mjs")
         _        (.writeFileSync fs ext-path
-                   "export default function(api) { return () => {}; }")
+                                 "export default function(api) { return () => {}; }")
         result   (js-await (discover-and-load [tmp-dir] (make-test-api)))]
     (-> (expect (count result)) (.toBe 1))
     (-> (expect (:namespace (first result))) (.toBe "standalone"))
@@ -229,13 +301,13 @@
         ext-dir (path/join tmp-dir "dep-ext")
         _       (.mkdirSync fs ext-dir #js {:recursive true})
         _       (.writeFileSync fs (path/join ext-dir "extension.json")
-                  (js/JSON.stringify
-                    #js {:namespace "dep-ext"
-                         :capabilities #js ["tools"]
-                         :dependencies #js {:shell-quote "^1.8.1"}}))
+                                (js/JSON.stringify
+                                 #js {:namespace "dep-ext"
+                                      :capabilities #js ["tools"]
+                                      :dependencies #js {:shell-quote "^1.8.1"}}))
         ;; shell-quote is already installed, so resolve-dependencies should be a no-op
         _       (.writeFileSync fs (path/join ext-dir "index.mjs")
-                  "export default function(api) { return () => {}; }")
+                                "export default function(api) { return () => {}; }")
         result  (js-await (discover-and-load [tmp-dir] (make-test-api)))]
     ;; Should load successfully — shell-quote is already in node_modules
     (-> (expect (count result)) (.toBe 1))
@@ -243,6 +315,6 @@
     (.rmSync fs tmp-dir #js {:recursive true})))
 
 (describe "agent.extension-loader - multi-file extensions" (fn []
-  (it "only loads index.mjs when extension.json present" test-multi-file-only-loads-index)
-  (it "single-file without manifest still loads" test-single-file-without-manifest-loads)
-  (it "manifest with dependencies field loads when deps available" test-manifest-with-dependencies-field)))
+                                                             (it "only loads index.mjs when extension.json present" test-multi-file-only-loads-index)
+                                                             (it "single-file without manifest still loads" test-single-file-without-manifest-loads)
+                                                             (it "manifest with dependencies field loads when deps available" test-manifest-with-dependencies-field)))

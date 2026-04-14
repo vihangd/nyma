@@ -215,7 +215,37 @@
                                (it "throws on namespace with invalid characters"
                                    (fn []
                                      (-> (expect (fn [] (derive-namespace "/path/to/bad name.cljs")))
-                                         (.toThrow "Invalid extension namespace"))))))
+                                         (.toThrow "Invalid extension namespace"))))
+
+                               ;; ── Directory entry-point cases ────────────────────────
+                               ;; Without these, every manifest-less directory extension
+                               ;; would derive to "index" and collide on load (the bug
+                               ;; that motivated the loader smoke test).
+
+                               (it "directory entry .cljs walks up to the parent dir"
+                                   (fn []
+                                     (-> (expect (derive-namespace "/path/to/my_plugin/index.cljs"))
+                                         (.toBe "my-plugin"))))
+
+                               (it "directory entry .mjs walks up to the parent dir"
+                                   (fn []
+                                     (-> (expect (derive-namespace "/dist/agent/extensions/model_roles/index.mjs"))
+                                         (.toBe "model-roles"))))
+
+                               (it "directory entry .ts walks up to the parent dir"
+                                   (fn []
+                                     (-> (expect (derive-namespace "/ext/git_tools/index.ts"))
+                                         (.toBe "git-tools"))))
+
+                               (it "kebab-cases the parent dir (underscores → hyphens)"
+                                   (fn []
+                                     (-> (expect (derive-namespace "/x/custom_provider_qwen_cli/index.mjs"))
+                                         (.toBe "custom-provider-qwen-cli"))))
+
+                               (it "non-index basename inside a directory uses the basename"
+                                   (fn []
+                                     (-> (expect (derive-namespace "/x/my_dir/helper.cljs"))
+                                         (.toBe "helper"))))))
 
 ;;; ─── Error boundary for event handlers ─────────────────────────────────────
 
@@ -286,7 +316,106 @@
                                                          (-> (expect (some? (.-state scoped))) (.toBe true))
                                                          (-> (expect (fn? (.-get (.-state scoped)))) (.toBe true))
                                                          (-> (expect (fn? (.-set (.-state scoped)))) (.toBe true))
-                                                         (-> (expect (fn? (.-keys (.-state scoped)))) (.toBe true))))))))
+                                                         (-> (expect (fn? (.-keys (.-state scoped)))) (.toBe true))))
+
+                                                 ;; ── Agent-state methods (getState / dispatch / onStateChange) ──
+                                                 ;; Gating regression for the new methods added when model_roles
+                                                 ;; surfaced its silent failure.
+
+                                                     (it "getState throws without :state capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-state" #{:tools})]
+                                                             (-> (expect (fn [] (.getState scoped)))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "dispatch throws without :state capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-state2" #{:tools})]
+                                                             (-> (expect (fn [] (.dispatch scoped "evt" {})))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "onStateChange throws without :state capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-state3" #{:tools})]
+                                                             (-> (expect (fn [] (.onStateChange scoped (fn [_]))))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "__state_atom is nil without :state capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-state4" #{:tools})]
+                                                         ;; Access is silent (returns nil) rather than throwing,
+                                                         ;; because consumers reach it via property access not call.
+                                                             (-> (expect (nil? (.-__state_atom scoped))) (.toBe true)))))
+
+                                                     (it "getState + dispatch + __state_atom work with :state cap"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "with-state" #{:state})]
+                                                             (swap! (:state agent) assoc :turn-count 5)
+                                                             (-> (expect (:turn-count (.getState scoped))) (.toBe 5))
+                                                             (-> (expect (some? (.-__state_atom scoped))) (.toBe true)))))
+
+                                                 ;; ── Other capabilities with no prior gating coverage ──
+
+                                                     (it "exec throws without :exec capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-exec" #{:tools})]
+                                                             (-> (expect (fn [] (.exec scoped "echo" #js [])))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "spawn throws without :spawn capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-spawn" #{:tools})]
+                                                             (-> (expect (fn [] (.spawn scoped "echo" #js [] #js {})))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "registerProvider throws without :providers capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-prov" #{:tools})]
+                                                             (-> (expect (fn [] (.registerProvider scoped "p" #js {})))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "setModel throws without :model capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-model" #{:tools})]
+                                                             (-> (expect (fn [] (.setModel scoped "claude-x")))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it "registerCommand throws without :commands capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "no-cmd" #{:tools})]
+                                                             (-> (expect (fn [] (.registerCommand scoped "x" #js {})))
+                                                                 (.toThrow "missing capability")))))
+
+                                                     (it ":all grants every capability"
+                                                         (fn []
+                                                           (let [agent    (make-test-agent)
+                                                                 base-api (create-extension-api agent)
+                                                                 scoped   (create-scoped-api base-api "everything" #{:all})]
+                                                         ;; None of these should throw
+                                                             (.registerTool scoped "t" #js {:execute (fn [_] "ok")})
+                                                             (.registerCommand scoped "c" #js {})
+                                                             (.on scoped "evt" (fn [_]))
+                                                             (-> (expect true) (.toBe true)))))))))
 
 ;;; ─── create-state-api integration ───────────────────────────────────────────
 

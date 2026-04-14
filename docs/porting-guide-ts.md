@@ -149,6 +149,80 @@ api.on("agent_end", async (event, ctx) => {
 | `pi.getFlag(name)` | `api.getFlag(name)` | Identical |
 | `Type.Enum({A:"a",B:"b"})` | `z.enum(["a","b"])` | Enum conversion fixed |
 
+## Nyma-Only Hooks
+
+Nyma adds three hook points that have no pi-mono equivalent. Any pi-mono
+extension can start using them after porting — they are purely additive.
+
+### `ctx.modelId` inside tool `execute`
+
+Every tool's `execute(args, ctx)` receives `ctx.modelId` — the active model ID
+string. Use it to adapt tool behaviour to the model in play (truncation size,
+top-k, verbosity). It is always a string; when no model is resolved yet the
+value is `"unknown"`, so `.includes(...)` is safe without a null check.
+
+```typescript
+api.registerTool("search", {
+  description: "Search the codebase",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }, ctx) => {
+    const limit = ctx.modelId.includes("haiku") ? 5
+                : ctx.modelId.includes("opus")  ? 30
+                : 15;
+    return await runSearch(query, { limit });
+  }
+});
+```
+
+### `before_message_send` — final message/system transform
+
+Fires after `context_assembly` and before `before_provider_request`. Use it to
+rewrite the messages array or system prompt as the very last step before the
+LLM call. Return `{messages?, system?}` to replace either field. Return
+`undefined`/`null` to pass through unchanged.
+
+```typescript
+api.on("before_message_send", (data, ctx) => {
+  // data: { messages: Message[], system: string, model: string }
+  if (data.messages.length > 40) {
+    return { messages: data.messages.slice(-40) };
+  }
+  return null;
+});
+```
+
+### `stream_filter` — abort + retry on bad output
+
+Fires per text delta while the model is streaming. Inspect
+`data.delta` (accumulated text) or `data.chunk` (this chunk); return
+`{abort: true, reason?, inject?: Message[]}` to stop the stream and retry with
+injected messages. Retry cap is 2; the 3rd attempt exits with whatever was
+accumulated.
+
+```typescript
+const BANNED = [/\beval\(/, /sk-[A-Za-z0-9]{20,}/];
+
+api.on("stream_filter", (data, ctx) => {
+  const full = data.delta as string;
+  if (BANNED.some((re) => re.test(full))) {
+    return {
+      abort:  true,
+      reason: "tripped content filter",
+      inject: [{
+        role: "system",
+        content: "Your previous output matched a forbidden pattern. Retry without it."
+      }]
+    };
+  }
+  return null;
+});
+```
+
+Both hooks deliver `(data, ctx)` where `ctx` is the standard extension context
+(same shape as every other `api.on` handler). Both are `emit-collect` events,
+so multiple handlers merge last-writer-wins; attach a `priority` (third arg to
+`api.on`) if you need a specific order.
+
 ### Timed Dialogs
 
 Pi-mono extensions using `{timeout, signal}` options on dialogs work in nyma:
@@ -179,13 +253,20 @@ A full `extension.json` with all supported fields:
 ```json
 {
   "namespace": "my-ts-ext",
-  "capabilities": ["tools", "events", "middleware", "commands", "exec", "flags", "context"],
+  "capabilities": [
+    "tools", "commands", "shortcuts", "events", "messages", "state", "ui",
+    "middleware", "exec", "spawn", "providers", "model", "session", "flags",
+    "renderers", "context"
+  ],
   "dependsOn": ["some-other-ext"],
   "dependencies": {
     "lodash": "^4.17.21"
   }
 }
 ```
+
+Use `"all"` instead of the list to grant everything (this is also the default
+when `capabilities` is omitted).
 
 | Field | Required | Description |
 |---|---|---|

@@ -118,6 +118,16 @@
                                               (.getFlag base-api (prefix name))))
                     ;; Global flag reading (ungated — read-only, no namespace prefix)
                     :getGlobalFlag    (.-getGlobalFlag base-api)
+
+                    ;; Agent-state read / dispatch — gated on :state.
+                    ;; Distinct from the per-extension persistent :state slot
+                    ;; below: these touch the running agent's live state.
+                    :getState         (gate capabilities :state (.-getState base-api))
+                    :dispatch         (gate capabilities :state (.-dispatch base-api))
+                    :onStateChange    (gate capabilities :state (.-onStateChange base-api))
+                    :__state_atom     (when (check capabilities :state)
+                                        (.-__state-atom base-api))
+
                     ;; Persistent state (namespace-scoped)
                     :state            (if (check capabilities :state)
                                         (create-state-api ns-str)
@@ -140,11 +150,24 @@
 
 (defn derive-namespace
   "Derive an extension namespace from its file path.
-   e.g., '/path/to/git-tools.cljs' → 'git-tools'
+
+   Rules:
+     - Single file:           '/path/to/git-tools.cljs'        → 'git-tools'
+     - Directory entry point: '/path/to/git_tools/index.cljs'  → 'git-tools'
+       (when the basename is 'index.*' we walk one directory up and
+       kebab-case the dir name — otherwise every manifest-less directory
+       extension would collide on the namespace 'index').
+
    Validates that the result is non-empty and contains only safe characters."
   [file-path]
-  (let [base        (last (.split file-path "/"))
-        without-ext (first (.split base "."))]
-    (if (and without-ext (.test #"^[a-zA-Z0-9_-]+$" without-ext))
-      without-ext
+  (let [parts       (vec (.split file-path "/"))
+        base        (last parts)
+        without-ext (first (.split base "."))
+        ns-raw      (if (= without-ext "index")
+                      ;; Directory ext: take the parent dir name instead
+                      (let [parent (last (butlast parts))]
+                        (when parent (.replace parent (js/RegExp. "_" "g") "-")))
+                      without-ext)]
+    (if (and ns-raw (.test #"^[a-zA-Z0-9_-]+$" ns-raw))
+      ns-raw
       (throw (js/Error. (str "Invalid extension namespace derived from: " file-path))))))

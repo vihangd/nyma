@@ -1,0 +1,5 @@
+{
+  "namespace": "prompt-history",
+  "capabilities": ["commands", "events", "shortcuts", "ui"],
+  "dependsOn": []
+}

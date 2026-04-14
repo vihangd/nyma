@@ -35,21 +35,21 @@
           missing   (vec (filter #(not (dep-resolvable? %)) pkg-names))]
       (when (seq missing)
         (js/console.log
-          (str "[nyma] Installing missing extension deps: "
-               (.join (clj->js missing) ", ")))
+         (str "[nyma] Installing missing extension deps: "
+              (.join (clj->js missing) ", ")))
         (if (fs/existsSync (path/join (js/process.cwd) "package.json"))
           (let [proc (js/Bun.spawn
-                       (clj->js (concat ["bun" "add"] missing))
-                       #js {:stdout "pipe" :stderr "pipe"
-                            :cwd (js/process.cwd)})
+                      (clj->js (concat ["bun" "add"] missing))
+                      #js {:stdout "pipe" :stderr "pipe"
+                           :cwd (js/process.cwd)})
                 exit-code (js-await (.-exited proc))]
             (when (not= exit-code 0)
               (js/console.error
-                (str "[nyma] Failed to install: "
-                     (.join (clj->js missing) ", ")))))
+               (str "[nyma] Failed to install: "
+                    (.join (clj->js missing) ", ")))))
           (js/console.warn
-            "[nyma] No package.json in CWD — cannot auto-install extension deps. "
-            (str "Missing: " (.join (clj->js missing) ", "))))))))
+           "[nyma] No package.json in CWD — cannot auto-install extension deps. "
+           (str "Missing: " (.join (clj->js missing) ", "))))))))
 
 (def ^:private cache-dir
   "Squint compilation cache directory."
@@ -70,8 +70,8 @@
     (when-not (fs/existsSync cache-path)
       ;; Compile and cache
       (let [compiled (compileString source
-                       #js {:context       "expr"
-                            :elide-imports false})]
+                                    #js {:context       "expr"
+                                         :elide-imports false})]
         (ensure-cache-dir)
         (js-await (js/Bun.write cache-path compiled))))
     ;; Import from cache (or freshly written)
@@ -102,9 +102,9 @@
         (js/JSON.parse (js-await (.readFile fsp manifest-path "utf8")))
         (catch :default _e nil)))))
 
-(defn- topo-sort
+(defn topo-sort
   "Topological sort of extension entries by dependsOn.
-   Falls back to original order on cycles."
+   Falls back to original order on cycles. Public for direct testing."
   [entries]
   (let [ns-set  (set (map :namespace entries))
         by-ns   (into {} (map (fn [e] [(:namespace e) e]) entries))
@@ -155,7 +155,7 @@
                 ;; entry point (index.*). Skip helper/support files like shared.mjs.
                 (let [dir-of-file    (path/dirname full-path)
                       has-manifest?  (fs/existsSync
-                                       (path/join dir-of-file "extension.json"))]
+                                      (path/join dir-of-file "extension.json"))]
                   (when (or (not has-manifest?)    ;; single-file ext: always load
                             (entry-point? entry))  ;; multi-file ext: only load index
                     (try
@@ -165,11 +165,11 @@
                             deps     (when (and manifest (.-dependsOn manifest))
                                        (vec (js/Array.from (.-dependsOn manifest))))]
                         (swap! scan-results conj
-                          {:path full-path :entry entry :namespace ns-str
-                           :manifest manifest :deps deps}))
+                               {:path full-path :entry entry :namespace ns-str
+                                :manifest manifest :deps deps}))
                       (catch :default e
                         (js/console.error
-                          (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))))
+                         (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))))
     ;; Pass 2: Topological sort
     (let [sorted     (topo-sort @scan-results)
           extensions (atom [])]
@@ -181,19 +181,40 @@
             (js-await (resolve-dependencies manifest)))
           (let [ext-fn (js-await (load-extension path))
                 caps   (parse-capabilities
-                         (when manifest (.-capabilities manifest)))
+                        (when manifest (.-capabilities manifest)))
                 scoped (create-scoped-api api namespace caps)]
             (when ext-fn
               (let [result (js-await (ext-fn scoped))]
                 (swap! extensions conj
-                  {:path       path
-                   :namespace  namespace
-                   :type       (if (cljs-extension? entry) :squint :ts)
-                   :deactivate (when (fn? result) result)}))))
+                       {:path       path
+                        :namespace  namespace
+                        :type       (if (cljs-extension? entry) :squint :ts)
+                        :deactivate (when (fn? result) result)}))))
           (catch :default e
             (js/console.error
-              (str "[nyma] Failed to load extension (" path "):") e))))
+             (str "[nyma] Failed to load extension (" path "):") e))))
       @extensions)))
+
+(defn filter-by-mode
+  "Return only those loaded-extension entries whose manifest allows `current-mode`.
+
+   Manifest format (extension.json): {\"modes\": [\"tui\", \"gateway\"]}
+   If a manifest has no `modes` field (or the extension has no manifest),
+   the extension is allowed in every mode — this preserves backward compatibility
+   with all existing extensions written before mode declarations were introduced.
+
+   `current-mode` is a keyword such as :tui or :gateway.
+
+   Example:
+     (filter-by-mode loaded-extensions :gateway)"
+  [extensions current-mode]
+  (filter (fn [{:keys [manifest]}]
+            (let [modes (when manifest (.-modes manifest))]
+              (or (nil? modes)
+                  (let [mode-strs (js/Array.from modes)
+                        mode-name (name current-mode)]
+                    (.includes mode-strs mode-name)))))
+          extensions))
 
 (defn deactivate-all
   "Call deactivate on all loaded extensions that returned a cleanup function."
@@ -204,15 +225,15 @@
         (deactivate)
         (catch :default e
           (js/console.error
-            (str "[nyma] Extension deactivate error (" path "):") e))))))
+           (str "[nyma] Extension deactivate error (" path "):") e))))))
 
 (defn ^:async reload-extension
   "Deactivate and re-load a single extension."
   [ext-info api]
   (when (:deactivate ext-info)
     (try ((:deactivate ext-info))
-      (catch :default e
-        (js/console.error (str "[nyma] Extension deactivate error during reload:") e))))
+         (catch :default e
+           (js/console.error (str "[nyma] Extension deactivate error during reload:") e))))
   (try
     (let [manifest (js-await (load-manifest (:path ext-info)))
           _        (when manifest (js-await (resolve-dependencies manifest)))
@@ -220,7 +241,7 @@
           ns-str   (or (and manifest (.-namespace manifest))
                        (:namespace ext-info))
           caps     (parse-capabilities
-                     (when manifest (.-capabilities manifest)))
+                    (when manifest (.-capabilities manifest)))
           scoped   (create-scoped-api api ns-str caps)]
       (when ext-fn
         (let [result (js-await (ext-fn scoped))]

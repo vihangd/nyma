@@ -42,7 +42,8 @@
                                 "hasPendingMessages" "shutdown" "getContextUsage"
                                 "compact" "getSystemPrompt" "getSessionDirectory"
                                 "getTokenBudget" "getModelInfo" "estimateTokens"
-                                "getContextProviders"]]
+                                "getContextProviders"
+                                "modelId"]]
                     (doseq [f fields]
                       (-> (expect (.includes keys f)) (.toBe true))))))))
 

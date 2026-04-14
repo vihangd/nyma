@@ -22,7 +22,17 @@
       :long-running?          may exceed normal tool timeouts
       :category               one of #{:file :search :shell :network :meta}
       :result-policy          optional override map for agent.tool-result-policy;
-                              keys: :max-string-length (int), :prefer-summary-only (bool)}
+                              keys: :max-string-length (int), :prefer-summary-only (bool)
+      :capabilities           set of capability keywords — used by gateway to filter
+                              tools by what they can do; e.g. #{:filesystem :read}
+                              common values: :filesystem :read :write :execution
+                                             :shell :network
+      :modes                  set of runtime-mode keywords where this tool is allowed;
+                              nil = allowed in all modes (no restriction)
+                              common values: :tui :gateway
+      :cost                   relative cost hint for rate-limit / quota decisions:
+                              :free | :low | :medium | :high | nil
+      :timeout-ms             suggested per-call timeout in milliseconds, or nil}
 
    Unknown tools fall back to a conservative 'nothing known' default:
    not read-only, not destructive, no confirmation required. Callers
@@ -34,17 +44,57 @@
 (def builtin-metadata
   "Safety metadata for the tools defined in agent.tools. Built-in
    names match the registered tool identifiers exactly."
-  {"read"       {:read-only? true  :category :file}
-   "write"      {:destructive? true :requires-confirmation? true :category :file}
-   "edit"       {:destructive? true :requires-confirmation? true :category :file}
+  {"read"       {:read-only? true  :category :file
+                 :capabilities #{:filesystem :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   10000}
+   "write"      {:destructive? true :requires-confirmation? true :category :file
+                 :capabilities #{:filesystem :write}
+                 :modes        #{:tui}
+                 :cost         :free
+                 :timeout-ms   10000}
+   "edit"       {:destructive? true :requires-confirmation? true :category :file
+                 :capabilities #{:filesystem :write}
+                 :modes        #{:tui}
+                 :cost         :free
+                 :timeout-ms   10000}
    "bash"       {:destructive? true :requires-confirmation? true
-                 :category :shell :long-running? true}
-   "think"      {:read-only? true :category :meta}
-   "ls"         {:read-only? true :category :file}
-   "glob"       {:read-only? true :category :search}
-   "grep"       {:read-only? true :category :search}
-   "web_fetch"  {:read-only? true :network? true :category :network}
-   "web_search" {:read-only? true :network? true :category :network}})
+                 :category :shell :long-running? true
+                 :capabilities #{:filesystem :execution :shell}
+                 :modes        #{:tui}
+                 :cost         :medium
+                 :timeout-ms   30000}
+   "think"      {:read-only? true :category :meta
+                 :capabilities #{}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   5000}
+   "ls"         {:read-only? true :category :file
+                 :capabilities #{:filesystem :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   5000}
+   "glob"       {:read-only? true :category :search
+                 :capabilities #{:filesystem :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   10000}
+   "grep"       {:read-only? true :category :search
+                 :capabilities #{:filesystem :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   10000}
+   "web_fetch"  {:read-only? true :network? true :category :network
+                 :capabilities #{:network :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :medium
+                 :timeout-ms   30000}
+   "web_search" {:read-only? true :network? true :category :network
+                 :capabilities #{:network :read}
+                 :modes        #{:tui :gateway}
+                 :cost         :medium
+                 :timeout-ms   30000}})
 
 ;;; ─── Extension-contributed metadata ─────────────────────
 
@@ -83,7 +133,12 @@
    :network?               false
    :long-running?          false
    :category               nil
-   :result-policy          nil})
+   :result-policy          nil
+   ;; Gateway / mode-filtering fields — nil means "no restriction"
+   :capabilities           #{}
+   :modes                  nil
+   :cost                   nil
+   :timeout-ms             nil})
 
 (defn tool-safety
   "Return the merged safety map for a tool name. Order of precedence
@@ -127,3 +182,35 @@
   "Return the tool's category keyword, or nil."
   [tool-name]
   (:category (tool-safety tool-name)))
+
+(defn capabilities
+  "Return the tool's capability set, or #{} if none declared."
+  [tool-name]
+  (or (:capabilities (tool-safety tool-name)) #{}))
+
+(defn modes
+  "Return the tool's allowed runtime-mode set, or nil (= all modes allowed)."
+  [tool-name]
+  (:modes (tool-safety tool-name)))
+
+(defn cost
+  "Return the tool's cost hint keyword (:free/:low/:medium/:high), or nil."
+  [tool-name]
+  (:cost (tool-safety tool-name)))
+
+(defn timeout-ms
+  "Return the tool's suggested timeout in ms, or nil."
+  [tool-name]
+  (:timeout-ms (tool-safety tool-name)))
+
+(defn has-capability?
+  "True if the tool declares the given capability keyword."
+  [tool-name cap]
+  (contains? (capabilities tool-name) cap))
+
+(defn allowed-in-mode?
+  "True if the tool is allowed in the given runtime mode.
+   Tools with nil :modes are allowed in every mode."
+  [tool-name mode]
+  (let [m (modes tool-name)]
+    (or (nil? m) (contains? m mode))))

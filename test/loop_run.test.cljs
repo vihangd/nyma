@@ -174,3 +174,70 @@
   (it "before_provider_request mutation persists across handlers" test-run-provider-request-mutation-persists)
   (it "context_assembly fires before before_provider_request" test-run-context-assembly-fires-before-provider-request)
   (it "after_provider_request not fired when blocked" test-run-after-provider-request-not-fired-when-blocked)))
+
+;;; ─── G20: before_message_send ────────────────────────────────────────
+
+(defn ^:async test-before-message-send-replaces-system-prompt []
+  (let [agent       (make-test-agent)
+        seen-system (atom nil)]
+    ((:on (:events agent)) "before_message_send"
+      (fn [_] #js {:system "REPLACED BY G20"}))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen-system (.-system config))
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    (-> (expect @seen-system) (.toBe "REPLACED BY G20"))))
+
+(defn ^:async test-before-message-send-replaces-messages []
+  (let [agent         (make-test-agent)
+        seen-messages (atom nil)]
+    ((:on (:events agent)) "before_message_send"
+      (fn [_]
+        #js {:messages #js [#js {:role "user" :content "injected-by-G20"}]}))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen-messages (.-messages config))
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "original"))
+    (let [msgs (js/Array.from @seen-messages)
+          contents (map #(.-content %) msgs)]
+      (-> (expect (.some @seen-messages #(= (.-content %) "injected-by-G20")))
+          (.toBe true)))))
+
+(defn ^:async test-before-message-send-nil-has-no-effect []
+  (let [agent       (make-test-agent)
+        seen-system (atom nil)]
+    ((:on (:events agent)) "before_message_send" (fn [_] nil))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [config]
+        (reset! seen-system (.-system config))
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    ;; System prompt should be unchanged from the agent's config
+    (-> (expect @seen-system) (.toContain "You are a test agent."))))
+
+(defn ^:async test-before-message-send-fires-after-context-assembly []
+  (let [agent (make-test-agent)
+        order (atom [])]
+    ((:on (:events agent)) "context_assembly"
+      (fn [_] (swap! order conj "context_assembly") nil))
+    ((:on (:events agent)) "before_message_send"
+      (fn [_] (swap! order conj "before_message_send") nil))
+    ((:on (:events agent)) "before_provider_request"
+      (fn [_] (swap! order conj "before_provider_request")
+        #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    (-> (expect (first @order)) (.toBe "context_assembly"))
+    (-> (expect (second @order)) (.toBe "before_message_send"))
+    (-> (expect (nth @order 2)) (.toBe "before_provider_request"))))
+
+(describe "agent.loop/run - G20 before_message_send" (fn []
+  (it "handler returning {system: '...'} replaces system prompt"
+      test-before-message-send-replaces-system-prompt)
+  (it "handler returning {messages: [...]} replaces message list"
+      test-before-message-send-replaces-messages)
+  (it "handler returning nil has no effect on system prompt"
+      test-before-message-send-nil-has-no-effect)
+  (it "fires after context_assembly and before before_provider_request"
+      test-before-message-send-fires-after-context-assembly)))

@@ -66,6 +66,26 @@
                                   "steer"    (steer agent {:role "user" :content text})
                                   "followUp" (follow-up agent {:role "user" :content text}))))
 
+       ;; ── State access ────────────────────────────────────
+       ;; Extensions read from agent state, push events back through the
+       ;; bus, and (for those that need direct mutation) reach :__state-atom.
+         :getState          (fn [] @(:state agent))
+         :dispatch          (fn [event-type data]
+                              ((:emit (:events agent))
+                               (str event-type)
+                               (clj->js data)))
+         :onStateChange     (fn [listener]
+                              ;; Returns an unsubscribe fn. Keyed by the
+                              ;; listener identity itself for dedup.
+                              (add-watch (:state agent) listener
+                                         (fn [_k _r _o n] (listener n)))
+                              (fn [] (remove-watch (:state agent) listener)))
+         ;; Dot accessor `.-__state-atom` compiles to `.__state_atom` in
+         ;; squint (hyphens become underscores), so use the underscore
+         ;; spelling here too — otherwise the JS property name and the
+         ;; lookup name don't match and consumers get nil.
+         :__state_atom      (:state agent)
+
        ;; ── Middleware API ──────────────────────────────────
          :addMiddleware     (fn [interceptor & [opts]]
                               (when-let [pipeline (:middleware agent)]
@@ -315,7 +335,12 @@
 
        ;; ── Token budget ───────────────────────────────────────
          :getTokenBudget    (fn []
-                              (let [model-id (or (.-modelId (:model (:config agent))) "unknown")
+                              ;; Model may be nil before login or string in tests.
+                              (let [m        (:model (:config agent))
+                                    model-id (cond
+                                               (nil? m)    "unknown"
+                                               (string? m) m
+                                               :else       (or (.-modelId m) "unknown"))
                                     window   ((:context-window (:model-registry agent)) model-id)
                                     state    @(:state agent)
                                     used     (te/estimate-messages-tokens (:messages state))
@@ -328,8 +353,12 @@
 
        ;; ── Model info ─────────────────────────────────────────
          :getModelInfo      (fn [& [model-id]]
-                              (let [id (or model-id
-                                           (.-modelId (:model (:config agent)))
+                              (let [m  (:model (:config agent))
+                                    id (or model-id
+                                           (cond
+                                             (nil? m)    nil
+                                             (string? m) m
+                                             :else       (.-modelId m))
                                            "unknown")]
                                 (clj->js ((:get (:model-registry agent)) id))))
          :registerModelInfo (fn [entries]

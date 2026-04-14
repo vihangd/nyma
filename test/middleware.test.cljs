@@ -7,7 +7,8 @@
                                       normalize-tool-result tool-persistence-interceptor]]
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
-            [agent.state :refer [create-agent-store]]))
+            [agent.state :refer [create-agent-store]]
+            [agent.core :refer [create-agent]]))
 
 ;; Helper: create a mock tool with an execute function
 (defn mock-tool [execute-fn]
@@ -585,3 +586,39 @@
                                                         (fn [] (test-skip-with-args-transform-skip-wins)))
                                                     (it "two skip handlers — last-writer-wins for result string"
                                                         (fn [] (test-two-skip-handlers-last-result-wins)))))
+
+;;; ─── G18: modelId in extension context ──────────────────────────────
+
+(defn ^:async test-g18-model-id-set-in-ext-ctx []
+  (let [agent    (create-agent {:model "claude-test-G18" :system-prompt "test"})
+        agent-ref (atom agent)
+        events   (:events agent)
+        pipeline  (create-pipeline events nil agent-ref nil)
+        captured  (atom nil)
+        test-tool #js {:description "capture-ctx"
+                       :parameters  #js {}
+                       :execute     (fn [_ ctx]
+                                      (reset! captured ctx)
+                                      "ok")}]
+    (js-await ((:execute pipeline) "g18-tool" test-tool #js {}))
+    (-> (expect (.-modelId @captured)) (.toBe "claude-test-G18"))))
+
+(defn ^:async test-g18-model-id-unknown-when-no-agent []
+  ;; No agent-ref → ext-ctx is nil → tool receives nil as second arg
+  (let [events   (create-event-bus)
+        pipeline  (create-pipeline events nil nil nil)
+        captured  (atom :not-called)
+        test-tool #js {:description "capture-ctx"
+                       :parameters  #js {}
+                       :execute     (fn [_ ctx]
+                                      (reset! captured ctx)
+                                      "ok")}]
+    (js-await ((:execute pipeline) "g18-tool" test-tool #js {}))
+    ;; ext-ctx is nil when there is no agent-ref
+    (-> (expect (nil? @captured)) (.toBe true))))
+
+(describe "G18: modelId in tool extension context" (fn []
+  (it "pipeline sets modelId on ext-ctx from agent config"
+      test-g18-model-id-set-in-ext-ctx)
+  (it "no agent-ref → ext-ctx is nil (tool gets nil ctx)"
+      test-g18-model-id-unknown-when-no-agent)))

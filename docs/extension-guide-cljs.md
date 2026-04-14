@@ -269,6 +269,127 @@ Before loading your extension, the loader checks if each declared package is res
 
 If your extension only uses packages already in the project's `package.json`, you don't need to declare them — Bun resolves them automatically.
 
+## Shaping the LLM Call Pipeline
+
+Five `emit-collect` hooks fire during every run of `agent.loop/run`. Unlike
+fire-and-forget events, `emit-collect` awaits each handler and merges its return
+value into a single result map — that is what gives extensions the ability to
+transform the data the loop is about to use.
+
+Execution order per turn:
+
+```
+before_agent_start  ─┐
+                     ├─► model_resolve  ─► context_assembly  ─► before_message_send  ─► before_provider_request
+                     │                                                                          │
+                     │                                                                          ▼
+                     │                                                                      streamText
+                     │                                                                          │
+                     │         (per delta)  ─► stream_filter  ◄──────────────────────────┐     │
+                     │                                ▲                                   │     │
+                     │                   (on abort: inject + retry, max 2 attempts) ──────┘     │
+                     │                                                                          ▼
+                     │                                               message_before_store  ─► after_provider_request
+```
+
+### `before_message_send` — G20
+
+The final transform after `context_assembly` and before `before_provider_request`
+sees the streamText config. Use it when you need to rewrite messages or the
+system prompt as the very last step — e.g. per-model message caps, final
+sanitization, or stripping system blocks the LLM shouldn't see.
+
+```clojure
+(defn ^:export default [api]
+  (.on api "before_message_send"
+    (fn [data _ctx]
+      ;; data is a JS object with :messages :system :model
+      (let [msgs (.-messages data)
+            n    (.-length msgs)]
+        (when (> n 40)
+          ;; Drop the oldest messages if we're about to overflow
+          #js {:messages (.slice msgs (- n 40))}))))
+  (fn [] nil))
+```
+
+Return shape: `{messages?: JS[], system?: string}`. Any key you set replaces
+the corresponding value in the loop. Return `nil` to pass through unchanged.
+Multiple handlers merge last-writer-wins — attach a `priority` (higher runs
+first) if you need a specific order.
+
+### `stream_filter` — G1/G2
+
+Fires once per text delta while the model is streaming. Use it to abort the
+stream mid-generation when the assistant starts to produce something you don't
+want (a secret, a known-bad command, content that trips a TTSR rule) and to
+inject corrective system messages before retrying.
+
+```clojure
+(def banned-patterns
+  [#"\beval\(" #"\bexec\(" #"sk-[A-Za-z0-9]{20,}"])
+
+(defn ^:export default [api]
+  (.on api "stream_filter"
+    (fn [data _ctx]
+      ;; data is a JS object: :delta (accumulated text so far), :chunk (this chunk), :type
+      (let [full (.-delta data)]
+        (when (some #(re-find % full) banned-patterns)
+          #js {:abort  true
+               :reason "tripped content filter"
+               :inject #js [#js {:role "system"
+                                 :content "Your previous output matched a forbidden pattern. Retry without it."}]}))))
+  (fn [] nil))
+```
+
+Return shape: `{abort: bool, reason?: string, inject?: JS[]}`. When `abort` is
+true the loop:
+
+1. Stops reading from `fullStream`
+2. Appends every message in `inject` to the agent state
+3. Re-runs the LLM call (up to 2 retries; the 3rd attempt exits with whatever
+   was accumulated)
+
+`data.delta` is the accumulated text *including* the current chunk, so a simple
+`re-find` on `(.-delta data)` catches patterns that span chunk boundaries.
+
+### `ctx.modelId` on tool execute — G18
+
+Inside a tool's `execute(args, ctx)` function the ctx object now carries
+`ctx.modelId` — the active model ID string for the LLM call that is about to
+use the tool's output. Use it to size truncation, top-k, or verbosity to the
+model in play.
+
+```clojure
+(.registerTool api "search"
+  #js {:description "Search the codebase"
+       :execute
+       (fn [args ctx]
+         (let [model-id (or (.-modelId ctx) "unknown")
+               ;; Haiku gets a tight result cap; Opus gets more context
+               limit    (cond
+                          (.includes model-id "haiku") 5
+                          (.includes model-id "opus")  30
+                          :else                        15)]
+           (run-search (:query args) :limit limit)))})
+```
+
+`ctx.modelId` is `"unknown"` if the active model is `nil` (no API key) or
+otherwise unavailable. It is always a string, so you can call `.includes` on it
+safely without a null check.
+
+### Picking the right hook
+
+| Use case | Hook |
+|---|---|
+| Add to or replace the system prompt once per turn | `before_agent_start` (adds) or `context_assembly` (replaces) |
+| Swap the model based on context | `model_resolve` |
+| Final message/system rewrite right before LLM call | `before_message_send` |
+| Mutate provider-specific config (`providerOptions`, tool list) | `before_provider_request` |
+| Block a run without touching the provider | `before_provider_request` → return `{block: true, reason}` |
+| Abort and retry mid-stream | `stream_filter` |
+| Adapt a tool's behaviour to the active model | Read `ctx.modelId` inside `execute` |
+| Track usage or cache metrics | `after_provider_request` |
+
 ## Extension Lifecycle
 
 1. Files discovered in (in order):
@@ -287,6 +408,10 @@ If your extension only uses packages already in the project's `package.json`, yo
 
 - **`editor_change`** — fired on every keystroke in the editor; payload `{text: string}`. Subscribe to build live previews or debounced analysis widgets.
 - **`session_clear`** — fired when `/clear` is invoked; extensions (e.g. agent-shell) use this to send `session/new` to their backend.
+- **`before_message_send`** (emit-collect) — final transform between `context_assembly` and the streamText call. Return `{messages?, system?}` to replace either. See §Shaping the LLM Call Pipeline above.
+- **`stream_filter`** (emit-collect) — fires per text delta during streaming. Return `{abort: true, reason?, inject?}` to stop the stream and retry with injected messages (max 2 retries). See §Shaping the LLM Call Pipeline above.
+
+The full ordered list of hooks is in the README's Events table.
 
 ## Squint Gotchas
 

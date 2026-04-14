@@ -221,42 +221,27 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-| Test File | Module | Tests |
-|-----------|--------|-------|
-| `events.test.cljs` | Event bus (sync + async) | 21 |
-| `interceptors.test.cljs` | Interceptor chain engine | 20 |
-| `middleware.test.cljs` | Tool middleware pipeline | 12 |
-| `protocols.test.cljs` | Protocol dispatch | 14 |
-| `schema.test.cljs` | Data-driven schemas | 14 |
-| `state.test.cljs` | Event-sourced state store | 15 |
-| `permissions.test.cljs` | Extension capabilities | 6 |
-| `extension_scope.test.cljs` | Namespaced extension API | 10 |
-| `tool_registry.test.cljs` | Tool registry | 8 |
-| `session_manager.test.cljs` | Session manager | 10 |
-| `core.test.cljs` | Agent factory | 8 |
-| `context.test.cljs` | Context building | 5 |
-| `tools.test.cljs` | Built-in tools (I/O) | 15 |
-| `compaction.test.cljs` | Context compaction | 5 |
-| `prompts.test.cljs` | Template expansion | 5 |
-| `settings.test.cljs` | Settings manager | 5 |
-| `extension_loader.test.cljs` | Extension loader | 8 |
-| `loop.test.cljs` | Execution loop | 10 |
-| `integration/tool_pipeline.test.cljs` | Full middleware chain | 6 |
-| `integration/extension_lifecycle.test.cljs` | Extension load/use/deactivate | 7 |
-| `integration/state_events.test.cljs` | State + event bus integration | 5 |
-| `workspace_config.test.cljs` | Workspace config + command aliases | 20 |
-| `token_preview.test.cljs` | Live token count preview | 10 |
-| `clear_session.test.cljs` | /clear session reset | 9 |
-| `commands_skills.test.cljs` | Skills activation (/skill, /skills, dedup) | 16 |
-| `model_roles.test.cljs` | Model roles, settings, model_resolve event | 12 |
-| `grouped_tool_display.test.cljs` | Grouped tool display, message grouping | 12 |
-| `ast_tools.test.cljs` | AST tool command building, truncation | 10 |
-| `prompt_history.test.cljs` | Prompt history SQLite + picker | 11 |
-| `stats_dashboard.test.cljs` | Usage stats aggregate queries | 9 |
+**Total: 2,280+ tests across 127 test files** (run `bun test` to see live counts).
 
-**Total: ~344 tests**
+Coverage spans the full stack:
+
+- **Core kernel** — events, interceptors, middleware, protocols, schemas, state store, permissions, tool registry, session manager
+- **Agent loop** — full run cycle, hook events (`before_agent_start`, `model_resolve`, `context_assembly`, `before_message_send`, `before_provider_request`, `after_provider_request`, `stream_filter`, `message_before_store`, `provider_error`), retry-state lifecycle
+- **Extensions** — extension loader, scope/capabilities, extension API surface, every built-in extension has its own `ext_<name>.test.cljs`
+- **Gateway** — config interpolation + validation, session pool with lane serialization, auth/approval pipelines, streaming policies, channel registry, allow-list checks
+- **UI** — Ink components (status line, header, welcome, dialogs, picker, autocomplete, editor modes, render layout)
+- **Integration** — tool pipeline end-to-end, extension lifecycle, state+events, ACP agent shells
+
+See `test/` for the full list. New tests live alongside source code under matching names.
 
 ## Running the Agent
+
+Nyma ships **two binaries**:
+
+| Binary | Source | Purpose |
+|---|---|---|
+| `nyma` | `dist/agent/cli.mjs` | Interactive TUI / print / JSON / RPC modes |
+| `nyma-gateway` | `dist/gateway/entry.mjs` | Run nyma as a daemon behind chat channels (Telegram, Slack, HTTP, Email) |
 
 ### Interactive Mode (Default)
 
@@ -272,7 +257,7 @@ Launches the full terminal UI with message display, text input, and keyboard sho
 bun run start -- -p "Explain this codebase"
 ```
 
-Runs once with the given prompt, prints the response, and exits. Useful for scripting.
+Runs once with the given prompt, prints the response, and exits. Useful for scripting. The first positional arg after `-p` becomes the prompt.
 
 ### JSON Mode
 
@@ -289,6 +274,71 @@ bun run start -- --mode rpc
 ```
 
 Starts a JSONL stdio protocol for external process communication.
+
+### Gateway Mode (`nyma-gateway`)
+
+The gateway runs nyma as a long-lived daemon that listens on chat platforms — Telegram, Slack, HTTP webhooks, IMAP/SMTP email — and routes inbound messages to per-conversation agent sessions.
+
+```bash
+# Start with the default config (./gateway.json)
+bun dist/gateway/entry.mjs
+
+# Or with a custom config path
+bun dist/gateway/entry.mjs --config=/etc/nyma/bot.json
+
+# Validate a config file without starting
+bun dist/gateway/entry.mjs validate
+
+# Run interactive setup flows for each channel (where supported)
+bun dist/gateway/entry.mjs setup
+
+# Show help
+bun dist/gateway/entry.mjs --help
+```
+
+Once installed via `npm install -g .` (or `bun link`), the same commands work as the `nyma-gateway` binary directly.
+
+#### Config (`gateway.json`)
+
+```json
+{
+  "agent": {
+    "model":                "claude-sonnet-4-6",
+    "modes":                ["gateway"],
+    "exclude-capabilities": ["execution"]
+  },
+  "gateway": {
+    "streaming": { "policy": "debounce", "delay-ms": 400 },
+    "session":   { "policy": "persistent", "idle-evict-ms": 3600000 },
+    "auth":      { "allowed-user-ids": ["U12345"] }
+  },
+  "channels": [
+    {
+      "type":   "telegram",
+      "name":   "my-bot",
+      "config": { "token": "${TELEGRAM_BOT_TOKEN}" }
+    },
+    {
+      "type":   "http",
+      "name":   "webhook",
+      "config": { "port": 3000 }
+    }
+  ]
+}
+```
+
+`${VAR}` tokens are expanded from `process.env` at load time. All config keys use **kebab-case** (`delay-ms`, `allowed-user-ids`) — the gateway reads them as plain Clojure keywords. Streaming policies (`immediate`, `debounce`, `throttle`, `batch-on-end`), session policies (`persistent`, `ephemeral`, `idle-evict`, `capped`), per-channel config, and third-party channel adapter authoring are documented in [`docs/gateway.md`](docs/gateway.md).
+
+#### Built-in channels
+
+| Type | Capabilities | Notes |
+|---|---|---|
+| `telegram` | text, typing, attachments | Long-polling via Bot API |
+| `slack` | text, typing, threads | Socket Mode (no public URL needed) |
+| `http` | text | Bun.serve webhook server |
+| `email` | text | IMAP polling + SMTP reply, batch-on-end streaming |
+
+Third-party adapters can register via `gateway.core/register-channel-type!` from their own entry point.
 
 ### CLI Flags
 
@@ -384,10 +434,16 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 |-----------|-----------|---------|
 | `agent_shell` | `agent-shell` | Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.) |
 | `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
+| `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
+| `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
+| `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.) |
+| `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
+| `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
+| `questionnaire` | `questionnaire` | Structured user input flows for extensions |
 | `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
-| `bash_suite` | `bash-suite` | Shell execution helpers |
 | `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
 | `mention_files` | `mention-files` | `@filename` file insertion in the editor |
+| `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Run Qwen models via local CLI provider |
 
 ### Extension Locations
 
@@ -411,7 +467,7 @@ Control which API methods the extension can access via a capabilities list in `e
 }
 ```
 
-Available capabilities: `tools`, `commands`, `shortcuts`, `events`, `messages`, `state`, `ui`, `middleware`, `all`.
+Available capabilities: `tools`, `commands`, `shortcuts`, `events`, `messages`, `state`, `ui`, `middleware`, `exec`, `spawn`, `providers`, `model`, `session`, `flags`, `renderers`, `context`. Use `all` to grant everything. When no manifest is present, extensions default to `all`.
 
 ### ClojureScript Extension
 
@@ -550,21 +606,37 @@ All macros live in `macros.tool-dsl`:
 
 ## Events
 
-The event bus provides lifecycle hooks for extensions:
+The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 
-| Event | When |
-|-------|------|
-| `agent_start` / `agent_end` | Agent lifecycle |
-| `turn_start` / `turn_end` | Each conversation turn |
-| `message_start` / `message_update` / `message_end` | Streaming messages |
-| `tool_call` / `tool_result` | Tool execution |
-| `before_tool_call` | Before tool runs — set `ctx.cancelled = true` to block |
-| `session_start` / `session_end` / `session_switch` | Session lifecycle |
-| `before_compact` / `compact` | Context compaction |
-| `context` | Context building |
-| `input` | User input |
-| `editor_change` | User typing in editor — `{text: string}` payload |
-| `session_clear` | `/clear` invoked — extensions may reset their agent sessions |
+- **`emit`** — fire-and-forget; handlers run in priority order, return values ignored
+- **`emit-collect`** — awaits every handler and merges their JS object returns into a single result map; lets extensions transform the data the caller is about to use
+
+| Event | Kind | When |
+|-------|------|------|
+| `agent_start` / `agent_end` | emit | Agent lifecycle |
+| `turn_start` / `turn_end` | emit | Each conversation turn |
+| `message_start` / `message_update` / `message_end` | emit | Streaming messages |
+| `tool_call` / `tool_result` | emit | Tool execution |
+| `before_tool_call` | emit | Before tool runs — set `ctx.cancelled = true` to block, or return `{__skip: result}` to short-circuit |
+| `session_start` / `session_end` / `session_switch` | emit | Session lifecycle |
+| `session_clear` | emit | `/clear` invoked — extensions may reset their agent sessions |
+| `before_compact` / `compact` | emit | Context compaction |
+| `editor_change` | emit | User typing in editor — `{text: string}` payload |
+| `before_agent_start` | emit-collect | First step of each run; return `{systemPromptAddition, system-prompt-additions, prompt-sections, inject-messages}` to shape the run |
+| `model_resolve` | emit-collect | Pick which model to use for this turn; return `{model}` to override the agent default |
+| `context_assembly` | emit-collect | After messages are built; return `{messages, system}` to replace either |
+| **`before_message_send`** | emit-collect | Final transform after `context_assembly` and before the LLM call; same return shape |
+| `before_provider_request` | emit-collect | Receives the mutable streamText config; mutate in place or return `{block: true, reason}` to skip the LLM call |
+| `after_provider_request` | emit | Fired after a successful LLM call with `{usage, model, cachedTokens, turnCount}` |
+| **`stream_filter`** | emit-collect | Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries) |
+| `provider_error` | emit-collect | Fires on LLM call failure; return `{retry: true}` to retry once |
+| `message_before_store` | emit-collect | Last chance to rewrite assistant content before it lands in the store |
+| `tool_access_check` | emit-collect | Filter the tool list for the next call; return `{allowed: [name, ...]}` |
+| `permission_request` | emit-collect | Per-tool approval; return `{decision: "allow"\|"deny"\|"ask"}` |
+
+### Tool extension context (`ctx.modelId`)
+
+Tool `execute(args, ctx)` functions receive a context object with the active model ID at `ctx.modelId` — useful for tools that want to adapt truncation, top-k, or output verbosity to the model in play.
 
 ### Async Events
 

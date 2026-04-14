@@ -16,6 +16,48 @@
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
 
+(defn agent-stats
+  "Snapshot of agent stats used by the session_end_summary / session_end events."
+  [agent]
+  (let [s @(:state agent)]
+    #js {:totalCost    (or (:total-cost s) 0)
+         :turnCount    (or (:turn-count s) 0)
+         :inputTokens  (or (:total-input-tokens s) 0)
+         :outputTokens (or (:total-output-tokens s) 0)
+         :messageCount (count (:messages s))}))
+
+(defn ^:async emit-session-shutdown!
+  "Synchronous half of the shutdown sequence (used by the 'exit' handler):
+   fires session_shutdown, session_end_summary, then session_end. The
+   `:reason` payload propagates to handlers that care."
+  [agent reason]
+  (let [stats  (agent-stats agent)
+        events (:events agent)]
+    ((:emit events) "session_shutdown" {:reason reason})
+    ((:emit events) "session_end_summary" stats)
+    ((:emit events) "session_end" stats)))
+
+(defn ^:async emit-session-shutdown-async!
+  "Async half of the shutdown sequence (used by the SIGINT handler so
+   extensions awaiting cleanup get a chance to finish). Same event order
+   as `emit-session-shutdown!` but uses `emit-async` for the two
+   summary/end events."
+  [agent reason]
+  (let [stats  (agent-stats agent)
+        events (:events agent)]
+    ((:emit events) "session_shutdown" {:reason reason})
+    (js-await ((:emit-async events) "session_end_summary" stats))
+    (js-await ((:emit-async events) "session_end" stats))))
+
+(defn ^:async emit-session-ready!
+  "Fires session_ready (emit-async) with the standard payload — called once
+   per CLI startup after extensions are loaded and the model is resolved."
+  [agent model extensions-count]
+  (js-await ((:emit-async (:events agent)) "session_ready"
+                                           #js {:cwd        (js/process.cwd)
+                                                :model      (str (or model "unknown"))
+                                                :extensions extensions-count})))
+
 (defn- resolve-model-via-registry
   "Resolve a model through the agent's provider registry.
    Falls back to the provider name as a direct model ID.
@@ -151,37 +193,22 @@
         (rebuild-registry! (:keybinding-registry agent) bindings))
 
       ;; Emit session_ready — all extensions loaded, session attached, model resolved
-      (js-await ((:emit-async (:events agent)) "session_ready"
-                                               #js {:cwd        (js/process.cwd)
-                                                    :model      (str (or model "unknown"))
-                                                    :extensions (count @extensions-atom)}))
+      (js-await (emit-session-ready! agent model (count @extensions-atom)))
 
-      ;; Deactivate extensions on process exit with session_end_summary
-      (.on js/process "SIGINT" (fn []
-                                 (let [stats #js {:totalCost    (or (:total-cost @(:state agent)) 0)
-                                                  :turnCount    (or (:turn-count @(:state agent)) 0)
-                                                  :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
-                                                  :outputTokens (or (:total-output-tokens @(:state agent)) 0)
-                                                  :messageCount (count (:messages @(:state agent)))}]
-          ;; session_shutdown fires first so extensions can do cleanup before exit
-                                   ((:emit (:events agent)) "session_shutdown" {:reason "sigint"})
-                                   (-> ((:emit-async (:events agent)) "session_end_summary" stats)
-                                       (.then  (fn [] ((:emit-async (:events agent)) "session_end" stats)))
-                                       (.finally (fn []
-                                                   (deactivate-all @extensions-atom)
-                                                   (js/process.exit 0)))))))
-      (.on js/process "exit" (fn []
-                               (try
-                                 (let [stats #js {:totalCost    (or (:total-cost @(:state agent)) 0)
-                                                  :turnCount    (or (:turn-count @(:state agent)) 0)
-                                                  :inputTokens  (or (:total-input-tokens @(:state agent)) 0)
-                                                  :outputTokens (or (:total-output-tokens @(:state agent)) 0)
-                                                  :messageCount (count (:messages @(:state agent)))}]
-                                   ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
-                                   ((:emit (:events agent)) "session_end_summary" stats)
-                                   ((:emit (:events agent)) "session_end" stats))
-                                 (catch :default _ nil))
-                               (deactivate-all @extensions-atom)))
+      ;; SIGINT: async shutdown so extensions awaiting cleanup get a chance to finish.
+      (.on js/process "SIGINT"
+           (fn []
+             (-> (emit-session-shutdown-async! agent "sigint")
+                 (.finally (fn []
+                             (deactivate-all @extensions-atom)
+                             (js/process.exit 0))))))
+      ;; exit: synchronous shutdown — node won't wait on promises here.
+      (.on js/process "exit"
+           (fn []
+             (try
+               (emit-session-shutdown! agent "exit")
+               (catch :default _ nil))
+             (deactivate-all @extensions-atom)))
 
       ;; Dispatch to mode
       (let [mode (or (:mode values)
