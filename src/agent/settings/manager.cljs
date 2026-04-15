@@ -16,6 +16,11 @@
    :transport              "auto"
    :tool-display           "collapsed"
    :tool-display-max-lines 500
+   ;; When true, use the scrollback-based chat renderer: commit finalized
+   ;; messages directly to terminal scrollback via Ink's writeToStdout and
+   ;; keep only in-flight content in the dynamic region. See
+   ;; src/agent/ui/scrollback.cljs. Default false during rollout.
+   :scrollback-mode        false
    :status-line            {:preset "default"
                             :left-segments nil
                             :right-segments nil
