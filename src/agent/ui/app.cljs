@@ -1,16 +1,18 @@
 (ns agent.ui.app
   {:squint/extension "jsx"}
   (:require ["react" :refer [useState useEffect useCallback useRef]]
-            ["ink" :refer [Box Text render useInput useApp useStdout]]
+            ["ink" :refer [Box Text render useInput useApp useStdout useStdin]]
             [agent.loop :refer [run steer]]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.keybinding-registry :as kbr]
             [agent.ui.bracketed-paste :as paste]
+            [agent.ui.app-reducers :as reducers]
             [agent.ui.autocomplete-provider :as ac]
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
             ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
+            ["./scrollback.jsx" :refer [commit_to_scrollback_BANG_]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -20,7 +22,8 @@
             ["./help_overlay.jsx" :refer [HelpOverlay]]
             ["./status_line.jsx" :refer [StatusLine]]
             ["./welcome.jsx" :refer [WelcomeScreen]]
-            ["./mention_picker.mjs" :refer [create-picker]]))
+            ["./mention_picker.mjs" :refer [create-picker]]
+            [agent.debug :as dbg]))
 
 (defn- handle-command [agent text set-overlay set-messages]
   (let [parts    (.split (.slice text 1) " ")
@@ -38,24 +41,33 @@
                      :set-messages  set-messages
                      :append-message (fn [msg]
                                        (set-messages
-                                        (fn [prev] (conj (vec prev) msg))))})))))
+                                        (fn [prev] (conj (vec prev) (assoc msg :id (new-id))))))})))))
+
+(defn- new-id []
+  (-> (js/Math.random) (.toString 36) (.slice 2 11)))
 
 (defn- add-user-msg!
   "Add user message to chat. Called synchronously to batch with Editor clear."
   [set-messages text]
-  (set-messages (fn [prev] (conj (vec prev) {:role "user" :content text}))))
+  (dbg/dbg "[add-user-msg!] text:" (.slice (str text) 0 200)
+           "| stack:" (.-stack (js/Error.)))
+  (set-messages (fn [prev] (conj (vec prev) {:role "user" :content text :id (new-id)}))))
 
 (defn- add-assistant-chunk!
-  "Append a text delta to the last assistant message, or create one."
+  "Append a text delta to the last assistant message, or create one.
+   Uses in-place tail update (O(1)) rather than butlast+conj (O(n))."
   [set-messages text-delta]
   (set-messages
    (fn [prev]
      (let [all      (vec prev)
-           last-msg (last all)]
+           tail-idx (dec (count all))
+           last-msg (when (>= tail-idx 0) (nth all tail-idx))]
+       (when (not= (:role last-msg) "assistant")
+         (dbg/dbg "[add-assistant-chunk!] last-msg role is" (:role last-msg)
+                  "— creating new assistant message"))
        (if (= (:role last-msg) "assistant")
-         (conj (vec (butlast all))
-               (update last-msg :content str text-delta))
-         (conj all {:role "assistant" :content (or text-delta "")}))))))
+         (update all tail-idx update :content str text-delta)
+         (conj all {:role "assistant" :content (or text-delta "") :id (new-id)}))))))
 
 (defn ^:async do-submit [agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text]
   ;; Expand bracketed-paste markers to their original content before the
@@ -65,12 +77,16 @@
         text          (if pastes-map
                         (paste/expand-paste-markers text pastes-map)
                         text)
+        _ (dbg/dbg "[do-submit] raw-text:" (.slice (str text) 0 200))
         ;; Emit "input" event — extensions can intercept, transform, or fully handle
         input-result (js-await
                       (let [ec (:emit-collect (:events agent))]
                         (ec "input" #js {:input text :text text})))
         handled      (get input-result "handle")
         transformed  (get input-result "input")
+        _ (when (and (some? transformed) (not= transformed text))
+            (dbg/dbg "[do-submit] input-event rewrote text to:"
+                     (.slice (str transformed) 0 200)))
         text         (if (and (some? transformed) (not= transformed text))
                        transformed
                        text)]
@@ -89,7 +105,7 @@
       (let [response (get input-result "response")]
         (when (> (count (str response)) 0)
           (set-messages
-           (fn [prev] (conj (vec prev) {:role "assistant" :content response})))))
+           (fn [prev] (conj (vec prev) {:role "assistant" :content response :id (new-id)})))))
 
       handled
       nil  ;; handled but no response or subscribe
@@ -117,7 +133,8 @@
                                :stderr    (:stderr result)
                                :exit-code (:exit-code result)
                                :blocked?  (:blocked? result)
-                               :reason    (:reason result)}
+                               :reason    (:reason result)
+                               :id        (new-id)}
                         hidden? (assoc :local-only true))]
           (set-messages (fn [prev] (conj (vec prev) msg)))
           (set-streaming false)))
@@ -144,7 +161,8 @@
                                :stderr       (:stderr result)
                                :exit-code    (:exit-code result)
                                :unavailable? (:unavailable? result)
-                               :install-hint (:install-hint result)}
+                               :install-hint (:install-hint result)
+                               :id           (new-id)}
                         hidden? (assoc :local-only true))]
           (set-messages (fn [prev] (conj (vec prev) msg)))
           (set-streaming false)))
@@ -167,7 +185,11 @@
                            (let [ec (:emit-collect (:events agent))]
                              (ec "input_submit" #js {:text text :timestamp (js/Date.now)})))
             cancelled     (get submit-result "cancel")
-            text          (or (get submit-result "text") text)]
+            text          (let [t (or (get submit-result "text") text)]
+                            (when (not= t text)
+                              (dbg/dbg "[do-submit] input_submit rewrote text to:"
+                                       (.slice (str t) 0 200)))
+                            t)]
         (when-not cancelled
           (set-streaming true)
           (add-user-msg! set-messages text)
@@ -177,7 +199,19 @@
             (js-await (run agent text))
             ((:off (:events agent)) "message_update" update-handler)
             (set-streaming false)
-            (set-messages (fn [prev] (vec (remove #(= (:role %) "tool-start") prev))))))))))
+            ;; Convert any orphaned tool-start messages (those that never got
+            ;; a matching tool-end, e.g. due to abort/error) to synthetic
+            ;; tool-end messages in place. Preserves the stable :id so items
+            ;; already committed to Static scrollback are not removed.
+            (set-messages
+             (fn [prev]
+               (mapv (fn [msg]
+                       (if (= (:role msg) "tool-start")
+                         (assoc msg :role "tool-end"
+                                :result "(cancelled)"
+                                :duration 0)
+                         msg))
+                     prev)))))))))
 
 (defn with-dismissal
   "Attach timeout and/or abort-signal auto-dismiss to a dialog.
@@ -223,6 +257,31 @@
         ;; Cleared as soon as the editor-value changes to anything
         ;; else, so typing more resumes normal completion.
         dismissed-trigger-ref             (useRef nil)
+        ;; Ref mirror of (some? overlay). Updated synchronously via
+        ;; useEffect([overlay]) so the stdin paste handler (a stale closure
+        ;; from the agent useEffect) can read current overlay state without
+        ;; re-registering its data listener on every render.
+        overlay-active-ref                (useRef false)
+        ;; Ref used to block ink-text-input from appending paste-marker
+        ;; fragments ("[200~", "[201~") to the editor value.  ink's
+        ;; input-parser splits a bracketed paste into three separate events
+        ;; and use-input.js delivers them to all useInput handlers including
+        ;; ink-text-input's onChange.  Those are direct setState calls; the
+        ;; last one ("[201~") overwrites our functional marker update in the
+        ;; same React batch.  We set this ref true on "[200~" and clear it
+        ;; (via setTimeout 0, after TextInput's handler for "[201~" fires) so
+        ;; the guarded setter below suppresses all three paste-fragment updates.
+        ink-paste-block-ref               (useRef false)
+        ;; Destructure internal_eventEmitter from ink's StdinContext so we can
+        ;; prependListener on the shared event bus before ink-text-input's
+        ;; useInput fires for each paste fragment.
+        {:keys [internal_eventEmitter]}   (useStdin)
+        ;; Guarded wrapper: drop direct-setState calls while a paste is in
+        ;; flight (ink-paste-block-ref is true).  Functional updates (fn [prev]
+        ;; …) are always allowed through — our marker append uses those and
+        ;; must never be suppressed.  See app_reducers/make-guarded-setter.
+        set-editor-value-guarded          (reducers/make-guarded-setter
+                                           ink-paste-block-ref set-editor-value)
         ;; Bumped whenever the on-resolve callback externally sets
         ;; the editor text (picker commits). Used as the React key
         ;; on the Editor subtree so ink-text-input remounts with a
@@ -231,7 +290,10 @@
         ;; (after the trailing '/' for a slash completion), which
         ;; looks broken.
         [editor-remount-key set-editor-remount-key] (useState 0)
-        {:keys [stdout]}                  (useStdout)
+        ;; `write` is Ink's writeToStdout — clears the dynamic region,
+        ;; writes to scrollback, then restores the dynamic region below.
+        ;; Used by scrollback module to commit finalized messages.
+        {:keys [stdout write]}            (useStdout)
         [term-rows set-term-rows]         (useState (or (.-rows stdout) 24))
         layout-handlers                   (useRef #js [])
         app                               (useApp)
@@ -241,6 +303,52 @@
         emit!                             (fn [event data]
                                             (when-let [e (:emit (:events agent))]
                                               (e event data)))]
+
+    ;; ── scrollback-mode commit sweep ───────────────────────────────
+    ;; When :scrollback-mode is ON in settings, commit stable messages to
+    ;; terminal scrollback via Ink's writeToStdout and drop them from
+    ;; React state. "Stable" = not streaming AND not still-in-flight
+    ;; (tool-start without a matching tool-end).
+    ;;
+    ;; This runs after every render where messages or streaming changed.
+    ;; The (not streaming) guard means commits only happen at stream-end
+    ;; or in non-streaming paths (command handlers, bash/eval mode).
+    ;; During streaming, messages accumulate in the dynamic region and
+    ;; flush to scrollback when streaming flips false.
+    ;;
+    ;; Idempotent: committing calls set-messages (remove) which re-fires
+    ;; the effect; the second run sees an empty messages vec and returns.
+    (useEffect
+     (fn []
+       (let [sm           (:settings resources)
+             flag-on?     (boolean
+                           (when sm (:scrollback-mode ((:get sm)))))
+             committable? (fn [m]
+                            ;; A tool-start is not stable until replaced
+                            ;; by a tool-end. Keep it in state.
+                            (not= (:role m) "tool-start"))]
+         (when (and flag-on? (not streaming) (pos? (count messages)))
+           (let [to-commit (filterv committable? messages)
+                 br        (when-let [br (:block-renderers agent)] @br)
+                 columns   (or (.-columns stdout) 80)]
+             (when (seq to-commit)
+               (doseq [msg to-commit]
+                 (commit_to_scrollback_BANG_
+                  #js {:write write
+                       :message msg
+                       :theme theme
+                       :block-renderers br
+                       :columns columns}))
+               ;; Remove committed messages. Preserves any tool-start
+               ;; still in-flight (unlikely in not-streaming state, but
+               ;; the filter above already excluded them).
+               (set-messages
+                (fn [prev]
+                  (vec (remove
+                        (fn [m] (some #(= (:id m) (:id %)) to-commit))
+                        prev))))))))
+       js/undefined)
+     #js [messages streaming])
 
     ;; Wire extension UI hooks
     (useEffect
@@ -389,59 +497,20 @@
              verbosity (or (:tool-display settings) "collapsed")
              max-lines (or (:tool-display-max-lines settings) 500)
 
-             on-start
-             (fn [data]
-               (set-messages
-                (fn [prev]
-                  (conj (vec prev)
-                        (cond-> {:role      "tool-start"
-                                 :tool-name (get data :tool-name)
-                                 :args      (get data :args)
-                                 :exec-id   (get data :exec-id)
-                                 :verbosity (or (get data :custom-verbosity) verbosity)
-                                 :max-lines max-lines}
-                          (get data :custom-one-line-args)  (assoc :custom-one-line-args (get data :custom-one-line-args))
-                          (get data :custom-status-text)    (assoc :custom-status-text (get data :custom-status-text))
-                          (get data :custom-icon)           (assoc :custom-icon (get data :custom-icon)))))))
+             on-start   (fn [data]
+                          (set-messages
+                           (fn [prev]
+                             (reducers/apply-tool-start prev data verbosity max-lines))))
 
-             on-end
-             (fn [data]
-               (set-messages
-                (fn [prev]
-                  (let [exec-id (get data :exec-id)
-                        idx     (reduce-kv
-                                 (fn [_ i msg]
-                                   (when (and (= (:role msg) "tool-start")
-                                              (= (:exec-id msg) exec-id))
-                                     (reduced i)))
-                                 nil (vec prev))
-                        end-msg (cond-> {:role      "tool-end"
-                                         :tool-name (get data :tool-name)
-                                         :duration  (get data :duration)
-                                         :result    (get data :result)
-                                         :exec-id   exec-id
-                                         :verbosity (or (get data :custom-verbosity) verbosity)
-                                         :max-lines max-lines}
-                                  (get data :custom-one-line-result) (assoc :custom-one-line-result (get data :custom-one-line-result))
-                                  (get data :custom-icon)            (assoc :custom-icon (get data :custom-icon)))]
-                    (if idx
-                      (assoc (vec prev) idx end-msg)
-                      (conj (vec prev) end-msg))))))
+             on-end     (fn [data]
+                          (set-messages
+                           (fn [prev]
+                             (reducers/apply-tool-end prev data verbosity max-lines))))
 
-             on-update
-             (fn [data]
-               (set-messages
-                (fn [prev]
-                  (let [exec-id (get data :exec-id)
-                        idx     (reduce-kv
-                                 (fn [_ i msg]
-                                   (when (and (= (:role msg) "tool-start")
-                                              (= (:exec-id msg) exec-id))
-                                     (reduced i)))
-                                 nil (vec prev))]
-                    (if idx
-                      (assoc-in (vec prev) [idx :custom-status-text] (str (get data :data)))
-                      prev)))))]
+             on-update  (fn [data]
+                          (set-messages
+                           (fn [prev]
+                             (reducers/apply-tool-update prev data))))]
 
          ((:on events) "tool_execution_start" on-start)
          ((:on events) "tool_execution_end" on-end)
@@ -468,26 +537,52 @@
 
     ;; Bracketed paste: enable terminal mode, install raw stdin listener, and
     ;; attach the handler to `agent` so do-submit can expand markers.
+    ;; Also registers a prependListener on ink's internal_eventEmitter so we
+    ;; can set ink-paste-block-ref before ink-text-input's useInput fires for
+    ;; each of the three paste events ("[200~", body, "[201~") that ink's
+    ;; input-parser emits.  Without this guard those events reach TextInput's
+    ;; onChange as direct-setState calls; the last one overwrites our
+    ;; functional marker update in the same React batch, showing "[201~"
+    ;; instead of "[paste #N +X lines]".
     (useEffect
      (fn []
        (paste/enable-bracketed-paste)
-       (let [handler     (paste/create-paste-handler)
-             process-fn  (:process handler)
-             stdin-fn    (fn [data]
-                           (let [result (process-fn data)]
-                             (when (and (:handled result) (:marker result))
-                                ;; Append the marker to the editor value so
-                                ;; the user sees '[paste #N +X lines]' where
-                                ;; they would have seen the raw content.
-                               (set-editor-value
-                                (fn [prev] (str (or prev "") (:marker result)))))))]
+       (let [handler      (paste/create-paste-handler)
+             process-fn   (:process handler)
+             ;; Skips while any overlay is active (see make-stdin-paste-handler).
+             stdin-fn     (reducers/make-stdin-paste-handler
+                           process-fn overlay-active-ref set-editor-value)
+             ;; Blocks ink-text-input's direct onChange calls during a paste
+             ;; (see make-ink-paste-fn for the three-event race explanation).
+             ink-paste-fn (reducers/make-ink-paste-fn
+                           ink-paste-block-ref
+                           (fn [cb] (js/setTimeout cb 0)))]
          (set! (.-__paste-handler agent) handler)
          (.on (.-stdin js/process) "data" stdin-fn)
+         (when internal_eventEmitter
+           (.prependListener internal_eventEmitter "input" ink-paste-fn))
          (fn []
            (.off (.-stdin js/process) "data" stdin-fn)
+           (when internal_eventEmitter
+             (.removeListener internal_eventEmitter "input" ink-paste-fn))
            (paste/disable-bracketed-paste)
            (set! (.-__paste-handler agent) js/undefined))))
-     #js [agent])
+     #js [agent internal_eventEmitter])
+
+    ;; Keep overlay-active-ref in sync so the stdin paste handler (a closure
+    ;; that cannot re-capture `overlay` state directly) can skip paste
+    ;; processing while any dialog or picker is shown. We do NOT toggle
+    ;; terminal bracketed-paste mode here — doing so creates a race: the
+    ;; re-enable write to stdout arrives after readline has already started
+    ;; processing the next paste, causing the ESC[201~ end marker to leak
+    ;; into the editor as the literal string "[201~".  Keeping the terminal
+    ;; always in bracketed-paste mode and filtering in software is simpler
+    ;; and race-free.
+    (useEffect
+     (fn []
+       (set! (.-current overlay-active-ref) (some? overlay))
+       js/undefined)
+     #js [overlay])
 
     ;; Emit editor_change so extensions can react to typed text (e.g. token preview)
     (useEffect
@@ -627,12 +722,19 @@
                         custom-header)]
                 #jsx [Header {:agent agent :resources resources :theme theme}]))
             [WidgetContainer {:widgets widgets :position "above"}]
-            [Box {:flexGrow 1 :flexShrink 1 :overflow "hidden"
-                  :flexDirection "column"}
+            [Box {:flexGrow 1 :flexShrink 1
+                  :flexDirection "column" :overflow "hidden"}
              (if (and (empty? messages) (not streaming))
                #jsx [WelcomeScreen {:agent agent :theme theme
                                     :sessions-dir (:sessions-dir resources)}]
+               ;; scrollback-mode flows from settings :scrollback-mode.
+               ;; OFF (default): current Static-based rendering. ON:
+               ;; in-flight-only rendering; commits go to scrollback.
                #jsx [ChatView {:messages messages :theme theme
+                               :streaming streaming
+                               :scrollback-mode (boolean
+                                                 (when-let [sm (:settings resources)]
+                                                   (:scrollback-mode ((:get sm)))))
                                :block-renderers (when-let [br (:block-renderers agent)]
                                                   @br)}])]
             [WidgetContainer {:widgets widgets :position "below"}]
@@ -664,7 +766,7 @@
             [Editor {:key            editor-remount-key
                      :onSubmit       handle-submit
                      :editorValue    editor-value
-                     :setEditorValue set-editor-value
+                     :setEditorValue set-editor-value-guarded
                      :hidden         editor-hidden
                      :overlay        (some? overlay)
                      :streaming  streaming

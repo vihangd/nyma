@@ -17,8 +17,12 @@
      the previously-visible content must not be mass-re-emitted to the
      terminal (which would scroll it off and reset the visible anchor)."
   {:squint/extension "jsx"}
-  (:require ["bun:test" :refer [describe it expect]]
-            ["./agent/ui/scrollback.jsx" :refer [commit_to_scrollback_BANG_]]))
+  (:require ["bun:test" :refer [describe it expect afterEach]]
+            ["ink-testing-library" :refer [render cleanup]]
+            ["./agent/ui/scrollback.jsx" :refer [commit_to_scrollback_BANG_]]
+            ["./agent/ui/chat_view.jsx" :refer [ChatView]]))
+
+(afterEach (fn [] (cleanup)))
 
 (def ^:private test-theme
   {:colors {:primary   "#7aa2f7"
@@ -143,3 +147,67 @@
                     ;; Written content mentions the tool (at least the name
                     ;; appears via the ToolExecution renderer).
                     (-> (expect (pos? (count (first @calls)))) (.toBe true)))))))
+
+;;; ─── ChatView with scrollback-mode prop ────────────────────────────
+
+(describe "ChatView: scrollback-mode prop branches correctly"
+          (fn []
+
+            (it "scrollback-mode OFF (default): renders Static + live as before"
+                (fn []
+                  (let [msgs [{:role "user"      :content "Q1" :id "u1"}
+                              {:role "assistant" :content "A1" :id "a1"}
+                              {:role "user"      :content "Q2" :id "u2"}]
+                        {:keys [lastFrame]}
+                        (render #jsx [ChatView {:messages msgs
+                                                :theme test-theme
+                                                :streaming false}])]
+                    (-> (expect (lastFrame)) (.toContain "Q1"))
+                    (-> (expect (lastFrame)) (.toContain "A1"))
+                    (-> (expect (lastFrame)) (.toContain "Q2")))))
+
+            (it "scrollback-mode ON: renders all messages in dynamic region"
+                ;; In ON mode, ChatView skips Static entirely and renders
+                ;; every message in the dynamic region. Apps using this
+                ;; mode are expected to commit+drop messages via the sweep
+                ;; effect in app.cljs — this test only verifies the
+                ;; component itself renders cleanly without Static.
+                (fn []
+                  (let [msgs [{:role "user"      :content "QFIRST" :id "u1"}
+                              {:role "assistant" :content "AREPLY" :id "a1"}]
+                        {:keys [lastFrame]}
+                        (render #jsx [ChatView {:messages msgs
+                                                :theme test-theme
+                                                :streaming true
+                                                :scrollback-mode true}])]
+                    (-> (expect (lastFrame)) (.toContain "QFIRST"))
+                    (-> (expect (lastFrame)) (.toContain "AREPLY")))))
+
+            (it "scrollback-mode ON with empty messages renders without crashing"
+                (fn []
+                  (let [{:keys [lastFrame]}
+                        (render #jsx [ChatView {:messages []
+                                                :theme test-theme
+                                                :streaming false
+                                                :scrollback-mode true}])]
+                    ;; No content, no crash — lastFrame is a string
+                    (-> (expect (string? (lastFrame))) (.toBe true)))))
+
+            (it "scrollback-mode flip (OFF→ON) re-renders without errors"
+                ;; Changing the prop mid-lifetime must not crash — used
+                ;; when the user toggles the setting at runtime.
+                (fn []
+                  (let [msgs [{:role "user"      :content "HELLO" :id "u1"}
+                              {:role "assistant" :content "WORLD" :id "a1"}]
+                        {:keys [lastFrame rerender]}
+                        (render #jsx [ChatView {:messages msgs
+                                                :theme test-theme
+                                                :streaming false
+                                                :scrollback-mode false}])]
+                    (-> (expect (lastFrame)) (.toContain "HELLO"))
+                    (rerender #jsx [ChatView {:messages msgs
+                                              :theme test-theme
+                                              :streaming false
+                                              :scrollback-mode true}])
+                    ;; Still renders content; flip didn't break the tree
+                    (-> (expect (lastFrame)) (.toContain "HELLO")))))))

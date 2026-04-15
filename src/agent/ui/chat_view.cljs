@@ -1,10 +1,14 @@
 (ns agent.ui.chat-view
   {:squint/extension "jsx"}
   (:require ["react" :refer [useMemo]]
-            ["ink" :refer [Box Text]]
+            ["ink" :refer [Box Text Static]]
+            ["ink-spinner$default" :as Spinner]
             ["./tool_status.jsx" :refer [ToolGroupStatus group_messages]]
             ["./tool_execution.jsx" :refer [ToolExecution]]
-            ["./streaming_markdown.mjs" :refer [useStreamingMarkdown]]))
+            ["./streaming_markdown.mjs" :refer [useStreamingMarkdown]]
+            [agent.ui.think-tag-parser :refer [split-think-blocks]]
+            [agent.token-estimation :refer [estimate-tokens]]
+            [clojure.string :as str]))
 
 (defn role-prefix [role]
   (case role "user" "❯ " "assistant" "● " "thinking" "💭 " "plan" "📋 " "tool-call" "⚙ " "error" "✗ " "  "))
@@ -19,16 +23,88 @@
     "error"     (get-in theme [:colors :error])
     nil))
 
+(def ^:private reasoning-visible-lines
+  "Max number of reasoning lines shown when the block is expanded."
+  10)
+
+(defn- format-token-count
+  "Format a token count as '~N.Nk tokens' for thousands, '~N tokens' otherwise."
+  [n]
+  (cond
+    (>= n 1000) (str "~" (.toFixed (/ n 1000) 1) "k tokens")
+    (> n 0)     (str "~" n " tokens")
+    :else       nil))
+
+(defn- ReasoningBlock
+  "Dedicated renderer for inline <think>…</think> reasoning text.
+   - `expanded` true while the model is still thinking (no answer text yet):
+     shows a bold header with token count + last N lines with a │ left gutter.
+   - `expanded` false once the final answer starts streaming: collapses to a
+     compact `✻ Thought (~N tokens) ›` pill so the answer stays visible.
+
+   Matches the visual conventions of the existing thinking-renderer extension:
+   `│ ` gutter per line, 10-line cap, overflow indicator, token count in header."
+  [{:keys [reasoning expanded muted]}]
+  (let [tokens     (estimate-tokens reasoning)
+        tok-label  (format-token-count tokens)
+        lines      (str/split reasoning #"\n")
+        line-count (count lines)
+        overflow?  (> line-count reasoning-visible-lines)
+        visible    (if overflow?
+                     (vec (drop (- line-count reasoning-visible-lines) lines))
+                     (vec lines))]
+    (if expanded
+      #jsx [Box {:flexDirection "column" :marginBottom 1}
+            [Box {:flexDirection "row"}
+             [Spinner {:type "dots"}]
+             [Text {:color muted :bold true}
+              (str " ✻ Thinking" (when tok-label (str " (" tok-label ")")) "…")]]
+            (map-indexed
+             (fn [i line]
+               #jsx [Text {:key i :color "gray" :italic true :wrap "word"}
+                     (str "│ " line)])
+             visible)
+            (when overflow?
+              #jsx [Text {:color muted}
+                    (str "│ … " (- line-count reasoning-visible-lines) " earlier lines")])]
+      #jsx [Box {:flexDirection "row" :marginBottom 1}
+            [Text {:color muted}
+             (str "✻ Thought"
+                  (when tok-label (str " (" tok-label ")"))
+                  " ›")]])))
+
 (defn AssistantMessage
-  "Separate component for assistant messages — uses streaming markdown hook."
-  [{:keys [content theme block-renderers]}]
-  (let [rendered (useStreamingMarkdown content block-renderers)
-        color    (role-color theme "assistant")]
+  "Separate component for assistant messages — uses streaming markdown hook.
+   Inline <think>…</think> tags (MiniMax, DeepSeek-R1, Qwen-QwQ, GLM-4.6, Kimi)
+   are split out via `split-think-blocks` and rendered as a `ReasoningBlock`
+   above the clean answer text. Raw tags still survive in storage so
+   interleaved-thinking round-trips work for subsequent turns."
+  [{:keys [content theme block-renderers is-live]}]
+  (let [{:keys [reasoning text]} (split-think-blocks (or content ""))
+        has-reasoning (seq reasoning)
+        has-text      (seq text)
+        ;; Expand the reasoning panel while the model is still thinking
+        ;; (no answer text yet) and collapse it once the answer begins
+        ;; to stream. Also requires is-live so completed/historic messages
+        ;; never show the spinner — stream end always collapses to the pill.
+        expanded?     (and is-live has-reasoning (not has-text))
+        rendered      (useStreamingMarkdown text block-renderers)
+        color         (role-color theme "assistant")
+        muted         (get-in theme [:colors :muted] "#565f89")]
     #jsx [Box {:flexDirection "column" :marginBottom 1}
+          (when has-reasoning
+            #jsx [ReasoningBlock {:reasoning reasoning
+                                  :expanded  expanded?
+                                  :muted     muted}])
           [Box {:flexDirection "row"}
            [Text {:color color} (role-prefix "assistant")]
            [Box {:flexDirection "column" :flexShrink 1}
-            [Text {:wrap "word"} rendered]]]]))
+            (if has-text
+              #jsx [Text {:wrap "word"} rendered]
+              ;; Show "…" only when not yet reasoning either (pure wait before first chunk).
+              ;; When reasoning is active, the ReasoningBlock header already signals activity.
+              (when-not has-reasoning
+                #jsx [Text {:color muted} "…"]))]]]))
 
 (defn EvalMessage
   "Rendered result of an editor eval-mode expression (`$expr` /
@@ -123,7 +199,7 @@
   "Role-based rendering (original MessageBubble logic). Extracted so
    that MessageBubble can branch on :kind first before dispatching
    on :role."
-  [{:keys [message theme block-renderers]}]
+  [{:keys [message theme block-renderers is-live]}]
   (let [role (:role message)]
     (case role
       "tool-group"
@@ -159,7 +235,8 @@
         (case role
           "assistant"
           #jsx [AssistantMessage {:content content :theme theme
-                                  :block-renderers block-renderers}]
+                                  :block-renderers block-renderers
+                                  :is-live is-live}]
 
           "thinking"
           ;; Thinking messages: dimmed italic style
@@ -179,7 +256,7 @@
                 [Text {:color color :bold (= role "user")}
                  (str (role-prefix role) content)]])))))
 
-(defn MessageBubble [{:keys [message theme block-renderers]}]
+(defn MessageBubble [{:keys [message theme block-renderers is-live]}]
   (let [kind (:kind message)]
     (cond
       ;; Editor bash mode (!cmd / !!cmd) — dedicated renderer. Checked
@@ -197,14 +274,105 @@
 
       :else
       #jsx [MessageBubbleByRole {:message message :theme theme
-                                 :block-renderers block-renderers}])))
+                                 :block-renderers block-renderers
+                                 :is-live is-live}])))
 
-(defn ChatView [{:keys [messages theme block-renderers]}]
-  (let [grouped (useMemo #(group_messages messages) #js [messages])]
-    #jsx [Box {:flexDirection "column" :flexGrow 1 :overflow "hidden"
-               :justifyContent "flex-end"}
+(defn last-user-index
+  "Return the index of the last :role \"user\" message in msgs, or -1.
+   The turn boundary — everything from this index onwards is the current
+   turn and must stay in the live region so the user's question never
+   scrolls off while the assistant streams."
+  [msgs]
+  (loop [i (dec (count msgs))]
+    (cond
+      (< i 0) -1
+      (= "user" (:role (nth msgs i))) i
+      :else (recur (dec i)))))
+
+(defn compute-turn-split
+  "Pure function — split messages into finalized (scrollback, completed
+   turns) and live (the in-progress turn from the last user message onwards).
+
+   - finalized: everything before the last user message. nil when there is
+     no completed turn (fresh chat or single turn in progress).
+   - live:      everything from the last user message to the end. Includes
+     the user's question, streaming assistant content, tool calls, etc.
+   - turn-idx:  the index of the last user message, or -1 if none.
+
+   This split is the single source of truth for ChatView's Static / live
+   region decision. Test it directly with pure-function tests — do NOT
+   rely on `lastFrame()` assertions, since ink-testing-library runs Ink
+   in debug mode which writes full static + dynamic output every frame,
+   masking any bug where a message is in the wrong region."
+  [messages]
+  (let [msgs     (vec messages)
+        turn-idx (last-user-index msgs)]
+    {:turn-idx  turn-idx
+     :finalized (when (pos? turn-idx) (subvec msgs 0 turn-idx))
+     :live      (if (>= turn-idx 0) (subvec msgs turn-idx) msgs)}))
+
+(defn ChatView
+  "Renders the chat history region.
+
+   Two code paths behind the `scrollback-mode` prop (plumbed down from
+   app.cljs, which reads `:scrollback-mode` from settings):
+
+   OFF (default): current behavior — finalized slice goes into `<Static>`
+     and the live slice (from last user message onwards) renders in the
+     dynamic region. See compute-turn-split + fin-grouped memo below.
+
+   ON: scrollback mode — the `<Static>` component is NOT rendered. All
+     remaining `messages` are assumed to be in-flight (app.cljs commits
+     stable items to scrollback via `commit-to-scrollback!` and removes
+     them from state). The dynamic region shows only the in-flight tail.
+
+   PR-2 will remove the OFF path entirely once the ON path is validated."
+  [{:keys [messages theme block-renderers streaming scrollback-mode]}]
+  (let [all-msgs       (vec messages)
+        {:keys [turn-idx finalized live]} (compute-turn-split all-msgs)
+        ;; Group only the stable finalized slice (previous completed turns).
+        ;; Memo key: turn-idx (new turn boundary), plus first-message id
+        ;; (session switch detection — a different message list with the
+        ;; same turn-idx would otherwise return a stale cache). The live
+        ;; slice never participates in the memo — it renders fresh every
+        ;; frame so streaming content updates appear immediately.
+        ;; group_messages returns a CLJS vector; to-array converts for Static.
+        first-id       (:id (first all-msgs))
+        fin-grouped    (useMemo
+                        (fn []
+                          (if (and (not scrollback-mode) finalized)
+                            (to-array (group_messages finalized))
+                            #js []))
+                        #js [turn-idx first-id scrollback-mode])
+        live-is-live   (boolean streaming)
+        ;; In scrollback mode the entire messages list is in-flight —
+        ;; there's no Static region, so compute-turn-split's `live` slice
+        ;; isn't the right source. Use the full list instead.
+        in-flight      (if scrollback-mode all-msgs live)
+        in-flight-count (count in-flight)]
+    #jsx [Box {:flexDirection "column"}
+          (when (and (not scrollback-mode) (pos? (.-length fin-grouped)))
+            ;; :key pinned to first-message-id forces Ink to unmount and
+            ;; remount <Static> when the session changes. Ink's Static
+            ;; tracks emitted items via an internal watermark (useState)
+            ;; and assumes items is append-only; without a key, switching
+            ;; to a different session's finalized list — even one that
+            ;; differs by content — silently drops the new items because
+            ;; items.length <= prior watermark.
+            #jsx [Static {:key (str "static-" (or first-id "empty"))
+                          :items fin-grouped}
+                  (fn [msg i]
+                    #jsx [MessageBubble {:key             (or (:id msg) i)
+                                         :message         msg
+                                         :theme           theme
+                                         :block-renderers block-renderers
+                                         :is-live         false}])])
           (map-indexed
            (fn [i msg]
-             #jsx [MessageBubble {:key i :message msg :theme theme
-                                  :block-renderers block-renderers}])
-           grouped)]))
+             (let [tail? (= i (dec in-flight-count))]
+               #jsx [MessageBubble {:key             (or (:id msg) (str "live-" i))
+                                    :message         msg
+                                    :theme           theme
+                                    :block-renderers block-renderers
+                                    :is-live         (and tail? live-is-live)}]))
+           in-flight)]))
