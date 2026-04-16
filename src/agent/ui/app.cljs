@@ -720,14 +720,16 @@
                                       (str "Error: " (.-message e)) "error"))))))
            #js [streaming agent])]
 
-      ;; The startup header banner is printed ONCE to stdout before Ink
-      ;; mounts (see agent.modes.interactive + agent.ui.scrollback/
-      ;; print-header-banner!). This matches Claude Code's pattern: the
-      ;; banner is normal terminal output — it scrolls up with the rest
-      ;; of the conversation as content accumulates. No Static, no
-      ;; pinning, no repaint. Extension-provided custom headers still
-      ;; go through the dynamic region below.
-      #jsx [Box {:flexDirection "column" :height (max 1 (dec term-rows))}
+      ;; Scrollback-mode layout: NO fixed height on the App Box.
+      ;; Content flows naturally — chat renders at its natural size,
+      ;; editor sits right below the last message. Terminal scrolls
+      ;; as content accumulates. Banner was already printed to stdout
+      ;; before Ink mounted (see modes/interactive.cljs).
+      ;;
+      ;; This matches Claude Code: the editor is at the cursor
+      ;; position, not pinned to the terminal bottom. No empty middle,
+      ;; no wasted vertical space.
+      #jsx [Box {:flexDirection "column"}
             (when-let [custom-header (when custom-header-fn (custom-header-fn))]
               #jsx [Box {:flexShrink 0}
                     (if (string? custom-header)
@@ -736,21 +738,19 @@
                             [Text {:color "#7aa2f7" :bold true} custom-header]]
                       custom-header)])
             [WidgetContainer {:widgets widgets :position "above"}]
-            [Box {:flexGrow 1 :flexShrink 1
-                  :flexDirection "column" :overflow "hidden"}
-             (if (and (empty? messages) (not streaming))
-               #jsx [WelcomeScreen {:agent agent :theme theme
-                                    :sessions-dir (:sessions-dir resources)}]
-               ;; scrollback-mode flows from settings :scrollback-mode.
-               ;; OFF (default): current Static-based rendering. ON:
-               ;; in-flight-only rendering; commits go to scrollback.
-               #jsx [ChatView {:messages messages :theme theme
-                               :streaming streaming
-                               :scrollback-mode (boolean
-                                                 (when-let [sm (:settings resources)]
-                                                   (:scrollback-mode ((:get sm)))))
-                               :block-renderers (when-let [br (:block-renderers agent)]
-                                                  @br)}])]
+            (if (and (empty? messages) (not streaming))
+              #jsx [WelcomeScreen {:agent agent :theme theme
+                                   :sessions-dir (:sessions-dir resources)}]
+              ;; scrollback-mode flows from settings :scrollback-mode.
+              ;; OFF (default): current Static-based rendering. ON:
+              ;; in-flight-only rendering; commits go to scrollback.
+              #jsx [ChatView {:messages messages :theme theme
+                              :streaming streaming
+                              :scrollback-mode (boolean
+                                                (when-let [sm (:settings resources)]
+                                                  (:scrollback-mode ((:get sm)))))
+                              :block-renderers (when-let [br (:block-renderers agent)]
+                                                 @br)}])
             [WidgetContainer {:widgets widgets :position "below"}]
             ;; Status line sits directly above the editor (oh-my-pi style,
             ;; and consistent with Claude Code / Codex / Gemini CLI).
