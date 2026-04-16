@@ -345,10 +345,15 @@
                             #js []))
                         #js [turn-idx first-id scrollback-mode])
         live-is-live   (boolean streaming)
-        ;; In scrollback mode the entire messages list is in-flight —
-        ;; there's no Static region, so compute-turn-split's `live` slice
-        ;; isn't the right source. Use the full list instead.
-        in-flight      (if scrollback-mode all-msgs live)
+        ;; In scrollback mode, the in-flight region renders only messages
+        ;; that have NOT yet been committed to scrollback. Committed
+        ;; messages stay in React state (so build-context can still read
+        ;; them for LLM context) but are filtered out here to avoid
+        ;; double rendering (once in terminal scrollback via writeToStdout,
+        ;; once in the dynamic region via MessageBubble).
+        in-flight      (if scrollback-mode
+                         (filterv (fn [m] (not (:committed m))) all-msgs)
+                         live)
         in-flight-count (count in-flight)]
     #jsx [Box {:flexDirection "column"}
           (when (and (not scrollback-mode) (pos? (.-length fin-grouped)))

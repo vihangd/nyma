@@ -16,11 +16,14 @@
    :transport              "auto"
    :tool-display           "collapsed"
    :tool-display-max-lines 500
-   ;; When true, use the scrollback-based chat renderer: commit finalized
-   ;; messages directly to terminal scrollback via Ink's writeToStdout and
-   ;; keep only in-flight content in the dynamic region. See
-   ;; src/agent/ui/scrollback.cljs. Default false during rollout.
-   :scrollback-mode        false
+   ;; Use the scrollback-based chat renderer: commit finalized messages
+   ;; directly to terminal scrollback via Ink's writeToStdout and keep only
+   ;; in-flight content in the dynamic region. Matches the Claude Code /
+   ;; Codex / Aider architecture. Users can revert via
+   ;;   "scrollbackMode": false
+   ;; in ~/.nyma/settings.json during the transition period.
+   ;; See src/agent/ui/scrollback.cljs.
+   :scrollback-mode        true
    :status-line            {:preset "default"
                             :left-segments nil
                             :right-segments nil

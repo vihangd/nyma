@@ -306,27 +306,32 @@
 
     ;; ── scrollback-mode commit sweep ───────────────────────────────
     ;; When :scrollback-mode is ON in settings, commit stable messages to
-    ;; terminal scrollback via Ink's writeToStdout and drop them from
-    ;; React state. "Stable" = not streaming AND not still-in-flight
-    ;; (tool-start without a matching tool-end).
+    ;; terminal scrollback via Ink's writeToStdout and MARK them with
+    ;; :committed true in React state. "Stable" = not streaming AND not
+    ;; still in-flight (tool-start without a matching tool-end) AND not
+    ;; already committed.
+    ;;
+    ;; Committed messages are KEPT in React state so `agent.context/
+    ;; build-context` (which reads `:messages` from the agent state atom)
+    ;; still sees the full conversation history for LLM context. ChatView
+    ;; filters them out of the dynamic region when scrollback-mode is ON,
+    ;; so they don't render twice (once in scrollback, once in dynamic).
     ;;
     ;; This runs after every render where messages or streaming changed.
     ;; The (not streaming) guard means commits only happen at stream-end
     ;; or in non-streaming paths (command handlers, bash/eval mode).
-    ;; During streaming, messages accumulate in the dynamic region and
-    ;; flush to scrollback when streaming flips false.
     ;;
-    ;; Idempotent: committing calls set-messages (remove) which re-fires
-    ;; the effect; the second run sees an empty messages vec and returns.
+    ;; Idempotent: after committing, the effect re-fires because
+    ;; set-messages flipped the :committed flags. The second run sees
+    ;; no uncommitted messages and returns early.
     (useEffect
      (fn []
        (let [sm           (:settings resources)
              flag-on?     (boolean
                            (when sm (:scrollback-mode ((:get sm)))))
              committable? (fn [m]
-                            ;; A tool-start is not stable until replaced
-                            ;; by a tool-end. Keep it in state.
-                            (not= (:role m) "tool-start"))]
+                            (and (not= (:role m) "tool-start")
+                                 (not (:committed m))))]
          (when (and flag-on? (not streaming) (pos? (count messages)))
            (let [to-commit (filterv committable? messages)
                  br        (when-let [br (:block-renderers agent)] @br)
@@ -339,14 +344,16 @@
                        :theme theme
                        :block-renderers br
                        :columns columns}))
-               ;; Remove committed messages. Preserves any tool-start
-               ;; still in-flight (unlikely in not-streaming state, but
-               ;; the filter above already excluded them).
+               ;; Mark committed messages in place. Preserves order and
+               ;; preserves them for LLM context reads via build-context.
                (set-messages
                 (fn [prev]
-                  (vec (remove
-                        (fn [m] (some #(= (:id m) (:id %)) to-commit))
-                        prev))))))))
+                  (let [to-commit-ids (set (map :id to-commit))]
+                    (mapv (fn [m]
+                            (if (contains? to-commit-ids (:id m))
+                              (assoc m :committed true)
+                              m))
+                          prev))))))))
        js/undefined)
      #js [messages streaming])
 

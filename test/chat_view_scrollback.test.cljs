@@ -210,4 +210,39 @@
                                               :streaming false
                                               :scrollback-mode true}])
                     ;; Still renders content; flip didn't break the tree
-                    (-> (expect (lastFrame)) (.toContain "HELLO")))))))
+                    (-> (expect (lastFrame)) (.toContain "HELLO")))))
+
+            (it "scrollback-mode ON: :committed messages are filtered from the in-flight region"
+                ;; This is the critical invariant: once a message is committed
+                ;; to terminal scrollback via writeToStdout, it's marked with
+                ;; :committed true in React state (for LLM context) but must
+                ;; NOT render in the dynamic region (otherwise it would appear
+                ;; twice — once in scrollback, once in the live region).
+                (fn []
+                  (let [msgs [{:role "user"      :content "OLD_Q" :id "u1" :committed true}
+                              {:role "assistant" :content "OLD_A" :id "a1" :committed true}
+                              {:role "user"      :content "NEW_Q" :id "u2"}]
+                        {:keys [lastFrame]}
+                        (render #jsx [ChatView {:messages msgs
+                                                :theme test-theme
+                                                :streaming false
+                                                :scrollback-mode true}])]
+                    ;; Only the uncommitted message (NEW_Q) should appear
+                    (-> (expect (lastFrame)) (.toContain "NEW_Q"))
+                    (-> (expect (.includes (lastFrame) "OLD_Q")) (.toBe false))
+                    (-> (expect (.includes (lastFrame) "OLD_A")) (.toBe false)))))
+
+            (it "scrollback-mode OFF: :committed flag is IGNORED, all messages render"
+                ;; In OFF mode (current Static-based behavior), the
+                ;; :committed flag has no effect — ChatView renders
+                ;; messages via compute-turn-split as before.
+                (fn []
+                  (let [msgs [{:role "user"      :content "OLD_Q" :id "u1" :committed true}
+                              {:role "assistant" :content "OLD_A" :id "a1" :committed true}]
+                        {:keys [lastFrame]}
+                        (render #jsx [ChatView {:messages msgs
+                                                :theme test-theme
+                                                :streaming false
+                                                :scrollback-mode false}])]
+                    (-> (expect (lastFrame)) (.toContain "OLD_Q"))
+                    (-> (expect (lastFrame)) (.toContain "OLD_A")))))))
