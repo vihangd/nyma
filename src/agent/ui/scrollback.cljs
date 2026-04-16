@@ -281,3 +281,25 @@
     (let [rendered (render-message-to-string message theme block-renderers columns)]
       (when (and rendered (pos? (count rendered)))
         (write (str rendered "\n"))))))
+
+;;; ─── Startup banner (direct stdout, pre-Ink) ────────────────────
+
+(defn print-header-banner!
+  "Write a minimal startup banner to stdout BEFORE Ink's render mounts.
+   Matches the Claude Code pattern: the banner is normal terminal output —
+   it scrolls up naturally as chat content accumulates, no pinning, no
+   Static component. Ink's live region (chat, status, editor) mounts
+   below the banner and takes over from there.
+
+   `model-id` is the configured model string (or nil — falls back to
+   \"unknown\"). `theme` is the current theme map."
+  [{:keys [model-id theme]}]
+  (let [primary (get-in theme [:colors :primary] "#7aa2f7")
+        muted   (get-in theme [:colors :muted] "#565f89")
+        model   (or model-id "unknown")
+        ;; Simple one-line banner — no borders, no box drawing.
+        ;; Terminal scrollback shows it at the top of the session
+        ;; until enough content pushes it out of the visible area.
+        line    (str (fg (bold "● nyma") primary)
+                     " " (fg (str "· " model) muted))]
+    (.write js/process.stdout (str line "\n\n"))))

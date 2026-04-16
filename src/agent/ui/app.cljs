@@ -10,7 +10,6 @@
             [agent.ui.autocomplete-provider :as ac]
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
-            ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
                                         committable_past_turn]]
@@ -721,16 +720,21 @@
                                       (str "Error: " (.-message e)) "error"))))))
            #js [streaming agent])]
 
+      ;; The startup header banner is printed ONCE to stdout before Ink
+      ;; mounts (see agent.modes.interactive + agent.ui.scrollback/
+      ;; print-header-banner!). This matches Claude Code's pattern: the
+      ;; banner is normal terminal output — it scrolls up with the rest
+      ;; of the conversation as content accumulates. No Static, no
+      ;; pinning, no repaint. Extension-provided custom headers still
+      ;; go through the dynamic region below.
       #jsx [Box {:flexDirection "column" :height (max 1 (dec term-rows))}
-            (let [custom-header (when custom-header-fn (custom-header-fn))]
-              (if custom-header
-                #jsx [Box {:flexShrink 0}
-                      (if (string? custom-header)
-                        #jsx [Box {:paddingX 1 :justifyContent "space-between"
-                                   :borderStyle "round" :borderColor "#7aa2f7"}
-                              [Text {:color "#7aa2f7" :bold true} custom-header]]
-                        custom-header)]
-                #jsx [Header {:agent agent :resources resources :theme theme}]))
+            (when-let [custom-header (when custom-header-fn (custom-header-fn))]
+              #jsx [Box {:flexShrink 0}
+                    (if (string? custom-header)
+                      #jsx [Box {:paddingX 1 :justifyContent "space-between"
+                                 :borderStyle "round" :borderColor "#7aa2f7"}
+                            [Text {:color "#7aa2f7" :bold true} custom-header]]
+                      custom-header)])
             [WidgetContainer {:widgets widgets :position "above"}]
             [Box {:flexGrow 1 :flexShrink 1
                   :flexDirection "column" :overflow "hidden"}
