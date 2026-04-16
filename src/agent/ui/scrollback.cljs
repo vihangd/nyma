@@ -29,6 +29,8 @@
   (:require ["node:util" :as nodeutil]
             [agent.utils.markdown-blocks :as mb]
             [agent.utils.ansi :as ansi]
+            [agent.token-estimation :refer [estimate-tokens]]
+            [agent.ui.think-tag-parser :refer [split-think-blocks]]
             [clojure.string :as str]))
 
 ;;; ─── ANSI primitives ────────────────────────────────────────────
@@ -74,22 +76,71 @@
         rendered (:rendered result)]
     (or rendered "")))
 
+(defn- format-token-count [n]
+  (cond
+    (>= n 1000) (str "~" (.toFixed (/ n 1000) 1) "k tokens")
+    (> n 0)     (str "~" n " tokens")
+    :else       nil))
+
+(defn- render-reasoning-pill
+  "Render a compact one-line `✻ Thought (~N tokens) ›` pill for the
+   committed-scrollback view. Matches the collapsed live-view pill
+   (see chat_view.cljs ReasoningBlock) so reasoning is visible in
+   history without the full chain-of-thought cluttering scrollback."
+  [reasoning theme]
+  (let [muted     (get-in theme [:colors :muted] "#565f89")
+        tok-label (format-token-count (estimate-tokens reasoning))]
+    (fg (str "✻ Thought"
+             (when tok-label (str " (" tok-label ")"))
+             " ›")
+        muted)))
+
 (defn- render-assistant
+  "Render an assistant message for scrollback commit.
+
+   Inline <think>…</think> blocks (MiniMax, DeepSeek-R1, Qwen-QwQ,
+   GLM-4.6, Kimi) are split out via split-think-blocks — exactly like
+   the live AssistantMessage view. The reasoning becomes a compact
+   collapsed pill; the clean text becomes the message body. This
+   matches what the user saw while the turn was streaming, so
+   committed scrollback and live-region appearance are consistent.
+
+   Returns nil for messages with NO visible text (reasoning-only
+   pre-tool-call assistants). These already appeared as a live pill;
+   committing an empty `●` bubble plus an orphan pill to scrollback
+   is noise. Committing nothing also keeps scrollback cleaner for
+   reasoning-heavy models that emit many intermediate think-only
+   messages."
   [message theme block-renderers columns]
-  (let [color     (get-in theme [:colors :secondary] "#9ece6a")
-        content   (or (:content message) "")
-        rendered  (render-assistant-text content block-renderers columns)
-        ;; `rendered` is already markdown-rendered ANSI; prepend the
-        ;; role prefix in secondary color. The first line gets the
-        ;; bullet; subsequent lines stay aligned with a 2-space indent.
-        lines     (str/split rendered #"\n")
-        first-ln  (or (first lines) "")
-        rest-lns  (rest lines)
-        prefixed-first (fg (str "● " first-ln) color)
-        prefixed-rest  (str/join "\n" (map #(str "  " %) rest-lns))]
-    (if (seq rest-lns)
-      (str prefixed-first "\n" prefixed-rest)
-      prefixed-first)))
+  (let [color         (get-in theme [:colors :secondary] "#9ece6a")
+        raw           (or (:content message) "")
+        {:keys [reasoning text]} (split-think-blocks raw)
+        has-reasoning (seq reasoning)
+        has-text      (seq text)]
+    (cond
+      ;; No text and no reasoning → nothing to commit.
+      (and (not has-text) (not has-reasoning))
+      nil
+
+      ;; Reasoning only (no final text) → skip. The live view already
+      ;; showed the pill; committing it again just clutters history.
+      (and (not has-text) has-reasoning)
+      nil
+
+      :else
+      (let [rendered       (render-assistant-text text block-renderers columns)
+            lines          (str/split rendered #"\n")
+            first-ln       (or (first lines) "")
+            rest-lns       (rest lines)
+            prefixed-first (fg (str "● " first-ln) color)
+            prefixed-rest  (str/join "\n" (map #(str "  " %) rest-lns))
+            body           (if (seq rest-lns)
+                             (str prefixed-first "\n" prefixed-rest)
+                             prefixed-first)]
+        (if has-reasoning
+          ;; Prepend a one-line reasoning pill above the body.
+          (str "  " (render-reasoning-pill reasoning theme) "\n" body)
+          body)))))
 
 (defn- render-bash
   "Editor bash mode (`!cmd` / `!!cmd`) result."

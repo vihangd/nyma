@@ -118,6 +118,71 @@
                     (-> (expect (.includes out "Read")) (.toBe true))
                     (-> (expect (.includes out "file contents")) (.toBe true)))))
 
+            (it "assistant with <think> blocks: strips raw tags, shows compact pill"
+                ;; Regression for the user-reported inconsistency: committed
+                ;; scrollback turns were showing raw "<think>...</think>"
+                ;; text because render-assistant passed content through
+                ;; incremental-render without split-think-blocks. Live view
+                ;; (AssistantMessage) stripped them but committed view
+                ;; didn't — same message looked different in-flight vs
+                ;; committed.
+                (fn []
+                  (let [content "<think>I should look at the main.go file.</think>\nHere is the answer."
+                        out (render_message_to_string
+                             {:role "assistant" :content content :id "a1"}
+                             test-theme nil 80)]
+                    ;; The raw <think> tag must NOT appear in scrollback
+                    (-> (expect (.includes out "<think>")) (.toBe false))
+                    (-> (expect (.includes out "</think>")) (.toBe false))
+                    ;; The reasoning pill should appear (compact form)
+                    (-> (expect (.includes out "✻ Thought")) (.toBe true))
+                    ;; The actual answer text must still appear
+                    (-> (expect (.includes out "Here is the answer")) (.toBe true))
+                    ;; The reasoning text itself should NOT be dumped inline
+                    (-> (expect (.includes out "I should look at the main.go file."))
+                        (.toBe false)))))
+
+            (it "assistant with ONLY reasoning (no text) → committed as nil/empty"
+                ;; Reasoning-only messages happen right before a tool call
+                ;; on reasoning models. The live view already showed the
+                ;; pill; committing an empty `●` bubble + orphan pill to
+                ;; scrollback is noise. Skip the commit entirely.
+                (fn []
+                  (let [content "<think>Let me check the file first.</think>"
+                        out (render_message_to_string
+                             {:role "assistant" :content content :id "a1"}
+                             test-theme nil 80)]
+                    ;; Returns nil or empty — commit-to-scrollback! treats
+                    ;; both as a no-op.
+                    (-> (expect (or (nil? out) (= "" out))) (.toBe true)))))
+
+            (it "assistant with UNTERMINATED <think> tag → skip commit"
+                ;; Mid-stream state: <think>partial reasoning with no
+                ;; closing tag yet. All content is treated as reasoning,
+                ;; no final text. Don't commit.
+                (fn []
+                  (let [content "<think>starting to think about this..."
+                        out (render_message_to_string
+                             {:role "assistant" :content content :id "a1"}
+                             test-theme nil 80)]
+                    (-> (expect (or (nil? out) (= "" out))) (.toBe true)))))
+
+            (it "commit-to-scrollback! is a no-op when renderer returns nil"
+                ;; Reasoning-only messages: renderer returns nil, commit
+                ;; should write nothing.
+                (fn []
+                  (let [calls (atom [])
+                        mock-write (fn [data] (swap! calls conj data))]
+                    (commit_to_scrollback_BANG_
+                     #js {:write mock-write
+                          :message {:role "assistant"
+                                    :content "<think>only reasoning</think>"
+                                    :id "a1"}
+                          :theme test-theme
+                          :block-renderers nil
+                          :columns 80})
+                    (-> (expect (count @calls)) (.toBe 0)))))
+
             (it "renders each kind+role combination without throwing"
                 ;; Exhaustive smoke test — every branch in the cond.
                 (fn []

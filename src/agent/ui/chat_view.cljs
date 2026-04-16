@@ -96,15 +96,18 @@
             #jsx [ReasoningBlock {:reasoning reasoning
                                   :expanded  expanded?
                                   :muted     muted}])
-          [Box {:flexDirection "row"}
-           [Text {:color color} (role-prefix "assistant")]
-           [Box {:flexDirection "column" :flexShrink 1}
-            (if has-text
-              #jsx [Text {:wrap "word"} rendered]
-              ;; Show "…" only when not yet reasoning either (pure wait before first chunk).
-              ;; When reasoning is active, the ReasoningBlock header already signals activity.
-              (when-not has-reasoning
-                #jsx [Text {:color muted} "…"]))]]]))
+          ;; Suppress the `●` row entirely when there's no text AND
+          ;; reasoning IS present — the reasoning pill/block is the
+          ;; only meaningful signal, and an empty `●` bubble looks
+          ;; broken. Pre-first-chunk (no reasoning, no text) still
+          ;; shows `● …` so the user sees SOMETHING while waiting.
+          (when (or has-text (not has-reasoning))
+            #jsx [Box {:flexDirection "row"}
+                  [Text {:color color} (role-prefix "assistant")]
+                  [Box {:flexDirection "column" :flexShrink 1}
+                   (if has-text
+                     #jsx [Text {:wrap "word"} rendered]
+                     #jsx [Text {:color muted} "…"])]])]))
 
 (defn EvalMessage
   "Rendered result of an editor eval-mode expression (`$expr` /
