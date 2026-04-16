@@ -207,6 +207,39 @@
   [message _theme]
   (str (:role message) ": " (:content message)))
 
+;;; ─── Commit-sweep helpers (pure) ────────────────────────────────
+
+(defn last-user-index
+  "Return the index of the last \"user\" message in `messages`, or -1.
+   The turn boundary: messages BEFORE this index are past turns
+   (eligible to commit); messages FROM this index onwards are the
+   current turn (stay in the chat region until a new user submit)."
+  [messages]
+  (loop [i (dec (count messages))]
+    (cond
+      (< i 0) -1
+      (= "user" (:role (nth messages i))) i
+      :else (recur (dec i)))))
+
+(defn committable-past-turn
+  "Given the current messages vector, return the subvector of messages
+   that form PAST TURNS (before the last user message) AND haven't been
+   committed yet AND aren't in-flight tool-starts.
+
+   Pure. Drives the commit-sweep effect in app.cljs and is tested
+   directly so the turn-boundary rules don't regress in a
+   flushPassiveEffects / renderToString path that integration tests
+   can't observe."
+  [messages]
+  (let [last-user-idx (last-user-index messages)]
+    (if (pos? last-user-idx)
+      (let [past-turn (vec (take last-user-idx messages))]
+        (filterv (fn [m]
+                   (and (not= (:role m) "tool-start")
+                        (not (:committed m))))
+                 past-turn))
+      [])))
+
 ;;; ─── Public API ─────────────────────────────────────────────────
 
 (defn render-message-to-string

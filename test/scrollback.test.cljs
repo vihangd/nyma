@@ -10,7 +10,9 @@
   {:squint/extension "jsx"}
   (:require ["bun:test" :refer [describe it expect]]
             ["./agent/ui/scrollback.mjs" :refer [render_message_to_string
-                                                 commit_to_scrollback_BANG_]]))
+                                                 commit_to_scrollback_BANG_
+                                                 last_user_index
+                                                 committable_past_turn]]))
 
 (def ^:private test-theme
   {:colors {:primary   "#7aa2f7"
@@ -195,3 +197,114 @@
                         :columns 80})
                   ;; Reaching here without throwing is the assertion.
                   (-> (expect true) (.toBe true))))))
+
+;;; ─── Turn-boundary semantics (pure) ────────────────────────────
+;;;
+;;; This is the test gap the user flagged when they saw content scroll
+;;; above the header after every turn. The fix: commit ONLY past turns
+;;; (everything before the last user message), not the current turn.
+;;; The current turn stays in the chat region — that's what the user
+;;; sees as "the conversation".
+;;;
+;;; These tests codify the exact rules so they can't silently regress.
+
+(describe "last-user-index"
+          (fn []
+
+            (it "returns -1 for empty messages"
+                (fn []
+                  (-> (expect (last_user_index #js [])) (.toBe -1))))
+
+            (it "returns -1 when no user message exists"
+                (fn []
+                  (let [msgs #js [#js {:role "assistant" :content "x" :id "a1"}]]
+                    (-> (expect (last_user_index msgs)) (.toBe -1)))))
+
+            (it "returns index of the only user message"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q" :id "u1"}]]
+                    (-> (expect (last_user_index msgs)) (.toBe 0)))))
+
+            (it "returns the index of the LAST user in a multi-turn list"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}
+                                  #js {:role "assistant" :content "a2" :id "a2"}
+                                  #js {:role "user" :content "q3" :id "u3"}]]
+                    (-> (expect (last_user_index msgs)) (.toBe 4)))))))
+
+(describe "committable-past-turn"
+          (fn []
+
+            (it "returns [] when there are no past turns (single turn only)"
+                ;; During turn 1, last-user is at index 0, so there's no
+                ;; prior slice to commit. The chat region shows the
+                ;; whole conversation.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}]]
+                    (-> (expect (.-length (committable_past_turn msgs))) (.toBe 0)))))
+
+            (it "returns [] when there's no user message yet"
+                (fn []
+                  (-> (expect (.-length (committable_past_turn #js []))) (.toBe 0))))
+
+            (it "returns prior turn messages when a new turn starts"
+                ;; Turn 2 user just arrived — now turn 1 becomes a past
+                ;; turn and should commit.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        result (committable_past_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 2))
+                    (-> (expect (.-id (aget result 0))) (.toBe "u1"))
+                    (-> (expect (.-id (aget result 1))) (.toBe "a1")))))
+
+            (it "skips messages already marked :committed"
+                ;; Idempotent: second-run sees the flag and returns empty.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "a1" :id "a1" :committed true}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        result (committable_past_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "skips tool-start (in-flight — NOT eligible to commit)"
+                ;; A tool-start without tool-end is still in-flight. We
+                ;; wait for tool-end to replace it before committing.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "tool-start" :tool-name "Read" :id "t1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        result (committable_past_turn msgs)]
+                    ;; Only u1 is committable; t1 is tool-start
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "u1")))))
+
+            (it "handles multi-turn: commits all past turns, keeps current visible"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}
+                                  #js {:role "assistant" :content "a2" :id "a2"}
+                                  #js {:role "user" :content "q3" :id "u3"}
+                                  #js {:role "assistant" :content "a3-streaming" :id "a3"}]
+                        result (committable_past_turn msgs)]
+                    ;; q3 and a3 are the CURRENT turn (from u3 onwards) — not committed.
+                    ;; Everything before u3 (u1, a1, u2, a2) is past turn — committed.
+                    (-> (expect (.-length result)) (.toBe 4))
+                    (-> (expect (.-id (aget result 3))) (.toBe "a2")))))
+
+            (it "during streaming: current streaming assistant is NOT committed"
+                ;; Critical regression guard. If the streaming tail is
+                ;; included in commit, the user sees an empty chat
+                ;; region after stream ends (content scrolled above
+                ;; the header — the bug this test codifies).
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "streaming" :id "a1"}]
+                        result (committable_past_turn msgs)]
+                    ;; No past turn — only one turn in flight.
+                    (-> (expect (.-length result)) (.toBe 0)))))))

@@ -12,7 +12,8 @@
             [agent.ui.editor-eval :as editor-eval]
             ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
-            ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_]]
+            ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
+                                        committable_past_turn]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -305,35 +306,39 @@
                                               (e event data)))]
 
     ;; ── scrollback-mode commit sweep ───────────────────────────────
-    ;; When :scrollback-mode is ON in settings, commit stable messages to
-    ;; terminal scrollback via Ink's writeToStdout and MARK them with
-    ;; :committed true in React state. "Stable" = not streaming AND not
-    ;; still in-flight (tool-start without a matching tool-end) AND not
-    ;; already committed.
+    ;; When :scrollback-mode is ON in settings, commit PAST TURNS to
+    ;; terminal scrollback via Ink's writeToStdout. The CURRENT turn
+    ;; (from the last user message onwards) stays in React state and
+    ;; renders live in the chat region — this is what the user actually
+    ;; sees at any given moment. Only when a NEW user message arrives
+    ;; does the previous turn get committed to scrollback.
     ;;
-    ;; Committed messages are KEPT in React state so `agent.context/
-    ;; build-context` (which reads `:messages` from the agent state atom)
-    ;; still sees the full conversation history for LLM context. ChatView
-    ;; filters them out of the dynamic region when scrollback-mode is ON,
-    ;; so they don't render twice (once in scrollback, once in dynamic).
+    ;; This matches Claude Code / Codex UX: the latest exchange is
+    ;; always in the visible chat region; older turns are in terminal
+    ;; scrollback (scroll up to see them).
     ;;
-    ;; This runs after every render where messages or streaming changed.
-    ;; The (not streaming) guard means commits only happen at stream-end
-    ;; or in non-streaming paths (command handlers, bash/eval mode).
+    ;; Committed messages stay in React state with `:committed true` so
+    ;; `agent.context/build-context` (which reads `:messages` from the
+    ;; agent state atom) sees the full conversation for LLM context.
+    ;; ChatView filters them out of the dynamic region to avoid double
+    ;; rendering (scrollback + live).
     ;;
-    ;; Idempotent: after committing, the effect re-fires because
-    ;; set-messages flipped the :committed flags. The second run sees
-    ;; no uncommitted messages and returns early.
+    ;; Turn boundary: the index of the last `user` message. Everything
+    ;; BEFORE that index is a past turn and eligible to commit.
+    ;; Everything FROM that index onwards is the current turn.
+    ;;
+    ;; Idempotent: committing flips :committed flags, which causes the
+    ;; effect to re-fire; the second run sees no uncommitted past-turn
+    ;; messages and returns early.
     (useEffect
      (fn []
-       (let [sm           (:settings resources)
-             flag-on?     (boolean
-                           (when sm (:scrollback-mode ((:get sm)))))
-             committable? (fn [m]
-                            (and (not= (:role m) "tool-start")
-                                 (not (:committed m))))]
-         (when (and flag-on? (not streaming) (pos? (count messages)))
-           (let [to-commit (filterv committable? messages)
+       (let [sm       (:settings resources)
+             flag-on? (boolean (when sm (:scrollback-mode ((:get sm)))))]
+         (when flag-on?
+           ;; committable-past-turn is pure — see scrollback.cljs — and
+           ;; directly tested so the turn-boundary rules don't regress
+           ;; in the integration-only render path.
+           (let [to-commit (committable_past_turn messages)
                  br        (when-let [br (:block-renderers agent)] @br)
                  columns   (or (.-columns stdout) 80)]
              (when (seq to-commit)
@@ -344,8 +349,6 @@
                        :theme theme
                        :block-renderers br
                        :columns columns}))
-               ;; Mark committed messages in place. Preserves order and
-               ;; preserves them for LLM context reads via build-context.
                (set-messages
                 (fn [prev]
                   (let [to-commit-ids (set (map :id to-commit))]
@@ -355,7 +358,7 @@
                               m))
                           prev))))))))
        js/undefined)
-     #js [messages streaming])
+     #js [messages])
 
     ;; Wire extension UI hooks
     (useEffect
