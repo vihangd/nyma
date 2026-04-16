@@ -9,7 +9,7 @@
    `renderToString` to test the real ANSI output directly."
   {:squint/extension "jsx"}
   (:require ["bun:test" :refer [describe it expect]]
-            ["./agent/ui/scrollback.jsx" :refer [render_message_to_string
+            ["./agent/ui/scrollback.mjs" :refer [render_message_to_string
                                                  commit_to_scrollback_BANG_]]))
 
 (def ^:private test-theme
@@ -75,7 +75,64 @@
                   (let [out (render_message_to_string
                              {:role "assistant" :content "some text" :id "a1"}
                              test-theme nil 40)]
-                    (-> (expect (> (count out) 0)) (.toBe true)))))))
+                    (-> (expect (> (count out) 0)) (.toBe true)))))
+
+            (it "handles complex markdown (code blocks, lists, headers) without crashing"
+                ;; Regression guard: the initial implementation used ink's
+                ;; renderToString which triggered a yoga-wasm call_indirect
+                ;; crash via flushPassiveEffects firing AFTER teardown freed
+                ;; the yoga node. The pure renderer must handle anything the
+                ;; markdown renderer supports.
+                (fn []
+                  (let [md (str "# Heading\n\n"
+                                "Some text with **bold** and *italic*.\n\n"
+                                "```python\n"
+                                "def hello():\n"
+                                "    print('world')\n"
+                                "```\n\n"
+                                "- item 1\n"
+                                "- item 2\n"
+                                "- item 3\n\n"
+                                "> a quoted line\n")
+                        out (render_message_to_string
+                             {:role "assistant" :content md :id "a1"}
+                             test-theme nil 80)]
+                    (-> (expect (> (count out) 0)) (.toBe true))
+                    ;; Content should carry through — at least the raw text
+                    (-> (expect (.includes out "Heading")) (.toBe true))
+                    (-> (expect (.includes out "hello")) (.toBe true))
+                    (-> (expect (.includes out "item 1")) (.toBe true)))))
+
+            (it "tool-end message renders tool name and compact result"
+                (fn []
+                  (let [out (render_message_to_string
+                             {:role "tool-end"
+                              :tool-name "Read"
+                              :args {"file_path" "/tmp/foo.txt"}
+                              :result "file contents here"
+                              :duration 123
+                              :id "t1"}
+                             test-theme nil 80)]
+                    (-> (expect (.includes out "Read")) (.toBe true))
+                    (-> (expect (.includes out "file contents")) (.toBe true)))))
+
+            (it "renders each kind+role combination without throwing"
+                ;; Exhaustive smoke test — every branch in the cond.
+                (fn []
+                  (doseq [msg [{:role "user" :content "x" :id "u"}
+                               {:role "assistant" :content "y" :id "a"}
+                               {:role "assistant" :kind :bash :command "ls"
+                                :stdout "out" :stderr "" :exit-code 0 :id "b"}
+                               {:role "assistant" :kind :eval :expr "(+ 1 2)"
+                                :stdout "3" :stderr "" :exit-code 0 :id "e"}
+                               {:role "tool-end" :tool-name "Grep"
+                                :args {"pattern" "x"} :result "match" :id "t"}
+                               {:role "thinking" :content "hmm" :id "th"}
+                               {:role "plan" :content "steps" :id "p"}
+                               {:role "error" :content "oops" :id "er"}
+                               {:role "unknown" :content "??" :id "un"}]]
+                    (let [out (render_message_to_string msg test-theme nil 80)]
+                      (-> (expect (string? out)) (.toBe true))))))))
 
 ;;; ─── commit-to-scrollback! ─────────────────────────────────────────
 

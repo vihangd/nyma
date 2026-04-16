@@ -19,7 +19,7 @@
   {:squint/extension "jsx"}
   (:require ["bun:test" :refer [describe it expect afterEach]]
             ["ink-testing-library" :refer [render cleanup]]
-            ["./agent/ui/scrollback.jsx" :refer [commit_to_scrollback_BANG_]]
+            ["./agent/ui/scrollback.mjs" :refer [commit_to_scrollback_BANG_]]
             ["./agent/ui/chat_view.jsx" :refer [ChatView]]))
 
 (afterEach (fn [] (cleanup)))

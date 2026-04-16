@@ -12,7 +12,7 @@
             [agent.ui.editor-eval :as editor-eval]
             ["./header.jsx" :refer [Header]]
             ["./chat_view.jsx" :refer [ChatView]]
-            ["./scrollback.jsx" :refer [commit_to_scrollback_BANG_]]
+            ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
