@@ -25,6 +25,31 @@
             ["./mention_picker.mjs" :refer [create-picker]]
             [agent.debug :as dbg]))
 
+(defn- safe-react-child
+  "Guard against non-React-element objects being rendered as children.
+   If `v` is a plain JS object (not a React element, string, number, or
+   nil), log a warning with `label` and return nil. This catches the
+   `Objects are not valid as a React child` error before React does,
+   with a helpful diagnostic instead of a cryptic stack trace."
+  [v label]
+  (cond
+    (nil? v)                   nil
+    (string? v)                v
+    (number? v)                v
+    (boolean? v)               nil   ;; React skips booleans
+    (array? v)                 v
+    ;; React elements have $$typeof
+    (and (object? v) (.-$$typeof v)) v
+    ;; Plain objects are NOT valid React children
+    (object? v)
+    (do (js/console.warn
+         (str "[nyma] non-React-element rendered as child in " label
+              ". Keys: " (.join (js/Object.keys v) ", ")
+              ". This is a bug — check extensions calling ui.setHeader/setFooter/showOverlay."))
+        nil)
+    ;; Everything else (functions, symbols, etc.) — skip
+    :else nil))
+
 (defn- handle-command [agent text set-overlay set-messages]
   (let [parts    (.split (.slice text 1) " ")
         cmd      (first parts)
@@ -730,7 +755,9 @@
       ;; position, not pinned to the terminal bottom. No empty middle,
       ;; no wasted vertical space.
       #jsx [Box {:flexDirection "column"}
-            (when-let [custom-header (when custom-header-fn (custom-header-fn))]
+            (when-let [custom-header (safe-react-child
+                                      (when custom-header-fn (custom-header-fn))
+                                      "custom-header")]
               #jsx [Box {:flexShrink 0}
                     (if (string? custom-header)
                       #jsx [Box {:paddingX 1 :justifyContent "space-between"
@@ -762,16 +789,18 @@
             (when overlay
               (let [is-transparent (and (some? overlay) (not (string? overlay))
                                         (not (number? overlay)) (.-__transparent overlay))
-                    content        (if is-transparent (.-__overlay-content overlay) overlay)]
-                #jsx [Box {:position "absolute"
-                           :flexDirection "column"
-                           :width "100%"
-                           :height (max 1 (dec term-rows))
-                           :justifyContent "center"
-                           :alignItems "center"}
-                      [Overlay {:onClose (fn [] (set-overlay nil))
-                                :transparent is-transparent}
-                       content]]))
+                    raw-content    (if is-transparent (.-__overlay-content overlay) overlay)
+                    content        (safe-react-child raw-content "overlay")]
+                (when content
+                  #jsx [Box {:position "absolute"
+                             :flexDirection "column"
+                             :width "100%"
+                             :height (max 1 (dec term-rows))
+                             :justifyContent "center"
+                             :alignItems "center"}
+                        [Overlay {:onClose (fn [] (set-overlay nil))
+                                  :transparent is-transparent}
+                         content]])))
             ;; :key changes (bumped by `set-editor-remount-key`) force
             ;; ink-text-input to remount with a fresh cursorOffset at
             ;; the end of the new value. Used after picker commits
@@ -792,7 +821,9 @@
                     [Notification {:message (:message notification)
                                    :level   (:level notification)
                                    :theme   theme}]])
-            (let [custom-footer (when custom-footer-fn (custom-footer-fn))]
+            (let [custom-footer (safe-react-child
+                                 (when custom-footer-fn (custom-footer-fn))
+                                 "custom-footer")]
               (if custom-footer
                 #jsx [Box {:flexShrink 0}
                       (if (string? custom-footer)
