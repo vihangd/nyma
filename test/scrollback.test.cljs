@@ -8,11 +8,12 @@
    the terminal. This file uses a fresh mock stdout and ink's headless
    `renderToString` to test the real ANSI output directly."
   {:squint/extension "jsx"}
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
             ["./agent/ui/scrollback.mjs" :refer [render_message_to_string
                                                  commit_to_scrollback_BANG_
                                                  last_user_index
-                                                 committable_past_turn]]))
+                                                 committable_past_turn
+                                                 print_header_banner_BANG_]]))
 
 (def ^:private test-theme
   {:colors {:primary   "#7aa2f7"
@@ -373,3 +374,222 @@
                         result (committable_past_turn msgs)]
                     ;; No past turn — only one turn in flight.
                     (-> (expect (.-length result)) (.toBe 0)))))))
+
+;;; ─── Sweep integration (end-to-end commit flow) ────────────────
+;;;
+;;; The useEffect body in app.cljs is trivially wired:
+;;;   1. compute (committable-past-turn messages)
+;;;   2. doseq commit-to-scrollback! each
+;;;   3. set-messages (mark :committed true by id)
+;;;
+;;; These tests simulate that loop directly (no React needed) so we
+;;; can assert on the full side-effect chain — write order, ID-based
+;;; marking, idempotent re-entry, multi-turn transitions.
+
+(defn- simulate-sweep!
+  "Simulate one pass of the app.cljs useEffect sweep body.
+   Returns the new messages vector after marking committed ids."
+  [messages write theme]
+  (let [to-commit (committable_past_turn messages)]
+    (doseq [msg to-commit]
+      (commit_to_scrollback_BANG_
+       #js {:write write :message msg
+            :theme theme :block-renderers nil :columns 80}))
+    (let [ids (into #{} (map #(.-id %) to-commit))]
+      (.map messages
+            (fn [m]
+              (if (contains? ids (.-id m))
+                (js/Object.assign #js {} m #js {:committed true})
+                m))))))
+
+(describe "sweep integration: commit-sweep end-to-end"
+          (fn []
+
+            (it "single turn: no past turn → no writes, no state change"
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}]
+                        new-msgs (simulate-sweep! msgs write test-theme)]
+                    (-> (expect (count @writes)) (.toBe 0))
+                    ;; messages unchanged (no :committed flag added)
+                    (-> (expect (.-committed (aget new-msgs 0))) (.toBeUndefined))
+                    (-> (expect (.-committed (aget new-msgs 1))) (.toBeUndefined)))))
+
+            (it "two-turn transition: past turn commits, current turn stays"
+                ;; The UX invariant: when a new user message arrives,
+                ;; the previous turn writes to scrollback, current turn
+                ;; stays uncommitted in React state.
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        new-msgs (simulate-sweep! msgs write test-theme)]
+                    ;; u1 and a1 committed (2 writes)
+                    (-> (expect (count @writes)) (.toBe 2))
+                    ;; u1 and a1 marked :committed
+                    (-> (expect (.-committed (aget new-msgs 0))) (.toBe true))
+                    (-> (expect (.-committed (aget new-msgs 1))) (.toBe true))
+                    ;; u2 NOT committed (current turn)
+                    (-> (expect (.-committed (aget new-msgs 2))) (.toBeUndefined)))))
+
+            (it "commit order: writes emit in message order (oldest first)"
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "FIRST" :id "u1"}
+                                  #js {:role "assistant" :content "REPLY1" :id "a1"}
+                                  #js {:role "user" :content "SECOND" :id "u2"}
+                                  #js {:role "assistant" :content "REPLY2" :id "a2"}
+                                  #js {:role "user" :content "THIRD" :id "u3"}]]
+                    (simulate-sweep! msgs write test-theme)
+                    ;; 4 writes, in order: u1, a1, u2, a2
+                    (-> (expect (count @writes)) (.toBe 4))
+                    (-> (expect (.includes (nth @writes 0) "FIRST")) (.toBe true))
+                    (-> (expect (.includes (nth @writes 1) "REPLY1")) (.toBe true))
+                    (-> (expect (.includes (nth @writes 2) "SECOND")) (.toBe true))
+                    (-> (expect (.includes (nth @writes 3) "REPLY2")) (.toBe true)))))
+
+            (it "idempotent: running sweep again on committed messages is a no-op"
+                ;; The sweep effect re-fires whenever `messages` changes
+                ;; (including the mark-committed state change it itself
+                ;; causes). Second run must NOT re-commit.
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        after-1 (simulate-sweep! msgs write test-theme)
+                        first-count (count @writes)
+                        after-2 (simulate-sweep! after-1 write test-theme)
+                        second-count (count @writes)
+                        after-3 (simulate-sweep! after-2 write test-theme)
+                        third-count (count @writes)]
+                    ;; First run writes 2 (u1, a1). Subsequent runs don't.
+                    (-> (expect first-count) (.toBe 2))
+                    (-> (expect second-count) (.toBe 2))
+                    (-> (expect third-count) (.toBe 2)))))
+
+            (it "tool-start in past turn stays uncommitted, its tool-end commits"
+                ;; Tool lifecycle: tool-start represents in-flight work;
+                ;; tool-end replaces it when the call resolves. Sweep
+                ;; must never commit a bare tool-start (it would show
+                ;; stale/incomplete state in scrollback).
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        ;; Turn 1: user, tool-start (not yet replaced), new user
+                        msgs1 #js [#js {:role "user" :content "q1" :id "u1"}
+                                   #js {:role "tool-start" :tool-name "Read" :id "t1"}
+                                   #js {:role "user" :content "q2" :id "u2"}]
+                        after-1 (simulate-sweep! msgs1 write test-theme)]
+                    ;; u1 commits, t1 does NOT (tool-start filtered)
+                    (-> (expect (count @writes)) (.toBe 1))
+                    (-> (expect (.-committed (aget after-1 0))) (.toBe true))
+                    (-> (expect (.-committed (aget after-1 1))) (.toBeUndefined))
+                    ;; Now simulate tool-end replacing tool-start in place
+                    ;; (this is what apply-tool-end does). Sweep runs again.
+                    (let [msgs2 #js [(aget after-1 0)  ; u1 (committed)
+                                     #js {:role "tool-end" :tool-name "Read"
+                                          :result "done" :duration 10 :id "t1"}
+                                     (aget after-1 2)]  ; u2 (uncommitted)
+                          after-2 (simulate-sweep! msgs2 write test-theme)]
+                      ;; Now the tool-end commits. u1 was already committed.
+                      (-> (expect (count @writes)) (.toBe 2))
+                      (-> (expect (.-committed (aget after-2 1))) (.toBe true))))))
+
+            (it "bash/eval messages commit through the sweep"
+                ;; Regression guard: bash (:kind :bash) and eval
+                ;; (:kind :eval) messages must route to their renderers.
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :kind "bash"
+                                       :command "ls" :stdout "a.txt"
+                                       :stderr "" :exit-code 0 :id "b1"}
+                                  #js {:role "assistant" :kind "eval"
+                                       :expr "(+ 1 2)" :stdout "3"
+                                       :stderr "" :exit-code 0 :id "e1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]]
+                    (simulate-sweep! msgs write test-theme)
+                    ;; 3 past-turn messages committed
+                    (-> (expect (count @writes)) (.toBe 3))
+                    ;; bash content recognizable
+                    (-> (expect (.some @writes
+                                       (fn [w] (.includes w "ls"))))
+                        (.toBe true))
+                    ;; eval content recognizable
+                    (-> (expect (.some @writes
+                                       (fn [w] (.includes w "(+ 1 2)"))))
+                        (.toBe true)))))
+
+            (it "reasoning-only assistant in past turn: no write, but marked committed"
+                ;; Reasoning-only messages produce nil from the renderer
+                ;; (commit-to-scrollback! skips the write). BUT the sweep
+                ;; still marks them :committed so it doesn't retry them
+                ;; on every rerender forever.
+                (fn []
+                  (let [writes (atom [])
+                        write (fn [d] (swap! writes conj d))
+                        msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant"
+                                       :content "<think>planning</think>"
+                                       :id "a1"}
+                                  #js {:role "assistant" :content "the answer" :id "a2"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        after-1 (simulate-sweep! msgs write test-theme)]
+                    ;; 2 writes: u1 and a2 (a1 is reasoning-only, skipped)
+                    (-> (expect (count @writes)) (.toBe 2))
+                    ;; Second run: a1 still marked committed → no retry
+                    (let [after-2 (simulate-sweep! after-1 write test-theme)]
+                      (-> (expect (count @writes)) (.toBe 2))
+                      (-> (expect (.-committed (aget after-2 1))) (.toBe true))))))))
+
+;;; ─── print-header-banner! ──────────────────────────────────────
+;;;
+;;; Writes to process.stdout directly before Ink mounts. We can't
+;;; fully unit-test the stdout interaction without stubbing, but we
+;;; CAN check that calling it with a stub doesn't throw and writes
+;;; something sensible.
+
+(describe "print-header-banner!"
+          (fn []
+
+            (it "writes a single line containing 'nyma' and the model id"
+                (fn []
+                  (let [original-write (.-write js/process.stdout)
+                        captured (atom [])]
+                    (try
+                      (set! (.-write js/process.stdout)
+                            (fn [d] (swap! captured conj d) true))
+                      (print_header_banner_BANG_
+                       #js {:model-id "test-model-123"
+                            :theme (clj->js test-theme)})
+                      (finally
+                        (set! (.-write js/process.stdout) original-write)))
+                    (let [all (apply str @captured)]
+                      (-> (expect (.includes all "nyma")) (.toBe true))
+                      (-> (expect (.includes all "test-model-123")) (.toBe true))
+                      ;; Trailing blank line so Ink's dynamic region starts
+                      ;; on a fresh line.
+                      (-> (expect (.includes all "\n\n")) (.toBe true))))))
+
+            (it "handles nil model-id gracefully (falls back to 'unknown')"
+                (fn []
+                  (let [original-write (.-write js/process.stdout)
+                        captured (atom [])]
+                    (try
+                      (set! (.-write js/process.stdout)
+                            (fn [d] (swap! captured conj d) true))
+                      (print_header_banner_BANG_
+                       #js {:model-id nil
+                            :theme (clj->js test-theme)})
+                      (finally
+                        (set! (.-write js/process.stdout) original-write)))
+                    (let [all (apply str @captured)]
+                      (-> (expect (.includes all "unknown")) (.toBe true))))))))
