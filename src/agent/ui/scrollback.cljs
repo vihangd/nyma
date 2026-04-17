@@ -31,6 +31,9 @@
             [agent.utils.ansi :as ansi]
             [agent.token-estimation :refer [estimate-tokens]]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]
+            ["./tool_status.jsx" :refer [format_one_line_args
+                                         format_one_line_result_for_tool
+                                         format_duration]]
             [clojure.string :as str]))
 
 ;;; ─── ANSI primitives ────────────────────────────────────────────
@@ -216,29 +219,33 @@
       header)))
 
 (defn- render-tool-end
-  "Finalized tool call — render name + compact args + one-line result."
+  "Finalized tool call — one-line summary matching Gemini CLI / Codex style.
+
+   Format: ✓ tool-name args-summary — result-summary duration
+   Failure: ✗ tool-name args-summary — result-summary duration
+
+   Uses format-one-line-args (tool_status.cljs) for args, the new
+   format-one-line-result-for-tool for result summaries ('42 lines',
+   '7 matches', 'applied'), and format-duration for timing."
   [message theme]
-  (let [muted     (get-in theme [:colors :muted] "#565f89")
+  (let [success-c (get-in theme [:colors :success] "#9ece6a")
+        error-c   (get-in theme [:colors :error] "#f7768e")
+        muted     (get-in theme [:colors :muted] "#565f89")
         tool-name (or (:tool-name message) "?")
         args      (:args message)
-        result    (:result message)
+        result    (str (or (:result message) ""))
         duration  (:duration message)
-        arg-str   (cond
-                    (nil? args)    ""
-                    (string? args) args
-                    :else          (try (nodeutil/inspect (clj->js args)
-                                                          #js {:depth 2 :colors false})
-                                        (catch :default _ "")))
-        first-line (-> (str (or result ""))
-                       (.split "\n") first (or "")
-                       (.slice 0 120))
-        header    (fg (str "⚙ " (bold tool-name)
-                           (when (seq arg-str) (str "(" (.slice arg-str 0 80) ")"))
-                           (when duration (str " · " duration "ms")))
-                      muted)
-        body      (when (seq first-line)
-                    (str "  " (fg first-line muted)))]
-    (if body (str header "\n" body) header)))
+        ok?       (and (seq result) (not= result ""))
+        icon      (if ok? "✓" "✗")
+        icon-c    (if ok? success-c error-c)
+        arg-text  (format_one_line_args tool-name args)
+        res-text  (when ok? (format_one_line_result_for_tool tool-name result args))
+        dur-text  (when duration (format_duration duration))]
+    (str (fg icon icon-c) " "
+         (fg (bold tool-name) muted) " "
+         (fg arg-text muted)
+         (when (seq res-text) (str " " (fg (str "— " res-text) muted)))
+         (when (seq dur-text) (str " " (fg dur-text muted))))))
 
 (defn- render-thinking
   [message _theme]

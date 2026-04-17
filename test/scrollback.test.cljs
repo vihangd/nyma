@@ -13,7 +13,8 @@
                                                  commit_to_scrollback_BANG_
                                                  last_user_index
                                                  committable_past_turn
-                                                 print_header_banner_BANG_]]))
+                                                 print_header_banner_BANG_]]
+            ["./agent/ui/tool_status.jsx" :refer [format_one_line_result_for_tool]]))
 
 (def ^:private test-theme
   {:colors {:primary   "#7aa2f7"
@@ -592,4 +593,153 @@
                       (finally
                         (set! (.-write js/process.stdout) original-write)))
                     (let [all (apply str @captured)]
-                      (-> (expect (.includes all "unknown")) (.toBe true))))))))
+                      (-> (expect (.includes all "unknown")) (.toBe true)))))))
+
+;;; ─── Tool display UX ──────────────────────────────────────────
+;;;
+;;; The scrollback tool display uses a one-liner format:
+;;;   ✓ tool-name args-summary — result-summary duration
+;;; These tests pin the format so regressions are caught.
+
+          (describe "format-one-line-result-for-tool: per-tool result summaries"
+                    (fn []
+
+                      (it "read: counts lines"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "read" "line1\nline2\nline3" nil))
+                                (.toBe "3 lines"))))
+
+                      (it "read: singular '1 line'"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "read" "only one" nil))
+                                (.toBe "1 line"))))
+
+                      (it "grep: counts matches"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "grep" "a.cljs:1:foo\nb.cljs:5:bar" nil))
+                                (.toBe "2 matches"))))
+
+                      (it "glob: counts files"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "glob" "a.cljs\nb.cljs\nc.cljs" nil))
+                                (.toBe "3 files"))))
+
+                      (it "ls: counts items"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "ls" "foo\nbar" nil))
+                                (.toBe "2 items"))))
+
+                      (it "edit: returns 'applied'"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "edit" "success" nil))
+                                (.toBe "applied"))))
+
+                      (it "write: returns 'written'"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "write" "ok" nil))
+                                (.toBe "written"))))
+
+                      (it "bash: counts output lines"
+                          (fn []
+                            (-> (expect (format_one_line_result_for_tool "bash" "line1\nline2" nil))
+                                (.toBe "2 lines"))))
+
+                      (it "unknown tool: falls back to generic format"
+                          (fn []
+                            (let [out (format_one_line_result_for_tool "custom_tool" "some output" nil)]
+                              (-> (expect (string? out)) (.toBe true)))))))
+
+          (describe "render-tool-end: scrollback one-liner format"
+                    (fn []
+
+                      (it "read: shows ✓, tool name, path, line count, duration"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "read"
+                                        :args {:path "/src/main.cljs"}
+                                        :result "line1\nline2\nline3\nline4"
+                                        :duration 6 :id "t1"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "✓")) (.toBe true))
+                              (-> (expect (.includes out "read")) (.toBe true))
+                              (-> (expect (.includes out "/src/main.cljs")) (.toBe true))
+                              (-> (expect (.includes out "4 lines")) (.toBe true))
+                              (-> (expect (.includes out "6ms")) (.toBe true)))))
+
+                      (it "grep: shows match count and pattern"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "grep"
+                                        :args {:pattern "TODO" :path "src/"}
+                                        :result "a.cljs:1:TODO\nb.cljs:5:TODO\nc.cljs:9:TODO"
+                                        :duration 12 :id "t2"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "grep")) (.toBe true))
+                              (-> (expect (.includes out "TODO")) (.toBe true))
+                              (-> (expect (.includes out "3 matches")) (.toBe true)))))
+
+                      (it "glob: shows file count"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "glob"
+                                        :args {:pattern "**/*.cljs"}
+                                        :result "a.cljs\nb.cljs"
+                                        :duration 5 :id "t3"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "2 files")) (.toBe true))
+                              (-> (expect (.includes out "**/*.cljs")) (.toBe true)))))
+
+                      (it "edit: shows 'applied'"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "edit"
+                                        :args {:path "/src/foo.cljs"}
+                                        :result "success"
+                                        :duration 8 :id "t4"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "applied")) (.toBe true))
+                              (-> (expect (.includes out "/src/foo.cljs")) (.toBe true)))))
+
+                      (it "empty result: shows ✗ failure icon"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "read"
+                                        :args {:path "/missing.txt"}
+                                        :result ""
+                                        :duration 2 :id "t5"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "✗")) (.toBe true))
+                    ;; ✓ should NOT appear for failures
+                              (-> (expect (.includes out "✓")) (.toBe false)))))
+
+                      (it "nil result: shows ✗ failure icon"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "grep"
+                                        :args {:pattern "nonexistent"}
+                                        :result nil
+                                        :duration 3 :id "t6"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "✗")) (.toBe true)))))
+
+                      (it "duration > 1s: formats as seconds"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "bash"
+                                        :args {:command "sleep 2"}
+                                        :result "done"
+                                        :duration 2100 :id "t7"}
+                                       test-theme nil 80)]
+                              (-> (expect (.includes out "2.1s")) (.toBe true)))))
+
+                      (it "one-liner: no newlines in the output"
+                          (fn []
+                            (let [out (render_message_to_string
+                                       {:role "tool-end" :tool-name "read"
+                                        :args {:path "/x.cljs"}
+                                        :result "line1\nline2"
+                                        :duration 4 :id "t8"}
+                                       test-theme nil 80)]
+                    ;; Strip ANSI, check no newlines
+                              (let [plain (.replace out (js/RegExp. "\\x1b\\[[0-9;]*m" "g") "")]
+                                (-> (expect (.includes plain "\n")) (.toBe false)))))))))

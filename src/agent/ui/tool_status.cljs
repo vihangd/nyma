@@ -24,30 +24,30 @@
   [tool-name args]
   (let [max-w (max 20 (- (terminal-width) 30))]
     (truncate-to
-      (case tool-name
-        "bash"       (or (first (.split (or (get args :command) "") "\n")) "")
-        "read"       (let [p (or (get args :path) "")]
-                       (if-let [r (get args :range)]
-                         (str p ":" (first r) "-" (second r))
-                         p))
-        "write"      (or (get args :path) "")
-        "edit"       (or (get args :path) "")
-        "ls"         (or (get args :path) ".")
-        "glob"       (let [pat (or (get args :pattern) "")
-                           p   (get args :path)]
-                       (if (seq p) (str pat " in " p) pat))
-        "grep"       (let [pat (or (get args :pattern) "")
-                           p   (get args :path)]
-                       (if (seq p)
-                         (str "\"" pat "\" in " p)
-                         (str "\"" pat "\"")))
-        "web_fetch"  (or (get args :url) "")
-        "web_search" (str "\"" (or (get args :query) "") "\"")
-        "think"      (or (first (.split (or (get args :thought) "") "\n")) "")
+     (case tool-name
+       "bash"       (or (first (.split (or (get args :command) "") "\n")) "")
+       "read"       (let [p (or (get args :path) "")]
+                      (if-let [r (get args :range)]
+                        (str p ":" (first r) "-" (second r))
+                        p))
+       "write"      (or (get args :path) "")
+       "edit"       (or (get args :path) "")
+       "ls"         (or (get args :path) ".")
+       "glob"       (let [pat (or (get args :pattern) "")
+                          p   (get args :path)]
+                      (if (seq p) (str pat " in " p) pat))
+       "grep"       (let [pat (or (get args :pattern) "")
+                          p   (get args :path)]
+                      (if (seq p)
+                        (str "\"" pat "\" in " p)
+                        (str "\"" pat "\"")))
+       "web_fetch"  (or (get args :url) "")
+       "web_search" (str "\"" (or (get args :query) "") "\"")
+       "think"      (or (first (.split (or (get args :thought) "") "\n")) "")
         ;; fallback: compact key=value pairs
-        (let [pairs (map (fn [[k v]] (str k "=" v)) args)]
-          (.join (clj->js pairs) " ")))
-      max-w)))
+       (let [pairs (map (fn [[k v]] (str k "=" v)) args)]
+         (.join (clj->js pairs) " ")))
+     max-w)))
 
 (defn format-one-line-result
   "Summarize tool result as a human-readable one-liner."
@@ -60,6 +60,27 @@
       (if (= n 1)
         (truncate-to (first lines) max-w)
         (str n " lines")))))
+
+(defn format-one-line-result-for-tool
+  "Tool-specific one-line result summary. Returns a compact human-readable
+   string: '42 lines' for read, '7 matches' for grep, 'exit 1' for failed
+   bash, etc. Falls back to generic format-one-line-result for unknown tools."
+  [tool-name result _args]
+  (let [lines-of (fn [s] (let [ls (.split (or s "") "\n")]
+                           (count (filterv seq ls))))]
+    (case tool-name
+      "read"  (let [n (lines-of result)]
+                (if (= n 1) "1 line" (str n " lines")))
+      "grep"  (let [n (lines-of result)]
+                (if (= n 1) "1 match" (str n " matches")))
+      "glob"  (let [n (lines-of result)]
+                (if (= n 1) "1 file" (str n " files")))
+      "ls"    (let [n (lines-of result)]
+                (if (= n 1) "1 item" (str n " items")))
+      "edit"  "applied"
+      "write" "written"
+      "bash"  (let [n (lines-of result)] (str n " lines"))
+      (format-one-line-result result))))
 
 (defn format-args
   "Format tool args for display based on verbosity level."
@@ -136,9 +157,10 @@
     (if (empty? msgs)
       ;; Flush remaining group
       (if (and group (>= (count (:items group)) 2))
-        (conj acc {:role "tool-group"
+        (conj acc {:role      "tool-group"
+                   :id        (:id (:original (first (:items group))))
                    :tool-name (:tool-name group)
-                   :items (:items group)})
+                   :items     (:items group)})
         (into acc (when group
                     (mapv (fn [item] (:original item)) (:items group)))))
       (let [msg  (first msgs)
@@ -149,28 +171,30 @@
           (if (and group (= (:tool-name group) (:tool-name msg)))
             ;; Same tool as current group — extend
             (recur rest-msgs acc
-              (update group :items conj {:args     (:args msg)
-                                         :duration (:duration msg)
-                                         :result   (:result msg)
-                                         :original msg}))
+                   (update group :items conj {:args     (:args msg)
+                                              :duration (:duration msg)
+                                              :result   (:result msg)
+                                              :original msg}))
             ;; Different tool or no group — flush old, start new
             (let [flushed (if (and group (>= (count (:items group)) 2))
-                            (conj acc {:role "tool-group"
+                            (conj acc {:role      "tool-group"
+                                       :id        (:id (:original (first (:items group))))
                                        :tool-name (:tool-name group)
-                                       :items (:items group)})
+                                       :items     (:items group)})
                             (into acc (when group
                                         (mapv (fn [item] (:original item)) (:items group)))))]
               (recur rest-msgs flushed
-                {:tool-name (:tool-name msg)
-                 :items [{:args     (:args msg)
-                          :duration (:duration msg)
-                          :result   (:result msg)
-                          :original msg}]})))
+                     {:tool-name (:tool-name msg)
+                      :items [{:args     (:args msg)
+                               :duration (:duration msg)
+                               :result   (:result msg)
+                               :original msg}]})))
           ;; Non-groupable message — flush group, emit message
           (let [flushed (if (and group (>= (count (:items group)) 2))
-                          (conj acc {:role "tool-group"
+                          (conj acc {:role      "tool-group"
+                                     :id        (:id (:original (first (:items group))))
                                      :tool-name (:tool-name group)
-                                     :items (:items group)})
+                                     :items     (:items group)})
                           (into acc (when group
                                       (mapv (fn [item] (:original item)) (:items group)))))]
             (recur rest-msgs (conj flushed msg) nil)))))))
@@ -206,7 +230,7 @@
                 #jsx [Text {:color muted} args-text])]))))
 
 (defn ToolEndStatus [{:keys [tool-name duration result verbosity max-lines theme
-                            custom-one-line-result custom-icon]}]
+                             custom-one-line-result custom-icon]}]
   (let [success  (get-in theme [:colors :success] "#9ece6a")
         muted    (get-in theme [:colors :muted] "#565f89")
         dur-text (format-duration duration)
@@ -248,14 +272,14 @@
              #jsx [Text {:color muted} (str " (" dur-text ")")])]
           [Box {:flexDirection "column" :marginLeft 2}
            (map-indexed
-             (fn [i item]
-               (let [last? (= i (dec n))
-                     connector (if last? "└─ " "├─ ")
-                     icon (item-status-icon item)
-                     ok?  (= icon "✓")
-                     label (tool-group-label tool-name (:args item))]
-                 #jsx [Box {:key i :flexDirection "row"}
-                       [Text {:color muted} connector]
-                       [Text {:color (if ok? success error-c)} (str icon " ")]
-                       [Text {:color muted} label]]))
-             items)]]))
+            (fn [i item]
+              (let [last? (= i (dec n))
+                    connector (if last? "└─ " "├─ ")
+                    icon (item-status-icon item)
+                    ok?  (= icon "✓")
+                    label (tool-group-label tool-name (:args item))]
+                #jsx [Box {:key i :flexDirection "row"}
+                      [Text {:color muted} connector]
+                      [Text {:color (if ok? success error-c)} (str icon " ")]
+                      [Text {:color muted} label]]))
+            items)]]))
