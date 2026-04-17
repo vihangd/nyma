@@ -12,21 +12,40 @@
 (def default-actions
   "Built-in action registry. Each entry: {:description :default-keys :category}.
    category is a keyword used to group actions in the help overlay."
-  {"app.help"           {:description  "Show keyboard help"
+  {;; ── Navigation ──
+   "app.help"           {:description  "Show keyboard help"
                          :default-keys ["?"]
                          :category     :navigation}
+   "app.history.search" {:description  "Search prompt history"
+                         :default-keys ["ctrl+r"]
+                         :category     :navigation}
+   ;; ── Agent ──
    "app.interrupt"      {:description  "Interrupt agent / close overlay"
                          :default-keys ["escape"]
                          :category     :agent}
    "app.model.show"     {:description  "Show current model info"
                          :default-keys ["ctrl+l"]
                          :category     :agent}
-   "app.history.search" {:description  "Search prompt history"
-                         :default-keys ["ctrl+r"]
-                         :category     :navigation}
-   "app.paste.expand"   {:description  "Expand collapsed paste marker"
-                         :default-keys ["ctrl+o"]
+   "app.steer"          {:description  "Queue follow-up while streaming"
+                         :default-keys ["return"]
+                         :category     :agent}
+   ;; ── Editor ──
+   "app.submit"         {:description  "Submit message"
+                         :default-keys ["return"]
                          :category     :editor}
+   "app.paste.expand"   {:description  "Expand collapsed paste marker"
+                         :default-keys ["ctrl+e"]
+                         :category     :editor}
+   "app.tab.complete"   {:description  "Autocomplete (slash, @file, path)"
+                         :default-keys ["tab"]
+                         :category     :editor}
+   "app.bash.mode"      {:description  "Prefix ! for bash, !! for hidden"
+                         :default-keys ["!"]
+                         :category     :editor}
+   "app.eval.mode"      {:description  "Prefix $ for babashka eval"
+                         :default-keys ["$"]
+                         :category     :editor}
+   ;; ── Tools ──
    "app.tools.expand"   {:description  "Expand tool execution view"
                          :default-keys ["ctrl+o"]
                          :category     :tools}})

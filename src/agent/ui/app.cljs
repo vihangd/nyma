@@ -765,7 +765,8 @@
                     content        (if is-transparent (.-__overlay-content overlay) overlay)]
                 #jsx [Box {:position "absolute"
                            :flexDirection "column"
-                           :width "100%" :height "100%"
+                           :width "100%"
+                           :height (max 1 (dec term-rows))
                            :justifyContent "center"
                            :alignItems "center"}
                       [Overlay {:onClose (fn [] (set-overlay nil))

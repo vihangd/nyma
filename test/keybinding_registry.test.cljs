@@ -250,12 +250,13 @@
                                        (-> (expect (count conflicts)) (.toBe 1))
                                        (-> (expect (:key (first conflicts))) (.toBe "ctrl+x")))))
 
-                               (it "detects the built-in ctrl+o conflict (paste.expand vs tools.expand)"
+                               (it "detects the built-in return conflict (submit vs steer)"
                                    (fn []
-      ;; These intentionally share ctrl+o — they're context-sensitive.
+      ;; submit and steer intentionally share return — they're
+      ;; context-sensitive (submit when idle, steer when streaming).
       ;; Conflict detection should still report it so users are aware.
                                      (let [conflicts (detect-conflicts default-actions {})]
-                                       (-> (expect (some #(= "ctrl+o" (:key %)) conflicts)) (.toBeTruthy)))))))
+                                       (-> (expect (some #(= "return" (:key %)) conflicts)) (.toBeTruthy)))))))
 
 ;;; ─── create-registry + lookups ──────────────────────────
 
