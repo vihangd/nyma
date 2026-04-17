@@ -10,7 +10,12 @@
    :provider       "anthropic"
    :thinking       "off"
    :compaction     {:enabled true :threshold 0.85}
-   :retry          {:enabled true :max-retries 3}
+   ;; Retry on transient provider errors (429, 503, "high load").
+   ;; :max-retries is the number of RETRIES (not total attempts). With 5
+   ;; retries the AI SDK makes up to 6 attempts with exponential backoff
+   ;; starting at 2s. The AI SDK also respects retry-after / retry-after-ms
+   ;; headers from the provider if present.
+   :retry          {:enabled true :max-retries 5}
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
    :transport              "auto"

@@ -4,6 +4,7 @@
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.pricing :refer [calculate-cost]]
             [agent.token-estimation :as te]
+            [agent.debug :as dbg]
             [clojure.string :as str]))
 
 (def stream-event-types
@@ -67,6 +68,9 @@
         ;; corrupting ((:emit events) ...) double-paren calls.
         emit         (:emit events)
         emit-collect (:emit-collect events)]
+
+    (dbg/dbg "[loop/run] user-message:" (.slice (str user-message) 0 200)
+             "| msg-count:" (count (:messages @state)))
 
     ;; Append user message via event store (or direct swap for backwards compat)
     (if-let [store (:store agent)]
@@ -170,10 +174,18 @@
               effective-prompt (or (get send-result "system") effective-prompt)
 
               ;; Build mutable streamText config
+              ;; maxRetries: number of RETRIES on transient errors (429, 503,
+              ;; "high load"). AI SDK default is 2 (3 attempts total) which is
+              ;; too aggressive for providers under sustained load. We set 5
+              ;; retries (6 total attempts) with AI SDK's built-in exponential
+              ;; backoff (2s initial, 2× factor) + respect for retry-after
+              ;; headers from the provider. Matches :retry :max-retries in
+              ;; settings defaults.
               st-config #js {:model           active-model
                              :system          effective-prompt
                              :messages        (clj->js messages)
                              :tools           (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
+                             :maxRetries      5
                              :stopWhen        (stepCountIs (:max-steps config))
                              :providerOptions #js {}
                              :onError         (fn [e] (throw (.-error e)))
@@ -294,6 +306,8 @@
 
               ;; Process follow-up queue — outside retry loop, recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]
+                (dbg/dbg "[loop/follow-queue] drain content:" (.slice (str (:content next)) 0 200)
+                         "| remaining:" (count (rest @(:follow-queue agent))))
                 (swap! (:follow-queue agent) #(vec (rest %)))
                 (if-let [store (:store agent)]
                   ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
@@ -308,4 +322,6 @@
 (defn follow-up
   "Queue a follow-up message — delivered after agent finishes all work."
   [agent message]
+  (dbg/dbg "[follow-up] queued content:" (.slice (str (:content message)) 0 200)
+           "| stack:" (.-stack (js/Error.)))
   (swap! (:follow-queue agent) conj message))
