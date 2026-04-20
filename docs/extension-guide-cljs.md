@@ -413,6 +413,39 @@ safely without a null check.
 
 The full ordered list of hooks is in the README's Events table.
 
+## Custom Providers
+
+An extension can register a new LLM provider by calling `api.registerProvider`. Declare the `providers` capability in `extension.json`.
+
+```clojure
+(defn ^:export default [api]
+  (.registerProvider api "my-provider"
+    #js {:createModel  (fn [model-id] (create-my-model model-id))
+         :baseUrl      "https://api.example.com/v1"
+         :apiKeyEnv    "MY_PROVIDER_API_KEY"
+         :api          "openai"   ; "openai" or "anthropic"
+         :models       (clj->js models)})
+  (fn [] (.unregisterProvider api "my-provider")))
+```
+
+Each model object needs `{:id "..." :name "..." :contextWindow N}`. The `api` field controls which Vercel AI SDK provider adapter is used under the hood (`"openai"` for OpenAI-compatible endpoints, `"anthropic"` for Anthropic-native).
+
+**Credential resolution** — read from env first, then fall back to `~/.nyma/credentials.json`:
+
+```clojure
+(defn resolve-api-key []
+  (or (aget js/process.env "MY_PROVIDER_API_KEY")
+      (when-let [home (aget js/process.env "HOME")]
+        (try
+          (let [creds (-> (str home "/.nyma/credentials.json")
+                         (fs/readFileSync "utf8")
+                         js/JSON.parse)]
+            (aget creds "my-provider"))
+          (catch :default _ nil)))))
+```
+
+See `src/agent/extensions/custom_provider_minimax/` and `src/agent/extensions/custom_provider_claude_native/` for complete reference implementations.
+
 ## Squint Gotchas
 
 - `fn ^:async` does NOT work — use `defn ^:async` instead

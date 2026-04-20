@@ -436,6 +436,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
 | `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
 | `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
+| `lsp_suite` | `lsp-suite` | Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics |
 | `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.) |
 | `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
 | `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
@@ -443,7 +444,10 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
 | `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
 | `mention_files` | `mention-files` | `@filename` file insertion in the editor |
-| `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Run Qwen models via local CLI provider |
+| `rtk_compression` | `rtk-compression` | Prompt compression via the `rtk` CLI (reduces token usage on long contexts) |
+| `custom_provider_claude_native` | `custom-provider-claude-native` | Native Anthropic SDK provider (direct API, no OpenAI shim) |
+| `custom_provider_minimax` | `custom-provider-minimax` | MiniMax M2.x models via OpenAI-compatible API |
+| `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Qwen models via local CLI provider |
 
 ### Extension Locations
 
