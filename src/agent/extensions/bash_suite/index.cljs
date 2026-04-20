@@ -5,6 +5,7 @@
             [agent.extensions.bash-suite.output-handling :as output-handling]
             [agent.extensions.bash-suite.env-filter :as env-filter]
             [agent.extensions.bash-suite.cwd-manager :as cwd-manager]
+            [agent.extensions.bash-suite.timeout-classifier :as timeout-classifier]
             [agent.extensions.bash-suite.background-jobs :as background-jobs]
             [clojure.string :as str]))
 
@@ -52,26 +53,27 @@ Commands are analyzed for safety. Destructive operations (rm -rf /, dd, fork bom
     (swap! deactivators conj (permissions/activate api))
     ;; env_filter is independent
     (swap! deactivators conj (env-filter/activate api))
-    ;; middleware: cwd_manager, background_jobs, output_handling
+    ;; middleware: cwd_manager, timeout_classifier, background_jobs, output_handling
     (swap! deactivators conj (cwd-manager/activate api))
+    (swap! deactivators conj (timeout-classifier/activate api))
     (swap! deactivators conj (background-jobs/activate api))
     (swap! deactivators conj (output-handling/activate api))
 
     ;; Register /bash-stats command
     (.registerCommand api "bash-stats"
-      #js {:description "Show bash security and execution stats"
-           :handler (fn [_args ctx]
-                      (let [text (format-stats)]
-                        (when (and ctx (.-ui ctx) (.-available (.-ui ctx)))
-                          (.notify (.-ui ctx) text "info"))
-                        text))})
+                      #js {:description "Show bash security and execution stats"
+                           :handler (fn [_args ctx]
+                                      (let [text (format-stats)]
+                                        (when (and ctx (.-ui ctx) (.-available (.-ui ctx)))
+                                          (.notify (.-ui ctx) text "info"))
+                                        text))})
 
     ;; Inject security notice into system prompt
     (.on api "before_agent_start"
-      (fn [_event _ctx]
-        #js {:prompt-sections
-             #js [#js {:content bash-security-notice :priority 30}]})
-      40)
+         (fn [_event _ctx]
+           #js {:prompt-sections
+                #js [#js {:content bash-security-notice :priority 30}]})
+         40)
 
     ;; Return combined deactivate
     (fn []

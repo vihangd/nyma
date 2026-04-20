@@ -6,38 +6,45 @@
             [agent.extensions.token-suite.shared :as shared]
             [agent.token-estimation :as te]
             [agent.sessions.compaction :as compaction]
+            [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [clojure.string :as str]))
 
 ;; ── Structured Summary Template ────────────────────────────────
 
-(def ^:private structured-prompt
-  "You are summarizing a coding agent conversation for continuity. Generate a structured summary preserving ALL specific values.
+(def structured-prompt
+  "You are summarizing a coding agent conversation for continuity.
+Do NOT continue the conversation. ONLY output a structured summary
+with every section below present.
 
-## Required Format
+## 1. Previous Conversation
+[What the user originally asked for and how the session has evolved]
 
-### User Intent
-[The user's original request — preserve exact phrasing]
+## 2. Current Work
+[What is being actively worked on right now — exact file paths, exact line numbers]
 
-### Completed Work
-- [action] → [EXACT file path(s)]
+## 3. Key Technical Concepts
+[Libraries, patterns, architectural decisions that inform ongoing work]
 
-### Errors & Corrections
-[Error messages VERBATIM — do not paraphrase. Include user corrections.]
+## 4. Relevant Files and Code
+[EXACT file paths, EXACT line numbers, relevant function names VERBATIM.
+ Every path from <files-read>/<files-modified> must appear here.]
 
-### Active Work
-[Current task state, partial results]
+## 5. Problem Solving
+[Errors encountered (VERBATIM), fixes applied, open issues, things ruled out]
 
-### Pending Tasks
-[Remaining items in order]
-
-### Key References
-[ALL file paths, line numbers, error strings, config values — one per line, VERBATIM]
+## 6. Pending Tasks and Next Steps
+[Unfinished work in execution order. For EACH pending task, include a
+ VERBATIM QUOTE from the user's messages or from my most recent work.
+ Format:
+   - [task description]
+     Quote: \"[exact words from conversation]\"
+ Do NOT paraphrase these quotes. Do NOT invent next steps the user did not state.]
 
 ## Critical Rules
 - File paths must be EXACT (e.g., src/agent/loop.cljs:142, NOT \"the loop file\")
 - Error messages must be VERBATIM
 - Configuration values must be exact numbers
-- ALL paths from <files-read> and <files-modified> MUST appear in Key References")
+- Section 6 MUST contain at least one verbatim quote per pending task")
 
 ;; ── Tagged Serialization ────────────────────────────────────────
 
@@ -53,17 +60,17 @@
                       content (str (shared/msg-content m))]
                   (case role
                     "user"       (str "[User]: " content)
-                    "assistant"  (str "[Assistant]: " content)
+                    "assistant"  (str "[Assistant]: " (strip-think-tags content))
                     "tool_call"  (let [meta (or (when (map? m) (:metadata m))
                                                 (when (object? m) (.-metadata m)))
-                                      tname (when meta
-                                              (or (when (map? meta) (:tool-name meta))
-                                                  (when (object? meta) (.-tool-name meta))))]
-                                  (str "[Tool Call]: " (or tname "unknown")))
+                                       tname (when meta
+                                               (or (when (map? meta) (:tool-name meta))
+                                                   (when (object? meta) (.-tool-name meta))))]
+                                   (str "[Tool Call]: " (or tname "unknown")))
                     "tool_result" (str "[Tool Result]: "
-                                      (if (> (count content) limit)
-                                        (str (subs content 0 limit) "...[truncated]")
-                                        content))
+                                       (if (> (count content) limit)
+                                         (str (subs content 0 limit) "...[truncated]")
+                                         content))
                     "compaction" (str "[Previous Summary]: " content)
                     (str "[" role "]: " content)))))
          (str/join "\n\n"))))
@@ -126,7 +133,7 @@
         (let [content (str (shared/msg-content msg))]
           (when (shared/has-error-pattern? content)
             (swap! errors conj
-              (if (> (count content) 200) (subs content 0 200) content))))))
+                   (if (> (count content) 200) (subs content 0 200) content))))))
     @errors))
 
 (defn- extract-active-work [messages]
@@ -198,98 +205,98 @@
 
     ;; Hook A: Background summary generation (after_provider_request, priority 10)
     (.on api "after_provider_request"
-      (fn [event ctx]
-        (let [usage-info (when ctx
-                           (let [get-usage (.-getContextUsage ctx)]
-                             (when (fn? get-usage) (get-usage))))
+         (fn [event ctx]
+           (let [usage-info (when ctx
+                              (let [get-usage (.-getContextUsage ctx)]
+                                (when (fn? get-usage) (get-usage))))
               ;; Fallback: use event data for token tracking
-              input-tokens (or (when usage-info (.-inputTokens usage-info))
-                               (when event (.-inputTokens (.-usage event)))
-                               0)
-              turn-count (or (when event (.-turnCount event)) 0)]
+                 input-tokens (or (when usage-info (.-inputTokens usage-info))
+                                  (when event (.-inputTokens (.-usage event)))
+                                  0)
+                 turn-count (or (when event (.-turnCount event)) 0)]
           ;; Only build summary after a few turns and when we have meaningful context
-          (when (>= turn-count 2)
+             (when (>= turn-count 2)
             ;; Extract messages from the context usage or build from state
             ;; For now, we build the summary from the event data
             ;; The full messages aren't in after_provider_request, so we track incrementally
-            (swap! shared/suite-stats update-in [:smart-compaction :background-updates] inc))))
-      10)
+               (swap! shared/suite-stats update-in [:smart-compaction :background-updates] inc))))
+         10)
 
     ;; Hook B: Filesystem offloading (context_assembly, priority 85)
     (.on api "context_assembly"
-      (fn [event _ctx]
-        (let [budget (.-tokenBudget event)
-              tokens-used (when budget (.-tokensUsed budget))
-              input-budget (when budget (.-inputBudget budget))
-              threshold (:offload-threshold sc-cfg)
-              messages (.-messages event)]
-          (when (and tokens-used input-budget
-                     (> (/ tokens-used input-budget) threshold))
-            (let [total (.-length messages)
-                  cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
-                  max-preview (:max-preview-lines sc-cfg)
-                  min-tokens (:offload-min-tokens sc-cfg)]
-              (doseq [i (range total)]
-                (let [msg (aget messages i)
-                      role (shared/msg-role msg)
-                      content (str (shared/msg-content msg))]
-                  (when (= role "tool_result")
+         (fn [event _ctx]
+           (let [budget (.-tokenBudget event)
+                 tokens-used (when budget (.-tokensUsed budget))
+                 input-budget (when budget (.-inputBudget budget))
+                 threshold (:offload-threshold sc-cfg)
+                 messages (.-messages event)]
+             (when (and tokens-used input-budget
+                        (> (/ tokens-used input-budget) threshold))
+               (let [total (.-length messages)
+                     cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
+                     max-preview (:max-preview-lines sc-cfg)
+                     min-tokens (:offload-min-tokens sc-cfg)]
+                 (doseq [i (range total)]
+                   (let [msg (aget messages i)
+                         role (shared/msg-role msg)
+                         content (str (shared/msg-content msg))]
+                     (when (= role "tool_result")
                     ;; Skip already-masked results
-                    (when-not (.startsWith content "[tool_result:")
+                       (when-not (.startsWith content "[tool_result:")
                       ;; Skip error-containing results
-                      (when-not (shared/has-error-pattern? content)
-                        (let [est (te/estimate-tokens content)]
-                          (when (> est min-tokens)
-                            (let [info (offload-to-file content cache-dir max-preview)]
-                              (aset msg "content"
-                                (str "[Archived: " (:tokens info) " tokens — use retrieve_archived(\"" (:hash info) "\") to recover]\n"
-                                     "Preview:\n" (:preview info) "\n"
-                                     "Cache: " (:hash info) ".txt"))
-                              (swap! tool-result-cache assoc (:hash info) info)
-                              (swap! shared/suite-stats update-in [:smart-compaction :offloads] inc)
-                              (swap! shared/suite-stats update-in [:smart-compaction :tokens-archived]
-                                     + (:tokens info))))))))))))
-          nil))
-      85)
+                         (when-not (shared/has-error-pattern? content)
+                           (let [est (te/estimate-tokens content)]
+                             (when (> est min-tokens)
+                               (let [info (offload-to-file content cache-dir max-preview)]
+                                 (aset msg "content"
+                                       (str "[Archived: " (:tokens info) " tokens — use retrieve_archived(\"" (:hash info) "\") to recover]\n"
+                                            "Preview:\n" (:preview info) "\n"
+                                            "Cache: " (:hash info) ".txt"))
+                                 (swap! tool-result-cache assoc (:hash info) info)
+                                 (swap! shared/suite-stats update-in [:smart-compaction :offloads] inc)
+                                 (swap! shared/suite-stats update-in [:smart-compaction :tokens-archived]
+                                        + (:tokens info))))))))))))
+             nil))
+         85)
 
     ;; Hook C: Structured compaction (before_compact, priority 100)
     (.on api "before_compact"
-      (fn [evt-ctx _ctx]
-        (let [;; Use enriched payload fields when available, fall back to full context
-              to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
-              messages (if (sequential? to-summarize) to-summarize
-                         (when (and to-summarize (.-length to-summarize))
-                           (vec (map (fn [i] (aget to-summarize i))
-                                     (range (.-length to-summarize))))))
+         (fn [evt-ctx _ctx]
+           (let [;; Use enriched payload fields when available, fall back to full context
+                 to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+                 messages (if (sequential? to-summarize) to-summarize
+                              (when (and to-summarize (.-length to-summarize))
+                                (vec (map (fn [i] (aget to-summarize i))
+                                          (range (.-length to-summarize))))))
               ;; Read previous summary for iterative updates
-              previous-summary (or (.-previous-summary evt-ctx)
-                                   (->> messages
-                                        (filter #(= (shared/msg-role %) "compaction"))
-                                        last
-                                        shared/msg-content))
+                 previous-summary (or (.-previous-summary evt-ctx)
+                                      (->> messages
+                                           (filter #(= (shared/msg-role %) "compaction"))
+                                           last
+                                           shared/msg-content))
               ;; Use pre-extracted file lists when available, else extract
-              current-files-read (or (when-let [fr (.-files-read evt-ctx)]
-                                       (vec fr))
-                                     (when (seq messages)
-                                       (compaction/extract-files-read messages)))
-              current-files-modified (or (when-let [fm (.-files-modified evt-ctx)]
-                                           (vec fm))
-                                         (when (seq messages)
-                                           (compaction/extract-files-modified messages)))
+                 current-files-read (or (when-let [fr (.-files-read evt-ctx)]
+                                          (vec fr))
+                                        (when (seq messages)
+                                          (compaction/extract-files-read messages)))
+                 current-files-modified (or (when-let [fm (.-files-modified evt-ctx)]
+                                              (vec fm))
+                                            (when (seq messages)
+                                              (compaction/extract-files-modified messages)))
               ;; Accumulate file lists from previous compaction
-              prev-files-read (when previous-summary
-                                (parse-file-section previous-summary "Files Read"))
-              prev-files-modified (when previous-summary
-                                    (parse-file-section previous-summary "Files Modified"))
-              files-read (vec (distinct (concat (or prev-files-read [])
-                                                (or current-files-read []))))
-              files-modified (vec (distinct (concat (or prev-files-modified [])
-                                                    (or current-files-modified []))))
+                 prev-files-read (when previous-summary
+                                   (parse-file-section previous-summary "Files Read"))
+                 prev-files-modified (when previous-summary
+                                       (parse-file-section previous-summary "Files Modified"))
+                 files-read (vec (distinct (concat (or prev-files-read [])
+                                                   (or current-files-read []))))
+                 files-modified (vec (distinct (concat (or prev-files-modified [])
+                                                       (or current-files-modified []))))
               ;; Build summary from messages
-              summary (when (seq messages)
-                        (build-background-summary messages))]
-          (when summary
-            (let [enhanced (str ;; Carry forward previous context
+                 summary (when (seq messages)
+                           (build-background-summary messages))]
+             (when summary
+               (let [enhanced (str ;; Carry forward previous context
                                (when previous-summary
                                  (str "## Previous Context\n" previous-summary "\n\n"))
                                summary
@@ -298,95 +305,95 @@
                                  (str "\n\n## Files Read\n" (str/join "\n" files-read)))
                                (when (seq files-modified)
                                  (str "\n\n## Files Modified\n" (str/join "\n" files-modified))))]
-              (aset evt-ctx "summary" enhanced)
-              (swap! shared/suite-stats update-in [:smart-compaction :full-compactions] inc)))))
-      100)
+                 (aset evt-ctx "summary" enhanced)
+                 (swap! shared/suite-stats update-in [:smart-compaction :full-compactions] inc)))))
+         100)
 
     ;; Hook E: Optional LLM-enhanced summary (before_compact, priority 99 — runs after Hook C)
     (when (:use-llm-summary sc-cfg)
       (.on api "before_compact"
-        (^:async fn [evt-ctx ctx]
+           (^:async fn [evt-ctx ctx]
           ;; Only run if Hook C already set a summary (we enhance it)
-          (when-let [extraction-summary (.-summary evt-ctx)]
-            (let [to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
-                  messages (if (sequential? to-summarize) to-summarize
-                             (when (and to-summarize (.-length to-summarize))
-                               (vec (map (fn [i] (aget to-summarize i))
-                                         (range (.-length to-summarize))))))
+             (when-let [extraction-summary (.-summary evt-ctx)]
+               (let [to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+                     messages (if (sequential? to-summarize) to-summarize
+                                  (when (and to-summarize (.-length to-summarize))
+                                    (vec (map (fn [i] (aget to-summarize i))
+                                              (range (.-length to-summarize))))))
                   ;; Resolve summarization model
-                  model-spec (:summarization-model sc-cfg)
-                  model-registry (when ctx (.-modelRegistry ctx))
-                  model (when (and model-spec model-registry)
-                          (try
-                            (let [parts (.split (str model-spec) "/")
-                                  provider (when (> (count parts) 1) (first parts))
-                                  model-id (if (> (count parts) 1) (second parts) (str model-spec))]
-                              (when-let [resolve (.-resolve model-registry)]
-                                (resolve provider model-id)))
-                            (catch :default _ nil)))]
-              (when (and model (seq messages))
-                (try
-                  (let [conversation-text (serialize-for-summary messages 2000)
-                        previous-summary (.-previous-summary evt-ctx)
-                        prompt (str structured-prompt "\n\n"
-                                    (when previous-summary
-                                      (str "<previous-summary>\n" previous-summary
-                                           "\n</previous-summary>\n\n"
-                                           "Update the previous summary with new information.\n\n"))
-                                    "<conversation>\n" conversation-text "\n</conversation>\n\n"
-                                    "<extraction-summary>\n" extraction-summary
-                                    "\n</extraction-summary>\n\n"
-                                    "Use the extraction summary as a reference. "
-                                    "Produce a comprehensive structured summary.")
-                        result (js-await
-                                 (generateText
-                                   #js {:model    model
-                                        :messages #js [#js {:role "user" :content prompt}]
-                                        :maxTokens 4096}))]
-                    (when-let [text (.-text result)]
-                      (when (seq (.trim text))
-                        (aset evt-ctx "summary" text))))
-                  (catch :default _e
+                     model-spec (:summarization-model sc-cfg)
+                     model-registry (when ctx (.-modelRegistry ctx))
+                     model (when (and model-spec model-registry)
+                             (try
+                               (let [parts (.split (str model-spec) "/")
+                                     provider (when (> (count parts) 1) (first parts))
+                                     model-id (if (> (count parts) 1) (second parts) (str model-spec))]
+                                 (when-let [resolve (.-resolve model-registry)]
+                                   (resolve provider model-id)))
+                               (catch :default _ nil)))]
+                 (when (and model (seq messages))
+                   (try
+                     (let [conversation-text (serialize-for-summary messages 2000)
+                           previous-summary (.-previous-summary evt-ctx)
+                           prompt (str structured-prompt "\n\n"
+                                       (when previous-summary
+                                         (str "<previous-summary>\n" previous-summary
+                                              "\n</previous-summary>\n\n"
+                                              "Update the previous summary with new information.\n\n"))
+                                       "<conversation>\n" conversation-text "\n</conversation>\n\n"
+                                       "<extraction-summary>\n" extraction-summary
+                                       "\n</extraction-summary>\n\n"
+                                       "Use the extraction summary as a reference. "
+                                       "Produce a comprehensive structured summary.")
+                           result (js-await
+                                   (generateText
+                                    #js {:model    model
+                                         :messages #js [#js {:role "user" :content prompt}]
+                                         :maxTokens 4096}))]
+                       (when-let [text (.-text result)]
+                         (when (seq (.trim text))
+                           (aset evt-ctx "summary" text))))
+                     (catch :default _e
                     ;; Fallback: keep the pure extraction summary from Hook C
-                    nil))))))
-        99))
+                       nil))))))
+           99))
 
     ;; Hook D: Re-read detection (tool_execution_end, priority 0)
     (.on api "tool_execution_end"
-      (fn [event _ctx]
-        (let [tool (or (.-toolName event) "")
-              args (.-args event)
-              fpath (when args (or (.-path args) ""))]
-          (when (and (= tool "read") (seq fpath))
-            (if (contains? @read-history fpath)
+         (fn [event _ctx]
+           (let [tool (or (.-toolName event) "")
+                 args (.-args event)
+                 fpath (when args (or (.-path args) ""))]
+             (when (and (= tool "read") (seq fpath))
+               (if (contains? @read-history fpath)
               ;; Re-read detected — check if this file was previously archived
-              (when (some (fn [[_hash info]]
-                            (let [cached-content (when (fs/existsSync (:path info))
-                                                   (fs/readFileSync (:path info) "utf8"))]
-                              (when cached-content
-                                (.includes cached-content fpath))))
-                          @tool-result-cache)
-                (swap! shared/suite-stats update-in [:smart-compaction :re-reads] inc))
-              (swap! read-history conj fpath)))))
-      0)
+                 (when (some (fn [[_hash info]]
+                               (let [cached-content (when (fs/existsSync (:path info))
+                                                      (fs/readFileSync (:path info) "utf8"))]
+                                 (when cached-content
+                                   (.includes cached-content fpath))))
+                             @tool-result-cache)
+                   (swap! shared/suite-stats update-in [:smart-compaction :re-reads] inc))
+                 (swap! read-history conj fpath)))))
+         0)
 
     ;; Tool: retrieve_archived
     (.registerTool api "retrieve_archived"
-      (tool
-        #js {:description "Retrieve previously archived tool result content from the context cache. Use the hash from archive notices."
-             :inputSchema (.object z
-                            #js {:hash (-> (.string z)
-                                           (.describe "The hash from the archive notice (e.g., 'a1b2c3d4')"))})
-             :execute (fn [args]
-                        (let [hash (or (.-hash args) (aget args "hash") "")
-                              cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
-                              abs-dir (if (path/isAbsolute cache-dir)
-                                        cache-dir
-                                        (path/join (js/process.cwd) cache-dir))
-                              fpath (path/join abs-dir (str hash ".txt"))]
-                          (if (fs/existsSync fpath)
-                            (fs/readFileSync fpath "utf8")
-                            (str "No cached content found for hash: " hash))))}))
+                   (tool
+                    #js {:description "Retrieve previously archived tool result content from the context cache. Use the hash from archive notices."
+                         :inputSchema (.object z
+                                               #js {:hash (-> (.string z)
+                                                              (.describe "The hash from the archive notice (e.g., 'a1b2c3d4')"))})
+                         :execute (fn [args]
+                                    (let [hash (or (.-hash args) (aget args "hash") "")
+                                          cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
+                                          abs-dir (if (path/isAbsolute cache-dir)
+                                                    cache-dir
+                                                    (path/join (js/process.cwd) cache-dir))
+                                          fpath (path/join abs-dir (str hash ".txt"))]
+                                      (if (fs/existsSync fpath)
+                                        (fs/readFileSync fpath "utf8")
+                                        (str "No cached content found for hash: " hash))))}))
 
     ;; Return deactivator
     (fn []

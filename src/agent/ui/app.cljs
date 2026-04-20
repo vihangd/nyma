@@ -221,8 +221,10 @@
           (let [update-handler
                 (fn [chunk] (add-assistant-chunk! set-messages (.-text chunk)))]
             ((:on (:events agent)) "message_update" update-handler)
-            (js-await (run agent text))
-            ((:off (:events agent)) "message_update" update-handler)
+            (try
+              (js-await (run agent text))
+              (finally
+                ((:off (:events agent)) "message_update" update-handler)))
             (set-streaming false)
             ;; Convert any orphaned tool-start messages (those that never got
             ;; a matching tool-end, e.g. due to abort/error) to synthetic
@@ -315,6 +317,12 @@
         ;; (after the trailing '/' for a slash completion), which
         ;; looks broken.
         [editor-remount-key set-editor-remount-key] (useState 0)
+        ;; Guard against rapid-fire onSubmit calls (key-repeat / double-Enter).
+        ;; React state updates are asynchronous — set-editor-value "" doesn't clear
+        ;; the TextInput until the next render, so multiple Enter presses in the same
+        ;; render cycle all fire onSubmit with the same text. A ref is synchronous,
+        ;; so it prevents concurrent do-submit calls without waiting for a re-render.
+        submit-lock-ref                      (useRef false)
         ;; `write` is Ink's writeToStdout — clears the dynamic region,
         ;; writes to scrollback, then restores the dynamic region below.
         ;; Used by scrollback module to commit finalized messages.
@@ -734,16 +742,18 @@
 
     (let [handle-submit
           (useCallback
-           (fn [text]
-             (set-editor-value "")
-             (-> (do-submit agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text)
-                 (.catch (fn [e]
-                           (set-streaming false)
-                           (set-editor-hidden false)
-                           (when (and (.-extension-api agent) (.-ui (.-extension-api agent)))
-                             (.notify (.-ui (.-extension-api agent))
-                                      (str "Error: " (.-message e)) "error"))))))
-           #js [streaming agent])]
+           (reducers/make-submit-guard
+            submit-lock-ref
+            (fn [text]
+              (set-editor-value "")
+              (-> (do-submit agent streaming set-overlay set-streaming set-messages set-steerAcked set-editor-hidden text)
+                  (.catch (fn [e]
+                            (set-streaming false)
+                            (set-editor-hidden false)
+                            (when (and (.-extension-api agent) (.-ui (.-extension-api agent)))
+                              (.notify (.-ui (.-extension-api agent))
+                                       (str "Error: " (.-message e)) "error")))))))
+           #js [streaming agent submit-lock-ref])]
 
       ;; Scrollback-mode layout: NO fixed height on the App Box.
       ;; Content flows naturally — chat renders at its natural size,

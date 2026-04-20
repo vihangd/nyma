@@ -173,6 +173,20 @@
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api))
           extensions-atom   (atom loaded-extensions)]
 
+      ;; Re-resolve model now that extensions have registered their providers.
+      ;; The startup resolution above runs against the built-in registry only
+      ;; (anthropic/openai/google) — any user whose default provider is
+      ;; extension-registered (minimax, qwen-cli, custom_provider_*) hits an
+      ;; "Unknown provider" throw, lands here with config.model = nil, and
+      ;; would otherwise see "No model configured" on their first message.
+      (when (nil? (.-model (:config agent)))
+        (try
+          (when-let [late-model (resolve-model-via-registry
+                                 (:provider-registry agent) values merged)]
+            (set! (.-model (:config agent)) late-model))
+          (catch :default e
+            (js/console.warn (str "[nyma] " (.-message e))))))
+
       ;; Resolve --ext-* CLI flags against registered extension flags
       (resolve-ext-flags agent)
 

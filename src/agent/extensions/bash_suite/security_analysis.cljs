@@ -64,6 +64,33 @@
    {:regex #">\s*/etc/(passwd|shadow|hosts|resolv\.conf|fstab)"
     :reason "truncating critical system file"}])
 
+;; ── Line-separator / subshell / redirect detection ──────────
+
+(def ^:private line-separator-regex
+  ;; U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, U+0085 NEXT LINE
+  (js/RegExp. "[\u2028\u2029\u0085]"))
+
+(defn- has-line-separator-injection? [cmd]
+  (boolean (.test line-separator-regex cmd)))
+
+(def ^:private redirect-regex
+  ;; heredoc (<<<), append (>>), input (<), output (>), with optional fd digit
+  (js/RegExp. "(^|\\s)[0-9]?(>>?|<<?<?)"))
+
+(defn- has-redirect? [cmd]
+  (boolean (re-find redirect-regex cmd)))
+
+(defn- extract-subshells
+  "Return a vector of inner command strings from $(...) and (...) subshells
+   (non-nested only — the recursive classifier handles depth)."
+  [cmd]
+  (let [dollar-pat #"\$\(([^()]*)\)"
+        paren-pat  #"(?<!\$)\(([^()]*)\)"
+        dollar-ms  (re-seq dollar-pat (str cmd))
+        paren-ms   (re-seq paren-pat  (str cmd))]
+    (vec (concat (keep second dollar-ms)
+                 (keep second paren-ms)))))
+
 ;; ── Obfuscation detection ────────────────────────────────────
 
 (def obfuscation-patterns
@@ -156,50 +183,80 @@
      @groups)))
 
 (defn classify-command
-  "Parse and classify a shell command. Returns {:level :reasons :command}."
+  "Parse and classify a shell command. Returns {:level :reasons :command}.
+   Checks (in order): line-separator injection, redirect policy, destructive patterns,
+   obfuscation, subshell recursion, then shell-quote structural analysis."
   [cmd config]
-  (let [cmd-str (str cmd)]
-    ;; Check destructive patterns first (regex-based, no parsing needed)
-    (let [destructive-reasons (check-destructive-patterns cmd-str)
-          obfuscation-reasons (when (:block-obfuscated config)
-                                (check-obfuscation cmd-str))]
-      (if (seq destructive-reasons)
-        {:level :destructive :reasons destructive-reasons :command cmd-str}
-        (if (seq obfuscation-reasons)
-          {:level :destructive :reasons obfuscation-reasons :command cmd-str}
-          ;; Parse with shell-quote for structural analysis
-          (try
-            (let [parsed (.parse shell-quote cmd-str)
-                  ;; Check pipe-to-interpreter (uses raw JS array)
-                  pipe-reasons (when (:block-network-exec config)
-                                 (check-pipe-to-interpreter parsed))
-                  ;; Split into subcommand groups at operators
-                  groups (atom [])
-                  current (atom [])]
-              ;; Build subcommand groups — iterate JS array directly
-              (doseq [token parsed]
-                (if (and (not (string? token)) (.-op token))
-                  (do
-                    (when (seq @current) (swap! groups conj @current))
-                    (reset! current []))
-                  (swap! current conj (str token))))
-              (when (seq @current) (swap! groups conj @current))
-              ;; Classify each group and take highest risk
-              (let [group-levels (map classify-token-group @groups)
-                    max-level (reduce higher-risk :safe group-levels)
-                    final-level (if (seq pipe-reasons) :destructive max-level)
-                    all-reasons (into (or pipe-reasons [])
-                                      (when (= final-level :destructive)
-                                        destructive-reasons))]
-                {:level   final-level
-                 :reasons (if (seq all-reasons) all-reasons
-                              [(str "classified as " (str final-level))])
-                 :command cmd-str}))
-            (catch :default _e
-              ;; Fail-closed: unparseable commands treated as destructive
-              {:level :destructive
-               :reasons ["unparseable command (fail-closed)"]
-               :command cmd-str})))))))
+  (let [cmd-str   (str cmd)
+        max-depth (or (:max-subshell-depth config) 4)]
+    ;; (a) Line-separator injection — U+2028/U+2029/U+0085 bypass scanners
+    (cond
+      (has-line-separator-injection? cmd-str)
+      {:level   :destructive
+       :reasons ["line-separator injection (U+2028/U+2029/U+0085)"]
+       :command cmd-str}
+
+      ;; (b) Redirect policy (opt-in via :block-redirects true)
+      (and (:block-redirects config) (has-redirect? cmd-str))
+      {:level   :destructive
+       :reasons ["redirect blocked by policy"]
+       :command cmd-str}
+
+      :else
+      ;; Check destructive patterns first (regex-based, no parsing needed)
+      (let [destructive-reasons (check-destructive-patterns cmd-str)
+            obfuscation-reasons (when (:block-obfuscated config)
+                                  (check-obfuscation cmd-str))
+            ;; (c) Recursively classify subshell bodies; take highest risk
+            subshell-results    (when (pos? max-depth)
+                                  (mapv #(classify-command
+                                          % (update config :max-subshell-depth dec))
+                                        (extract-subshells cmd-str)))
+            subshell-max        (reduce higher-risk :safe (map :level subshell-results))
+            subshell-reasons    (into [] (mapcat :reasons
+                                                 (filter #(= (:level %) :destructive)
+                                                         subshell-results)))]
+        (if (seq destructive-reasons)
+          {:level :destructive :reasons destructive-reasons :command cmd-str}
+          (if (seq obfuscation-reasons)
+            {:level :destructive :reasons obfuscation-reasons :command cmd-str}
+            (if (= subshell-max :destructive)
+              {:level   :destructive
+               :reasons (or (seq subshell-reasons) ["destructive command in subshell"])
+               :command cmd-str}
+              ;; Parse with shell-quote for structural analysis
+              (try
+                (let [parsed (.parse shell-quote cmd-str)
+                      ;; Check pipe-to-interpreter (uses raw JS array)
+                      pipe-reasons (when (:block-network-exec config)
+                                     (check-pipe-to-interpreter parsed))
+                      ;; Split into subcommand groups at operators
+                      groups  (atom [])
+                      current (atom [])]
+                  ;; Build subcommand groups — iterate JS array directly
+                  (doseq [token parsed]
+                    (if (and (not (string? token)) (.-op token))
+                      (do
+                        (when (seq @current) (swap! groups conj @current))
+                        (reset! current []))
+                      (swap! current conj (str token))))
+                  (when (seq @current) (swap! groups conj @current))
+                  ;; Classify each group and take highest risk
+                  (let [group-levels (map classify-token-group @groups)
+                        max-level    (reduce higher-risk subshell-max group-levels)
+                        final-level  (if (seq pipe-reasons) :destructive max-level)
+                        all-reasons  (into (or pipe-reasons [])
+                                           (when (= final-level :destructive)
+                                             destructive-reasons))]
+                    {:level   final-level
+                     :reasons (if (seq all-reasons) all-reasons
+                                  [(str "classified as " (str final-level))])
+                     :command cmd-str}))
+                (catch :default _e
+                  ;; Fail-closed: unparseable commands treated as destructive
+                  {:level   :destructive
+                   :reasons ["unparseable command (fail-closed)"]
+                   :command cmd-str})))))))))
 
 (defn should-block?
   "Determine if a classified command should be blocked based on config."

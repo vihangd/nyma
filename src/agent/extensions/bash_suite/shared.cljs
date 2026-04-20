@@ -24,7 +24,9 @@
                        :block-destructive true
                        :block-privilege-escalation true
                        :block-obfuscated true
-                       :block-network-exec true}
+                       :block-network-exec true
+                       :block-redirects false
+                       :max-subshell-depth 4}
    :permissions {:enabled true
                  :auto-approve-safe true
                  :allowlist ["ls *" "cat *" "head *" "tail *" "wc *" "file *"
@@ -60,12 +62,27 @@
                      :max-concurrent 5
                      :output-buffer-lines 500
                      :auto-detect-patterns
-                       ["npm run dev" "npm run start" "npm start"
-                        "yarn dev" "yarn start"
-                        "bun run dev" "bun run start"
-                        "python -m http.server" "python manage.py runserver"
-                        "cargo watch" "cargo run"
-                        "go run" "nodemon"]}})
+                     ["npm run dev" "npm run start" "npm start"
+                      "yarn dev" "yarn start"
+                      "bun run dev" "bun run start"
+                      "python -m http.server" "python manage.py runserver"
+                      "cargo watch" "cargo run"
+                      "go run" "nodemon"]}
+   :timeout-classifier {:enabled true
+                        :default-timeout-ms 30000
+                        :long-running-timeout-ms 300000
+                        :patterns
+                        ["(^|\\s)(npm|pnpm|yarn|bun)\\s+(install|ci|run\\s+build|run\\s+test|test|build)"
+                         "(^|\\s)(pytest|jest|vitest)\\b"
+                         "(^|\\s)cargo\\s+(build|test|check|run)\\b"
+                         "(^|\\s)go\\s+(build|test|run|mod)\\b"
+                         "(^|\\s)(mvn|gradle|gradlew)\\b"
+                         "(^|\\s)make\\b"
+                         "(^|\\s)cmake\\b"
+                         "(^|\\s)docker\\s+(build|compose\\s+build)\\b"
+                         "(^|\\s)(torchrun|python.*train)\\b"
+                         "(^|\\s)ffmpeg\\b"
+                         "(^|\\s)tsc(\\s|$)"]}})
 
 ;; ── Utility functions ────────────────────────────────────────
 

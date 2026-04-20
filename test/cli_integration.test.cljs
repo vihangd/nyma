@@ -42,8 +42,8 @@
   (let [{:keys [agent api]} (make-loaded-agent)
         loaded (js-await (discover-and-load [(builtin-dir)] api))]
     (try
-      ;; All 12 built-in extensions present
-      (-> (expect (count loaded)) (.toBe 12))
+      ;; All 16 built-in extensions present
+      (-> (expect (count loaded)) (.toBe 16))
       ;; Block the LLM call so we don't need credentials
       ((:on (:events agent)) "before_provider_request"
                              (fn [_] #js {:block true :reason "blocked for test"}))
@@ -189,7 +189,7 @@
 
 (describe "CLI integration — print mode + loaded extensions"
           (fn []
-            (it "loads all 12 built-ins, runs a blocked turn, no crashes"
+            (it "loads all 16 built-ins, runs a blocked turn, no crashes"
                 test-cli-startup-loads-all-builtins-without-crashing)
             (it "tool_access_check fires through loaded extensions without modelId crash"
                 test-tool-access-check-handlers-fire-without-modelid-crash)

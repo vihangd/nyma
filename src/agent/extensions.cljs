@@ -5,7 +5,8 @@
             [agent.providers.registry :refer [build-provider-entry]]
             [agent.pricing :as pricing]
             [agent.ui.tool-renderer-registry :as tool-renderers]
-            [agent.ui.status-line-segments :as status-segments]))
+            [agent.ui.status-line-segments :as status-segments]
+            [agent.debug :as dbg]))
 
 (defn create-extension-api
   "Build the API object that extensions receive.
@@ -62,6 +63,9 @@
                               (swap! (:state agent) update :messages conj msg))
          :sendUserMessage   (fn [text opts]
                               (let [deliver-as (or (and opts (.-deliverAs opts)) "steer")]
+                                (dbg/dbg "[sendUserMessage] deliverAs:" deliver-as
+                                         "| text:" (.slice (str text) 0 200)
+                                         "| stack:" (.-stack (js/Error.)))
                                 (case deliver-as
                                   "steer"    (steer agent {:role "user" :content text})
                                   "followUp" (follow-up agent {:role "user" :content text}))))

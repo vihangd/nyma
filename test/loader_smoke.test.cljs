@@ -22,15 +22,19 @@
   #{"agent-shell"
     "ast-tools"
     "bash-suite"
+    "custom-provider-claude-native"
+    "custom-provider-minimax"
     "custom-provider-qwen-cli"
     "desktop-notify"
     "mention-files"
     "model-roles"
     "prompt-history"
     "questionnaire"
+    "rtk-compression"
     "stats-dashboard"
     "token-suite"
-    "workspace-config"})
+    "workspace-config"
+    "lsp-suite"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so
@@ -82,7 +86,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 12 expected namespaces load and none collide on 'index'"
+            (it "all 15 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)

@@ -9,10 +9,13 @@
   [content custom-renderers]
   (let [cache-ref (useRef nil)]
     (useMemo
-      (fn []
-        (let [prev-cache (.-current cache-ref)
-              result     (mb/incremental-render content prev-cache (or custom-renderers {}))
-              rendered   (:rendered result)]
-          (set! (.-current cache-ref) result)
-          (or rendered "")))
-      #js [content custom-renderers])))
+     (fn []
+       (let [prev-cache (.-current cache-ref)
+             result     (mb/incremental-render content prev-cache (or custom-renderers {}))
+             rendered   (:rendered result)]
+         (set! (.-current cache-ref) result)
+         (or rendered "")))
+      ;; custom-renderers is excluded from deps: the cache-ref already handles
+      ;; incremental invalidation based on content growth, and custom-renderers
+      ;; is a fresh deref on every App render → would cause the memo to never hit.
+     #js [content])))
