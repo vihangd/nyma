@@ -21,13 +21,14 @@
    :transport              "auto"
    :tool-display           "collapsed"
    :tool-display-max-lines 500
-   ;; Use the scrollback-based chat renderer: commit finalized messages
-   ;; directly to terminal scrollback via Ink's writeToStdout and keep only
-   ;; in-flight content in the dynamic region. Matches the Claude Code /
-   ;; Codex / Aider architecture. Users can revert via
-   ;;   "scrollbackMode": false
-   ;; in ~/.nyma/settings.json during the transition period.
-   ;; See src/agent/ui/scrollback.cljs.
+   ;; Layout mode for the chat view. Accepts:
+   ;;   true    — default, natural-flow + writeToStdout commits
+   ;;   false   — fixed-height + Ink <Static> emissions to scrollback
+   ;;   "pager" — in-app scrollable pager (all turns stay inside Ink)
+   ;; The setting key can be written as either kebab-case
+   ;; ("scrollback-mode") or camelCase ("scrollbackMode") in the JSON
+   ;; file; load-json normalizes both to kebab-case before merge.
+   ;; See src/agent/ui/scrollback.cljs and src/agent/ui/chat_pager.cljs.
    :scrollback-mode        true
    :status-line            {:preset "default"
                             :left-segments nil
@@ -144,11 +145,45 @@
               (recur (inc i))))))
       @issues)))
 
+(defn camel->kebab
+  "Pure: convert a camelCase string to kebab-case. Leaves already-
+   kebab-case strings unchanged. Used to normalize JSON setting keys
+   so users can write either style — JSON convention is camelCase,
+   CLJS convention is kebab-case, and we accept both to match docs
+   that mentioned \"scrollbackMode\" historically.
+
+   Exported for testing."
+  [s]
+  (when (string? s)
+    (.toLowerCase (.replace s (js/RegExp. "([a-z0-9])([A-Z])" "g") "$1-$2"))))
+
+(defn normalize-keys
+  "Pure: walk a JS value and rewrite every string key from camelCase to
+   kebab-case. Nested objects and array elements are normalized
+   recursively. Primitives (number, boolean, string, null) and any
+   non-plain-object (function, Date, Map, Set, class instance) pass
+   through as-is. squint's `object?` is strict: it's true only for
+   plain `{}` objects, so arrays fall through the array branch below.
+
+   Exported for testing."
+  [v]
+  (cond
+    (nil? v)      v
+    (array? v)    (.map v normalize-keys)
+    (object? v)   (let [out #js {}]
+                    (doseq [k (js/Object.keys v)]
+                      (let [nk (camel->kebab k)
+                            nv (normalize-keys (aget v k))]
+                        (aset out nk nv)))
+                    out)
+    :else         v))
+
 (defn- load-json
-  "Read, duplicate-key-scan, and parse a settings JSON file. Any
-   duplicate-key warnings are sent through `d/warn` so they show up
-   on stderr but don't block load. Returns nil when the file is
-   missing or unparseable (the caller handles this case)."
+  "Read, duplicate-key-scan, parse, and normalize a settings JSON file.
+   Every camelCase key is rewritten to kebab-case so the CLJS code
+   (which reads `(:scrollback-mode m)` → `get(m, \"scrollback-mode\")`)
+   sees both styles. Any duplicate-key warnings are sent through
+   `d/warn`. Returns nil when the file is missing or unparseable."
   [file-path]
   (when (fs/existsSync file-path)
     (let [text   (fs/readFileSync file-path "utf8")
@@ -158,7 +193,7 @@
                 {:count (count issues)
                  :details (mapv v/format-issue issues)}))
       (try
-        (js/JSON.parse text)
+        (normalize-keys (js/JSON.parse text))
         (catch :default e
           (d/warn "settings" (str "Failed to parse " file-path ": " (.-message e)))
           nil)))))
