@@ -76,12 +76,36 @@
   [manager]
   (some (fn [[_ c]] (when (lsp-client/running? c) c)) @(:clients manager)))
 
+(defn- get-running-client-for
+  "Return a running client for file-path WITHOUT spawning a new one.
+   Used by tool_complete to avoid kicking off LSP server startup as a
+   side-effect of every file read."
+  [manager file-path]
+  (let [ext    (.toLowerCase (path/extname file-path))
+        [id _] (catalog/server-for-extension ext)]
+    (when id
+      (let [client (get @(:clients manager) id)]
+        (when (and client (lsp-client/running? client)) client)))))
+
 ;; ── File sync entry points ────────────────────────────────────────
 
 (defn ^:async ensure-open!
-  "Ensure the file is open on its language server before querying."
+  "Ensure the file is open on its language server before querying.
+   Spawns a server lazily if none is running (used by LSP query tools)."
   [manager file-path]
   (when-let [client (js-await (get-client-for! manager file-path))]
+    (let [uri     (fmt/path->uri file-path)
+          ext     (.toLowerCase (path/extname file-path))
+          lang-id (get ext->lang-id ext "plaintext")]
+      (js-await (lsp-client/ensure-open! client uri lang-id)))))
+
+(defn ^:async ensure-open-if-running!
+  "Sync the file with its LSP server only if one is already running.
+   Never spawns a new server — use this from tool_complete to avoid
+   triggering heavy server startup (e.g. rust-analyzer workspace indexing)
+   as a side-effect of a file read."
+  [manager file-path]
+  (when-let [client (get-running-client-for manager file-path)]
     (let [uri     (fmt/path->uri file-path)
           ext     (.toLowerCase (path/extname file-path))
           lang-id (get ext->lang-id ext "plaintext")]
@@ -91,6 +115,12 @@
   "Notify the language server that a file was written."
   [manager file-path new-content]
   (when-let [client (js-await (get-client-for! manager file-path))]
+    (lsp-client/did-change! client (fmt/path->uri file-path) new-content)))
+
+(defn ^:async did-change-if-running!
+  "Notify the language server of a write only if one is already running."
+  [manager file-path new-content]
+  (when-let [client (get-running-client-for manager file-path)]
     (lsp-client/did-change! client (fmt/path->uri file-path) new-content)))
 
 (defn set-diagnostic-handler!

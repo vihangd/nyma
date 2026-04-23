@@ -76,14 +76,18 @@
              (when (and fabs (fs/existsSync fabs))
                (cond
                  (file-read-tool? name)
-                 ;; Open the file on its LSP server so hover etc. work immediately
-                 (mgr/ensure-open! manager fabs)
+                 ;; Only sync with already-running LSP clients — never spawn.
+                 ;; Spawning (e.g. rust-analyzer) runs spawnSync + heavy workspace
+                 ;; indexing as a side-effect of every file read, which competes
+                 ;; with the provider HTTP stream and causes "Divining" hangs.
+                 ;; LSP tools (hover, goto_definition) spawn lazily on first use.
+                 (-> (mgr/ensure-open-if-running! manager fabs) (.catch (fn [_] nil)))
 
                  (file-write-tool? name)
-                 ;; Sync new content after write
                  (let [content (try (.readFileSync fs fabs "utf8") (catch :default _ nil))]
                    (when content
-                     (mgr/did-change! manager fabs content)))))))
+                     (-> (mgr/did-change-if-running! manager fabs content) (.catch (fn [_] nil))))))))
+           nil)
          50)
 
     ;; ── Register LLM tools ────────────────────────────────────────

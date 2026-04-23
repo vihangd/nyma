@@ -5,7 +5,8 @@
             [agent.extensions.lsp-suite.lsp-formatters :as fmt]
             [agent.extensions.lsp-suite.lsp-diagnostics :as diags]
             [agent.extensions.lsp-suite.lsp-servers-catalog :as catalog]
-            [agent.extensions.lsp-suite.lsp-config :as config]))
+            [agent.extensions.lsp-suite.lsp-config :as config]
+            [agent.extensions.lsp-suite.lsp-manager :as mgr]))
 
 ;; ── Formatters ────────────────────────────────────────────────────
 
@@ -175,3 +176,42 @@
                                            (fn []
                                              (let [ts (get (config/load-config) "typescript")]
                                                (-> (expect (:disabled? ts)) (.toBe false)))))))
+
+;; ── lsp-manager — no-spawn variants ──────────────────────────────────
+
+(defn ^:async test-ensure-open-if-running-returns-nil-for-rs []
+  (let [manager (mgr/create-manager)
+        result  (js-await (mgr/ensure-open-if-running! manager "/tmp/foo.rs"))]
+    (-> (expect (nil? result)) (.toBe true))))
+
+(defn ^:async test-ensure-open-if-running-returns-nil-for-unknown-ext []
+  (let [manager (mgr/create-manager)
+        result  (js-await (mgr/ensure-open-if-running! manager "/tmp/foo.xyz"))]
+    (-> (expect (nil? result)) (.toBe true))))
+
+(defn ^:async test-ensure-open-if-running-does-not-add-clients []
+  (let [manager (mgr/create-manager)
+        _       (js-await (mgr/ensure-open-if-running! manager "/tmp/foo.rs"))]
+    (-> (expect (= {} @(:clients manager))) (.toBe true))))
+
+(defn ^:async test-did-change-if-running-returns-nil-when-no-client []
+  (let [manager (mgr/create-manager)
+        result  (js-await (mgr/did-change-if-running! manager "/tmp/foo.rs" "fn main() {}"))]
+    (-> (expect (nil? result)) (.toBe true))))
+
+(defn ^:async test-did-change-if-running-does-not-add-clients []
+  (let [manager (mgr/create-manager)
+        _       (js-await (mgr/did-change-if-running! manager "/tmp/foo.rs" "fn main() {}"))]
+    (-> (expect (= {} @(:clients manager))) (.toBe true))))
+
+(describe "lsp-manager — ensure-open-if-running! (no-spawn)" (fn []
+                                                               (it "returns nil when no client running for a .rs file"
+                                                                   test-ensure-open-if-running-returns-nil-for-rs)
+                                                               (it "returns nil when no client running for an unknown extension"
+                                                                   test-ensure-open-if-running-returns-nil-for-unknown-ext)
+                                                               (it "does not add any clients to the manager"
+                                                                   test-ensure-open-if-running-does-not-add-clients)
+                                                               (it "did-change-if-running! returns nil when no client running"
+                                                                   test-did-change-if-running-returns-nil-when-no-client)
+                                                               (it "did-change-if-running! does not add any clients"
+                                                                   test-did-change-if-running-does-not-add-clients)))

@@ -109,6 +109,11 @@
                     :getModelInfo      (.-getModelInfo base-api)
                     :registerModelInfo (.-registerModelInfo base-api)
                     :estimateTokens    (.-estimateTokens base-api)
+                    ;; Settings access (ungated — read-only)
+                    :getSettings       (.-getSettings base-api)
+                    ;; Emit to main agent event bus (gated — lets extensions
+                    ;; broadcast to other extensions that subscribed via api.on)
+                    :emitGlobal        (gate capabilities :events (.-emitGlobal base-api))
                     ;; Flags (namespace-prefixed)
                     :registerFlag     (gate capabilities :flags
                                             (fn [name config]

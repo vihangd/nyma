@@ -23,7 +23,11 @@
     "ast-tools"
     "bash-suite"
     "custom-provider-claude-native"
+    "custom-provider-kimi"
     "custom-provider-minimax"
+    "custom-provider-opencode-zen"
+    "custom-provider-groq"
+    "custom-provider-openrouter"
     "custom-provider-qwen-cli"
     "desktop-notify"
     "mention-files"
@@ -86,7 +90,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 15 expected namespaces load and none collide on 'index'"
+            (it "all 19 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)

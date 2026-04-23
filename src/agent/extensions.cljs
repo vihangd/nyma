@@ -63,9 +63,10 @@
                               (swap! (:state agent) update :messages conj msg))
          :sendUserMessage   (fn [text opts]
                               (let [deliver-as (or (and opts (.-deliverAs opts)) "steer")]
-                                (dbg/dbg "[sendUserMessage] deliverAs:" deliver-as
-                                         "| text:" (.slice (str text) 0 200)
-                                         "| stack:" (.-stack (js/Error.)))
+                                (dbg/debug "sendUserMessage"
+                                           (str "deliverAs: " deliver-as
+                                                " | text: " (.slice (str text) 0 200)
+                                                " | stack: " (.-stack (js/Error.))))
                                 (case deliver-as
                                   "steer"    (steer agent {:role "user" :content text})
                                   "followUp" (follow-up agent {:role "user" :content text}))))
@@ -373,6 +374,11 @@
                                                              (.-contextWindow (aget entries k))}])
                                                          (js/Object.keys entries)))]
                                 ((:register (:model-registry agent)) converted)))
+
+       ;; ── Settings access ────────────────────────────────────
+         :getSettings       (fn []
+                              (when-let [sm (:settings agent)]
+                                ((:get sm))))
 
        ;; ── Token estimation ───────────────────────────────────
          :estimateTokens    (fn [text] (te/estimate-tokens text))

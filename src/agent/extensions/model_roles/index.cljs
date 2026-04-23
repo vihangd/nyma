@@ -3,19 +3,44 @@
    to provider/model pairs. Switch with /role <name>."
   (:require [clojure.string :as str]))
 
+(def ^:private default-roles
+  {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+   :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
+   :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+   :plan    {:provider "anthropic" :model "claude-opus-4-20250514"}
+   :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}})
+
+(defn- js-obj->map
+  "Shallow-convert a plain JS object (from JSON.parse) to a CLJS map.
+   Values are left as-is (may themselves be JS objects)."
+  [obj]
+  (when obj
+    (reduce (fn [m k] (assoc m k (aget obj k)))
+            {}
+            (js/Object.keys obj))))
+
+(defn- role-entry->clj
+  "Normalize a single role config — accepts both CLJS maps and JS objects."
+  [v]
+  (if (map? v) v (js-obj->map v)))
+
 (defn- get-roles
-  "Read roles map from settings, falling back to built-in defaults."
+  "Read roles map from settings, merged on top of built-in defaults.
+   User-defined roles override defaults; new role names are additive.
+   Accepts both CLJS maps and plain JS objects (from JSON.parse)."
   [api]
-  (let [settings (when-let [get-fn (.-getSettings api)] (get-fn))
-        roles    (or (get settings "roles") (get settings :roles))]
-    (if (and roles (map? roles))
-      roles
-      ;; Inline fallback if settings unavailable
-      {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
-       :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
-       :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
-       :plan    {:provider "anthropic" :model "claude-opus-4-20250514"}
-       :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}})))
+  (let [settings   (when-let [get-fn (.-getSettings api)] (get-fn))
+        raw-roles  (or (when settings (get settings "roles"))
+                       (when settings (get settings :roles)))
+        ;; JSON.parse returns plain JS objects; (map? js-obj) is false in squint.
+        user-roles (cond
+                     (map? raw-roles)    raw-roles
+                     (some? raw-roles)   (js-obj->map raw-roles)
+                     :else               nil)]
+    (if user-roles
+      (merge default-roles
+             (into {} (map (fn [[k v]] [k (role-entry->clj v)]) user-roles)))
+      default-roles)))
 
 (defn- resolve-role-model
   "Given a role config {:provider :model}, resolve the model object via provider registry."
@@ -45,21 +70,25 @@
 (defn ^:export default [api]
   (let [handlers (atom [])
 
-        ;; Subscribe to model_resolve — override model based on active role
+        ;; Subscribe to model_resolve — ensure config.model reflects the active role.
+        ;; /role already calls .setModel which updates config.model; we return nil
+        ;; so the loop uses config.model rather than accidentally overriding it with
+        ;; the stale default that arrived in data.default.
         on-resolve
-        (fn [data]
+        (fn [_data]
           (let [state    (.getState api)
                 role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                ;; Squint: keywords ARE strings, so (get roles "default")
-                ;; matches a map keyed by :default.
                 role-cfg (get roles role)]
-            (when role-cfg
+            (when (and role-cfg (not= role "default"))
               (let [provider (or (:provider role-cfg) (get role-cfg "provider"))
                     model-id (or (:model role-cfg) (get role-cfg "model"))]
-                ;; Only override if the role specifies a model
-                (when model-id
-                  #js {:model (.-default data)})))))
+                (when (and provider model-id)
+                  ;; Re-apply setModel each turn so the correct provider model is
+                  ;; always in config even if something else reset it.
+                  (.setModel api (str provider "/" model-id)))))
+            ;; Return nil — loop falls back to config.model which setModel just set.
+            nil))
 
         ;; tool_access_check — restrict tools based on active role
         on-tool-access
