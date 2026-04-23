@@ -1,0 +1,6 @@
+{
+  "namespace": "custom-provider-groq",
+  "capabilities": ["providers", "model"],
+  "dependsOn": [],
+  "dependencies": {}
+}
