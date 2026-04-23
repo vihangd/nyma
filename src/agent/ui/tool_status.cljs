@@ -1,7 +1,6 @@
 (ns agent.ui.tool-status
   {:squint/extension "jsx"}
   (:require ["ink" :refer [Box Text]]
-            ["ink-spinner$default" :as Spinner]
             [agent.utils.ansi :refer [truncate-text terminal-width]]))
 
 ;;; ─── Pure formatting functions (exported for testing) ───
@@ -201,35 +200,37 @@
 
 ;;; ─── Components ─────────────────────────────────────────
 
+;; Static glyph shown in place of a ticking spinner. The ToolStartStatus
+;; row is the top of a potentially tall dynamic region (it stacks with
+;; reasoning blocks, tool args, editor, status, footer), so any 80-ms
+;; Ink tick in here scrolls the top line into permanent terminal
+;; scrollback — see the ReasoningBlock fix for the full mechanism.
+;; Visual liveness is provided by the status-line activity segment,
+;; which lives in a fixed 1-row region that can't overflow.
+(def ^:private TOOL-RUNNING-GLYPH "◌")
+
 (defn ToolStartStatus [{:keys [tool-name args verbosity theme
                                custom-one-line-args custom-status-text custom-icon]}]
   (let [muted (get-in theme [:colors :muted] "#565f89")
-        v     (or verbosity "collapsed")]
+        v     (or verbosity "collapsed")
+        icon  (or custom-icon TOOL-RUNNING-GLYPH)]
     (if (= v "one-line")
       (let [one-line (or custom-status-text
                          custom-one-line-args
                          (format-one-line-args tool-name args))]
         #jsx [Box {:flexDirection "column" :marginBottom 0}
               [Box {:flexDirection "row"}
-               [Text {:color muted}
-                (if custom-icon
-                  (str custom-icon " ")
-                  #jsx [Spinner {:type "dots"}])]
-               [Text {:color muted} (str (when-not custom-icon " ") tool-name)]
+               [Text {:color muted} (str icon " " tool-name)]
                (when (seq one-line)
                  #jsx [Text {:color muted} (str " — " one-line)])]])
       (let [args-text (format-args args v)]
         #jsx [Box {:flexDirection "column" :marginBottom 0}
               [Box {:flexDirection "row"}
-               [Text {:color muted}
-                (if custom-icon
-                  (str custom-icon " ")
-                  #jsx [Spinner {:type "dots"}])]
-               [Text {:color muted} (str (when-not custom-icon " ") tool-name)]]
+               [Text {:color muted} (str icon " " tool-name)]]
               (when (and (seq args-text) (not= args-text ""))
                 #jsx [Text {:color muted} args-text])]))))
 
-(defn ToolEndStatus [{:keys [tool-name duration result verbosity max-lines theme
+(defn ToolEndStatus [{:keys [tool-name args duration result verbosity max-lines theme
                              custom-one-line-result custom-icon]}]
   (let [success  (get-in theme [:colors :success] "#9ece6a")
         muted    (get-in theme [:colors :muted] "#565f89")
@@ -237,10 +238,13 @@
         v        (or verbosity "collapsed")
         icon     (or custom-icon "✓")]
     (if (= v "one-line")
-      (let [one-line (or custom-one-line-result (format-one-line-result result))]
+      (let [arg-text (format-one-line-args tool-name args)
+            one-line (or custom-one-line-result (format-one-line-result-for-tool tool-name result args))]
         #jsx [Box {:flexDirection "column" :marginBottom 0}
               [Box {:flexDirection "row"}
                [Text {:color success} (str icon " " tool-name)]
+               (when (seq arg-text)
+                 #jsx [Text {:color muted} (str " " arg-text)])
                (when (seq dur-text)
                  #jsx [Text {:color muted} (str " " dur-text)])
                (when (seq one-line)

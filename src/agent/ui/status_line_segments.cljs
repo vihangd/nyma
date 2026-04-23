@@ -309,10 +309,63 @@
              (get-in theme [:colors :muted] "#565f89"))
     (hidden)))
 
+;;; ─── Activity (spinner + rotating verb) ────────────────────
+;;;
+;;; Single source of motion for the whole UI. Shown only while the
+;;; agent is actively working (streaming / tool running); hidden at
+;;; idle so the status-line stops re-rendering and the terminal
+;;; scroll position can be held still.
+;;;
+;;; Lives in the status-line (a fixed 1-row region) by design —
+;;; replaces the previous per-component Spinners in ReasoningBlock
+;;; and ToolStartStatus, which leaked lines into terminal scrollback
+;;; whenever the dynamic region touched the viewport bottom (each
+;;; 80 ms tick's trailing `\n` scrolled the top line out of
+;;; log-update's erase reach). A 1-row region can't overflow, so the
+;;; same tick here is cosmetic, not catastrophic.
+;;;
+;;; Context keys read:
+;;;   :activity      bool — is the agent working right now?
+;;;   :spinner-frame int  — index into SPINNER-FRAMES; rotated by
+;;;                         StatusLine's useEffect at ~80 ms cadence.
+;;;   :verb          str  — current whimsy verb; rotated by the same
+;;;                         useEffect at ~2500 ms cadence.
+
+(def SPINNER-FRAMES
+  "Same 10-frame dots spinner as ink-spinner's 'dots' style, inlined
+   so we don't keep the package just for this one glyph list."
+  ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"])
+
+(def ACTIVITY-VERBS
+  "Whimsy verbs shown alongside the spinner. Rotated every few
+   seconds while the agent is working. Keeping the list inside the
+   segments module (rather than a user-facing setting) means adding
+   or trimming a verb is a one-line change with no migration cost."
+  ["Thinking"     "Pondering"   "Musing"       "Cogitating"
+   "Contemplating" "Reasoning"  "Ruminating"   "Deliberating"
+   "Reflecting"   "Brewing"     "Conjuring"    "Untangling"
+   "Crafting"     "Noodling"    "Scheming"     "Divining"])
+
+(defn- role-seg [{:keys [active-role theme]}]
+  (if (and (seq active-role) (not= active-role "default"))
+    (visible (str "[" active-role "]")
+             (get-in theme [:colors :warning] "#e0af68"))
+    (hidden)))
+
+(defn- activity-seg [{:keys [activity spinner-frame verb theme]}]
+  (if activity
+    (let [frame (nth SPINNER-FRAMES
+                     (mod (or spinner-frame 0) (count SPINNER-FRAMES)))
+          v     (or verb (first ACTIVITY-VERBS))]
+      (visible (str frame " " v "…")
+               (get-in theme [:colors :warning] "#e0af68")))
+    (hidden)))
+
 ;;; ─── Install built-ins ──────────────────────────────────
 
 (def builtin-segments
   [["model"         :agent    model-seg]
+   ["role"          :agent    role-seg]
    ["path"          :workspace path-seg]
    ["git"           :workspace git-seg]
    ["pr"            :workspace pr-seg]
@@ -329,14 +382,26 @@
    ["session"       :session  session-seg]
    ["hostname"      :workspace hostname-seg]
    ["cache-read"    :usage    cache-read-seg]
-   ["cache-write"   :usage    cache-write-seg]])
+   ["cache-write"   :usage    cache-write-seg]
+   ["activity"      :agent    activity-seg]])
+
+;; Activity segment auto-appends so users see the spinner + verb
+;; without having to edit their preset. Position :left places it
+;; alongside model / path / git on the left of the status line.
+(def ^:private auto-append-spec
+  {"activity" :left
+   "role"     :left})
 
 (defn install-builtins!
   "Install every built-in into the module-level registry. Safe to call
    multiple times."
   []
   (doseq [[id cat render] builtin-segments]
-    (register-segment id {:category cat :render render})))
+    (let [base    {:category cat :render render}
+          with-ap (if-let [pos (get auto-append-spec id)]
+                    (assoc base :auto-append? true :position pos)
+                    base)]
+      (register-segment id with-ap))))
 
 ;; Register built-ins at module load.
 (install-builtins!)

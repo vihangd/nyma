@@ -2,7 +2,6 @@
   {:squint/extension "jsx"}
   (:require ["react" :refer [useMemo]]
             ["ink" :refer [Box Text Static]]
-            ["ink-spinner$default" :as Spinner]
             ["./tool_status.jsx" :refer [ToolGroupStatus group_messages]]
             ["./tool_execution.jsx" :refer [ToolExecution]]
             ["./streaming_markdown.mjs" :refer [useStreamingMarkdown]]
@@ -54,11 +53,22 @@
                      (vec (drop (- line-count reasoning-visible-lines) lines))
                      (vec lines))]
     (if expanded
+      ;; No ticking Spinner here: in scrollback-mode the ReasoningBlock
+      ;; renders inside a dynamic region that can be ≥ terminal height
+      ;; once reasoning + editor + status + footer are stacked. Ink
+      ;; appends a trailing `\n` to every render, and when the bottom
+      ;; row is at the viewport bottom, that newline scrolls the top
+      ;; of the dynamic region into permanent scrollback. At 80 ms per
+      ;; spinner tick that compounds into one leaked line every frame
+      ;; (the visible bug was 12 stacked `✻ Thinking` lines per second).
+      ;; Visual liveness is delegated to the status-line activity
+      ;; segment, which lives in a fixed 1-row region that can't
+      ;; overflow. The token-count update in the header below already
+      ;; tells the user the model is still working.
       #jsx [Box {:flexDirection "column" :marginBottom 1}
             [Box {:flexDirection "row"}
-             [Spinner {:type "dots"}]
              [Text {:color muted :bold true}
-              (str " ✻ Thinking" (when tok-label (str " (" tok-label ")")) "…")]]
+              (str "✻ Thinking" (when tok-label (str " (" tok-label ")")) "…")]]
             (map-indexed
              (fn [i line]
                #jsx [Text {:key i :color "gray" :italic true :wrap "word"}
@@ -348,12 +358,16 @@
                             #js []))
                         #js [turn-idx first-id scrollback-mode])
         live-is-live   (boolean streaming)
-        ;; In scrollback mode, the in-flight region renders only messages
-        ;; that have NOT yet been committed to scrollback. Committed
-        ;; messages stay in React state (so build-context can still read
-        ;; them for LLM context) but are filtered out here to avoid
-        ;; double rendering (once in terminal scrollback via writeToStdout,
-        ;; once in the dynamic region via MessageBubble).
+        ;; In scrollback mode, in-flight = every non-:committed message.
+        ;; The commit sweep (app.cljs) promotes each sub-message to real
+        ;; terminal scrollback as soon as it is no longer the actively-
+        ;; streaming tail (committable-now rule), so this filter normally
+        ;; resolves to at most one message: the currently-streaming tail.
+        ;; Keeping filter-uncommitted (instead of `live`) means earlier
+        ;; sub-messages of the current turn — user prompt, finished
+        ;; assistant bubble, completed tool-end — stay visible until the
+        ;; commit sweep fires, rather than vanishing and reappearing in
+        ;; scrollback (which looked like content loss).
         in-flight      (if scrollback-mode
                          (filterv (fn [m] (not (:committed m))) all-msgs)
                          live)

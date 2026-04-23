@@ -1,5 +1,6 @@
 (ns status-line.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["./agent/ui/status_line.jsx" :refer [set_if_changed_BANG_]]
             [agent.ui.status-line-segments
              :refer [context-usage-level
                      register-segment
@@ -9,7 +10,9 @@
                      builtin-segments
                      render-segments
                      auto-append-ids
-                     token-rate-per-sec]]
+                     token-rate-per-sec
+                     SPINNER-FRAMES
+                     ACTIVITY-VERBS]]
             [agent.ui.status-line-presets :refer [get-preset]]
             [agent.ui.status-line-separators :refer [get-separator]]))
 
@@ -64,7 +67,8 @@
                                (it "all built-ins are registered on module load"
                                    (fn []
                                      (-> (expect (pos? (count (segment-registry)))) (.toBe true))
-                                     (-> (expect (count builtin-segments)) (.toBe 18))))
+                                     ;; 18 original + 1 "activity" + 1 "role"
+                                     (-> (expect (count builtin-segments)) (.toBe 20))))
 
                                (it "can retrieve a built-in by id"
                                    (fn []
@@ -427,3 +431,224 @@
                                                       {:ts 1000 :delta-tokens 0}]
                                              r (token-rate-per-sec samples 60000 3000)]
                                          (-> (expect r) (.toBe 100)))))))
+
+;;; ─── set-if-changed! bailout helper ────────────────────
+;;;
+;;; Regression class: a freshly-constructed CLJS map from a 5 s poller
+;;; has no reference equality across ticks. Calling `(set-state new-map)`
+;;; unconditionally would trigger a React re-render every 5 s, which in
+;;; scrollback-mode snaps the terminal scroll back to the cursor (makes
+;;; scrollback unreadable while idle). The fix is a value-equality
+;;; bailout inside the producer — either this standalone helper or an
+;;; equivalent functional-setState pattern. Both are tested here.
+
+(describe "set-if-changed!"
+          (fn []
+
+            (it "calls setter on first set (prev=nil, next=value)"
+                (fn []
+                  (let [calls (atom [])
+                        setter (fn [v] (swap! calls conj v))]
+                    (set_if_changed_BANG_ setter nil {:staged 0 :unstaged 0 :untracked 0})
+                    (-> (expect (count @calls)) (.toBe 1))
+                    (-> (expect (:staged (first @calls))) (.toBe 0)))))
+
+            (it "skips setter when prev and next are content-equal (CLJS map)"
+                ;; THE regression test. Two different map references with
+                ;; identical content: the helper must NOT invoke the setter.
+                (fn []
+                  (let [calls (atom 0)
+                        setter (fn [_] (swap! calls inc))
+                        prev {:staged 0 :unstaged 0 :untracked 0}
+                        next {:staged 0 :unstaged 0 :untracked 0}]
+                    (set_if_changed_BANG_ setter prev next)
+                    (-> (expect @calls) (.toBe 0)))))
+
+            (it "calls setter when content differs"
+                (fn []
+                  (let [calls (atom [])
+                        setter (fn [v] (swap! calls conj v))
+                        prev {:staged 0 :unstaged 0 :untracked 0}
+                        next {:staged 1 :unstaged 0 :untracked 0}]
+                    (set_if_changed_BANG_ setter prev next)
+                    (-> (expect (count @calls)) (.toBe 1))
+                    (-> (expect (:staged (first @calls))) (.toBe 1)))))
+
+            (it "works for primitive values (string branch names)"
+                (fn []
+                  (let [calls (atom [])
+                        setter (fn [v] (swap! calls conj v))]
+                    (set_if_changed_BANG_ setter "main" "main")
+                    (-> (expect (count @calls)) (.toBe 0))
+                    (set_if_changed_BANG_ setter "main" "feature")
+                    (-> (expect (count @calls)) (.toBe 1))
+                    (-> (expect (first @calls)) (.toBe "feature")))))
+
+            (it "accepts custom equality predicate"
+                ;; Some values (JS objects) may want shallow-keyed equality
+                ;; instead of CLJS deep equality. The 3-arg form lets callers
+                ;; swap the predicate.
+                (fn []
+                  (let [calls (atom 0)
+                        setter (fn [_] (swap! calls inc))
+                        prev #js {:a 1}
+                        next #js {:a 1}
+                        shallow-eq (fn [x y] (= (.-a x) (.-a y)))]
+                    (set_if_changed_BANG_ setter prev next shallow-eq)
+                    (-> (expect @calls) (.toBe 0)))))
+
+            (it "handles nil prev with non-nil next"
+                (fn []
+                  (let [calls (atom [])
+                        setter (fn [v] (swap! calls conj v))]
+                    (set_if_changed_BANG_ setter nil {:staged 1})
+                    (-> (expect (count @calls)) (.toBe 1)))))
+
+            (it "handles non-nil prev transitioning back to nil"
+                ;; Branch detection can fail (not a git repo) → branch becomes nil.
+                (fn []
+                  (let [calls (atom [])
+                        setter (fn [v] (swap! calls conj v))]
+                    (set_if_changed_BANG_ setter "main" nil)
+                    (-> (expect (count @calls)) (.toBe 1))
+                    (-> (expect (first @calls)) (.toBe nil)))))))
+
+;;; ─── Functional-setState bailout pattern ──────────────
+;;;
+;;; The status_line useEffects use `(set-xxx (fn [prev] ...))` with an
+;;; if-equal-return-prev bailout. This is what actually runs in prod
+;;; (React bails when the updater returns Object.is(prev, current)).
+;;; These tests simulate that flow: feed the updater the first poll's
+;;; result as `prev`, confirm it returns the SAME reference for equal
+;;; content, and a NEW reference when content differs.
+
+(describe "functional-setState bailout (simulates polling flow)"
+          (fn []
+
+            (it "two identical git-status resolves: updater returns prev reference"
+                (fn []
+                  (let [first-poll  {:staged 0 :unstaged 0 :untracked 0}
+                        second-poll {:staged 0 :unstaged 0 :untracked 0}
+                        ;; Exactly the shape status_line.cljs uses inside
+                        ;; `(set-git-status (fn [prev] ...))`.
+                        updater-2   (fn [prev]
+                                      (if (= prev second-poll) prev second-poll))
+                        returned    (updater-2 first-poll)]
+                    ;; React performs Object.is(returned, prev); identical
+                    ;; ref → no re-render. Updater must return `prev`.
+                    (-> (expect (identical? returned first-poll))
+                        (.toBe true)))))
+
+            (it "two different git-status resolves: updater returns the new value"
+                (fn []
+                  (let [prev     {:staged 0 :unstaged 0 :untracked 0}
+                        next     {:staged 1 :unstaged 0 :untracked 0}
+                        updater  (fn [p] (if (= p next) p next))
+                        returned (updater prev)]
+                    (-> (expect (identical? returned next)) (.toBe true)))))
+
+            (it "nil-to-value transition: updater returns the new value"
+                (fn []
+                  (let [next     {:staged 0}
+                        updater  (fn [p] (if (= p next) p next))
+                        returned (updater nil)]
+                    (-> (expect (identical? returned next)) (.toBe true)))))
+
+            (it "branch nil-to-nil: updater returns prev (nil)"
+                (fn []
+                  (let [updater  (fn [p] (if (= p nil) p nil))
+                        returned (updater nil)]
+                    (-> (expect (identical? returned nil)) (.toBe true)))))))
+
+;;; ─── Activity segment (spinner + rotating verb) ──────
+;;;
+;;; Lives in the status line — a FIXED 1-row region — so its spinner
+;;; tick can animate without triggering Ink's overflow-leak behaviour
+;;; (which was what made the ReasoningBlock Spinner stack dozens of
+;;; "✻ Thinking" lines into scrollback per second).
+;;;
+;;; These tests cover the rendering contract of the segment itself
+;;; and the shape of the frame/verb lists. Timer wiring lives in
+;;; StatusLine's useEffects and is exercised manually by the "Spinner
+;;; frame advances + verb rotates" scenario below (no React mount,
+;;; just direct rendering of the pure segment function).
+
+(describe "built-in segments: activity"
+          (fn []
+
+            (it "renders nothing when activity is false"
+                (fn []
+                  (let [out (render-segments ["activity"]
+                                             {:activity false :theme test-theme})]
+                    (-> (expect (count out)) (.toBe 0)))))
+
+            (it "renders spinner frame + verb when activity is true"
+                (fn []
+                  (let [out (render-segments ["activity"]
+                                             {:activity      true
+                                              :spinner-frame 0
+                                              :verb          "Pondering"
+                                              :theme         test-theme})]
+                    (-> (expect (count out)) (.toBe 1))
+                    (-> (expect (:content (first out))) (.toBe "⠋ Pondering…")))))
+
+            (it "uses modulo on spinner-frame so overflow is safe"
+                ;; setInterval's counter grows unboundedly while active;
+                ;; the segment must clamp via (mod frame frame-count) so
+                ;; we never index past the array.
+                (fn []
+                  (let [out (render-segments ["activity"]
+                                             {:activity      true
+                                              :spinner-frame 17   ;; > 10
+                                              :verb          "Musing"
+                                              :theme         test-theme})]
+                    ;; 17 mod 10 = 7 → ⠧
+                    (-> (expect (:content (first out))) (.toBe "⠧ Musing…")))))
+
+            (it "falls back to the first verb when verb is missing"
+                ;; Defensive: if a producer forgets to populate :verb.
+                (fn []
+                  (let [out (render-segments ["activity"]
+                                             {:activity      true
+                                              :spinner-frame 0
+                                              :theme         test-theme})]
+                    (-> (expect (.endsWith (:content (first out)) "Thinking…"))
+                        (.toBe true)))))
+
+            (it "uses warning color so the spinner catches the eye"
+                (fn []
+                  (let [out (render-segments ["activity"]
+                                             {:activity      true
+                                              :spinner-frame 0
+                                              :verb          "Thinking"
+                                              :theme         test-theme})]
+                    ;; test-theme defines :warning as #e0af68
+                    (-> (expect (:color (first out))) (.toBe "#e0af68")))))))
+
+(describe "activity segment fixtures"
+          (fn []
+
+            (it "SPINNER-FRAMES has exactly 10 frames"
+                (fn []
+                  (-> (expect (count SPINNER-FRAMES)) (.toBe 10))))
+
+            (it "ACTIVITY-VERBS has at least a handful of verbs"
+                ;; Pin a lower bound so the verb rotation feels varied.
+                ;; Upper bound is left unspecified so the list can grow.
+                (fn []
+                  (-> (expect (>= (count ACTIVITY-VERBS) 10)) (.toBe true))))
+
+            (it "each verb is a non-empty string"
+                (fn []
+                  (doseq [v ACTIVITY-VERBS]
+                    (-> (expect (string? v)) (.toBe true))
+                    (-> (expect (pos? (count v))) (.toBe true)))))
+
+            (it "activity segment is auto-append on the left"
+                ;; Ensures the spinner shows up for every user without
+                ;; requiring preset config. If this breaks, users will
+                ;; not see any indication the agent is working.
+                (fn []
+                  (let [seg (get-segment "activity")]
+                    (-> (expect (:auto-append? seg)) (.toBe true))
+                    (-> (expect (:position seg))     (.toBe :left)))))))

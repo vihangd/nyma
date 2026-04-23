@@ -76,17 +76,17 @@
         header-glyph (if is-python ">>> " "$ ")
         {:keys [visible-lines hidden-count]}
         (useMemo
-          (fn []
-            (if expanded
-              {:visible-lines (vec lines) :hidden-count 0}
-              (truncate-to-visual-lines lines PREVIEW-ROWS cols)))
-          #js [lines expanded cols])]
+         (fn []
+           (if expanded
+             {:visible-lines (vec lines) :hidden-count 0}
+             (truncate-to-visual-lines lines PREVIEW-ROWS cols)))
+         #js [lines expanded cols])]
 
     (useInput
-      (fn [input key]
-        (when (and is-active (.-ctrl key) (= input "o"))
-          (when onToggle (onToggle))))
-      #js {:isActive (boolean is-active)})
+     (fn [input key]
+       (when (and is-active (.-ctrl key) (= input "o"))
+         (when onToggle (onToggle))))
+     #js {:isActive (boolean is-active)})
 
     #jsx [Box {:flexDirection "column" :flexShrink 0}
           [DynamicBorder {:color border}]
@@ -97,5 +97,5 @@
             #jsx [Box {:flexDirection "column"}
                   (for [[i line] (map-indexed vector visible-lines)]
                     #jsx [Text {:key i :color muted} (or line "")])])
-          [status-row status exit-code hidden-count theme]
+          (status-row status exit-code hidden-count theme)
           [DynamicBorder {:color border}]]))

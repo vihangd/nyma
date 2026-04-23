@@ -73,6 +73,7 @@
                         :else result)]
     #jsx [Box {:flexDirection "column"}
           [ToolEndStatus {:tool-name              tool-name
+                          :args                   args
                           :duration               duration
                           :result                 result
                           :verbosity              "collapsed"

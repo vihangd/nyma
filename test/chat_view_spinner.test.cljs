@@ -197,4 +197,30 @@
                     (rerender #jsx [ChatView {:messages msgs :theme test-theme :streaming false}])
                     ;; After stream ends: collapses to pill
                     (-> (expect (.includes (lastFrame) "Thinking")) (.toBe false))
-                    (-> (expect (lastFrame)) (.toContain "Thought")))))))
+                    (-> (expect (lastFrame)) (.toContain "Thought")))))
+
+            (it "REGRESSION: ReasoningBlock does NOT include a ticking spinner glyph"
+                ;; The user reported 12 stacked "⠋ ✻ Thinking" lines leaking
+                ;; into permanent scrollback. Root cause: ink-spinner ticked
+                ;; every 80 ms inside a dynamic region that could reach the
+                ;; terminal bottom; each tick's trailing newline scrolled the
+                ;; top line into unreachable scrollback. Fix: remove the
+                ;; Spinner from ReasoningBlock entirely and move visual
+                ;; liveness to the status-line activity segment (which lives
+                ;; in a fixed 1-row region that can't overflow).
+                ;;
+                ;; This test pins that the ReasoningBlock renders with a
+                ;; STATIC ✻ glyph (no spinner-frame chars). If someone
+                ;; reintroduces a Spinner here thinking it's harmless, this
+                ;; test fails and points them at the bug we're preventing.
+                (fn []
+                  (let [{:keys [lastFrame]}
+                        (render #jsx [AssistantMessage {:content "<think>some reasoning</think>"
+                                                        :theme   test-theme
+                                                        :is-live true}])
+                        frame (lastFrame)
+                        spinner-chars ["⠋" "⠙" "⠹" "⠸" "⠼"
+                                       "⠴" "⠦" "⠧" "⠇" "⠏"]]
+                    (-> (expect frame) (.toContain "Thinking"))
+                    (doseq [c spinner-chars]
+                      (-> (expect (.includes frame c)) (.toBe false))))))))

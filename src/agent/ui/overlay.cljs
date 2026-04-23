@@ -38,6 +38,24 @@
         (str "[Render error] " (.-message e))))
     ""))
 
+(def ^:private MIN-INTERVAL-MS
+  "Floor for `component.interval` in CustomComponentAdapter. A
+   misconfigured extension (interval=5 or 0) would otherwise spam React
+   renders and freeze the TUI; 100 ms is well below user-perceptible
+   animation lag while being high enough that render cost stays bounded."
+  100)
+
+(defn clamp-interval
+  "Return max(MIN-INTERVAL-MS, raw). Pure — tested directly. Treats
+   non-positive / non-numeric inputs as MIN-INTERVAL-MS so a stray
+   0/nil/NaN can't degenerate into a no-wait setInterval."
+  [raw]
+  (cond
+    (nil? raw)       MIN-INTERVAL-MS
+    (not (number? raw)) MIN-INTERVAL-MS
+    (js/isNaN raw)   MIN-INTERVAL-MS
+    :else            (max MIN-INTERVAL-MS raw)))
+
 (defn CustomComponentAdapter
   "Adapter that bridges pi-mono's {render, onInput, interval} object interface
    into an Ink component.
@@ -67,13 +85,17 @@
                     (fn [] (set-tick (fn [t] (inc t))))
                     #js [])]
 
-    ;; Expose invalidate to the component + set up interval timer
+    ;; Expose invalidate to the component + set up interval timer.
+    ;; `.interval` is clamped to a 100 ms floor so a misconfigured
+    ;; extension (e.g. interval=5 or 0) can't spam React renders and
+    ;; freeze the TUI. Values ≥ 100 pass through unchanged.
     (useEffect
      (fn []
        (set! (.-invalidate component) invalidate)
         ;; If component has .interval, set up automatic re-rendering
-       (if-let [ms (.-interval component)]
-         (let [id (js/setInterval invalidate ms)]
+       (if-let [raw-ms (.-interval component)]
+         (let [ms (clamp-interval raw-ms)
+               id (js/setInterval invalidate ms)]
            (fn []
              (js/clearInterval id)
              (when-let [dispose (.-dispose component)]
