@@ -1116,7 +1116,93 @@
                       (finally
                         (set! (.-write js/process.stdout) original-write)))
                     (let [all (apply str @captured)]
-                      (-> (expect (.includes all "unknown")) (.toBe true)))))))
+                      (-> (expect (.includes all "unknown")) (.toBe true))))))
+
+            ;; Pad-to-bottom behavior. The banner ends with `(rows - 3)`
+            ;; extra newlines so that, taken together with the literal
+            ;; "\n\n" after the banner line, the cursor lands on the
+            ;; terminal's last row before Ink mounts. The pad is gated
+            ;; on `stdout.isTTY` and `rows > 3`. We can't safely mutate
+            ;; `process.stdout`'s `isTTY`/`rows` in a worker process, so
+            ;; these tests exercise the underlying counting behavior by
+            ;; reading the captured output.
+
+            (it "in a non-TTY environment, emits banner + \"\\n\\n\" only (no pad)"
+                ;; Default behavior under `bun test` — process.stdout.isTTY
+                ;; is false in worker processes. The banner should write
+                ;; exactly 3 lines: banner line + the two trailing
+                ;; newlines from "\n\n". Counting newlines is the
+                ;; cleanest invariant to assert.
+                (fn []
+                  (let [original-write   (.-write js/process.stdout)
+                        original-isTTY   (.-isTTY js/process.stdout)
+                        captured         (atom [])]
+                    (try
+                      (set! (.-isTTY js/process.stdout) false)
+                      (set! (.-write js/process.stdout)
+                            (fn [d] (swap! captured conj d) true))
+                      (print_header_banner_BANG_
+                       #js {:model-id "m" :theme (clj->js test-theme)})
+                      (finally
+                        (set! (.-write js/process.stdout) original-write)
+                        (set! (.-isTTY js/process.stdout) original-isTTY)))
+                    (let [all (apply str @captured)
+                          newline-count (count (.match all (js/RegExp. "\n" "g")))]
+                      ;; Exactly 2 newlines: the line-terminator after
+                      ;; the banner content + the blank-line separator.
+                      (-> (expect newline-count) (.toBe 2))))))
+
+            (it "in a TTY environment with rows=24, emits banner + \"\\n\\n\" + (rows-3) newlines"
+                ;; The pad pushes Ink's first frame to the terminal's
+                ;; last row. With rows=24, total newlines = 2 (from "\n\n")
+                ;; + 21 (pad) = 23. After 23 newlines, cursor is on row 24
+                ;; (the last row).
+                (fn []
+                  (let [original-write   (.-write js/process.stdout)
+                        original-isTTY   (.-isTTY js/process.stdout)
+                        original-rows    (.-rows js/process.stdout)
+                        captured         (atom [])]
+                    (try
+                      (set! (.-isTTY js/process.stdout) true)
+                      (set! (.-rows js/process.stdout) 24)
+                      (set! (.-write js/process.stdout)
+                            (fn [d] (swap! captured conj d) true))
+                      (print_header_banner_BANG_
+                       #js {:model-id "m" :theme (clj->js test-theme)})
+                      (finally
+                        (set! (.-write js/process.stdout) original-write)
+                        (set! (.-isTTY js/process.stdout) original-isTTY)
+                        (set! (.-rows js/process.stdout) original-rows)))
+                    (let [all (apply str @captured)
+                          newline-count (count (.match all (js/RegExp. "\n" "g")))]
+                      ;; 2 from banner trailer + 21 pad = 23 total.
+                      (-> (expect newline-count) (.toBe 23))))))
+
+            (it "in a TTY environment with rows=3 or smaller, skips the pad"
+                ;; Pathological tiny terminal — pad would be 0 or
+                ;; negative. The banner should still appear (no crash,
+                ;; no garbage), and only the literal "\n\n" after the
+                ;; banner line should be emitted.
+                (fn []
+                  (let [original-write   (.-write js/process.stdout)
+                        original-isTTY   (.-isTTY js/process.stdout)
+                        original-rows    (.-rows js/process.stdout)
+                        captured         (atom [])]
+                    (try
+                      (set! (.-isTTY js/process.stdout) true)
+                      (set! (.-rows js/process.stdout) 3)
+                      (set! (.-write js/process.stdout)
+                            (fn [d] (swap! captured conj d) true))
+                      (print_header_banner_BANG_
+                       #js {:model-id "m" :theme (clj->js test-theme)})
+                      (finally
+                        (set! (.-write js/process.stdout) original-write)
+                        (set! (.-isTTY js/process.stdout) original-isTTY)
+                        (set! (.-rows js/process.stdout) original-rows)))
+                    (let [all (apply str @captured)
+                          newline-count (count (.match all (js/RegExp. "\n" "g")))]
+                      (-> (expect newline-count) (.toBe 2))
+                      (-> (expect (.includes all "nyma")) (.toBe true)))))))
 
 ;;; ─── Tool display UX ──────────────────────────────────────────
 ;;;

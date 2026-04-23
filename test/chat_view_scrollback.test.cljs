@@ -245,4 +245,33 @@
                                                 :streaming false
                                                 :scrollback-mode false}])]
                     (-> (expect (lastFrame)) (.toContain "OLD_Q"))
-                    (-> (expect (lastFrame)) (.toContain "OLD_A")))))))
+                    (-> (expect (lastFrame)) (.toContain "OLD_A")))))
+
+            ;; Session switch under scrollback-mode=true (the default).
+            ;; The Static-memo session-switch test in chat_view_static
+            ;; covers the OFF path; this one covers the ON path. Under
+            ;; ON mode, ChatView's `in-flight` filter is `(filterv (not
+            ;; :committed))`, so the new session's fresh (uncommitted)
+            ;; messages must all render and the prior session's content
+            ;; must not bleed in. No <Static> involved — no memo-key
+            ;; race possible.
+            (it "scrollback-mode ON: session switch shows new session, no bleed-through from old"
+                (fn []
+                  (let [session-a [{:role "user"      :content "AQ" :id "a-u1"}
+                                   {:role "assistant" :content "AR_REPLY" :id "a-a1"}]
+                        session-b [{:role "user"      :content "BQ" :id "b-u1"}
+                                   {:role "assistant" :content "BR_REPLY" :id "b-a1"}]
+                        {:keys [lastFrame rerender]}
+                        (render #jsx [ChatView {:messages session-a
+                                                :theme test-theme
+                                                :streaming false
+                                                :scrollback-mode true}])]
+                    (-> (expect (lastFrame)) (.toContain "AR_REPLY"))
+                    (rerender #jsx [ChatView {:messages session-b
+                                              :theme test-theme
+                                              :streaming false
+                                              :scrollback-mode true}])
+                    ;; Last frame contains ONLY the new session.
+                    (-> (expect (lastFrame)) (.toContain "BR_REPLY"))
+                    (-> (expect (.includes (lastFrame) "AR_REPLY")) (.toBe false))
+                    (-> (expect (.includes (lastFrame) "AQ")) (.toBe false)))))))
