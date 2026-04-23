@@ -870,10 +870,24 @@
               ;; Normal: show chat/welcome + below-widgets.
               ;; When scrollback-off: flexGrow + overflow "hidden" pins editor
               ;; and prevents in-flight content from pushing it off-screen.
-              ;; When scrollback-on: natural flow, no flexGrow needed.
+              ;; justifyContent "flex-end" pins the live chat to the BOTTOM
+              ;; of the content area (right above the status line) so it
+              ;; doesn't float at the top with empty space below — that's
+              ;; the "new message jumps to top" UX bug. Past turns are
+              ;; already separately handled (real scrollback when not
+              ;; alt-screen, alt-screen top via <Static> when alt-screen).
+              ;; When scrollback-on: natural flow, no flexGrow needed —
+              ;; live chat naturally sits just above the editor.
+              ;; The empty-state branch (WelcomeScreen) gets center
+              ;; justification so it doesn't visually cling to either
+              ;; the top or the status line — looks deliberate, not jammed.
               #jsx [Box {:key           "content"
                          :flexGrow      (when-not scrollback-on? 1)
                          :flexDirection "column"
+                         :justifyContent (cond
+                                           scrollback-on? nil
+                                           (and (empty? messages) (not streaming)) "center"
+                                           :else "flex-end")
                          :overflow      (when-not scrollback-on? "hidden")}
                     (if (and (empty? messages) (not streaming))
                       #jsx [WelcomeScreen {:key "welcome" :agent agent :theme theme
