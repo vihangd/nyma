@@ -14,6 +14,7 @@
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
                                         committable_now
                                         filter_uncommitted_ids]]
+            ["../modes/interactive.jsx" :refer [effective_scrollback_on_QMARK_]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -362,11 +363,17 @@
         emit!                             (fn [event data]
                                             (when-let [e (:emit (:events agent))]
                                               (e event data)))
-        scrollback-on?                    (let [sm (:settings resources)]
-                                            (boolean (if sm
-                                                       (let [v (:scrollback-mode ((:get sm)))]
-                                                         (if (nil? v) true v))
-                                                       true)))]
+        ;; alt-screen mode (set by interactive.cljs from NYMA_ALT_SCREEN
+        ;; env var) wipes terminal scrollback on entry, so committing
+        ;; past turns to "scrollback" via writeToStdout is meaningless.
+        ;; Use the shared predicate so this gate stays in sync with the
+        ;; banner-write gate in interactive.cljs.
+        alt-screen?                       (boolean (:alt-screen? resources))
+        scrollback-on?                    (effective_scrollback_on_QMARK_
+                                           #js {:alt-screen?             alt-screen?
+                                                :scrollback-mode-setting
+                                                (when-let [sm (:settings resources)]
+                                                  (:scrollback-mode ((:get sm))))})]
 
     ;; ── scrollback-mode commit sweep ───────────────────────────────
     ;; When :scrollback-mode is ON in settings, commit PAST TURNS to
