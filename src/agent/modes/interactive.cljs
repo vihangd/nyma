@@ -71,15 +71,28 @@
         ;; Env var (not a setting) so the only way to enable it is
         ;; deliberate per-invocation; no persistence, easy rollback.
         alt-screen? (alt-screen-enabled? (.-NYMA_ALT_SCREEN js/process.env))
+        scrollback-setting (:scrollback-mode ((:get (:settings resources))))
+        opts-map {:alt-screen? alt-screen? :scrollback-mode-setting scrollback-setting}
+        pager-mode? (pager-mode-enabled? opts-map)
         ;; Banner is meaningful only in natural-flow scrollback mode.
-        ;; In alt-screen, the screen gets wiped on entry, so writing
-        ;; the banner is wasted bytes. The same predicate is applied
-        ;; in app.cljs to gate the commit-sweep, so banner-write and
-        ;; commit-sweep agree on whether scrollback-mode is in effect.
-        scrollback-on?
-        (effective-scrollback-on?
-         {:alt-screen?             alt-screen?
-          :scrollback-mode-setting (:scrollback-mode ((:get (:settings resources))))})]
+        ;; In alt-screen or pager mode, the screen gets fully managed
+        ;; by Ink — writing a banner is wasted bytes. The same
+        ;; predicates are applied in app.cljs so banner-write,
+        ;; commit-sweep, and layout gates all agree.
+        scrollback-on? (effective-scrollback-on? opts-map)
+        resolved-mode (cond
+                        alt-screen?    "alt-screen"
+                        pager-mode?    "pager"
+                        scrollback-on? "flow (default)"
+                        :else          "fixed (static)")]
+    ;; Startup diagnostic: prints the resolved layout mode to stderr
+    ;; so the user can verify their settings took effect. Written to
+    ;; stderr so stdout stays clean for banner/Ink output.
+    (.write js/process.stderr
+            (str "[nyma] layout: " resolved-mode
+                 (when scrollback-setting
+                   (str " (scrollback-mode=" (pr-str scrollback-setting) ")"))
+                 "\n"))
     (when scrollback-on?
       (print-header-banner! {:model-id model-id :theme theme}))
     (render
