@@ -868,26 +868,44 @@
                                   :transparent is-transparent}
                          content]]))
               ;; Normal: show chat/welcome + below-widgets.
-              ;; When scrollback-off: flexGrow + overflow "hidden" pins editor
-              ;; and prevents in-flight content from pushing it off-screen.
-              ;; justifyContent "flex-end" pins the live chat to the BOTTOM
-              ;; of the content area (right above the status line) so it
-              ;; doesn't float at the top with empty space below — that's
-              ;; the "new message jumps to top" UX bug. Past turns are
-              ;; already separately handled (real scrollback when not
-              ;; alt-screen, alt-screen top via <Static> when alt-screen).
-              ;; When scrollback-on: natural flow, no flexGrow needed —
-              ;; live chat naturally sits just above the editor.
-              ;; The empty-state branch (WelcomeScreen) gets center
-              ;; justification so it doesn't visually cling to either
-              ;; the top or the status line — looks deliberate, not jammed.
+              ;;
+              ;; Layout-mode breakdown:
+              ;;
+              ;;   scrollback-on (default, natural flow)
+              ;;     no flexGrow / no overflow / no justifyContent.
+              ;;     Frame grows with content; editor floats at the
+              ;;     end of in-flight messages. writeToStdout commits
+              ;;     handle past turns to real terminal scrollback.
+              ;;
+              ;;   scrollback-off + alt-screen (NYMA_ALT_SCREEN=1)
+              ;;     flexGrow 1 + overflow hidden + justifyContent
+              ;;     "flex-end". Pins live chat flush above status.
+              ;;     Empty rows at the top of the content area never
+              ;;     pollute anything — alt-screen has no scrollback,
+              ;;     they just sit invisibly until alt-screen exits.
+              ;;
+              ;;   scrollback-off + NO alt-screen
+              ;;     flexGrow 1 + overflow hidden but TOP-aligned
+              ;;     (no flex-end). When Ink emits a new <Static> item
+              ;;     it does clear → write static → redraw the full
+              ;;     frame, which auto-scrolls the terminal. Whatever
+              ;;     sits at the top of the frame is what scrolls into
+              ;;     real terminal scrollback. flex-end's empty top
+              ;;     rows would scroll in as visible blank pollution
+              ;;     (the bug the user reported). Top-aligned keeps
+              ;;     live message content at the top so the scroll
+              ;;     carries actual content, not blanks.
+              ;;
+              ;;   empty-state (no messages, no streaming)
+              ;;     justifyContent "center" centers the welcome screen.
               #jsx [Box {:key           "content"
                          :flexGrow      (when-not scrollback-on? 1)
                          :flexDirection "column"
                          :justifyContent (cond
-                                           scrollback-on? nil
-                                           (and (empty? messages) (not streaming)) "center"
-                                           :else "flex-end")
+                                           scrollback-on?                                nil
+                                           (and (empty? messages) (not streaming))      "center"
+                                           alt-screen?                                  "flex-end"
+                                           :else                                        nil)
                          :overflow      (when-not scrollback-on? "hidden")}
                     (if (and (empty? messages) (not streaming))
                       #jsx [WelcomeScreen {:key "welcome" :agent agent :theme theme
