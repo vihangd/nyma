@@ -5,7 +5,7 @@
             ["node:os" :as os]
             [clojure.string :as str]
             [agent.token-estimation :as te]
-            [agent.utils.debug :as d]
+            [agent.debug :as d]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]))
 
 (defn- valid-cut-position?

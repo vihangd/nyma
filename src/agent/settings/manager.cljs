@@ -2,7 +2,7 @@
   (:require ["node:path" :as path]
             ["node:fs" :as fs]
             ["node:os" :as os]
-            [agent.utils.debug :as d]
+            [agent.debug :as d]
             [agent.utils.validation :as v]))
 
 (def defaults

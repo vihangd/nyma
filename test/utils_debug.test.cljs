@@ -1,10 +1,12 @@
 (ns utils-debug.test
-  "Unit tests for agent.utils.debug — env-gate, level rules,
-   configurable sink. We inject a collecting sink in every test so
-   nothing leaks to stderr and assertions can inspect what was
-   emitted."
+  "Unit tests for agent.debug — env-gate, level rules, configurable
+   sink. We inject a collecting sink in every test so nothing leaks to
+   stderr/file and assertions can inspect what was emitted.
+
+   Post-consolidation (was agent.utils.debug) — the module moved to
+   agent.debug; all existing tests still apply."
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
-            [agent.utils.debug :as d]))
+            [agent.debug :as d]))
 
 (def ^:dynamic *captured* nil)
 
@@ -130,3 +132,134 @@
                                         (capture-setup!)
                                         (d/warn "t" "hit")
                                         (-> (expect (count @local)) (.toBe 0)))))))
+
+;;; ─── Multi-env-var gate resolution ───────────────────
+;;;
+;;; REGRESSION GUARD for the consolidation. Before the merge, two
+;;; separate modules each honoured exactly one env var
+;;; (`NYMA_DEBUG_USERMSG` → file sink, `NYMA_DEBUG` → stderr sink).
+;;; After the merge, a single gate accepts all of: `NYMA_DEBUG_USERMSG`,
+;;; `NYMA_DEBUG`, and `DEBUG=*|nyma|<tag>`. These tests pin each path
+;;; so a future refactor can't silently drop an alias.
+
+(defn- with-env
+  "Temporarily set `k` to `v` (nil clears) inside `f`, restoring the
+   prior value on exit. Bun test runs node/bun in-process so mutating
+   `process.env` is safe and cheap."
+  [k v f]
+  (let [prev (aget js/process.env k)]
+    (try
+      (if v
+        (aset js/process.env k v)
+        (js-delete js/process.env k))
+      (f)
+      (finally
+        (if prev
+          (aset js/process.env k prev)
+          (js-delete js/process.env k))))))
+
+(describe "env-var gate resolution" (fn []
+                                      (beforeEach (fn []
+                                                    (capture-setup!)
+                                                    ;; Start from a clean slate: no override, no env.
+                                                    (d/set-enabled! nil)))
+                                      (afterEach  (fn [] (capture-teardown!)))
+
+                                      (it "NYMA_DEBUG_USERMSG alone enables the gate"
+                                          ;; Legacy file-logger flag — must still work.
+                                          (fn []
+                                            (with-env "NYMA_DEBUG" nil
+                                              (fn []
+                                                (with-env "DEBUG" nil
+                                                  (fn []
+                                                    (with-env "NYMA_DEBUG_USERMSG" "1"
+                                                      (fn []
+                                                        (-> (expect (d/enabled?)) (.toBe true))))))))))
+
+                                      (it "NYMA_DEBUG alone enables the gate"
+                                          ;; Legacy stderr-logger flag — must still work.
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "DEBUG" nil
+                                                  (fn []
+                                                    (with-env "NYMA_DEBUG" "1"
+                                                      (fn []
+                                                        (-> (expect (d/enabled?)) (.toBe true))))))))))
+
+                                      (it "DEBUG=* enables regardless of tag"
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" nil
+                                                  (fn []
+                                                    (with-env "DEBUG" "*"
+                                                      (fn []
+                                                        (-> (expect (d/enabled? "whatever")) (.toBe true))))))))))
+
+                                      (it "DEBUG=nyma enables for any nyma tag"
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" nil
+                                                  (fn []
+                                                    (with-env "DEBUG" "nyma"
+                                                      (fn []
+                                                        (-> (expect (d/enabled? "commit-sweep")) (.toBe true))))))))))
+
+                                      (it "DEBUG=commit-sweep enables only for that tag"
+                                          ;; Per-tag scoping — user can trace one subsystem.
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" nil
+                                                  (fn []
+                                                    (with-env "DEBUG" "commit-sweep"
+                                                      (fn []
+                                                        (-> (expect (d/enabled? "commit-sweep")) (.toBe true))
+                                                                                ;; Different tag → not enabled (and "nyma"
+                                                                                ;; is NOT a substring of "commit-sweep").
+                                                        (-> (expect (d/enabled? "loop")) (.toBe false))))))))))
+
+                                      (it "no env vars → gate closed"
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" nil
+                                                  (fn []
+                                                    (with-env "DEBUG" nil
+                                                      (fn []
+                                                        (-> (expect (d/enabled?)) (.toBe false))))))))))
+
+                                      (it "set-enabled! overrides env off-state"
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" nil
+                                                  (fn []
+                                                    (with-env "DEBUG" nil
+                                                      (fn []
+                                                        (d/set-enabled! true)
+                                                        (-> (expect (d/enabled?)) (.toBe true))))))))))
+
+                                      (it "set-enabled! false overrides env on-state"
+                                          ;; Critical: a --quiet CLI flag must be able to silence
+                                          ;; even when NYMA_DEBUG=1 is already in the shell env.
+                                          (fn []
+                                            (with-env "NYMA_DEBUG" "1"
+                                              (fn []
+                                                (d/set-enabled! false)
+                                                (-> (expect (d/enabled?)) (.toBe false))))))
+
+                                      (it "empty-string env var does NOT enable"
+                                          ;; Edge case: `NYMA_DEBUG=` in a shell script sets it to
+                                          ;; empty string. `aget` returns "" (truthy in JS) but
+                                          ;; our gate explicitly requires a non-empty string.
+                                          (fn []
+                                            (with-env "NYMA_DEBUG_USERMSG" nil
+                                              (fn []
+                                                (with-env "NYMA_DEBUG" ""
+                                                  (fn []
+                                                    (with-env "DEBUG" nil
+                                                      (fn []
+                                                        (-> (expect (d/enabled?)) (.toBe false))))))))))))
