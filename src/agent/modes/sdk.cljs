@@ -65,9 +65,11 @@
      :on-many
      (fn [handlers-map]
        (let [unsub-fns (mapv (fn [[event handler]]
-                               ((:on (:events agent)) (name event) handler))
+                               (let [ev (name event)]
+                                 ((:on (:events agent)) ev handler)
+                                 (fn [] ((:off (:events agent)) ev handler))))
                              handlers-map)]
-         (fn [] (doseq [f unsub-fns] (when (fn? f) (f))))))
+         (fn [] (doseq [f unsub-fns] (f)))))
 
      ;; Abort the current run. reason is informational only.
      :interrupt!
@@ -84,5 +86,7 @@
        (let [s @(:state agent)]
          (if (seq (:active-executions s)) :tool-running :idle)))
 
-     :on    (fn [event handler] ((:on (:events agent)) event handler))
+     :on    (fn [event handler]
+              ((:on (:events agent)) event handler)
+              (fn [] ((:off (:events agent)) event handler)))
      :state (fn [] @(:state agent))}))

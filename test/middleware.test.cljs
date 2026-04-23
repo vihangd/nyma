@@ -618,7 +618,38 @@
     (-> (expect (nil? @captured)) (.toBe true))))
 
 (describe "G18: modelId in tool extension context" (fn []
-  (it "pipeline sets modelId on ext-ctx from agent config"
-      test-g18-model-id-set-in-ext-ctx)
-  (it "no agent-ref → ext-ctx is nil (tool gets nil ctx)"
-      test-g18-model-id-unknown-when-no-agent)))
+                                                     (it "pipeline sets modelId on ext-ctx from agent config"
+                                                         test-g18-model-id-set-in-ext-ctx)
+                                                     (it "no agent-ref → ext-ctx is nil (tool gets nil ctx)"
+                                                         test-g18-model-id-unknown-when-no-agent)))
+
+;; ── tool_complete — blocking hazard ──────────────────────────────────
+;; Documents and guards against tool_complete handlers returning slow Promises.
+;; A handler that returns a Promise will block emit-collect for every tool call.
+;; The fix pattern is to always return nil from tool_complete handlers.
+
+(defn ^:async test-tool-complete-blocks-if-handler-returns-slow-promise []
+  (let [events (create-event-bus)
+        _      ((:on events) "tool_complete"
+                             (fn [_]
+                               (js/Promise. (fn [resolve _]
+                                              (js/setTimeout resolve 60)))))
+        t0      (js/Date.now)
+        _       (js-await ((:emit-collect events) "tool_complete" #js {:name "read"}))
+        elapsed (- (js/Date.now) t0)]
+    (-> (expect elapsed) (.toBeGreaterThan 50))))
+
+(defn ^:async test-tool-complete-resolves-instantly-when-handler-returns-nil []
+  (let [events  (create-event-bus)
+        _       ((:on events) "tool_complete"
+                              (fn [_] nil))
+        t0      (js/Date.now)
+        _       (js-await ((:emit-collect events) "tool_complete" #js {:name "read"}))
+        elapsed (- (js/Date.now) t0)]
+    (-> (expect elapsed) (.toBeLessThan 20))))
+
+(describe "tool_complete — blocking hazard" (fn []
+                                              (it "emit-collect tool_complete blocks if handler returns a slow Promise"
+                                                  test-tool-complete-blocks-if-handler-returns-slow-promise)
+                                              (it "emit-collect tool_complete resolves instantly when handler returns nil"
+                                                  test-tool-complete-resolves-instantly-when-handler-returns-nil)))

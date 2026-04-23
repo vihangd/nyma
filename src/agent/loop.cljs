@@ -69,8 +69,9 @@
         emit         (:emit events)
         emit-collect (:emit-collect events)]
 
-    (dbg/dbg "[loop/run] user-message:" (.slice (str user-message) 0 200)
-             "| msg-count:" (count (:messages @state)))
+    (dbg/debug "loop/run"
+               (str "user-message: " (.slice (str user-message) 0 200)
+                    " | msg-count: " (count (:messages @state))))
 
     ;; Append user message via event store (or direct swap for backwards compat)
     (if-let [store (:store agent)]
@@ -306,13 +307,25 @@
 
               ;; Process follow-up queue — outside retry loop, recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]
-                (dbg/dbg "[loop/follow-queue] drain content:" (.slice (str (:content next)) 0 200)
-                         "| remaining:" (count (rest @(:follow-queue agent))))
+                (dbg/debug "loop/follow-queue"
+                           (str "drain content: " (.slice (str (:content next)) 0 200)
+                                " | remaining: " (count (rest @(:follow-queue agent)))))
                 (swap! (:follow-queue agent) #(vec (rest %)))
                 (if-let [store (:store agent)]
                   ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
                   (swap! state update :messages conj {:role "user" :content (:content next)}))
                 (recur)))))))))
+
+(defn ^:async run-turn-with-update-handler
+  "Register on-chunk for message_update, drive run-fn, always deregister.
+   Used by the UI submit path and directly testable without React."
+  [agent on-chunk run-fn]
+  (let [events (:events agent)]
+    ((:on events) "message_update" on-chunk)
+    (try
+      (js-await (run-fn))
+      (finally
+        ((:off events) "message_update" on-chunk)))))
 
 (defn steer
   "Queue a steering message — delivered after current tool execution."
@@ -322,6 +335,7 @@
 (defn follow-up
   "Queue a follow-up message — delivered after agent finishes all work."
   [agent message]
-  (dbg/dbg "[follow-up] queued content:" (.slice (str (:content message)) 0 200)
-           "| stack:" (.-stack (js/Error.)))
+  (dbg/debug "follow-up"
+             (str "queued content: " (.slice (str (:content message)) 0 200)
+                  " | stack: " (.-stack (js/Error.))))
   (swap! (:follow-queue agent) conj message))

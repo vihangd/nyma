@@ -121,20 +121,46 @@
 ;; ── describe blocks ──────────────────────────────────────────
 
 (describe "emit-collect" (fn []
-  (it "returns empty map when no handlers" test-collect-empty)
-  (it "returns empty map for nil returns" test-collect-nil-return)
-  (it "collects a single handler return" test-collect-single-return)
-  (it "merges boolean keys with OR" test-collect-boolean-or)
-  (it "concatenates collection keys" test-collect-concat-collections)
-  (it "last-writer-wins for scalar keys" test-collect-scalar-last-wins)
-  (it "handles async (Promise) returns" test-collect-async-handler)
-  (it "handles mixed sync/async returns" test-collect-mixed-sync-async)
-  (it "isolates errors from other handlers" test-collect-error-isolation)
-  (it "respects handler priority" test-collect-priority-ordering)))
+                           (it "returns empty map when no handlers" test-collect-empty)
+                           (it "returns empty map for nil returns" test-collect-nil-return)
+                           (it "collects a single handler return" test-collect-single-return)
+                           (it "merges boolean keys with OR" test-collect-boolean-or)
+                           (it "concatenates collection keys" test-collect-concat-collections)
+                           (it "last-writer-wins for scalar keys" test-collect-scalar-last-wins)
+                           (it "handles async (Promise) returns" test-collect-async-handler)
+                           (it "handles mixed sync/async returns" test-collect-mixed-sync-async)
+                           (it "isolates errors from other handlers" test-collect-error-isolation)
+                           (it "respects handler priority" test-collect-priority-ordering)))
 
 (describe "handler sort cache" (fn []
-  (it "invalidates on new handler registration" test-cache-invalidation)
-  (it "invalidates when handler removed" test-off-invalidates-cache)))
+                                 (it "invalidates on new handler registration" test-cache-invalidation)
+                                 (it "invalidates when handler removed" test-off-invalidates-cache)))
 
 (describe "new event types" (fn []
-  (it "all-event-types includes pi-compat events" test-new-event-types)))
+                              (it "all-event-types includes pi-compat events" test-new-event-types)))
+
+;; ── emit-collect blocking hazard tests ──────────────────────────────
+
+(defn ^:async test-slow-promise-handler-delays-emit-collect []
+  (let [bus    (create-event-bus)
+        _      ((:on bus) "test_slow" (fn [_]
+                                        (js/Promise. (fn [resolve _]
+                                                       (js/setTimeout resolve 50)))))
+        t0     (js/Date.now)
+        _      (js-await ((:emit-collect bus) "test_slow" #js {}))
+        elapsed (- (js/Date.now) t0)]
+    (-> (expect elapsed) (.toBeGreaterThan 40))))
+
+(defn ^:async test-nil-returning-handler-does-not-delay-emit-collect []
+  (let [bus     (create-event-bus)
+        _       ((:on bus) "test_nil" (fn [_] nil))
+        t0      (js/Date.now)
+        _       (js-await ((:emit-collect bus) "test_nil" #js {}))
+        elapsed (- (js/Date.now) t0)]
+    (-> (expect elapsed) (.toBeLessThan 20))))
+
+(describe "emit-collect — blocking hazard" (fn []
+                                             (it "a slow-resolving Promise handler delays emit-collect"
+                                                 test-slow-promise-handler-delays-emit-collect)
+                                             (it "a nil-returning handler does not delay emit-collect"
+                                                 test-nil-returning-handler-does-not-delay-emit-collect)))

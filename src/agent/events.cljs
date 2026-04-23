@@ -151,4 +151,7 @@
              (swap! handlers update event
                     (fn [hs] (vec (remove #(= (:handler %) handler) hs))))
              ;; Invalidate cache for this event
-             (swap! sorted-cache dissoc event))}))
+             (swap! sorted-cache dissoc event))
+
+     :handler-count (fn [event] (count (get @handlers event [])))}))
+
