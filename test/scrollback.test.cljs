@@ -15,6 +15,7 @@
                                                  committable_past_turn
                                                  committable_completed_turn
                                                  committable_now
+                                                 filter_uncommitted_ids
                                                  print_header_banner_BANG_]]
             ["./agent/ui/tool_status.jsx" :refer [format_one_line_result_for_tool]]))
 
@@ -458,6 +459,103 @@
                             :block-renderers nil :columns 80}))
                     ;; Both messages written to scrollback
                     (-> (expect (count @writes)) (.toBe 2)))))))
+
+;;; ─── filter-uncommitted-ids (commit-sweep dedup guard) ─────────
+;;;
+;;; Pins the fix for the duplicate-commit bug the user reported:
+;;;   ● 1 consumer — ... topic.
+;;;   ● 1 consumer — ... topic.
+;;;   ● 1 consumer — ... topic.
+;;;     (continuation)
+;;;   ● 1 consumer — ... topic.
+;;;
+;;; The same assistant message landed in terminal scrollback four
+;;; times. Root cause: the commit-sweep useEffect in app.cljs can
+;;; fire multiple times with the same to-commit list before React
+;;; has propagated the :committed flag through state — especially
+;;; when rapid set-messages calls from streaming chunks and
+;;; tool-start / tool-end messages batch in a way that replays the
+;;; effect with a message that's still flagged uncommitted.
+;;;
+;;; The guard in app.cljs uses a useRef-held JS Set of ids that have
+;;; already been written to scrollback; `filter-uncommitted-ids`
+;;; codifies the predicate. Belt-and-suspenders: even if the React
+;;; state race is fixed elsewhere, this makes the commit pipeline
+;;; idempotent at the id level.
+
+(describe "filter-uncommitted-ids (commit-sweep dedup guard)"
+          (fn []
+
+            (it "passes through messages whose ids are NOT in the set"
+                (fn []
+                  (let [set   (js/Set.)
+                        msgs  #js [#js {:role "user" :content "q" :id "u1"}
+                                   #js {:role "assistant" :content "a" :id "a1"}]
+                        out   (filter_uncommitted_ids msgs set)]
+                    (-> (expect (.-length out)) (.toBe 2))
+                    (-> (expect (.-id (aget out 0))) (.toBe "u1"))
+                    (-> (expect (.-id (aget out 1))) (.toBe "a1")))))
+
+            (it "filters OUT messages whose ids ARE in the set"
+                (fn []
+                  (let [set   (js/Set. #js ["u1"])
+                        msgs  #js [#js {:role "user" :content "q" :id "u1"}
+                                   #js {:role "assistant" :content "a" :id "a1"}]
+                        out   (filter_uncommitted_ids msgs set)]
+                    (-> (expect (.-length out)) (.toBe 1))
+                    (-> (expect (.-id (aget out 0))) (.toBe "a1")))))
+
+            (it "filters out messages with no :id (defensive)"
+                ;; A message missing :id would match ANY test against
+                ;; the set (undefined !== any id) and look safe to
+                ;; commit repeatedly. Safest to drop silently —
+                ;; ids-free messages shouldn't be on the commit path
+                ;; anyway (all add-* helpers in app.cljs assign one).
+                (fn []
+                  (let [set   (js/Set.)
+                        msgs  #js [#js {:role "user" :content "no-id"}
+                                   #js {:role "assistant" :content "ok" :id "a1"}]
+                        out   (filter_uncommitted_ids msgs set)]
+                    (-> (expect (.-length out)) (.toBe 1))
+                    (-> (expect (.-id (aget out 0))) (.toBe "a1")))))
+
+            (it "returns empty when every candidate id is in the set"
+                (fn []
+                  (let [set   (js/Set. #js ["u1" "a1"])
+                        msgs  #js [#js {:role "user" :content "q" :id "u1"}
+                                   #js {:role "assistant" :content "a" :id "a1"}]
+                        out   (filter_uncommitted_ids msgs set)]
+                    (-> (expect (.-length out)) (.toBe 0)))))
+
+            (it "is idempotent: repeated calls with a mutated set commit each id once"
+                ;; Simulates the exact commit-sweep race:
+                ;;   sweep 1 → commit A1 (id added to set, state not yet flagged)
+                ;;   sweep 2 → same messages because :committed hasn't propagated
+                ;;   sweep 2 should find A1 already in the set → no-op
+                ;; This is the regression test for the duplicated `●` bullets.
+                (fn []
+                  (let [set        (js/Set.)
+                        candidates #js [#js {:role "user" :content "q" :id "u1"}
+                                        #js {:role "assistant" :content "a" :id "a1"}]
+                        commits    (atom [])
+                        run-sweep  (fn []
+                                     (let [to-commit (filter_uncommitted_ids candidates set)]
+                                       (doseq [m to-commit]
+                                         (swap! commits conj (.-id m))
+                                         (.add set (.-id m)))))]
+                    ;; First sweep: both should commit
+                    (run-sweep)
+                    (-> (expect (count @commits)) (.toBe 2))
+                    ;; Second sweep with THE SAME candidate list
+                    ;; (simulating :committed flag not yet propagated):
+                    ;; nothing new should commit.
+                    (run-sweep)
+                    (-> (expect (count @commits)) (.toBe 2))
+                    ;; Third sweep, fourth sweep — still no re-commits.
+                    (run-sweep)
+                    (run-sweep)
+                    (-> (expect (count @commits)) (.toBe 2))
+                    (-> (expect @commits) (.toEqual ["u1" "a1"])))))))
 
 ;;; ─── committable-now (eager per-sub-message commit) ────────────
 ;;;

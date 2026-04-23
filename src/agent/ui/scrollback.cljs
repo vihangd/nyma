@@ -384,6 +384,24 @@
       (= role "error")    (render-error message theme)
       :else               (render-default message theme))))
 
+(defn filter-uncommitted-ids
+  "Given a seq of messages and a JS Set of ids already written to
+   terminal scrollback, return the subset whose ids are NOT yet in the
+   set. Messages without an :id are filtered out (they would mark the
+   whole set with `undefined` and break the dedup).
+
+   Pure. Does not mutate the set. Used by the commit sweep in app.cljs
+   as a belt-and-suspenders guard against duplicate commits when the
+   useEffect replays with messages whose :committed flag hasn't
+   propagated through React state yet.
+
+   Tested directly."
+  [messages written-set]
+  (filterv (fn [m]
+             (let [id (:id m)]
+               (and id (not (.has written-set id)))))
+           messages))
+
 (defn commit-to-scrollback!
   "Render a single message and write it to terminal scrollback via Ink's
    writeToStdout. Fire-and-forget.
@@ -404,11 +422,15 @@
 ;;; ─── Startup banner (direct stdout, pre-Ink) ────────────────────
 
 (defn print-header-banner!
-  "Write a minimal startup banner to stdout BEFORE Ink's render mounts.
-   Matches the Claude Code pattern: the banner is normal terminal output —
-   it scrolls up naturally as chat content accumulates, no pinning, no
-   Static component. Ink's live region (chat, status, editor) mounts
-   below the banner and takes over from there.
+  "Write a minimal startup banner to stdout, then pad the cursor to the
+   terminal's last row so Ink's first frame mounts at the bottom. The
+   banner is pushed into real terminal scrollback as soon as Ink's first
+   render scrolls the terminal to accommodate the frame; from there on
+   it's reachable by scrolling the terminal up. As commits accrue via
+   writeToStdout, past turns fill the area between the banner and the
+   live frame, then scroll off into scrollback as the visible terminal
+   fills up — the same steady state the app reaches today after a
+   handful of turns, just reached at startup.
 
    `model-id` is the configured model string (or nil — falls back to
    \"unknown\"). `theme` is the current theme map."
@@ -416,9 +438,16 @@
   (let [primary (get-in theme [:colors :primary] "#7aa2f7")
         muted   (get-in theme [:colors :muted] "#565f89")
         model   (or model-id "unknown")
-        ;; Simple one-line banner — no borders, no box drawing.
-        ;; Terminal scrollback shows it at the top of the session
-        ;; until enough content pushes it out of the visible area.
         line    (str (fg (bold "● nyma") primary)
-                     " " (fg (str "· " model) muted))]
-    (.write js/process.stdout (str line "\n\n"))))
+                     " " (fg (str "· " model) muted))
+        stdout  js/process.stdout
+        tty?    (.-isTTY stdout)
+        rows    (or (.-rows stdout) 24)
+        ;; Banner + "\n\n" leaves the cursor at row 3. Pad (rows - 3)
+        ;; more newlines to reach the last row. Skip for non-TTY output
+        ;; (piped/CI/tests) and for pathologically small terminals where
+        ;; the pad would be zero or negative.
+        pad     (if (and tty? (> rows 3))
+                  (.repeat "\n" (- rows 3))
+                  "")]
+    (.write stdout (str line "\n\n" pad))))

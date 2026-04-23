@@ -12,7 +12,8 @@
             [agent.ui.editor-eval :as editor-eval]
             ["./chat_view.jsx" :refer [ChatView]]
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
-                                        committable_now]]
+                                        committable_now
+                                        filter_uncommitted_ids]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -340,6 +341,19 @@
         ;; Used by scrollback module to commit finalized messages.
         {:keys [stdout write]}            (useStdout)
         [term-rows set-term-rows]         (useState (or (.-rows stdout) 24))
+        ;; Tracks the previously-observed terminal row count so the
+        ;; grow-resize effect below can emit exactly (new - old) newlines
+        ;; to re-pin Ink's frame to the new bottom.
+        prev-rows-ref                     (useRef (or (.-rows stdout) 24))
+        ;; Tracks which message :ids have already been written to
+        ;; terminal scrollback. Belt-and-suspenders guard against the
+        ;; commit sweep firing multiple times with the same message in
+        ;; to-commit before set-messages has propagated the :committed
+        ;; flag — a race that can happen when rapid state updates batch
+        ;; in a way that React replays an effect with stale-looking
+        ;; messages. Holds a Set of ids; never cleared during the
+        ;; session (committed is a monotonic transition).
+        committed-ids-ref                 (useRef (js/Set.))
         layout-handlers                   (useRef #js [])
         app                               (useApp)
         ;; Convenience helper — fire-and-forget emit on the agent's main event bus.
@@ -373,21 +387,33 @@
     (useEffect
      (fn []
        (when scrollback-on?
-         (let [to-commit (committable_now messages streaming)
+         (let [candidates   (committable_now messages streaming)
+               written-set  (.-current committed-ids-ref)
+               ;; Dedup candidates against ids we've already written to
+               ;; scrollback in this session. Prevents re-commits when
+               ;; the effect replays with messages whose :committed
+               ;; flag hasn't propagated yet. See
+               ;; scrollback/filter-uncommitted-ids.
+               to-commit    (filter_uncommitted_ids candidates written-set)
                br        (when-let [br (:block-renderers agent)] @br)
                columns   (or (.-columns stdout) 80)]
            (dbg/debug "commit-sweep"
                       "state"
-                      {:streaming   streaming
-                       :n-msgs      (count messages)
-                       :to-commit   (count to-commit)
-                       :roles       (mapv :role to-commit)
-                       :ids         (mapv :id to-commit)})
+                      {:streaming    streaming
+                       :n-msgs       (count messages)
+                       :candidates   (count candidates)
+                       :to-commit    (count to-commit)
+                       :skipped      (- (count candidates) (count to-commit))
+                       :roles        (mapv :role to-commit)
+                       :ids          (mapv :id to-commit)})
            (when (seq to-commit)
              (doseq [msg to-commit]
                (dbg/debug "commit-sweep"
                           (str "writing " (:role msg) " " (:id msg) " "
                                (.slice (str (or (:content msg) "")) 0 40)))
+               ;; Mark BEFORE the write so a synchronous effect replay
+               ;; (same tick) sees the id already present and skips.
+               (.add written-set (:id msg))
                (commit_to_scrollback_BANG_
                 #js {:write write
                      :message msg
@@ -596,6 +622,23 @@
          (.on stdout "resize" handler)
          (fn [] (.off stdout "resize" handler))))
      #js [stdout])
+
+    ;; Grow-resize re-pad: when the terminal gets TALLER, emit the
+    ;; difference in newlines so Ink's dynamic region stays pinned
+    ;; to the new bottom row. Shrinking the terminal needs no pad —
+    ;; content clips from the top naturally. Mirrors the startup
+    ;; pad from `print-header-banner!`; without this, enlarging the
+    ;; terminal mid-session leaves blank rows below the footer.
+    (useEffect
+     (fn []
+       (let [prev (.-current prev-rows-ref)
+             now  term-rows]
+         (when (and (.-isTTY stdout)
+                    (number? prev) (number? now) (> now prev))
+           (.write stdout (.repeat "\n" (- now prev))))
+         (set! (.-current prev-rows-ref) term-rows))
+       js/undefined)
+     #js [term-rows])
 
     ;; Bracketed paste: enable terminal mode, install raw stdin listener, and
     ;; attach the handler to `agent` so do-submit can expand markers.
