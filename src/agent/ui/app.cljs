@@ -14,7 +14,9 @@
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
                                         committable_now
                                         filter_uncommitted_ids]]
-            ["../modes/interactive.jsx" :refer [effective_scrollback_on_QMARK_]]
+            ["../modes/interactive.jsx" :refer [effective_scrollback_on_QMARK_
+                                                pager_mode_enabled_QMARK_]]
+            ["./chat_pager.jsx" :refer [ChatPager clamp_scroll_offset auto_follow_offset page_step]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -369,11 +371,22 @@
         ;; Use the shared predicate so this gate stays in sync with the
         ;; banner-write gate in interactive.cljs.
         alt-screen?                       (boolean (:alt-screen? resources))
+        scrollback-setting                (when-let [sm (:settings resources)]
+                                            (:scrollback-mode ((:get sm))))
+        pager-mode?                       (pager_mode_enabled_QMARK_
+                                           #js {:alt-screen?             alt-screen?
+                                                :scrollback-mode-setting scrollback-setting})
         scrollback-on?                    (effective_scrollback_on_QMARK_
                                            #js {:alt-screen?             alt-screen?
-                                                :scrollback-mode-setting
-                                                (when-let [sm (:settings resources)]
-                                                  (:scrollback-mode ((:get sm))))})]
+                                                :scrollback-mode-setting scrollback-setting})
+        ;; Pager scroll state: `scroll-offset` is the number of
+        ;; messages hidden from the END of the list (0 = show latest,
+        ;; grows as user scrolls up). Only meaningful when pager-mode?
+        ;; — other modes ignore it. `prev-msg-count-ref` is used by
+        ;; the auto-follow effect below to detect message additions
+        ;; and keep the user's visible window stable when scrolled up.
+        [scroll-offset set-scroll-offset] (useState 0)
+        prev-msg-count-ref                (useRef 0)]
 
     ;; ── scrollback-mode commit sweep ───────────────────────────────
     ;; When :scrollback-mode is ON in settings, commit PAST TURNS to
@@ -647,6 +660,23 @@
        js/undefined)
      #js [term-rows])
 
+    ;; Pager auto-follow: when the message count grows, adjust the
+    ;; pager's scroll-offset so the user's visible window doesn't
+    ;; shift under them. offset=0 stays at 0 (follow newest);
+    ;; offset>0 advances by the message delta. Runs in every mode so
+    ;; a mid-session toggle won't leave a stale offset — the clamp
+    ;; inside `auto-follow-offset` snaps to a valid range.
+    (useEffect
+     (fn []
+       (let [prev    (.-current prev-msg-count-ref)
+             now     (count messages)
+             new-off (auto_follow_offset scroll-offset prev now)]
+         (when (not= new-off scroll-offset)
+           (set-scroll-offset new-off))
+         (set! (.-current prev-msg-count-ref) now))
+       js/undefined)
+     #js [messages])
+
     ;; Bracketed paste: enable terminal mode, install raw stdin listener, and
     ;; attach the handler to `agent` so do-submit can expand markers.
     ;; Also registers a prependListener on ink's internal_eventEmitter so we
@@ -809,7 +839,33 @@
                     [Text {:bold true} "Current Model"]
                     [Text (str "  " model-id)]
                     [Box {:marginTop 1}
-                     [Text {:color "#565f89"} "Press ESC to close"]]])))))
+                     [Text {:color "#565f89"} "Press ESC to close"]]]))
+
+           ;; Pager scroll bindings: active only in pager mode. The
+           ;; editor's text-input doesn't consume PageUp/PageDown or
+           ;; Ctrl+arrow/Home/End, so these don't conflict with typing.
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.up"))
+           (set-scroll-offset
+            (fn [prev] (clamp_scroll_offset (inc prev) (count messages))))
+
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.down"))
+           (set-scroll-offset
+            (fn [prev] (clamp_scroll_offset (dec prev) (count messages))))
+
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.pageup"))
+           (set-scroll-offset
+            (fn [prev] (clamp_scroll_offset (+ prev (page_step)) (count messages))))
+
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.pagedown"))
+           (set-scroll-offset
+            (fn [prev] (clamp_scroll_offset (- prev (page_step)) (count messages))))
+
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.top"))
+           (set-scroll-offset
+            (clamp_scroll_offset (dec (count messages)) (count messages)))
+
+           (and pager-mode? (kbr/matches? reg input key "app.scroll.bottom"))
+           (set-scroll-offset 0))))
      #js {:isActive (not (some? overlay))})
 
     (let [handle-submit
@@ -827,20 +883,13 @@
                                        (str "Error: " (.-message e)) "error")))))))
            #js [streaming agent submit-lock-ref])]
 
-      ;; Scrollback-mode layout: NO fixed height on the App Box.
-      ;; Content flows naturally — chat renders at its natural size,
-      ;; editor sits right below the last message. Terminal scrolls
-      ;; as content accumulates. Banner was already printed to stdout
-      ;; before Ink mounted (see modes/interactive.cljs).
-      ;;
-      ;; height=term-rows tells Ink the exact terminal budget so it never
-      ;; over-clears after a scrollback commit. The content area (flexGrow 1)
-      ;; fills the space above the fixed-height editor+status+footer, keeping
-      ;; the editor pinned to the bottom with no blank lines below it.
-      ;; (Pattern from combray.prose.sh/2025-11-28-ink-tui-expandable-layout)
-      ;; When scrollback-on?: natural flow — no fixed height, Ink region
-      ;; shrinks as messages are committed above it.
-      ;; When NOT scrollback-on?: fixed height pins editor to bottom.
+      ;; App Box height:
+      ;;   scrollback-on  → no height (natural flow; frame grows with content)
+      ;;   otherwise      → fixed at term-rows (pins editor to the bottom
+      ;;                    and gives the content Box a definite budget
+      ;;                    for flexGrow / overflow hidden).
+      ;; Pager mode uses the fixed-height variant so the pager's windowed
+      ;; slice has a stable viewport to render into.
       #jsx [Box {:flexDirection "column"
                  :height (when-not scrollback-on? term-rows)}
             (when-let [custom-header (safe-react-child
@@ -877,6 +926,12 @@
               ;;     end of in-flight messages. writeToStdout commits
               ;;     handle past turns to real terminal scrollback.
               ;;
+              ;;   pager-mode (scrollback-mode = "pager")
+              ;;     flexGrow 1 + overflow hidden. ChatPager owns the
+              ;;     windowing via scroll-offset state; everything
+              ;;     stays inside the Ink frame, past turns reachable
+              ;;     with Ctrl+Up/PgUp/etc.
+              ;;
               ;;   scrollback-off + alt-screen (NYMA_ALT_SCREEN=1)
               ;;     flexGrow 1 + overflow hidden + justifyContent
               ;;     "flex-end". Pins live chat flush above status.
@@ -884,17 +939,13 @@
               ;;     pollute anything — alt-screen has no scrollback,
               ;;     they just sit invisibly until alt-screen exits.
               ;;
-              ;;   scrollback-off + NO alt-screen
-              ;;     flexGrow 1 + overflow hidden but TOP-aligned
-              ;;     (no flex-end). When Ink emits a new <Static> item
-              ;;     it does clear → write static → redraw the full
-              ;;     frame, which auto-scrolls the terminal. Whatever
-              ;;     sits at the top of the frame is what scrolls into
-              ;;     real terminal scrollback. flex-end's empty top
-              ;;     rows would scroll in as visible blank pollution
-              ;;     (the bug the user reported). Top-aligned keeps
-              ;;     live message content at the top so the scroll
-              ;;     carries actual content, not blanks.
+              ;;   scrollback-off + NO alt-screen (Static-based)
+              ;;     flexGrow 1 + overflow hidden but TOP-aligned.
+              ;;     Ink's <Static> emissions scroll top-of-frame rows
+              ;;     into real scrollback; flex-end's empty top rows
+              ;;     would pollute scrollback with blanks, so we
+              ;;     top-align instead (live content scrolls, not
+              ;;     blanks). Trade-off: empty space shows below live.
               ;;
               ;;   empty-state (no messages, no streaming)
               ;;     justifyContent "center" centers the welcome screen.
@@ -904,14 +955,29 @@
                          :justifyContent (cond
                                            scrollback-on?                                nil
                                            (and (empty? messages) (not streaming))      "center"
+                                           pager-mode?                                  nil
                                            alt-screen?                                  "flex-end"
                                            :else                                        nil)
                          :overflow      (when-not scrollback-on? "hidden")}
-                    (if (and (empty? messages) (not streaming))
+                    (cond
+                      (and (empty? messages) (not streaming))
                       #jsx [WelcomeScreen {:key "welcome" :agent agent :theme theme
                                            :sessions-dir (:sessions-dir resources)}]
-                      #jsx [ChatView {:key "chat" :messages messages :theme theme
-                                      :streaming streaming
+
+                      pager-mode?
+                      #jsx [ChatPager {:key             "pager"
+                                       :messages        messages
+                                       :theme           theme
+                                       :streaming       streaming
+                                       :scroll-offset   scroll-offset
+                                       :block-renderers (when-let [br (:block-renderers agent)]
+                                                          @br)}]
+
+                      :else
+                      #jsx [ChatView {:key             "chat"
+                                      :messages        messages
+                                      :theme           theme
+                                      :streaming       streaming
                                       :scrollback-mode scrollback-on?
                                       :block-renderers (when-let [br (:block-renderers agent)]
                                                          @br)}])

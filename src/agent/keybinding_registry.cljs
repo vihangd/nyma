@@ -48,7 +48,26 @@
    ;; ── Tools ──
    "app.tools.expand"   {:description  "Expand tool execution view"
                          :default-keys ["ctrl+o"]
-                         :category     :tools}})
+                         :category     :tools}
+   ;; ── Pager (in-app chat history scroll, active only in pager mode) ──
+   "app.scroll.up"      {:description  "Scroll chat up one message"
+                         :default-keys ["ctrl+up"]
+                         :category     :navigation}
+   "app.scroll.down"    {:description  "Scroll chat down one message"
+                         :default-keys ["ctrl+down"]
+                         :category     :navigation}
+   "app.scroll.pageup"  {:description  "Scroll chat up one page"
+                         :default-keys ["pageup"]
+                         :category     :navigation}
+   "app.scroll.pagedown" {:description "Scroll chat down one page"
+                          :default-keys ["pagedown"]
+                          :category     :navigation}
+   "app.scroll.top"     {:description  "Jump to oldest message"
+                         :default-keys ["ctrl+home"]
+                         :category     :navigation}
+   "app.scroll.bottom"  {:description  "Jump to newest message (exit scroll)"
+                         :default-keys ["ctrl+end"]
+                         :category     :navigation}})
 
 ;;; ─── Combo canonicalization ─────────────────────────────
 

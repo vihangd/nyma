@@ -18,22 +18,39 @@
                 (not= env-value "0")
                 (not= env-value "false"))))
 
-(defn effective-scrollback-on?
-  "Pure helper: resolve the effective scrollback-mode given alt-screen?
-   and the persisted scrollback-mode setting. alt-screen and scrollback-
-   mode are mutually exclusive — alt-screen wipes terminal scrollback on
-   entry, so committing past turns to scrollback would write into a
-   buffer no one can scroll back to. Returns false whenever alt-screen
-   is true, regardless of the setting; otherwise honors the setting
-   (defaulting to true when the setting is nil/missing).
-
-   App.cljs and interactive.cljs both call this so the commit-sweep and
-   the banner-write agree on what mode they're in."
+(defn pager-mode-enabled?
+  "Pure helper: return true when the persisted scrollback-mode setting
+   is the string \"pager\". Alt-screen suppresses pager mode — an alt-
+   screen has no terminal scrollback, and the pager's in-app scroll is
+   orthogonal to writeToStdout commits anyway; forcing one mode at a
+   time keeps the interactions predictable."
   [{:keys [alt-screen? scrollback-mode-setting]}]
   (boolean (and (not alt-screen?)
-                (if (nil? scrollback-mode-setting)
-                  true
-                  scrollback-mode-setting))))
+                (= scrollback-mode-setting "pager"))))
+
+(defn effective-scrollback-on?
+  "Pure helper: resolve the effective scrollback-mode (the natural-flow
+   writeToStdout-commit path) given alt-screen?, pager-mode?, and the
+   persisted scrollback-mode setting.
+
+   scrollback-on is only true when:
+     - alt-screen is OFF (alt-screen wipes scrollback; commits would
+       land in a buffer no one can scroll back to)
+     - pager-mode is OFF (pager owns the in-flight slice; there's no
+       commit loop to drive)
+     - the persisted setting is truthy (true or missing — missing
+       defaults to true to match d49e4a4's choice)
+
+   App.cljs and interactive.cljs both call this so the commit-sweep,
+   the banner-write, and the layout gates agree on what mode they're in."
+  [{:keys [alt-screen? scrollback-mode-setting]
+    :as opts}]
+  (boolean (and (not alt-screen?)
+                (not (pager-mode-enabled? opts))
+                (cond
+                  (nil? scrollback-mode-setting) true
+                  (= scrollback-mode-setting "pager") false
+                  :else scrollback-mode-setting))))
 
 (defn ^:async start [agent session resources]
   ;; Register built-in completion providers (slash, @file, path). Done

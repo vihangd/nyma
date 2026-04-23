@@ -11,7 +11,8 @@
    alt-screen and scrollback-mode are mutually exclusive."
   (:require ["bun:test" :refer [describe it expect]]
             ["./agent/modes/interactive.jsx" :refer [alt_screen_enabled_QMARK_
-                                                     effective_scrollback_on_QMARK_]]))
+                                                     effective_scrollback_on_QMARK_
+                                                     pager_mode_enabled_QMARK_]]))
 
 (describe "alt-screen-enabled?: NYMA_ALT_SCREEN env parsing"
           (fn []
@@ -80,4 +81,57 @@
                 (fn []
                   (-> (expect (effective_scrollback_on_QMARK_
                                #js {:alt-screen? false :scrollback-mode-setting nil}))
-                      (.toBe true))))))
+                      (.toBe true))))
+
+            (it "setting=\"pager\" forces scrollback-on? false (pager owns in-flight)"
+                ;; Pager mode manages its own windowed render; the
+                ;; writeToStdout commit loop is irrelevant there.
+                (fn []
+                  (-> (expect (effective_scrollback_on_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting "pager"}))
+                      (.toBe false))))))
+
+(describe "pager-mode-enabled?: \"pager\" setting vs other values"
+          (fn []
+
+            (it "setting=\"pager\" with alt-screen OFF returns true"
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting "pager"}))
+                      (.toBe true))))
+
+            (it "alt-screen ON suppresses pager even if setting=\"pager\""
+                ;; alt-screen and pager are orthogonal — forcing one at
+                ;; a time keeps the interactions predictable.
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? true :scrollback-mode-setting "pager"}))
+                      (.toBe false))))
+
+            (it "setting=true (default) is NOT pager mode"
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting true}))
+                      (.toBe false))))
+
+            (it "setting=false (Static mode) is NOT pager mode"
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting false}))
+                      (.toBe false))))
+
+            (it "setting=nil (missing) is NOT pager mode"
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting nil}))
+                      (.toBe false))))
+
+            (it "unrecognized string value is NOT pager mode (strict match)"
+                ;; Only the exact literal "pager" enables the mode.
+                (fn []
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting "PAGER"}))
+                      (.toBe false))
+                  (-> (expect (pager_mode_enabled_QMARK_
+                               #js {:alt-screen? false :scrollback-mode-setting "page"}))
+                      (.toBe false))))))
