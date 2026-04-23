@@ -2,7 +2,7 @@
   {:squint/extension "jsx"}
   (:require ["react" :refer [useState useEffect useCallback useRef]]
             ["ink" :refer [Box Text render useInput useApp useStdout useStdin]]
-            [agent.loop :refer [run steer]]
+            [agent.loop :refer [run steer run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.keybinding-registry :as kbr]
             [agent.ui.bracketed-paste :as paste]
@@ -12,7 +12,7 @@
             [agent.ui.editor-eval :as editor-eval]
             ["./chat_view.jsx" :refer [ChatView]]
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
-                                        committable_past_turn]]
+                                        committable_now]]
             ["./editor.jsx" :refer [Editor]]
             ["./footer.jsx" :refer [Footer]]
             ["./overlay.jsx" :refer [Overlay]]
@@ -25,7 +25,7 @@
             ["./mention_picker.mjs" :refer [create-picker]]
             [agent.debug :as dbg]))
 
-(defn- safe-react-child
+(defn safe-react-child
   "Guard against non-React-element objects being rendered as children.
    If `v` is a plain JS object (not a React element, string, number, or
    nil), log a warning with `label` and return nil. This catches the
@@ -37,9 +37,20 @@
     (string? v)                v
     (number? v)                v
     (boolean? v)               nil   ;; React skips booleans
-    (array? v)                 v
+    (array? v)
+    (let [bad-el (aget (.filter v (fn [el] (and (object? el) (not (.-$$typeof el))))) 0)]
+      (if bad-el
+        (do (js/console.warn
+             (str "[nyma] array contains non-React-element in " label
+                  ". Keys: " (.join (js/Object.keys bad-el) ", ")
+                  ". This is a bug."))
+            nil)
+        v))
     ;; React elements have $$typeof
     (and (object? v) (.-$$typeof v)) v
+    ;; Pi-mono component objects ({render, onInput?, dispose?} or {type: 'editor'})
+    ;; are handled by Overlay's CustomComponentAdapter / EditorAdapter — pass through.
+    (and (object? v) (or (.-render v) (= (.-type v) "editor"))) v
     ;; Plain objects are NOT valid React children
     (object? v)
     (do (js/console.warn
@@ -74,8 +85,9 @@
 (defn- add-user-msg!
   "Add user message to chat. Called synchronously to batch with Editor clear."
   [set-messages text]
-  (dbg/dbg "[add-user-msg!] text:" (.slice (str text) 0 200)
-           "| stack:" (.-stack (js/Error.)))
+  (dbg/debug "add-user-msg"
+             (str "text: " (.slice (str text) 0 200)
+                  " | stack: " (.-stack (js/Error.))))
   (set-messages (fn [prev] (conj (vec prev) {:role "user" :content text :id (new-id)}))))
 
 (defn- add-assistant-chunk!
@@ -88,8 +100,9 @@
            tail-idx (dec (count all))
            last-msg (when (>= tail-idx 0) (nth all tail-idx))]
        (when (not= (:role last-msg) "assistant")
-         (dbg/dbg "[add-assistant-chunk!] last-msg role is" (:role last-msg)
-                  "— creating new assistant message"))
+         (dbg/debug "add-assistant-chunk"
+                    (str "last-msg role is " (:role last-msg)
+                         " — creating new assistant message")))
        (if (= (:role last-msg) "assistant")
          (update all tail-idx update :content str text-delta)
          (conj all {:role "assistant" :content (or text-delta "") :id (new-id)}))))))
@@ -102,7 +115,7 @@
         text          (if pastes-map
                         (paste/expand-paste-markers text pastes-map)
                         text)
-        _ (dbg/dbg "[do-submit] raw-text:" (.slice (str text) 0 200))
+        _ (dbg/debug "do-submit" (str "raw-text: " (.slice (str text) 0 200)))
         ;; Emit "input" event — extensions can intercept, transform, or fully handle
         input-result (js-await
                       (let [ec (:emit-collect (:events agent))]
@@ -110,8 +123,9 @@
         handled      (get input-result "handle")
         transformed  (get input-result "input")
         _ (when (and (some? transformed) (not= transformed text))
-            (dbg/dbg "[do-submit] input-event rewrote text to:"
-                     (.slice (str transformed) 0 200)))
+            (dbg/debug "do-submit"
+                       (str "input-event rewrote text to: "
+                            (.slice (str transformed) 0 200))))
         text         (if (and (some? transformed) (not= transformed text))
                        transformed
                        text)]
@@ -212,19 +226,17 @@
             cancelled     (get submit-result "cancel")
             text          (let [t (or (get submit-result "text") text)]
                             (when (not= t text)
-                              (dbg/dbg "[do-submit] input_submit rewrote text to:"
-                                       (.slice (str t) 0 200)))
+                              (dbg/debug "do-submit"
+                                         (str "input_submit rewrote text to: "
+                                              (.slice (str t) 0 200))))
                             t)]
         (when-not cancelled
           (set-streaming true)
           (add-user-msg! set-messages text)
           (let [update-handler
                 (fn [chunk] (add-assistant-chunk! set-messages (.-text chunk)))]
-            ((:on (:events agent)) "message_update" update-handler)
-            (try
-              (js-await (run agent text))
-              (finally
-                ((:off (:events agent)) "message_update" update-handler)))
+            (js-await (run-turn-with-update-handler agent update-handler
+                                                    #(run agent text)))
             (set-streaming false)
             ;; Convert any orphaned tool-start messages (those that never got
             ;; a matching tool-end, e.g. due to abort/error) to synthetic
@@ -335,7 +347,12 @@
         ;; can share the same null-safe wrapper.
         emit!                             (fn [event data]
                                             (when-let [e (:emit (:events agent))]
-                                              (e event data)))]
+                                              (e event data)))
+        scrollback-on?                    (let [sm (:settings resources)]
+                                            (boolean (if sm
+                                                       (let [v (:scrollback-mode ((:get sm)))]
+                                                         (if (nil? v) true v))
+                                                       true)))]
 
     ;; ── scrollback-mode commit sweep ───────────────────────────────
     ;; When :scrollback-mode is ON in settings, commit PAST TURNS to
@@ -349,48 +366,47 @@
     ;; always in the visible chat region; older turns are in terminal
     ;; scrollback (scroll up to see them).
     ;;
-    ;; Committed messages stay in React state with `:committed true` so
-    ;; `agent.context/build-context` (which reads `:messages` from the
-    ;; agent state atom) sees the full conversation for LLM context.
-    ;; ChatView filters them out of the dynamic region to avoid double
-    ;; rendering (scrollback + live).
-    ;;
-    ;; Turn boundary: the index of the last `user` message. Everything
-    ;; BEFORE that index is a past turn and eligible to commit.
-    ;; Everything FROM that index onwards is the current turn.
-    ;;
-    ;; Idempotent: committing flips :committed flags, which causes the
-    ;; effect to re-fire; the second run sees no uncommitted past-turn
-    ;; messages and returns early.
+    ;; Committed messages stay in React state with :committed true so
+    ;; agent.context/build-context sees the full conversation. ChatView's
+    ;; in-flight filter drops them so they never re-render below the newly-
+    ;; committed scrollback line.
     (useEffect
      (fn []
-       (let [sm       (:settings resources)
-             flag-on? (boolean (when sm (:scrollback-mode ((:get sm)))))]
-         (when flag-on?
-           ;; committable-past-turn is pure — see scrollback.cljs — and
-           ;; directly tested so the turn-boundary rules don't regress
-           ;; in the integration-only render path.
-           (let [to-commit (committable_past_turn messages)
-                 br        (when-let [br (:block-renderers agent)] @br)
-                 columns   (or (.-columns stdout) 80)]
-             (when (seq to-commit)
-               (doseq [msg to-commit]
-                 (commit_to_scrollback_BANG_
-                  #js {:write write
-                       :message msg
-                       :theme theme
-                       :block-renderers br
-                       :columns columns}))
-               (set-messages
-                (fn [prev]
-                  (let [to-commit-ids (set (map :id to-commit))]
-                    (mapv (fn [m]
-                            (if (contains? to-commit-ids (:id m))
-                              (assoc m :committed true)
-                              m))
-                          prev))))))))
+       (when scrollback-on?
+         (let [to-commit (committable_now messages streaming)
+               br        (when-let [br (:block-renderers agent)] @br)
+               columns   (or (.-columns stdout) 80)]
+           (dbg/debug "commit-sweep"
+                      "state"
+                      {:streaming   streaming
+                       :n-msgs      (count messages)
+                       :to-commit   (count to-commit)
+                       :roles       (mapv :role to-commit)
+                       :ids         (mapv :id to-commit)})
+           (when (seq to-commit)
+             (doseq [msg to-commit]
+               (dbg/debug "commit-sweep"
+                          (str "writing " (:role msg) " " (:id msg) " "
+                               (.slice (str (or (:content msg) "")) 0 40)))
+               (commit_to_scrollback_BANG_
+                #js {:write write
+                     :message msg
+                     :theme theme
+                     :block-renderers br
+                     :columns columns}))
+             (dbg/debug "commit-sweep"
+                        "marking committed"
+                        {:ids (mapv :id to-commit)})
+             (set-messages
+              (fn [prev]
+                (let [to-commit-ids (set (map :id to-commit))]
+                  (mapv (fn [m]
+                          (if (contains? to-commit-ids (:id m))
+                            (assoc m :committed true)
+                            m))
+                        prev)))))))
        js/undefined)
-     #js [messages])
+     #js [messages streaming])
 
     ;; Wire extension UI hooks
     (useEffect
@@ -399,7 +415,7 @@
          (set! (.-showOverlay ui)
                (fn [content & [opts]]
                  (if (and opts (.-transparent opts))
-                   (set-overlay #js {:__overlay-content content :__transparent true})
+                   (set-overlay #js {:__overlayContent content :__transparent true})
                    (set-overlay content))
                  (emit! "overlay_open" {:overlay-type "custom"})))
          (set! (.-setWidget ui)
@@ -470,14 +486,18 @@
                     (if text
                       (assoc prev id text)
                       (dissoc prev id))))))
-          ;; Widget system
+          ;; Widget system. setWidget(id, lines, pos?, priority?, maxLines?)
+          ;; — maxLines is optional; WidgetContainer falls back to its own
+          ;; default (20) when nil. Producers emitting large widgets should
+          ;; either bump maxLines explicitly or switch to an overlay.
          (set! (.-setWidget ui)
-               (fn [id lines & [pos priority]]
+               (fn [id lines & [pos priority max-lines]]
                  (set-widgets
                   (fn [w]
-                    (assoc w id {:lines (if (array? lines) (vec lines) lines)
-                                 :position (or pos "below")
-                                 :priority (or priority 0)})))))
+                    (assoc w id (cond-> {:lines (if (array? lines) (vec lines) lines)
+                                         :position (or pos "below")
+                                         :priority (or priority 0)}
+                                  max-lines (assoc :max-lines max-lines)))))))
          (set! (.-clearWidget ui)
                (fn [id]
                  (set-widgets (fn [w] (dissoc w id)))))
@@ -713,7 +733,9 @@
            (kbr/matches? reg input key "app.interrupt")
            (do
              (emit! "keybinding_activated" {:action-id "app.interrupt" :input input})
-             (when streaming ((:abort agent))))
+             (when streaming
+               (when-let [ctrl-atom (:abort-controller agent)]
+                 (.abort @ctrl-atom))))
 
            (kbr/matches? reg input key "app.help")
             ;; Open help overlay only when editor is empty — matches oh-my-pi UX.
@@ -761,10 +783,16 @@
       ;; as content accumulates. Banner was already printed to stdout
       ;; before Ink mounted (see modes/interactive.cljs).
       ;;
-      ;; This matches Claude Code: the editor is at the cursor
-      ;; position, not pinned to the terminal bottom. No empty middle,
-      ;; no wasted vertical space.
-      #jsx [Box {:flexDirection "column"}
+      ;; height=term-rows tells Ink the exact terminal budget so it never
+      ;; over-clears after a scrollback commit. The content area (flexGrow 1)
+      ;; fills the space above the fixed-height editor+status+footer, keeping
+      ;; the editor pinned to the bottom with no blank lines below it.
+      ;; (Pattern from combray.prose.sh/2025-11-28-ink-tui-expandable-layout)
+      ;; When scrollback-on?: natural flow — no fixed height, Ink region
+      ;; shrinks as messages are committed above it.
+      ;; When NOT scrollback-on?: fixed height pins editor to bottom.
+      #jsx [Box {:flexDirection "column"
+                 :height (when-not scrollback-on? term-rows)}
             (when-let [custom-header (safe-react-child
                                       (when custom-header-fn (custom-header-fn))
                                       "custom-header")]
@@ -775,20 +803,37 @@
                             [Text {:color "#7aa2f7" :bold true} custom-header]]
                       custom-header)])
             [WidgetContainer {:widgets widgets :position "above"}]
-            (if (and (empty? messages) (not streaming))
-              #jsx [WelcomeScreen {:agent agent :theme theme
-                                   :sessions-dir (:sessions-dir resources)}]
-              ;; scrollback-mode flows from settings :scrollback-mode.
-              ;; OFF (default): current Static-based rendering. ON:
-              ;; in-flight-only rendering; commits go to scrollback.
-              #jsx [ChatView {:messages messages :theme theme
-                              :streaming streaming
-                              :scrollback-mode (boolean
-                                                (when-let [sm (:settings resources)]
-                                                  (:scrollback-mode ((:get sm)))))
-                              :block-renderers (when-let [br (:block-renderers agent)]
-                                                 @br)}])
-            [WidgetContainer {:widgets widgets :position "below"}]
+            (if overlay
+              ;; Overlay active: fill available space above the editor, centered.
+              (let [is-transparent (and (some? overlay) (not (string? overlay))
+                                        (not (number? overlay)) (.-__transparent overlay))
+                    raw-content    (if is-transparent (.-__overlayContent overlay) overlay)
+                    content        (safe-react-child raw-content "overlay")]
+                (when content
+                  #jsx [Box {:flexGrow 1
+                             :flexDirection "column"
+                             :justifyContent "center"
+                             :alignItems "center"}
+                        [Overlay {:onClose (fn [] (set-overlay nil))
+                                  :transparent is-transparent}
+                         content]]))
+              ;; Normal: show chat/welcome + below-widgets.
+              ;; When scrollback-off: flexGrow + overflow "hidden" pins editor
+              ;; and prevents in-flight content from pushing it off-screen.
+              ;; When scrollback-on: natural flow, no flexGrow needed.
+              #jsx [Box {:key           "content"
+                         :flexGrow      (when-not scrollback-on? 1)
+                         :flexDirection "column"
+                         :overflow      (when-not scrollback-on? "hidden")}
+                    (if (and (empty? messages) (not streaming))
+                      #jsx [WelcomeScreen {:key "welcome" :agent agent :theme theme
+                                           :sessions-dir (:sessions-dir resources)}]
+                      #jsx [ChatView {:key "chat" :messages messages :theme theme
+                                      :streaming streaming
+                                      :scrollback-mode scrollback-on?
+                                      :block-renderers (when-let [br (:block-renderers agent)]
+                                                         @br)}])
+                    #jsx [WidgetContainer {:key "widgets-below" :widgets widgets :position "below"}]])
             ;; Status line sits directly above the editor (oh-my-pi style,
             ;; and consistent with Claude Code / Codex / Gemini CLI).
             [StatusLine {:agent    agent
@@ -796,21 +841,6 @@
                          :settings (when-let [sm (:settings resources)]
                                      ((:get sm)))
                          :max-width (or (.-columns stdout) 80)}]
-            (when overlay
-              (let [is-transparent (and (some? overlay) (not (string? overlay))
-                                        (not (number? overlay)) (.-__transparent overlay))
-                    raw-content    (if is-transparent (.-__overlay-content overlay) overlay)
-                    content        (safe-react-child raw-content "overlay")]
-                (when content
-                  #jsx [Box {:position "absolute"
-                             :flexDirection "column"
-                             :width "100%"
-                             :height (max 1 (dec term-rows))
-                             :justifyContent "center"
-                             :alignItems "center"}
-                        [Overlay {:onClose (fn [] (set-overlay nil))
-                                  :transparent is-transparent}
-                         content]])))
             ;; :key changes (bumped by `set-editor-remount-key`) force
             ;; ink-text-input to remount with a fresh cursorOffset at
             ;; the end of the new value. Used after picker commits

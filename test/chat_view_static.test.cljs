@@ -142,10 +142,28 @@
 ;;; (box-drawing chars not bleeding into later frames) is therefore only
 ;;; verifiable with 3+ renders, or in a real terminal.
 ;;;
-;;; What we verify here:
+;;; What we verify here (best-effort through ink-testing-library):
 ;;;   • The "live" last message is always in lastFrame.
 ;;;   • Prior-turn content appears somewhere in the frames history (not lost).
 ;;;   • No crashes under multi-turn or streaming rerender.
+;;;
+;;; Where the AUTHORITATIVE region-assignment invariant lives:
+;;;   • test/ui_layout.test.cljs `compute-turn-split: no-jump invariant`
+;;;     — pure-function tests, including `"frame-by-frame simulation"`,
+;;;     assert that past-turn content never appears in the `live` slice
+;;;     as messages accumulate. That is the regression test for "past
+;;;     turn stays in Static / past turn stays committed to scrollback".
+;;;   • test/scrollback.test.cljs `committable-now (eager sub-message
+;;;     commit)` + `shrink-bound invariant` — pin that each sub-message
+;;;     of a streaming turn is eligible to be committed exactly when it
+;;;     stops being the tail, so the dynamic region can never balloon
+;;;     large enough to leak via Ink's log-update overflow.
+;;;
+;;; The tests below cover ink-rendering smoke (render + rerender doesn't
+;;; crash; content appears somewhere). They CANNOT distinguish Static vs
+;;; dynamic region placement because ink-testing-library writes both
+;;; regions atomically every frame. Don't strengthen these without
+;;; replacing ink-testing-library with a split-stream harness.
 
 (describe "ChatView: live-region and scrollback"
           (fn []

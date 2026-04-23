@@ -298,6 +298,67 @@
                  past-turn))
       [])))
 
+(defn committable-completed-turn
+  "Return all non-committed, non-tool-start messages.
+
+   Called when streaming just transitioned true→false (the full turn is done,
+   including any tool iterations). Unlike committable-past-turn this does NOT
+   require a following user message — the turn is complete right now.
+
+   Pure. Tested directly."
+  [messages]
+  (filterv (fn [m]
+             (and (not= (:role m) "tool-start")
+                  (not (:committed m))))
+           messages))
+
+(defn committable-now
+  "Messages that are safe to commit to terminal scrollback RIGHT NOW.
+
+   Per-sub-message eager commit rule that keeps the dynamic region
+   bounded. The invariant: everything that is FINALIZED gets committed
+   to real scrollback, so the dynamic region only holds the currently-
+   streaming tail and any later-arriving messages that are still in
+   flight. When streaming ends, even the tail is finalized and should
+   commit — leaving it in the dynamic region means every keypress
+   re-renders the whole response, and its top row leaks into permanent
+   scrollback one line at a time (the reported `Thought pill` bug).
+
+   Excluded from commit:
+     * already :committed
+     * tool-start (still in flight — no result yet)
+     * the LAST message IFF streaming is true (partial content — we
+       can't commit a half-written message). When streaming is false
+       the tail is complete and IS committable.
+
+   Why two signatures: the 1-arg form `(committable-now messages)` is
+   kept for backwards-compatibility with tests. It behaves as if
+   streaming is TRUE (conservative — never commits the tail), which
+   is the safe default when the caller has no streaming signal. The
+   real app wiring uses the 2-arg form.
+
+   Cosmetic trade-off: the 2-arg form's stream-end commit causes the
+   dynamic region to shrink in a single frame; Ink's log-update clears
+   more rows than the new (smaller) region rewrites, so there will be
+   a brief blank gap below the editor until the next render absorbs
+   it. That's strictly better than the alternative — a per-keypress
+   line leak — because the gap is a one-time cosmetic, while the leak
+   is a continuous, user-visible corruption of scrollback.
+
+   Pure. Tested directly."
+  ([messages] (committable-now messages true))
+  ([messages streaming]
+   (let [v        (vec messages)
+         last-idx (dec (count v))]
+     (vec
+      (keep-indexed
+       (fn [i m]
+         (when (and (not= (:role m) "tool-start")
+                    (not (:committed m))
+                    (not (and streaming (= i last-idx))))
+           m))
+       v)))))
+
 ;;; ─── Public API ─────────────────────────────────────────────────
 
 (defn render-message-to-string

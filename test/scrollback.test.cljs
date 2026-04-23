@@ -13,6 +13,8 @@
                                                  commit_to_scrollback_BANG_
                                                  last_user_index
                                                  committable_past_turn
+                                                 committable_completed_turn
+                                                 committable_now
                                                  print_header_banner_BANG_]]
             ["./agent/ui/tool_status.jsx" :refer [format_one_line_result_for_tool]]))
 
@@ -375,6 +377,429 @@
                         result (committable_past_turn msgs)]
                     ;; No past turn — only one turn in flight.
                     (-> (expect (.-length result)) (.toBe 0)))))))
+
+;;; ─── committable-completed-turn ────────────────────────────────
+;;;
+;;; Utility that returns ALL non-committed, non-tool-start messages.
+;;; Kept as a tested utility (may be used in future optimisations).
+;;; NOTE: the no-jump fix is in ChatView (in-flight = live, not
+;;; filterv-committed) — see compute-turn-split no-jump tests below.
+
+(describe "committable-completed-turn"
+          (fn []
+
+            (it "returns all messages for a single completed turn"
+                ;; This is the key case: turn 1 ends, streaming goes false.
+                ;; Both messages must be returned so they can be committed
+                ;; before the user types question 2 — preventing the jump.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}]
+                        result (committable_completed_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 2))
+                    (-> (expect (.-id (aget result 0))) (.toBe "u1"))
+                    (-> (expect (.-id (aget result 1))) (.toBe "a1")))))
+
+            (it "skips already-committed messages"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "a1" :id "a1"}]
+                        result (committable_completed_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "a1")))))
+
+            (it "skips tool-start (in-flight)"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "tool-start" :tool-name "Read" :id "t1"}
+                                  #js {:role "assistant" :content "done" :id "a1"}]
+                        result (committable_completed_turn msgs)]
+                    ;; tool-start filtered, user and assistant included
+                    (-> (expect (.-length result)) (.toBe 2))
+                    (-> (expect (.-id (aget result 0))) (.toBe "u1"))
+                    (-> (expect (.-id (aget result 1))) (.toBe "a1")))))
+
+            (it "returns [] for empty messages"
+                (fn []
+                  (let [result (committable_completed_turn #js [])]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "returns [] when all messages already committed"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "a1" :id "a1" :committed true}]
+                        result (committable_completed_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "includes multi-turn messages (all uncommitted, streaming just ended)"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}
+                                  #js {:role "assistant" :content "a2" :id "a2"}]
+                        result (committable_completed_turn msgs)]
+                    (-> (expect (.-length result)) (.toBe 4)))))
+
+            (it "commits all uncommitted messages and writes to stdout"
+                ;; Functional smoke test: given [u1, a1], all are returned
+                ;; and write() is called once per message.
+                (fn []
+                  (let [writes (atom [])
+                        write  (fn [d] (swap! writes conj d))
+                        msgs   #js [#js {:role "user" :content "q1" :id "u1"}
+                                    #js {:role "assistant" :content "a1" :id "a1"}]
+                        to-commit (committable_completed_turn msgs)]
+                    (doseq [m to-commit]
+                      (commit_to_scrollback_BANG_
+                       #js {:write write :message m
+                            :theme (clj->js {:colors {:primary "#7aa2f7"
+                                                      :secondary "#9ece6a"
+                                                      :muted "#565f89"}})
+                            :block-renderers nil :columns 80}))
+                    ;; Both messages written to scrollback
+                    (-> (expect (count @writes)) (.toBe 2)))))))
+
+;;; ─── committable-now (eager per-sub-message commit) ────────────
+;;;
+;;; These tests pin the REGRESSION that caused "❯ prompt" to appear
+;;; 19 times during streaming. Root cause: Ink's log-update can't
+;;; clear lines that have scrolled off-screen, so when the dynamic
+;;; region overflowed the terminal (user prompt + assistant text +
+;;; tool output + more assistant text all in flight), the top of
+;;; the region leaked permanently into scrollback — once per frame.
+;;;
+;;; Fix: commit each sub-message as soon as it stops being the
+;;; currently-streaming tail. Keeps the dynamic region bounded to
+;;; at most one sub-message, so overflow (and leak) can't happen.
+
+(describe "committable-now (eager sub-message commit)"
+          (fn []
+
+            (it "empty messages → []"
+                (fn []
+                  (-> (expect (.-length (committable_now #js []))) (.toBe 0))))
+
+            (it "single user message → [] (user is the tail)"
+                ;; Right after submit, before any chunk arrives. User is
+                ;; the only (and therefore last) message — keep it in the
+                ;; dynamic region so the editor stays anchored below it.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}]]
+                    (-> (expect (.-length (committable_now msgs))) (.toBe 0)))))
+
+            (it "user + partial assistant → [user] (assistant is the tail)"
+                ;; First chunk arrived, assistant message created.
+                ;; User can commit now — it's no longer the tail.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "hi" :id "a1"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "u1")))))
+
+            (it "user-committed + partial assistant → [] (user already committed, assistant is tail)"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "hi" :id "a1"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "user + assistant + tool-start → [assistant] (tool-start is tail but filtered anyway)"
+                ;; Tool fired during assistant's turn. tool-start is both
+                ;; tail AND excluded by the tool-start rule.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "thinking" :id "a1"}
+                                  #js {:role "tool-start" :tool-name "Read" :id "t1"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "a1")))))
+
+            (it "user + assistant + tool-end + partial A2 → [assistant, tool-end]"
+                ;; Tool finished (replaced tool-start in place), A2 started.
+                ;; The completed assistant bubble AND the finished tool-end
+                ;; can both commit now — A2 is the new tail.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "thinking" :id "a1"}
+                                  #js {:role "tool-end" :tool-name "Read" :result "ok" :id "t1"}
+                                  #js {:role "assistant" :content "second" :id "a2"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 2))
+                    (-> (expect (.-id (aget result 0))) (.toBe "a1"))
+                    (-> (expect (.-id (aget result 1))) (.toBe "t1")))))
+
+            (it "mid-stream (streaming=true): tail is NOT committed"
+                ;; While streaming is in progress, the tail is partial
+                ;; content — committing would write a half-written
+                ;; message to permanent scrollback. Keep it dynamic.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "partial" :id "a1"}]
+                        result (committable_now msgs true)]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "stream-end (streaming=false): tail IS committed"
+                ;; When streaming transitions true→false, the final
+                ;; assistant message is complete. Commit it — otherwise
+                ;; every keypress in the editor re-renders the full
+                ;; bubble and each re-render leaks the top row into
+                ;; permanent scrollback (stacked `✻ Thought` pill bug).
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "done" :id "a1"}]
+                        result (committable_now msgs false)]
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "a1")))))
+
+            (it "1-arg form defaults to streaming=true (conservative)"
+                ;; Back-compat: callers that don't pass streaming are
+                ;; treated as if mid-stream — safe default (never
+                ;; commit a possibly-partial tail).
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "done" :id "a1"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 0)))))
+
+            (it "new user submit makes previous assistant committable"
+                ;; This is the transition: user types Q2. The previous
+                ;; A1 is no longer the tail — Q2 is. A1 commits now,
+                ;; which scrolls it to real terminal scrollback.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "done" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        result (committable_now msgs)]
+                    (-> (expect (.-length result)) (.toBe 1))
+                    (-> (expect (.-id (aget result 0))) (.toBe "a1")))))
+
+            (it "all already committed → []"
+                (fn []
+                  (let [msgs #js [#js {:role "user" :id "u1" :committed true}
+                                  #js {:role "assistant" :id "a1" :committed true}]]
+                    (-> (expect (.-length (committable_now msgs))) (.toBe 0)))))
+
+            (it "REGRESSION: user prompt commits before assistant text grows past terminal"
+                ;; The original bug: [u1, a1-small] → [u1, a1-big] → [u1, a1-huge].
+                ;; Each growth step had u1 AT THE TOP of the dynamic region.
+                ;; When a1 overflowed the terminal, u1 scrolled off-screen
+                ;; and Ink's log-update couldn't clear it — each subsequent
+                ;; frame re-wrote u1 into permanent scrollback above the
+                ;; cleared region. 19+ copies accumulated.
+                ;;
+                ;; After this fix: on the very first chunk that creates a1,
+                ;; committable-now returns [u1]. The sweep commits u1 once
+                ;; to scrollback. On every subsequent chunk, u1 is already
+                ;; :committed and absent from in-flight. Only a1 lives in
+                ;; the dynamic region, so there's no "top-that-scrolls-off"
+                ;; for log-update to leak.
+                (fn []
+                  (let [u1   #js {:role "user" :content "what framework" :id "u1"}
+                        a1-partial #js {:role "assistant" :content "a" :id "a1"}
+                        first-chunk (committable_now #js [u1 a1-partial])]
+                    ;; First chunk: u1 is immediately eligible for commit.
+                    (-> (expect (.-length first-chunk)) (.toBe 1))
+                    (-> (expect (.-id (aget first-chunk 0))) (.toBe "u1")))
+                  ;; After the sweep runs, u1 is :committed. The second
+                  ;; chunk (a1 grows) must find nothing to commit — and,
+                  ;; critically, ChatView's in-flight filter must drop u1
+                  ;; so it's not re-rendered as "top of dynamic region".
+                  (let [u1c  #js {:role "user" :content "what framework" :id "u1" :committed true}
+                        a1-bigger #js {:role "assistant" :content "aaaa" :id "a1"}
+                        second-chunk (committable_now #js [u1c a1-bigger])]
+                    (-> (expect (.-length second-chunk)) (.toBe 0)))))))
+
+;;; ─── Shrink-bound invariant (blank-lines-below-editor) ─────────
+;;;
+;;; When the commit sweep fires, React re-renders the ChatView with
+;;; the just-committed messages filtered out of in-flight. Ink's
+;;; log-update clears the PREVIOUS lastOutput height and writes the
+;;; new (smaller) output. The N_old - N_new lines are left blank
+;;; below the editor — the "blank space after a response" visual.
+;;;
+;;; We can't control Ink's clear/rewrite behavior, but we CAN bound
+;;; how big the shrink is by controlling what `committable-now`
+;;; returns at each frame. The invariant we pin here: at any point
+;;; in a realistic streaming session, each commit sweep reduces
+;;; in-flight by a bounded, predictable number of messages — never
+;;; by "all of them at once" (which would be the worst-case blank
+;;; gap). Combined with "tail is always kept", this caps the blank
+;;; region to at most a handful of lines in practice.
+;;;
+;;; These are simulation tests: we walk through messages growing
+;;; frame-by-frame (as React would see them during streaming) and
+;;; assert the in-flight size AND the commit-sweep delta at each
+;;; step. If a future change ever makes committable-now greedier
+;;; or more conservative, these tests catch the regression in the
+;;; visual invariant before it reaches the user.
+
+(defn- in-flight-after-sweep
+  "Simulate one useEffect cycle: compute committable-now, mark those
+   messages :committed in the state, and return the resulting
+   in-flight slice (== filter-uncommitted) that ChatView would render.
+
+   Second arg `streaming` is forwarded to committable-now (defaults to
+   true — mid-stream — to match the 1-arg back-compat default)."
+  ([messages] (in-flight-after-sweep messages true))
+  ([messages streaming]
+   (let [to-commit (committable_now messages streaming)
+         to-commit-ids (into #{} (map #(.-id %) to-commit))
+         after (.map messages
+                     (fn [m]
+                       (if (contains? to-commit-ids (.-id m))
+                         (let [clone (js/Object.assign #js {} m)]
+                           (set! (.-committed clone) true)
+                           clone)
+                         m)))]
+     {:to-commit to-commit
+      :after     after
+      :in-flight (.filter after (fn [m] (not (.-committed m))))})))
+
+(describe "shrink-bound invariant (blank-lines-below-editor)"
+          (fn []
+
+            (it "single-turn streaming: in-flight never exceeds 2"
+                ;; Walk through Q1 submit → A1 first chunk → A1 grows.
+                ;; At every step, after the sweep fires, the dynamic
+                ;; region should hold at most 2 messages — current tail
+                ;; and anything not-yet-committable. In practice, always
+                ;; exactly 1 after the first sweep.
+                (fn []
+                  (let [q1 #js {:role "user" :content "q1" :id "u1"}
+                        ;; State A: user just submitted, no chunks yet.
+                        state-a (in-flight-after-sweep #js [q1])]
+                    ;; u1 is the tail → not committable → stays visible.
+                    (-> (expect (.-length (:in-flight state-a))) (.toBe 1)))
+                  ;; State B: first A1 chunk arrives. u1 can now commit.
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "h" :id "a1"}]
+                        state-b (in-flight-after-sweep msgs)]
+                    ;; Only a1 left in-flight (u1 committed to scrollback).
+                    (-> (expect (.-length (:to-commit state-b))) (.toBe 1))
+                    (-> (expect (.-length (:in-flight state-b))) (.toBe 1))
+                    (-> (expect (.-id (aget (:in-flight state-b) 0))) (.toBe "a1")))
+                  ;; State C: a1 grows through many chunks.
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "hello world this is longer" :id "a1"}]
+                        state-c (in-flight-after-sweep msgs)]
+                    ;; Nothing more to commit; a1 stays as-tail.
+                    (-> (expect (.-length (:to-commit state-c))) (.toBe 0))
+                    (-> (expect (.-length (:in-flight state-c))) (.toBe 1)))))
+
+            (it "stream-end (streaming=false): tail commits, in-flight drops to 0"
+                ;; When streaming transitions true→false, the final
+                ;; assistant bubble is finalized. The sweep commits it
+                ;; to scrollback; the dynamic region then holds nothing
+                ;; until the next user submit. This is what prevents
+                ;; the per-keypress `✻ Thought` pill leak — once a1 is
+                ;; in real scrollback, editor keypresses can't re-render
+                ;; it (and therefore can't overflow it).
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "done" :id "a1"}]
+                        state (in-flight-after-sweep msgs false)]
+                    (-> (expect (.-length (:to-commit state))) (.toBe 1))
+                    (-> (expect (.-id (aget (:to-commit state) 0))) (.toBe "a1"))
+                    (-> (expect (.-length (:in-flight state))) (.toBe 0)))))
+
+            (it "mid-stream (streaming=true): tail stays in dynamic region"
+                ;; While streaming, the tail is partial. Leave it in
+                ;; the dynamic region so the user sees updates live.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "partial" :id "a1"}]
+                        state (in-flight-after-sweep msgs true)]
+                    (-> (expect (.-length (:to-commit state))) (.toBe 0))
+                    (-> (expect (.-length (:in-flight state))) (.toBe 1))
+                    (-> (expect (.-id (aget (:in-flight state) 0))) (.toBe "a1")))))
+
+            (it "next-turn submit: shrink bound is ≤ 1 message"
+                ;; User types Q2. Previous tail (A1) is now past-tail and
+                ;; commits. Dynamic region shrinks from {A1, Q2} to {Q2}.
+                ;; That's a SHRINK OF ONE MESSAGE — the bound we pin. If
+                ;; a future change committed multiple messages at this
+                ;; transition (e.g. grouping), the blank region would be
+                ;; proportionally larger.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                  #js {:role "assistant" :content "a1-done" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]
+                        state (in-flight-after-sweep msgs)]
+                    (-> (expect (.-length (:to-commit state))) (.toBe 1))
+                    (-> (expect (.-id (aget (:to-commit state) 0))) (.toBe "a1"))
+                    (-> (expect (.-length (:in-flight state))) (.toBe 1))
+                    (-> (expect (.-id (aget (:in-flight state) 0))) (.toBe "u2")))))
+
+            (it "tool call mid-turn: in-flight shrinks incrementally, never all at once"
+                ;; Realistic multi-phase turn: user → assistant text →
+                ;; tool-start → tool-end → more assistant text.
+                ;; The commit sweep fires after each messages change. We
+                ;; simulate each frame and assert that at no step does
+                ;; the dynamic region shrink by more than the sub-message
+                ;; that just became past-tail.
+                (fn []
+                  ;; Frame 1: first chunk of a1 (thinking).
+                  (let [f1 #js [#js {:role "user" :content "q1" :id "u1"}
+                                #js {:role "assistant" :content "think" :id "a1"}]
+                        s1 (in-flight-after-sweep f1)]
+                    ;; u1 commits, a1 stays.
+                    (-> (expect (.-length (:to-commit s1))) (.toBe 1))
+                    (-> (expect (.-length (:in-flight s1))) (.toBe 1)))
+                  ;; Frame 2: tool-start appended.
+                  (let [f2 #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                #js {:role "assistant" :content "think done" :id "a1"}
+                                #js {:role "tool-start" :tool-name "Read" :id "t1"}]
+                        s2 (in-flight-after-sweep f2)]
+                    ;; a1 is past-tail now; tool-start is skipped anyway.
+                    (-> (expect (.-length (:to-commit s2))) (.toBe 1))
+                    (-> (expect (.-id (aget (:to-commit s2) 0))) (.toBe "a1"))
+                    ;; In-flight: a1* (just committed, filtered) and
+                    ;; tool-start — but filter-uncommitted drops a1, so 1.
+                    (-> (expect (.-length (:in-flight s2))) (.toBe 1)))
+                  ;; Frame 3: tool-end replaces tool-start in place.
+                  (let [f3 #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                #js {:role "assistant" :content "think done" :id "a1" :committed true}
+                                #js {:role "tool-end" :tool-name "Read" :result "ok" :id "t1"}]
+                        s3 (in-flight-after-sweep f3)]
+                    ;; tool-end is the new tail, not committable.
+                    (-> (expect (.-length (:to-commit s3))) (.toBe 0))
+                    (-> (expect (.-length (:in-flight s3))) (.toBe 1)))
+                  ;; Frame 4: a2 chunk after tool-end.
+                  (let [f4 #js [#js {:role "user" :content "q1" :id "u1" :committed true}
+                                #js {:role "assistant" :content "think done" :id "a1" :committed true}
+                                #js {:role "tool-end" :tool-name "Read" :result "ok" :id "t1"}
+                                #js {:role "assistant" :content "final" :id "a2"}]
+                        s4 (in-flight-after-sweep f4)]
+                    ;; tool-end commits (past-tail), a2 stays.
+                    (-> (expect (.-length (:to-commit s4))) (.toBe 1))
+                    (-> (expect (.-id (aget (:to-commit s4) 0))) (.toBe "t1"))
+                    (-> (expect (.-length (:in-flight s4))) (.toBe 1)))))
+
+            (it "BOUND: in-flight is always ≤ 1 after a sweep (except when tail is user with no follow-up)"
+                ;; Strong invariant: after the sweep completes, ChatView
+                ;; renders AT MOST ONE uncommitted message. This is what
+                ;; makes the blank-lines-below issue cosmetic rather than
+                ;; catastrophic — the dynamic region's max height is
+                ;; bounded by a single sub-message's height, not the
+                ;; entire turn's.
+                (fn []
+                  ;; Try every interesting shape.
+                  (let [shapes [#js []
+                                #js [#js {:role "user" :id "u1"}]
+                                #js [#js {:role "user" :id "u1" :committed true}
+                                     #js {:role "assistant" :id "a1"}]
+                                #js [#js {:role "user" :id "u1" :committed true}
+                                     #js {:role "assistant" :id "a1" :committed true}
+                                     #js {:role "tool-end" :id "t1" :result "x"}]
+                                #js [#js {:role "user" :id "u1" :committed true}
+                                     #js {:role "assistant" :id "a1" :committed true}
+                                     #js {:role "tool-end" :id "t1" :result "x" :committed true}
+                                     #js {:role "assistant" :id "a2"}]]]
+                    (doseq [shape shapes]
+                      (let [state (in-flight-after-sweep shape)]
+                        (-> (expect (<= (.-length (:in-flight state)) 1))
+                            (.toBe true)))))))))
 
 ;;; ─── Sweep integration (end-to-end commit flow) ────────────────
 ;;;
@@ -743,3 +1168,76 @@
                     ;; Strip ANSI, check no newlines
                               (let [plain (.replace out (js/RegExp. "\\x1b\\[[0-9;]*m" "g") "")]
                                 (-> (expect (.includes plain "\n")) (.toBe false)))))))))
+
+;;; ─── Commit-sweep strategy contract ────────────────────────────
+;;;
+;;; These tests pin the commit strategy that app.cljs MUST use.
+;;;
+;;; REGRESSION HISTORY (2025-04-22):
+;;;   app.cljs was accidentally switched from committable-past-turn to
+;;;   committable-now. With scrollback-mode defaulting ON, the entire
+;;;   conversation was committed to scrollback immediately after each
+;;;   response — making messages "appear near the top and disappear
+;;;   almost immediately". The tests below ensure the two strategies
+;;;   behave differently enough that using the wrong one is detectable.
+;;;
+;;;   The invariant: committable-past-turn returns NOTHING for a
+;;;   single-turn conversation (the current exchange must stay visible).
+;;;   committable-now returns the user message immediately. Any caller
+;;;   that uses committable-now for the main commit sweep will fail
+;;;   this contract.
+
+(describe "commit-sweep strategy: past-turn vs now"
+          (fn []
+
+            (it "past-turn: single turn in progress — nothing to commit"
+                ;; app.cljs must use committable-past-turn, NOT committable-now.
+                ;; With past-turn the CURRENT exchange always stays in the Ink
+                ;; region. With committable-now the user message is committed
+                ;; immediately after the first assistant chunk, making content
+                ;; vanish from view.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "hello" :id "u1"}
+                                  #js {:role "assistant" :content "hi" :id "a1"}]]
+                    ;; committable-past-turn: no past turn exists → nothing committed
+                    (-> (expect (.-length (committable_past_turn msgs)))
+                        (.toBe 0)))))
+
+            (it "now: single turn in progress — user message IS committed immediately"
+                ;; Confirm that committable-now has different behavior.
+                ;; If the app ever uses this for its main sweep, the user
+                ;; message disappears after the first assistant chunk.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "hello" :id "u1"}
+                                  #js {:role "assistant" :content "hi" :id "a1"}]]
+                    ;; committable-now: u1 is no longer tail → returns u1
+                    (-> (expect (.-length (committable_now msgs)))
+                        (.toBe 1))
+                    (-> (expect (.-id (aget (committable_now msgs) 0)))
+                        (.toBe "u1")))))
+
+            (it "past-turn: after user submits again, prev turn becomes committable"
+                ;; The moment a second user message arrives, turn-1 is past
+                ;; and both its messages become eligible. This is the only time
+                ;; past-turn commits — the current exchange always stays visible.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "q1" :id "u1"}
+                                  #js {:role "assistant" :content "a1" :id "a1"}
+                                  #js {:role "user" :content "q2" :id "u2"}]]
+                    (let [result (committable_past_turn msgs)]
+                      (-> (expect (.-length result)) (.toBe 2))
+                      (-> (expect (.-id (aget result 0))) (.toBe "u1"))
+                      (-> (expect (.-id (aget result 1))) (.toBe "a1")))
+                    ;; u2 (current turn) must NOT be in the result
+                    (-> (expect (boolean (some #(= (.-id %) "u2") (committable_past_turn msgs))))
+                        (.toBe false)))))
+
+            (it "past-turn: streaming response — ZERO messages committed"
+                ;; Critical: while the user is watching the stream, nothing
+                ;; should vanish. Any function that returns >0 here is wrong
+                ;; for the app commit-sweep role.
+                (fn []
+                  (let [msgs #js [#js {:role "user" :content "tell me a story" :id "u1"}
+                                  #js {:role "assistant" :content "once upon" :id "a1"}]]
+                    (-> (expect (.-length (committable_past_turn msgs)))
+                        (.toBe 0)))))))
