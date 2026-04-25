@@ -9,7 +9,9 @@
             [agent.ui.autocomplete-builtins :as ac-builtins]
             [agent.ui.chat-pane :refer [create-chat-pane]]
             [agent.ui.status-bar :refer [create-status-bar]]
-            [agent.ui.app-reducers :as reducers]))
+            [agent.ui.app-reducers :as reducers]
+            [agent.ui.editor-bash :as editor-bash]
+            [agent.ui.editor-eval :as editor-eval]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -222,6 +224,61 @@
                     (.addToHistory editor trimmed)
                     (run-command! agent trimmed update-messages!)
                     (reset! submit-lock false))
+
+                ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
+                (and (not @submit-lock)
+                     (not= :not-bash (:kind (editor-bash/parse-bash-input trimmed))))
+                (let [{:keys [kind command]} (editor-bash/parse-bash-input trimmed)]
+                  (reset! submit-lock true)
+                  (.addToHistory editor trimmed)
+                  (add-user-msg! trimmed)
+                  (-> (editor-bash/run-bash! agent command)
+                      (.then (fn [result]
+                               (let [content (editor-bash/format-bash-output result)
+                                     role    (if (:blocked? result) "error" "assistant")]
+                                 (update-messages!
+                                  (fn [msgs]
+                                    (conj (vec msgs)
+                                          {:role     role
+                                           :content  content
+                                           :id       (new-id)
+                                           :local-only (= kind :run-hidden)})))
+                                 ;; Inject into LLM context for !cmd (not !!cmd)
+                                 (when (= kind :run)
+                                   (swap! (:state agent) update :messages conj
+                                          {:role "user" :content (str trimmed "\n" content)}))
+                                 (reset! submit-lock false)
+                                 (sync-pane!))))
+                      (.catch (fn [e]
+                                (add-error! e)
+                                (reset! submit-lock false)))))
+
+                ;; ── $expr / $$expr — Babashka eval ───────────────────────
+                (and (not @submit-lock)
+                     (not= :not-eval (:kind (editor-eval/parse-eval-input trimmed))))
+                (let [{:keys [kind expr]} (editor-eval/parse-eval-input trimmed)]
+                  (reset! submit-lock true)
+                  (.addToHistory editor trimmed)
+                  (add-user-msg! trimmed)
+                  (-> (editor-eval/run-eval! expr)
+                      (.then (fn [result]
+                               (let [content (editor-eval/format-eval-output result)
+                                     role    (if (:unavailable? result) "error" "assistant")]
+                                 (update-messages!
+                                  (fn [msgs]
+                                    (conj (vec msgs)
+                                          {:role     role
+                                           :content  content
+                                           :id       (new-id)
+                                           :local-only (= kind :eval-hidden)})))
+                                 (when (= kind :eval)
+                                   (swap! (:state agent) update :messages conj
+                                          {:role "user" :content (str trimmed "\n" content)}))
+                                 (reset! submit-lock false)
+                                 (sync-pane!))))
+                      (.catch (fn [e]
+                                (add-error! e)
+                                (reset! submit-lock false)))))
 
                 ;; ── Normal LLM prompt ────────────────────────────────────
                 (not @submit-lock)
