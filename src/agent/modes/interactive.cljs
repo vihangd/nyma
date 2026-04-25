@@ -211,6 +211,7 @@
         (fn [text]
           (let [trimmed (.trim text)]
             (when (pos? (count trimmed))
+              ((:emit-async events) "input_submit" #js {:text trimmed})
               (cond
                 ;; ── Steer: mid-stream follow-up ──────────────────────────
                 @streaming
@@ -328,29 +329,60 @@
                                    (js/process.cwd)
                                    nil))
 
-    ;; Subscribe to tool lifecycle events
-    ((:on events) "tool_execution_start"  on-tool-start)
-    ((:on events) "tool_execution_end"    on-tool-end)
-    ((:on events) "tool_execution_update" on-tool-update)
+    ;; ── Session-level event handlers ──────────────────────────────────────
+    (let [on-model-select   (fn [_] (sync-status!))
+          on-session-clear  (fn [_]
+                              (reset! messages [])
+                              (reset! widgets {})
+                              (sync-pane!))
+          on-session-start  (fn [_]
+                              (reset! messages [])
+                              (reset! widgets {})
+                              (reset! turn-count 0)
+                              (sync-pane!)
+                              (sync-status!))]
 
-    ;; Layout: chat → status-bar → editor
-    (.addChild tui chat-pane)
-    (.addChild tui status-bar)
-    (.addChild tui editor)
-    (.setFocus tui editor)
+      ;; Subscribe to tool lifecycle events
+      ((:on events) "tool_execution_start"  on-tool-start)
+      ((:on events) "tool_execution_end"    on-tool-end)
+      ((:on events) "tool_execution_update" on-tool-update)
+      ((:on events) "model_select"          on-model-select)
+      ((:on events) "session_clear"         on-session-clear)
+      ((:on events) "session_start"         on-session-start)
 
-    ;; Initial status render
-    (sync-status!)
+      ;; Load prior conversation history from session (user+assistant messages only)
+      (when-let [s @(:session agent)]
+        (when-let [build (:build-context s)]
+          (let [history (build)]
+            (when (pos? (count history))
+              (reset! messages
+                      (mapv (fn [m] (assoc m :id (new-id)))
+                            (filter #(contains? #{"user" "assistant"} (:role %))
+                                    history)))
+              (sync-pane!)))))
 
-    ;; Global Ctrl+C → exit
-    (.addInputListener tui
-                       (fn [data]
-                         (when (matchesKey data "ctrl+c")
-                           (.stop tui)
-                           ((:off events) "tool_execution_start"  on-tool-start)
-                           ((:off events) "tool_execution_end"    on-tool-end)
-                           ((:off events) "tool_execution_update" on-tool-update)
-                           (js/process.exit 0))
-                         nil))
+      ;; Layout: chat → status-bar → editor
+      (.addChild tui chat-pane)
+      (.addChild tui status-bar)
+      (.addChild tui editor)
+      (.setFocus tui editor)
 
-    (.start tui)))
+      ;; Initial status render
+      (sync-status!)
+
+      ;; Global Ctrl+C → graceful exit
+      (.addInputListener tui
+                         (fn [data]
+                           (when (matchesKey data "ctrl+c")
+                             (.stop tui)
+                             ((:off events) "tool_execution_start"  on-tool-start)
+                             ((:off events) "tool_execution_end"    on-tool-end)
+                             ((:off events) "tool_execution_update" on-tool-update)
+                             ((:off events) "model_select"          on-model-select)
+                             ((:off events) "session_clear"         on-session-clear)
+                             ((:off events) "session_start"         on-session-start)
+                             ((:emit-async events) "session_shutdown" #js {:reason "user-exit"})
+                             (js/process.exit 0))
+                           nil))
+
+      (.start tui))))
