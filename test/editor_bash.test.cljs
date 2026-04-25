@@ -71,14 +71,14 @@
 
 (describe "format-bash-output"
           (fn []
-            (it "renders command header plus stdout"
+            (it "renders stdout without a command header"
                 (fn []
                   (let [s (format-bash-output
                            {:command   "echo hi"
                             :stdout    "hi\n"
                             :stderr    ""
                             :exit-code 0})]
-                    (-> (expect (.includes s "$ echo hi")) (.toBe true))
+                    (-> (expect (.includes s "$ echo hi")) (.toBe false))
                     (-> (expect (.includes s "hi"))        (.toBe true)))))
 
             (it "omits the exit footer on exit 0"
@@ -101,12 +101,13 @@
                     (-> (expect (.includes s "not found")) (.toBe true))
                     (-> (expect (.includes s "exit 127")) (.toBe true)))))
 
-            (it "renders a BLOCKED message for vetoed commands"
+            (it "renders a blocked message with reason, no command echo"
                 (fn []
                   (let [s (format-bash-output
                            {:blocked? true :reason "BLOCKED: dangerous"
                             :command "rm -rf /" :stdout "" :stderr "" :exit-code -1})]
-                    (-> (expect (.includes s "rm -rf /")) (.toBe true))
+                    (-> (expect (.includes s "rm -rf /")) (.toBe false))
+                    (-> (expect (.includes s "blocked:")) (.toBe true))
                     (-> (expect (.includes s "BLOCKED")) (.toBe true)))))
 
             (it "truncates very large output with a byte-count note"

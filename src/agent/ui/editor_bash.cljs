@@ -118,29 +118,24 @@
 ;;; ─── Pure: formatting the rendered message ──────────────
 
 (defn format-bash-output
-  "Build a human-readable text block for a run-bash! result. The
-   styled message renderer in app.cljs will lay this out with a
-   command header, dim body, and a colored exit-code footer — but
-   the string content produced here is also useful on its own (for
-   :role assistant fallback and for serialization to LLM context on
-   `!cmd` turns)."
+  "Build a human-readable text block for a run-bash! result.
+   Does NOT include a command header — the user message above already
+   shows what was typed. Returns just the output body and an exit-code
+   footer on non-zero exits. Used both for UI display and for injecting
+   into LLM context on `!cmd` turns."
   [{:keys [command blocked? reason stdout stderr exit-code]}]
   (cond
     blocked?
-    (str "$ " command "\n" (or reason "blocked"))
+    (str "blocked: " (or reason "command blocked"))
 
     :else
-    (let [out (exec/truncate-output stdout)
-          err (exec/truncate-output stderr)
-          body (cond
-                 (and (seq out) (seq err))
-                 (str out "\nstderr:\n" err)
-
-                 (seq out) out
-                 (seq err) (str "stderr:\n" err)
-                 :else     "")
+    (let [out    (exec/truncate-output stdout)
+          err    (exec/truncate-output stderr)
+          body   (cond
+                   (and (seq out) (seq err)) (str out "\nstderr:\n" err)
+                   (seq out)                 out
+                   (seq err)                 (str "stderr:\n" err)
+                   :else                     "")
           footer (when (and exit-code (not (zero? exit-code)))
-                   (str "\nexit " exit-code))]
-      (str "$ " command
-           (when (seq body) (str "\n" body))
-           footer))))
+                   (str "exit " exit-code))]
+      (str/join "\n" (filter seq [body footer])))))

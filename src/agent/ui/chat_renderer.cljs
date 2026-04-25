@@ -127,6 +127,11 @@
               (when (and is-end dur) (str " " DIM (.toFixed (/ dur 1000) 1) "s"))
               RESET)])
 
+      "shell"
+      (if (seq content)
+        (wrap+split (str mc DIM content RESET) w)
+        [])
+
       "error"
       (wrap+split (str ec "✗ " RESET content) w)
 

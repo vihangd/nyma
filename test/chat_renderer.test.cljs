@@ -171,6 +171,25 @@
                 (let [text (visible-text (render {:role "info" :content "ok" :id "1"}))]
                   (-> (expect (.includes text "ℹ")) (.toBe true))))))
 
+;;; ─── shell (bash/eval output) ────────────────────────────────────────────
+
+(describe "chat-renderer/shell" (fn [])
+          (it "renders shell output without a bullet prefix"
+              (fn []
+                (let [text (visible-text (render {:role "shell" :content "Cargo.lock\nCargo.toml" :id "1"}))]
+                  (-> (expect (.includes text "●")) (.toBe false))
+                  (-> (expect (.includes text "Cargo.lock")) (.toBe true)))))
+
+          (it "returns empty array for empty content"
+              (fn []
+                (let [lines (render {:role "shell" :content "" :id "1"})]
+                  (-> (expect (count lines)) (.toBe 0)))))
+
+          (it "returns empty array for nil content"
+              (fn []
+                (let [lines (render {:role "shell" :content nil :id "1"})]
+                  (-> (expect (count lines)) (.toBe 0))))))
+
 ;;; ─── widget (verbatim lines) ──────────────────────────────────────────────
 
 (describe "chat-renderer/widget" (fn [])

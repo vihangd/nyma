@@ -236,13 +236,13 @@
                   (-> (editor-bash/run-bash! agent command)
                       (.then (fn [result]
                                (let [content (editor-bash/format-bash-output result)
-                                     role    (if (:blocked? result) "error" "assistant")]
+                                     role    (if (:blocked? result) "error" "shell")]
                                  (update-messages!
                                   (fn [msgs]
                                     (conj (vec msgs)
-                                          {:role     role
-                                           :content  content
-                                           :id       (new-id)
+                                          {:role       role
+                                           :content    content
+                                           :id         (new-id)
                                            :local-only (= kind :run-hidden)})))
                                  ;; Inject into LLM context for !cmd (not !!cmd)
                                  (when (= kind :run)
@@ -264,13 +264,13 @@
                   (-> (editor-eval/run-eval! expr)
                       (.then (fn [result]
                                (let [content (editor-eval/format-eval-output result)
-                                     role    (if (:unavailable? result) "error" "assistant")]
+                                     role    (if (:unavailable? result) "error" "shell")]
                                  (update-messages!
                                   (fn [msgs]
                                     (conj (vec msgs)
-                                          {:role     role
-                                           :content  content
-                                           :id       (new-id)
+                                          {:role       role
+                                           :content    content
+                                           :id         (new-id)
                                            :local-only (= kind :eval-hidden)})))
                                  (when (= kind :eval)
                                    (swap! (:state agent) update :messages conj

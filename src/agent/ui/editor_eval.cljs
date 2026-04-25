@@ -211,6 +211,4 @@
                  :else     "")
           footer (when (and exit-code (not (zero? exit-code)))
                    (str "\nexit " exit-code))]
-      (str "λ " expr
-           (when (seq body) (str "\n" body))
-           footer))))
+      (str/join "\n" (filter seq [body footer])))))

@@ -91,14 +91,14 @@
 
 (describe "format-eval-output"
           (fn []
-            (it "renders a λ header plus stdout"
+            (it "renders stdout without a λ expr header"
                 (fn []
                   (let [s (format-eval-output
                            {:expr      "(+ 1 2)"
                             :stdout    "3\n"
                             :stderr    ""
                             :exit-code 0})]
-                    (-> (expect (.includes s "λ (+ 1 2)")) (.toBe true))
+                    (-> (expect (.includes s "λ (+ 1 2)")) (.toBe false))
                     (-> (expect (.includes s "3"))         (.toBe true)))))
 
             (it "omits the exit footer on exit 0"
