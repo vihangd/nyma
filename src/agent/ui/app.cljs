@@ -14,7 +14,7 @@
             ["./scrollback.mjs" :refer [commit_to_scrollback_BANG_
                                         committable_now
                                         filter_uncommitted_ids]]
-            ["../modes/interactive.jsx" :refer [effective_scrollback_on_QMARK_
+            ["../modes/interactive.mjs" :refer [effective_scrollback_on_QMARK_
                                                 pager_mode_enabled_QMARK_]]
             ["./chat_pager.jsx" :refer [ChatPager clamp_scroll_offset auto_follow_offset page_step]]
             ["./editor.jsx" :refer [Editor]]
@@ -883,15 +883,29 @@
                                        (str "Error: " (.-message e)) "error")))))))
            #js [streaming agent submit-lock-ref])]
 
-      ;; App Box height:
-      ;;   scrollback-on  → no height (natural flow; frame grows with content)
-      ;;   otherwise      → fixed at term-rows (pins editor to the bottom
-      ;;                    and gives the content Box a definite budget
-      ;;                    for flexGrow / overflow hidden).
-      ;; Pager mode uses the fixed-height variant so the pager's windowed
-      ;; slice has a stable viewport to render into.
+      ;; App Box height: always (term-rows - 1).
+      ;;
+      ;; Why not term-rows: Ink's standard log-update writes
+      ;;   eraseLines(N) + frame
+      ;; with NO cursorTo(0). After writing a fullscreen frame (one where
+      ;; outputHeight >= viewportRows), the cursor lands at (row 40, col L)
+      ;; where L is the length of the last output line — NOT col 0.
+      ;; The next eraseLines(N) moves the cursor to (row 0, col L), still
+      ;; not col 0. Writing the new frame from there shifts the first row
+      ;; right by L columns; if first-row + L > terminal-width, the row
+      ;; wraps visually, creating an extra row log-update doesn't count.
+      ;; That extra visual row scrolls above the viewport on the next write
+      ;; and becomes unerasable, causing same-row overwrite corruption.
+      ;;
+      ;; Using (dec term-rows) keeps outputHeight < viewportRows, so Ink
+      ;; appends a trailing '\n' (non-fullscreen path). The '\n' resets the
+      ;; cursor to (row+1, col 0). Next eraseLines starts from col 0 and
+      ;; the first row is written at col 0. No misalignment, no wrapping,
+      ;; no stuck rows.
+      ;;
+      ;; Cost: 1 row of viewport.
       #jsx [Box {:flexDirection "column"
-                 :height (when-not scrollback-on? term-rows)}
+                 :height (dec term-rows)}
             (when-let [custom-header (safe-react-child
                                       (when custom-header-fn (custom-header-fn))
                                       "custom-header")]
@@ -918,13 +932,14 @@
                          content]]))
               ;; Normal: show chat/welcome + below-widgets.
               ;;
-              ;; Layout-mode breakdown:
+              ;; Layout-mode breakdown (all modes now use flexGrow 1 +
+              ;; overflow hidden since the App Box is always term-rows):
               ;;
-              ;;   scrollback-on (default, natural flow)
-              ;;     no flexGrow / no overflow / no justifyContent.
-              ;;     Frame grows with content; editor floats at the
-              ;;     end of in-flight messages. writeToStdout commits
-              ;;     handle past turns to real terminal scrollback.
+              ;;   scrollback-on (default)
+              ;;     flexGrow 1 + overflow hidden + flex-end.
+              ;;     Content is bottom-pinned so the latest streaming
+              ;;     output and editor stay visible. Past turns are
+              ;;     committed to terminal scrollback via writeToStdout.
               ;;
               ;;   pager-mode (scrollback-mode = "pager")
               ;;     flexGrow 1 + overflow hidden. ChatPager owns the
@@ -935,30 +950,17 @@
               ;;   scrollback-off + alt-screen (NYMA_ALT_SCREEN=1)
               ;;     flexGrow 1 + overflow hidden + justifyContent
               ;;     "flex-end". Pins live chat flush above status.
-              ;;     Empty rows at the top of the content area never
-              ;;     pollute anything — alt-screen has no scrollback,
-              ;;     they just sit invisibly until alt-screen exits.
-              ;;
-              ;;   scrollback-off + NO alt-screen (Static-based)
-              ;;     flexGrow 1 + overflow hidden but TOP-aligned.
-              ;;     Ink's <Static> emissions scroll top-of-frame rows
-              ;;     into real scrollback; flex-end's empty top rows
-              ;;     would pollute scrollback with blanks, so we
-              ;;     top-align instead (live content scrolls, not
-              ;;     blanks). Trade-off: empty space shows below live.
               ;;
               ;;   empty-state (no messages, no streaming)
               ;;     justifyContent "center" centers the welcome screen.
               #jsx [Box {:key           "content"
-                         :flexGrow      (when-not scrollback-on? 1)
+                         :flexGrow      1
                          :flexDirection "column"
                          :justifyContent (cond
-                                           scrollback-on?                                nil
-                                           (and (empty? messages) (not streaming))      "center"
-                                           pager-mode?                                  nil
-                                           alt-screen?                                  "flex-end"
-                                           :else                                        nil)
-                         :overflow      (when-not scrollback-on? "hidden")}
+                                           (and (empty? messages) (not streaming)) "center"
+                                           pager-mode?                             nil
+                                           :else                                   "flex-end")
+                         :overflow      "hidden"}
                     (cond
                       (and (empty? messages) (not streaming))
                       #jsx [WelcomeScreen {:key "welcome" :agent agent :theme theme

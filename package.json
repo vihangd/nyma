@@ -25,6 +25,7 @@
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/google": "^3.0.55",
     "@ai-sdk/openai": "^3.0.0",
+    "@mariozechner/pi-tui": "^0.70.2",
     "ai": "^6.0.142",
     "diff": "^7.0.0",
     "ink": "7.0.1",
@@ -46,5 +47,5 @@
     "concurrently": "^9.0.0",
     "ink-testing-library": "^4.0.0",
     "react-devtools-core": "^7.0.1"
-  }
+  },
 }

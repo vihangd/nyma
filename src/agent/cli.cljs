@@ -12,7 +12,7 @@
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
             [agent.hooks :as hooks]
-            ["./modes/interactive.jsx" :as interactive]
+            ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
 
