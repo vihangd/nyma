@@ -101,9 +101,14 @@
             prev     (when md-cache @md-cache)
             result   (mb/incremental-render (or text "") prev {})
             _        (when md-cache (reset! md-cache result))
-            rendered (:rendered result)]
-        (let [lines (if (seq rendered)
-                      (split-lines rendered)
+            rendered (:rendered result)
+            ;; Wrap at (w-2) to accommodate the "● " prefix on line 1.
+            ;; Uses hard:true so lines with no word-break (e.g. long filenames
+            ;; in bash output) are still clipped rather than crashing pi-tui.
+            safe     (when (seq rendered)
+                       (ansi/wrap-ansi rendered (- w 2) {:hard true :trim false :word-wrap true}))]
+        (let [lines (if (seq safe)
+                      (vec (.split safe "\n"))
                       [(str mc DIM "…" RESET)])]
           (into [(str sc "● " RESET (first lines))]
                 (rest lines))))
