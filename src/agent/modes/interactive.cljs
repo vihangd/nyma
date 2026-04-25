@@ -121,6 +121,7 @@
         sync-status! (fn []
                        (.setState status-bar
                                   #js {:model      (model-id agent)
+                                       :role       (name (or (:active-role @(:state agent)) :default))
                                        :streaming  @streaming
                                        :turn-count @turn-count}))
 

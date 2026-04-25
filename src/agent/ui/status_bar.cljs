@@ -13,17 +13,12 @@
         b (js/parseInt (.slice hex 5 7) 16)]
     (str ESC "[38;2;" r ";" g ";" b "m")))
 
-(defn- bg [hex]
-  (let [r (js/parseInt (.slice hex 1 3) 16)
-        g (js/parseInt (.slice hex 3 5) 16)
-        b (js/parseInt (.slice hex 5 7) 16)]
-    (str ESC "[48;2;" r ";" g ";" b "m")))
-
 (defn create-status-bar
   "Returns a pi-tui Component that renders a one-line status bar.
-   Call .setState({model, streaming, turn-count}) to update."
+   Call .setState({model, role, streaming, turn-count}) to update."
   [theme]
   (let [state (atom {:model      "–"
+                     :role       nil
                      :streaming  false
                      :turn-count 0})
 
@@ -31,13 +26,18 @@
         secondary (get-in theme [:colors :secondary] "#9ece6a")
         muted     (get-in theme [:colors :muted]     "#565f89")
         border    (get-in theme [:colors :border]    "#3b4261")
+        warning   (get-in theme [:colors :warning]   "#e0af68")
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model streaming turn-count]} @state
+                   (let [{:keys [model role streaming turn-count]} @state
+                         role-str  (when (and (seq (str role))
+                                              (not= (str role) "default"))
+                                     (str (fg warning) "[" role "]" RESET " "))
                          left  (str (fg muted) " nyma " RESET
                                     (fg border) "│" RESET
-                                    " " (fg primary) (or model "–") RESET)
+                                    " " (or role-str "")
+                                    (fg primary) (or model "–") RESET)
                          right (str (if streaming
                                       (str (fg secondary) BOLD "● streaming" RESET)
                                       (str (fg muted) DIM "ready" RESET))
