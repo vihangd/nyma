@@ -11,3 +11,4 @@ dist/
 .nyma/
 cli
 nyma
+docs/plan-*.md
