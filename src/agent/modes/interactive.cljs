@@ -111,6 +111,7 @@
 
         ;; ── Message + UI state ─────────────────────────────────────────────
         messages     (atom [])
+        widgets      (atom {})   ;; widget-name → message-id
         streaming    (atom false)
         turn-count   (atom 0)
         submit-lock  (atom false)
@@ -239,6 +240,26 @@
                  (fn [msgs]
                    (conj (vec msgs) {:role "info" :content (str msg) :id (new-id)})))
                 (.requestRender tui)))
+        (set! (.-setWidget ui)
+              (fn [widget-name lines _position]
+                (let [content (.join lines "\n")
+                      mid     (or (get @widgets widget-name) (new-id))]
+                  (swap! widgets assoc widget-name mid)
+                  (update-messages!
+                   (fn [msgs]
+                     (let [new-msg {:role "widget" :content content :id mid}
+                           idx     (first (keep-indexed #(when (= (:id %2) mid) %1) msgs))]
+                       (if (some? idx)
+                         (assoc (vec msgs) idx new-msg)
+                         (conj (vec msgs) new-msg)))))
+                  (.requestRender tui))))
+        (set! (.-clearWidget ui)
+              (fn [widget-name]
+                (when-let [mid (get @widgets widget-name)]
+                  (swap! widgets dissoc widget-name)
+                  (update-messages!
+                   (fn [msgs] (filterv #(not= (:id %) mid) msgs)))
+                  (.requestRender tui))))
         (set! (.-setEditorValue ui) (fn [v] (.setText editor v)))
         (set! (.-getEditorValue ui) (fn [] (.getText editor)))))
 
