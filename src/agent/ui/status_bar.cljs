@@ -38,7 +38,8 @@
                                     (fg border) "│" RESET
                                     " " (or role-str "")
                                     (fg primary) (or model "–") RESET)
-                         right (str (if streaming
+                         right (str " "
+                                    (if streaming
                                       (str (fg secondary) BOLD "● streaming" RESET)
                                       (str (fg muted) DIM "ready" RESET))
                                     (when (pos? turn-count)
