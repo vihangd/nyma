@@ -130,5 +130,8 @@
       "plan"
       (wrap+split (str (fg "#7dcfff") "📋 " RESET content) w)
 
+      "info"
+      (wrap+split (str (fg "#7dcfff") "ℹ " RESET (fg muted) content RESET) w)
+
       ;; fallback
       (wrap+split (str mc role ": " RESET content) w))))

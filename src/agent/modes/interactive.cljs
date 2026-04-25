@@ -229,6 +229,19 @@
                     (add-user-msg! trimmed)
                     (do-run! trimmed))))))]
 
+    ;; Wire extension UI hooks
+    (when-let [ext (.-extension-api agent)]
+      (let [ui (.-ui ext)]
+        (set! (.-available ui) true)
+        (set! (.-notify ui)
+              (fn [msg _type]
+                (update-messages!
+                 (fn [msgs]
+                   (conj (vec msgs) {:role "info" :content (str msg) :id (new-id)})))
+                (.requestRender tui)))
+        (set! (.-setEditorValue ui) (fn [v] (.setText editor v)))
+        (set! (.-getEditorValue ui) (fn [] (.getText editor)))))
+
     ;; Wire editor
     (set! (.-onSubmit editor) on-submit)
     (.setAutocompleteProvider editor
