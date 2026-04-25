@@ -209,7 +209,8 @@
               (cond
                 ;; ── Steer: mid-stream follow-up ──────────────────────────
                 @streaming
-                (do (steer agent {:role "user" :content trimmed})
+                (do (.addToHistory editor trimmed)
+                    (steer agent {:role "user" :content trimmed})
                     (add-user-msg! (str trimmed " ↩")))
 
                 ;; ── Slash command ────────────────────────────────────────

@@ -1,5 +1,6 @@
 (ns agent.ui.streaming-markdown
   (:require ["react" :refer [useRef useMemo]]
+            [agent.debug :as dbg]
             [agent.utils.markdown-blocks :as mb]))
 
 (defn useStreamingMarkdown
@@ -14,8 +15,16 @@
              result     (mb/incremental-render content prev-cache (or custom-renderers {}))
              rendered   (:rendered result)]
          (set! (.-current cache-ref) result)
+         ;; Diagnostic: always-emitted warn to ~/.nyma/debug.log so we can
+         ;; measure whether the streaming content alone is overflowing the
+         ;; terminal height (suspected root cause of same-row overwrite).
+         (when rendered
+           (let [line-count (count (.split rendered "\n"))
+                 term-rows  (or (.-rows js/process.stdout) 24)]
+             (when (> line-count (* 0.5 term-rows))
+               (dbg/warn "height" "md exceeds half terminal"
+                         {:md-lines  line-count
+                          :term-rows term-rows
+                          :ratio     (.toFixed (/ line-count term-rows) 2)}))))
          (or rendered "")))
-      ;; custom-renderers is excluded from deps: the cache-ref already handles
-      ;; incremental invalidation based on content growth, and custom-renderers
-      ;; is a fresh deref on every App render → would cause the memo to never hit.
      #js [content])))

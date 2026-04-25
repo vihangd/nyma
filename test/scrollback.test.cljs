@@ -266,7 +266,41 @@
                         :block-renderers nil
                         :columns 80})
                   ;; Reaching here without throwing is the assertion.
-                  (-> (expect true) (.toBe true))))))
+                  (-> (expect true) (.toBe true))))
+
+            (it "wide markdown table lines are wrapped to terminal columns before writing"
+                ;; Regression guard for the table-rendering viewport corruption:
+                ;; wide lines (markdown table borders longer than terminal width)
+                ;; cause the terminal to visually wrap them, shifting the cursor
+                ;; further down than log-update expects. The subsequent
+                ;; eraseLines(previousLineCount) misses rows where the old Ink
+                ;; frame was written, leaving stale content visible alongside
+                ;; committed text. wrap-ansi in commit-to-scrollback! prevents
+                ;; this by ensuring every logical \n-terminated segment fits
+                ;; within the terminal column count.
+                (fn []
+                  (let [cols 40
+                        wide-content (str "| Column A | Column B | Column C | Column D |\n"
+                                          "|----------|----------|----------|----------|\n"
+                                          "| a long value here | another long value | yet another | final |\n")
+                        calls (atom [])
+                        mock-write (fn [data] (swap! calls conj data))]
+                    (commit_to_scrollback_BANG_
+                     #js {:write mock-write
+                          :message {:role "assistant"
+                                    :content wide-content
+                                    :id "a1"}
+                          :theme test-theme
+                          :block-renderers nil
+                          :columns cols})
+                    ;; Something must have been written (table has visible text)
+                    (-> (expect (pos? (count @calls))) (.toBe true))
+                    ;; Every \n-delimited segment must fit within cols
+                    (let [written (first @calls)
+                          lines   (.split written "\n")]
+                      (doseq [line lines]
+                        (-> (expect (<= (js/Bun.stringWidth line) cols))
+                            (.toBe true)))))))))
 
 ;;; ─── Turn-boundary semantics (pure) ────────────────────────────
 ;;;

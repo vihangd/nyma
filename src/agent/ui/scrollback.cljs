@@ -28,7 +28,7 @@
    each message type."
   (:require ["node:util" :as nodeutil]
             [agent.utils.markdown-blocks :as mb]
-            [agent.utils.ansi :as ansi]
+            [agent.utils.ansi :as ansi :refer [wrap-ansi]]
             [agent.token-estimation :refer [estimate-tokens]]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]
             ["./tool_status.jsx" :refer [format_one_line_args
@@ -410,14 +410,26 @@
    (see `useStdout()` — its `write` field). It clears the dynamic region,
    writes the data to scrollback, then restores the dynamic region below.
 
+   `columns` is used to hard-wrap rendered lines to the terminal width
+   before writing. This is critical for correctness: log-update tracks
+   previousLineCount as logical \\n-delimited lines. If committed content
+   contains lines wider than the terminal, the terminal wraps them
+   visually, shifting the cursor further down than log-update expects.
+   restoreLastOutput() then writes the Ink frame starting too low, and
+   the subsequent log.clear() eraseLines(previousLineCount) misses the
+   rows where the old frame was placed, leaving stale content visible —
+   the corruption reported as mixed-content rows.
+
    This function does NOT modify any React state. The caller is
    responsible for marking the message :committed (or removing it) after
    committing."
   [{:keys [write message theme block-renderers columns]}]
   (when write
-    (let [rendered (render-message-to-string message theme block-renderers columns)]
-      (when (and rendered (pos? (count rendered)))
-        (write (str rendered "\n"))))))
+    (let [rendered (render-message-to-string message theme block-renderers columns)
+          cols     (or columns (.-columns js/process.stdout) 80)
+          safe     (wrap-ansi rendered cols {:hard true :trim false :word-wrap false})]
+      (when (and safe (pos? (count safe)))
+        (write (str safe "\n"))))))
 
 ;;; ─── Startup banner (direct stdout, pre-Ink) ────────────────────
 
