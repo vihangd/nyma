@@ -102,10 +102,11 @@
             result   (mb/incremental-render (or text "") prev {})
             _        (when md-cache (reset! md-cache result))
             rendered (:rendered result)]
-        (into [(str sc "●" RESET)]
-              (if (seq rendered)
-                (split-lines rendered)
-                [(str mc DIM "…" RESET)])))
+        (let [lines (if (seq rendered)
+                      (split-lines rendered)
+                      [(str mc DIM "…" RESET)])]
+          (into [(str sc "● " RESET (first lines))]
+                (rest lines))))
 
       ("tool-start" "tool-end")
       (let [tname  (:tool-name msg)
