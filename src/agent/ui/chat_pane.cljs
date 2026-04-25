@@ -69,9 +69,7 @@
             (swap! messages
                    (fn [msgs]
                      (let [v (vec msgs)
-                           i (reduce-kv (fn [found idx m]
-                                          (if (and (nil? found) (pred-fn m)) idx found))
-                                        nil v)]
+                           i (first (keep-indexed (fn [idx m] (when (pred-fn m) idx)) v))]
                        (if (some? i)
                          (assoc v i new-msg)
                          (conj v new-msg)))))))
