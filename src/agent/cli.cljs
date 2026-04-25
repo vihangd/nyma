@@ -153,9 +153,7 @@
                 :settings      settings})
         model (try
                 (resolve-model-via-registry (:provider-registry agent) values merged)
-                (catch :default e
-                  (js/console.warn (str "[nyma] " (.-message e)))
-                  nil))
+                (catch :default _e nil))
         _     (when model (set! (.-model (:config agent)) model))
         api (create-extension-api agent)]
 
