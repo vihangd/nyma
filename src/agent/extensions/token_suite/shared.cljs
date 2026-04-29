@@ -20,7 +20,12 @@
 ;; ── Default configuration ────────────────────────────────────
 (def default-config
   {:observation-mask {:keep-recent 10}
-   :kv-cache         {:enabled true :min-system-tokens 500}
+   :kv-cache         {:enabled true
+                      :min-system-tokens 500
+                      :cache-messages true
+                      :checkpoint-every-turns 4
+                      :max-message-breakpoints 2
+                      :extra-providers {:anthropic [] :google []}}
    :expired-context  {:track-reads true :track-greps true}
    :tool-truncation  {:max-chars 10000
                       :head-lines 100
@@ -56,8 +61,8 @@
 
 (defn count-lines [s]
   (if (or (nil? s) (= s "")) 0
-    (let [matches (re-seq #"\n" s)]
-      (inc (count matches)))))
+      (let [matches (re-seq #"\n" s)]
+        (inc (count matches)))))
 
 (defn count-chars [s]
   (count (str s)))
@@ -79,6 +84,28 @@
 (defn is-claude-model? [model-id]
   (and (string? model-id)
        (.startsWith (str model-id) "claude")))
+
+(defn detect-cache-provider
+  "Return :anthropic, :google, or nil based on model-id.
+   Used to route cache_control providerOptions to the right key.
+   OpenAI/Groq/Kimi etc. return nil — they don't accept explicit
+   breakpoints (OpenAI uses automatic caching, Groq has none).
+
+   `extra-providers` lets settings opt in non-Claude providers that
+   also accept Anthropic-format cache_control (e.g. minimax via its
+   Anthropic-compat endpoint)."
+  ([model-id] (detect-cache-provider model-id nil))
+  ([model-id extra-providers]
+   (let [m (str model-id)
+         in? (fn [provider]
+               (some #(.startsWith m %) (get extra-providers provider [])))]
+     (cond
+       (or (.startsWith m "claude")
+           (.startsWith m "anthropic.")
+           (in? :anthropic))           :anthropic
+       (or (.startsWith m "gemini")
+           (in? :google))              :google
+       :else                           nil))))
 
 (defn msg-role [msg]
   (or (when (map? msg) (:role msg))
@@ -114,41 +141,41 @@
   (let [la (count a)
         lb (count b)]
     (if (zero? la) lb
-      (if (zero? lb) la
-        (let [prev (js/Int32Array. (inc lb))]
+        (if (zero? lb) la
+            (let [prev (js/Int32Array. (inc lb))]
           ;; Initialize first row
-          (loop [j 0]
-            (when (<= j lb)
-              (aset prev j j)
-              (recur (inc j))))
+              (loop [j 0]
+                (when (<= j lb)
+                  (aset prev j j)
+                  (recur (inc j))))
           ;; Fill matrix row by row
-          (loop [i 1]
-            (if (> i la)
-              (aget prev lb)
-              (let [curr (js/Int32Array. (inc lb))
-                    ci (.charCodeAt a (dec i))]
-                (aset curr 0 i)
-                (loop [j 1]
-                  (when (<= j lb)
-                    (let [cost (if (= ci (.charCodeAt b (dec j))) 0 1)]
-                      (aset curr j (js/Math.min
-                                     (inc (aget curr (dec j)))
-                                     (inc (aget prev j))
-                                     (+ (aget prev (dec j)) cost))))
-                    (recur (inc j))))
+              (loop [i 1]
+                (if (> i la)
+                  (aget prev lb)
+                  (let [curr (js/Int32Array. (inc lb))
+                        ci (.charCodeAt a (dec i))]
+                    (aset curr 0 i)
+                    (loop [j 1]
+                      (when (<= j lb)
+                        (let [cost (if (= ci (.charCodeAt b (dec j))) 0 1)]
+                          (aset curr j (js/Math.min
+                                        (inc (aget curr (dec j)))
+                                        (inc (aget prev j))
+                                        (+ (aget prev (dec j)) cost))))
+                        (recur (inc j))))
                 ;; Copy curr to prev for next iteration
-                (loop [j 0]
-                  (when (<= j lb)
-                    (aset prev j (aget curr j))
-                    (recur (inc j))))
-                (recur (inc i))))))))))
+                    (loop [j 0]
+                      (when (<= j lb)
+                        (aset prev j (aget curr j))
+                        (recur (inc j))))
+                    (recur (inc i))))))))))
 
 (defn levenshtein-similarity
   "Normalized similarity between 0.0 (completely different) and 1.0 (identical)."
   [a b]
   (let [max-len (max (count a) (count b))]
     (if (zero? max-len) 1.0
-      (- 1.0 (/ (levenshtein-distance a b) max-len)))))
+        (- 1.0 (/ (levenshtein-distance a b) max-len)))))
 
 (defn hash-content
   "Generate a short hex hash of text content for cache filenames."
