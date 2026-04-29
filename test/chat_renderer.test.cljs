@@ -107,7 +107,40 @@
               (fn []
                 (let [text (visible-text (render {:role "tool-end" :tool-name "bash"
                                                   :args {} :result "" :duration 1500 :id "1"}))]
-                  (-> (expect (.includes text "1.5s")) (.toBe true))))))
+                  (-> (expect (.includes text "1.5s")) (.toBe true)))))
+
+          (it "shows the read path on tool-end (args + result combined)"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "read"
+                                                  :args {:path "src/foo.cljs"}
+                                                  :result "a\nb\nc" :id "1"}))]
+                  (-> (expect (.includes text "src/foo.cljs")) (.toBe true))
+                  (-> (expect (.includes text "3 lines")) (.toBe true)))))
+
+          (it "shows grep pattern + path + match count"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "grep"
+                                                  :args {:pattern "ipsum" :path "src/"}
+                                                  :result "m1\nm2" :id "1"}))]
+                  (-> (expect (.includes text "ipsum")) (.toBe true))
+                  (-> (expect (.includes text "src/")) (.toBe true))
+                  (-> (expect (.includes text "2 matches")) (.toBe true)))))
+
+          (it "shows glob pattern + path + file count"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "glob"
+                                                  :args {:pattern "*.cljs" :path "src/"}
+                                                  :result "f1\nf2\nf3" :id "1"}))]
+                  (-> (expect (.includes text "*.cljs")) (.toBe true))
+                  (-> (expect (.includes text "src/")) (.toBe true))
+                  (-> (expect (.includes text "3 files")) (.toBe true)))))
+
+          (it "uses · separator between args and result summary"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "read"
+                                                  :args {:path "/x"}
+                                                  :result "line" :id "1"}))]
+                  (-> (expect (.includes text "·")) (.toBe true))))))
 
 ;;; ─── error ────────────────────────────────────────────────────────────────
 

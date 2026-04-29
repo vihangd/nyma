@@ -39,25 +39,31 @@
 (defn- truncate-to [s max-len]
   (if (> (count s) max-len) (str (.slice s 0 max-len) "…") s))
 
-(defn- format-one-line-args [tool-name args]
-  (let [max-w (max 20 (- (or (.-columns js/process.stdout) 80) 30))]
-    (truncate-to
-     (case tool-name
-       "bash"       (or (first (.split (or (get args :command) "") "\n")) "")
-       "read"       (let [p (or (get args :path) "")]
-                      (if-let [r (get args :range)] (str p ":" (first r) "-" (second r)) p))
-       "write"      (or (get args :path) "")
-       "edit"       (or (get args :path) "")
-       "ls"         (or (get args :path) ".")
-       "glob"       (let [pat (or (get args :pattern) "") p (get args :path)]
-                      (if (seq p) (str pat " in " p) pat))
-       "grep"       (let [pat (or (get args :pattern) "") p (get args :path)]
-                      (if (seq p) (str "\"" pat "\" in " p) (str "\"" pat "\"")))
-       "web_fetch"  (or (get args :url) "")
-       "web_search" (str "\"" (or (get args :query) "") "\"")
-       "think"      (or (first (.split (or (get args :thought) "") "\n")) "")
-       (let [pairs (map (fn [[k v]] (str k "=" v)) args)] (.join (clj->js pairs) " ")))
-     max-w)))
+(defn- format-one-line-args
+  "Compact one-line summary of the tool's input args (path, pattern, etc).
+   `width-budget` is the column allowance for this string (defaults to
+   term-width - 40 to leave room for icon, name, result, and duration)."
+  ([tool-name args] (format-one-line-args tool-name args nil))
+  ([tool-name args width-budget]
+   (let [max-w (or width-budget
+                   (max 20 (- (or (.-columns js/process.stdout) 80) 40)))]
+     (truncate-to
+      (case tool-name
+        "bash"       (or (first (.split (or (get args :command) "") "\n")) "")
+        "read"       (let [p (or (get args :path) "")]
+                       (if-let [r (get args :range)] (str p ":" (first r) "-" (second r)) p))
+        "write"      (or (get args :path) "")
+        "edit"       (or (get args :path) "")
+        "ls"         (or (get args :path) ".")
+        "glob"       (let [pat (or (get args :pattern) "") p (get args :path)]
+                       (if (seq p) (str pat " in " p) pat))
+        "grep"       (let [pat (or (get args :pattern) "") p (get args :path)]
+                       (if (seq p) (str "\"" pat "\" in " p) (str "\"" pat "\"")))
+        "web_fetch"  (or (get args :url) "")
+        "web_search" (str "\"" (or (get args :query) "") "\"")
+        "think"      (or (first (.split (or (get args :thought) "") "\n")) "")
+        (let [pairs (map (fn [[k v]] (str k "=" v)) args)] (.join (clj->js pairs) " ")))
+      max-w))))
 
 (defn- format-one-line-result-for-tool [tool-name result _args]
   (let [lines-of (fn [s] (count (filterv seq (.split (or s "") "\n"))))]
@@ -114,17 +120,22 @@
                 (rest lines))))
 
       ("tool-start" "tool-end")
-      (let [tname  (:tool-name msg)
-            args   (:args msg)
-            dur    (:duration msg)
-            is-end (= role "tool-end")
-            icon   (if is-end "✓" "⚙")
-            detail (if is-end
-                     (format-one-line-result-for-tool tname (:result msg) args)
-                     (format-one-line-args tname args))]
+      (let [tname    (:tool-name msg)
+            args     (:args msg)
+            dur      (:duration msg)
+            is-end   (= role "tool-end")
+            icon     (if is-end "✓" "⚙")
+            arg-str  (format-one-line-args tname args)
+            res-str  (when is-end
+                       (format-one-line-result-for-tool tname (:result msg) args))]
         [(str mc icon " " (or tname "?")
-              (when (seq detail) (str " " detail))
-              (when (and is-end dur) (str " " DIM (.toFixed (/ dur 1000) 1) "s"))
+              (when (seq arg-str) (str " " arg-str))
+              ;; Result + duration appear in dim with a · separator so the
+              ;; eye lands on the args first, summary second.
+              (when (and is-end (seq res-str))
+                (str " " DIM "· " res-str RESET))
+              (when (and is-end dur)
+                (str " " DIM (.toFixed (/ dur 1000) 1) "s" RESET))
               RESET)])
 
       "shell"
