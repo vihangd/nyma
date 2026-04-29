@@ -15,7 +15,9 @@
          :smart-compaction   {:background-updates 0 :offloads 0 :full-compactions 0
                               :tokens-archived 0 :re-reads 0}
          :context-folding    {:foci-started 0 :foci-completed 0 :messages-folded 0
-                              :tokens-freed 0}}))
+                              :tokens-freed 0}
+         :anthropic-compaction {:turns 0 :requests-with-context-mgmt 0
+                                :compactions-observed 0}}))
 
 ;; ── Default configuration ────────────────────────────────────
 (def default-config
@@ -55,7 +57,10 @@
                         :summarization-model nil}
    :context-folding    {:enabled true
                         :max-depth 3
-                        :inject-instructions true}})
+                        :inject-instructions true}
+   :anthropic-compaction {:enabled true
+                          :trigger-tokens 150000
+                          :pause-after-compaction false}})
 
 ;; ── Utility functions ────────────────────────────────────────
 
@@ -84,6 +89,22 @@
 (defn is-claude-model? [model-id]
   (and (string? model-id)
        (.startsWith (str model-id) "claude")))
+
+(def supported-compaction-models
+  "Claude models that support the server-side compaction API
+   (`compact-2026-01-12` beta). Match by prefix to tolerate
+   `:date` suffixes (e.g. `claude-sonnet-4-6-20260601`)."
+  ["claude-mythos-preview"
+   "claude-opus-4-7"
+   "claude-opus-4-6"
+   "claude-sonnet-4-6"])
+
+(defn model-supports-compaction?
+  "True when the given model-id matches one of the supported
+   server-side compaction models."
+  [model-id]
+  (let [m (str model-id)]
+    (boolean (some #(.startsWith m %) supported-compaction-models))))
 
 (defn detect-cache-provider
   "Return :anthropic, :google, or nil based on model-id.

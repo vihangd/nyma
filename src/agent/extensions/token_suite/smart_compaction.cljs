@@ -222,15 +222,22 @@ with every section below present.
                (swap! shared/suite-stats update-in [:smart-compaction :background-updates] inc))))
          10)
 
-    ;; Hook B: Filesystem offloading (context_assembly, priority 85)
+    ;; Hook B: Filesystem offloading (context_assembly, priority 85).
+    ;; Skipped when the request runs against a model that supports the
+    ;; Anthropic server-side compaction API — Anthropic handles older
+    ;; tool-result pruning transparently in that mode.
     (.on api "context_assembly"
          (fn [event _ctx]
-           (let [budget (.-tokenBudget event)
-                 tokens-used (when budget (.-tokensUsed budget))
+           (let [budget       (.-tokenBudget event)
+                 tokens-used  (when budget (.-tokensUsed budget))
                  input-budget (when budget (.-inputBudget budget))
-                 threshold (:offload-threshold sc-cfg)
-                 messages (.-messages event)]
-             (when (and tokens-used input-budget
+                 model-id     (when budget (str (or (.-model budget) "")))
+                 server-side? (and (:enabled (:anthropic-compaction config))
+                                   (shared/model-supports-compaction? model-id))
+                 threshold    (:offload-threshold sc-cfg)
+                 messages     (.-messages event)]
+             (when (and (not server-side?)
+                        tokens-used input-budget
                         (> (/ tokens-used input-budget) threshold))
                (let [total (.-length messages)
                      cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")

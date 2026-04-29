@@ -10,6 +10,7 @@
             [agent.extensions.token-suite.structured-context :as structured-context]
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.context-folding :as context-folding]
+            [agent.extensions.token-suite.anthropic-compaction :as anthropic-compaction]
             [agent.extensions.token-suite.token-preview :as token-preview]
             [clojure.string :as str]))
 
@@ -69,16 +70,17 @@
     (swap! deactivators conj (structured-context/activate api))
     (swap! deactivators conj (smart-compaction/activate api))
     (swap! deactivators conj (context-folding/activate api))
+    (swap! deactivators conj (anthropic-compaction/activate api))
     (swap! deactivators conj (token-preview/activate api))
 
     ;; Register /token-stats command
     (.registerCommand api "token-stats"
-      #js {:description "Show token optimization stats"
-           :handler (fn [_args ctx]
-                      (let [text (format-stats)]
-                        (when (and ctx (.-ui ctx) (.-available (.-ui ctx)))
-                          (.notify (.-ui ctx) text "info"))
-                        text))})
+                      #js {:description "Show token optimization stats"
+                           :handler (fn [_args ctx]
+                                      (let [text (format-stats)]
+                                        (when (and ctx (.-ui ctx) (.-available (.-ui ctx)))
+                                          (.notify (.-ui ctx) text "info"))
+                                        text))})
 
     ;; Budget-aware tool filtering — disable expensive tools when context is near full
     (let [budget-handler
