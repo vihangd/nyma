@@ -34,6 +34,27 @@
                      :else (recur (inc i))))]
     adjusted))
 
+(defn new-span-after-last-compaction
+  "Given the messages selected for summarization (0..split-point), if a
+   prior compaction message exists in the slice, return only the
+   messages after it — this is the 'new span' for anchored iterative
+   summarization. Otherwise return the slice unchanged.
+
+   Returns a map {:span vector :prev-compaction message-or-nil} so
+   callers can also retrieve the previous summary."
+  [to-summarize]
+  (let [v          (vec to-summarize)
+        last-comp  (loop [i (dec (count v))]
+                     (cond
+                       (< i 0) nil
+                       (= "compaction" (:role (nth v i))) i
+                       :else (recur (dec i))))]
+    (if (some? last-comp)
+      {:span (vec (drop (inc last-comp) v))
+       :prev-compaction (nth v last-comp)}
+      {:span v
+       :prev-compaction nil})))
+
 (defn extract-files-read
   "Extract file paths from tool_call entries for the 'read' tool."
   [messages]
@@ -108,12 +129,29 @@ with every section below present.
 - Configuration values must be exact numbers
 - Section 6 MUST contain at least one verbatim quote per pending task")
 
-(defn- build-compact-user-prompt
+(defn build-compact-user-prompt
+  "Build the user-side prompt for compact-with-retry.
+
+   When `previous-summary` is present, this triggers anchored iterative
+   mode: the model is instructed to MERGE new-span entries into the
+   existing 6-section summary, preserving sections unaffected by the new
+   span. Otherwise it produces a fresh summary of `to-summarize`.
+
+   Anchored iterative was shown by Factory.ai's evaluation across 36k
+   production sessions to outperform regenerate-each-time on accuracy,
+   completeness, and continuity — repeatedly summarizing entire
+   histories causes details to drift; merging anchors prior decisions."
   [{:keys [custom-instructions previous-summary to-summarize files-read files-modified]}]
   (str (when custom-instructions (str custom-instructions "\n\n"))
        (when previous-summary
          (str "<previous-summary>\n" previous-summary "\n</previous-summary>\n\n"
-              "Update the previous summary with new information below.\n\n"))
+              "MERGE the new conversation span below into the previous summary.\n"
+              "- Each section either gains new entries from the span, or is left unchanged.\n"
+              "- Do NOT regenerate sections that aren't affected by the new span.\n"
+              "- Preserve verbatim quotes and exact file paths from the previous summary.\n"
+              "- If the new span contradicts a fact in the previous summary, prefer the\n"
+              "  newer fact and record the contradiction in section 5 (Problem Solving).\n"
+              "- Output the COMPLETE merged summary with all 6 sections present.\n\n"))
        "<conversation>\n" (format-messages to-summarize) "\n</conversation>"
        (when (seq files-read)
          (str "\n\n<files-read>\n" (str/join "\n" files-read) "\n</files-read>"))
@@ -238,9 +276,14 @@ with every section below present.
 
     (when (> usage (* limit 0.85))
       (let [split-point     (find-split-point context (* limit 0.3))
-            to-summarize    (vec (take split-point context))
+            slice           (vec (take split-point context))
             to-keep         (vec (drop split-point context))
-            prev-compaction (->> context (filter #(= (:role %) "compaction")) last)
+            ;; Anchored iterative: when a prior compaction message lives
+            ;; inside the slice, only the messages after it are the new
+            ;; span. The prior compaction message itself supplies the
+            ;; previous-summary anchor that the LLM merges into.
+            {:keys [span prev-compaction]} (new-span-after-last-compaction slice)
+            to-summarize    span
             files-read      (extract-files-read to-summarize)
             files-modified  (extract-files-modified to-summarize)
             evt-ctx #js {:context               context
