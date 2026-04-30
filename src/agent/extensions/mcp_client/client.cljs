@@ -242,9 +242,15 @@
         opts #js {:timeout (or timeout-ms
                                (:call-timeout-ms (:config client))
                                default-call-timeout-ms)}
+        ;; SDK signature is (params, resultSchema?, options?). The
+        ;; second arg is a zod schema for response validation; we
+        ;; want the SDK's default schema, so it must be JS undefined
+        ;; (the SDK's safeParse trips on null vs undefined). options
+        ;; goes third.
         result (js-await (.callTool c
                                     #js {:name      tool-name
                                          :arguments arguments}
+                                    js/undefined
                                     opts))
         content (.-content result)
         items   (when content
