@@ -33,7 +33,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
 
         pre-handler
         (^:async fn [evt-ctx]
@@ -65,9 +65,9 @@
               :cwd           cwd
               :api           api})))]
 
-    ((:on events) "before_compact" pre-handler bridge-priority)
-    ((:on events) "compact" post-handler bridge-priority)
+    (.on api "before_compact" pre-handler bridge-priority)
+    (.on api "compact" post-handler bridge-priority)
 
     (fn []
-      ((:off events) "before_compact" pre-handler)
-      ((:off events) "compact" post-handler))))
+      (.off api "before_compact" pre-handler)
+      (.off api "compact" post-handler))))

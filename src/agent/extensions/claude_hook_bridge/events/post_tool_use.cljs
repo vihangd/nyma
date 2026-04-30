@@ -48,7 +48,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
         handler
         (^:async fn [data]
           (let [is-error? (boolean (or (.-isError data) (.-is-error data)))
@@ -78,6 +78,6 @@
                        (seq (:additional-context merged)))
                   (aset "result" extra))
                 out))))]
-    ((:on events) "tool_complete" handler bridge-priority)
+    (.on api "tool_complete" handler bridge-priority)
     (fn []
-      ((:off events) "tool_complete" handler))))
+      (.off api "tool_complete" handler))))

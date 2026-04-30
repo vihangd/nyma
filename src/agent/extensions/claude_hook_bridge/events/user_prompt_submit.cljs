@@ -26,7 +26,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
         handler
         (fn [data]
           (let [text (str (or (.-text data) (.-prompt data) ""))
@@ -53,6 +53,6 @@
                                                                             (filter seq [ctx reason]))
                                                                   "</system-reminder>")})
                                  (catch :default _e nil))))))))))]
-    ((:on events) "input_submit" handler bridge-priority)
+    (.on api "input_submit" handler bridge-priority)
     (fn []
-      ((:off events) "input_submit" handler))))
+      (.off api "input_submit" handler))))

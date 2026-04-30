@@ -45,7 +45,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
 
         start-handler
         (fn [data]
@@ -92,11 +92,11 @@
               :cwd           cwd
               :api           api})))]
 
-    ((:on events) "session_start" start-handler bridge-priority)
-    ((:on events) "session_end" end-handler bridge-priority)
-    ((:on events) "session_shutdown" end-handler bridge-priority)
+    (.on api "session_start" start-handler bridge-priority)
+    (.on api "session_end" end-handler bridge-priority)
+    (.on api "session_shutdown" end-handler bridge-priority)
 
     (fn []
-      ((:off events) "session_start" start-handler)
-      ((:off events) "session_end" end-handler)
-      ((:off events) "session_shutdown" end-handler))))
+      (.off api "session_start" start-handler)
+      (.off api "session_end" end-handler)
+      (.off api "session_shutdown" end-handler))))

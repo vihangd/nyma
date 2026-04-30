@@ -28,7 +28,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
         handler
         (^:async fn [data]
           (let [tool-name (str (or (.-tool data) ""))
@@ -67,6 +67,6 @@
                         (aset "reason" (or (:permission-reason merged) "")))
 
                   :else nil)))))]
-    ((:on events) "permission_request" handler bridge-priority)
+    (.on api "permission_request" handler bridge-priority)
     (fn []
-      ((:off events) "permission_request" handler))))
+      (.off api "permission_request" handler))))

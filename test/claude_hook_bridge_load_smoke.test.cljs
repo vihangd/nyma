@@ -59,16 +59,24 @@
 ;;; ─── Layer 2: default(api) actually runs ────────────────────────────────
 
 (defn- mock-api
-  "Minimal api shape the bridge touches during default()."
+  "Minimal api shape the bridge touches during default().
+
+   The bridge subscribes to the MAIN event bus via api.on / api.off
+   at the top level (those are the methods the real
+   agent.extensions/create-extension-api exposes — see
+   src/agent/extensions.cljs:28). It also reads api.events for the
+   inter-extension bus, but never .on/.off on it from inside default."
   []
   (let [listeners (atom {})]
-    #js {:events  #js {:on  (fn [evt h _p]
-                              (swap! listeners update evt (fnil conj []) h)
-                              nil)
-                       :off (fn [evt h]
-                              (swap! listeners update evt
-                                     (fn [hs] (filterv #(not= % h) (or hs []))))
-                              nil)}
+    #js {:on       (fn [evt h _p]
+                     (swap! listeners update evt (fnil conj []) h)
+                     nil)
+         :off      (fn [evt h]
+                     (swap! listeners update evt
+                            (fn [hs] (filterv #(not= % h) (or hs []))))
+                     nil)
+         :events   #js {:on  (fn [_ _ _] nil)
+                        :off (fn [_ _] nil)}
          :ui       #js {:available false}
          :__listeners listeners}))
 

@@ -8,15 +8,22 @@
 
 ;; Build a tiny mock api the bridge can register against, then
 ;; check whether it added a listener for `before_tool_call`.
+;;
+;; The bridge subscribes to nyma's MAIN event bus via api.on /
+;; api.off (the top-level methods), NOT api.events.on (which is
+;; the separate inter-extension bus). The mock has to expose both
+;; so we can audit the right one.
 (defn- mock-api []
   (let [listeners (atom {})]
-    #js {:events  #js {:on  (fn [evt h _p]
-                              (swap! listeners update evt (fnil conj []) h)
-                              nil)
-                       :off (fn [evt h]
-                              (swap! listeners update evt
-                                     (fn [hs] (filterv #(not= % h) (or hs []))))
-                              nil)}
+    #js {:on       (fn [evt h _p]
+                     (swap! listeners update evt (fnil conj []) h)
+                     nil)
+         :off      (fn [evt h]
+                     (swap! listeners update evt
+                            (fn [hs] (filterv #(not= % h) (or hs []))))
+                     nil)
+         :events   #js {:on  (fn [_ _ _] nil)
+                        :off (fn [_ _] nil)}
          :ui       #js {:available false}
          :__listeners listeners}))
 

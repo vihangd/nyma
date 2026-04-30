@@ -86,7 +86,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
         ;; The actual handler. Returns a JS object that emit-collect
         ;; merges with other handlers' returns.
         handler
@@ -108,6 +108,6 @@
                              :api           api}))]
             (when merged
               (merged->effects merged))))]
-    ((:on events) "before_tool_call" handler bridge-priority)
+    (.on api "before_tool_call" handler bridge-priority)
     (fn []
-      ((:off events) "before_tool_call" handler))))
+      (.off api "before_tool_call" handler))))

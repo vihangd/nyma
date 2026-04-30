@@ -33,7 +33,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [events (.-events api)
+  (let [
 
         stop-handler
         (fn [data]
@@ -56,9 +56,9 @@
               :cwd           cwd
               :api           api})))]
 
-    ((:on events) "agent_end" stop-handler bridge-priority)
-    ((:on events) "provider_error" fail-handler bridge-priority)
+    (.on api "agent_end" stop-handler bridge-priority)
+    (.on api "provider_error" fail-handler bridge-priority)
 
     (fn []
-      ((:off events) "agent_end" stop-handler)
-      ((:off events) "provider_error" fail-handler))))
+      (.off api "agent_end" stop-handler)
+      (.off api "provider_error" fail-handler))))
