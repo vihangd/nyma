@@ -1,8 +1,18 @@
 (ns agent.extensions.agent-shell.features.mcp-discovery
-  "Discover MCP servers from project config files (.mcp.json, .cursor/mcp.json)
-   and make them available to ACP agents via session/new."
+  "Discover MCP servers from a stack of config files. Precedence
+   (lowest → highest, later overrides earlier on name collision):
+
+     1. ~/.nyma/mcp.json           — user-global
+     2. <cwd>/.nyma/mcp.json       — project, shared via VCS
+     3. <cwd>/.cursor/mcp.json     — Cursor compat
+     4. <cwd>/.mcp.json            — project, CC convention
+
+   Servers are made available to nyma's main LLM via the
+   mcp-client extension (registered as `mcp__<server>__<tool>`),
+   and forwarded to ACP subprocess agents at session/new."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
+            ["node:os" :as os]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shared]))
 
@@ -27,8 +37,8 @@
   [s]
   (if (string? s)
     (.replace s (js/RegExp. "\\$\\{([^}]+)\\}" "g")
-      (fn [_match var-name]
-        (or (aget js/process.env var-name) "")))
+              (fn [_match var-name]
+                (or (aget js/process.env var-name) "")))
     s))
 
 (defn- expand-env-obj
@@ -50,36 +60,44 @@
   (if (and servers-obj (> (.-length (js/Object.keys servers-obj)) 0))
     (let [keys (js/Object.keys servers-obj)]
       (vec
-        (map (fn [name]
-               (let [config (aget servers-obj name)]
-                 {:name    name
-                  :command (.-command config)
-                  :args    (or (.-args config) [])
-                  :env     (expand-env-obj (.-env config))}))
-             keys)))
+       (map (fn [name]
+              (let [config (aget servers-obj name)]
+                {:name    name
+                 :command (.-command config)
+                 :args    (or (.-args config) [])
+                 :env     (expand-env-obj (.-env config))}))
+            keys)))
     []))
 
 ;;; ─── Discovery ─────────────────────────────────────────────────
 
 (defn scan-mcp-servers
-  "Scan project root for MCP server configs.
-   Reads .mcp.json and .cursor/mcp.json, merges them (project .mcp.json wins).
-   Returns array format [{:name :command :args :env}]."
-  [project-root]
-  (let [;; Read both config locations
-        cursor-servers (read-mcp-json (path/join project-root ".cursor" "mcp.json"))
-        project-servers (read-mcp-json (path/join project-root ".mcp.json"))
-        ;; Merge: project .mcp.json overrides .cursor/mcp.json
-        merged #js {}]
-    ;; Copy cursor servers first (lower precedence)
-    (when cursor-servers
-      (doseq [k (js/Object.keys cursor-servers)]
-        (aset merged k (aget cursor-servers k))))
-    ;; Copy project servers second (higher precedence, overwrites)
-    (when project-servers
-      (doseq [k (js/Object.keys project-servers)]
-        (aset merged k (aget project-servers k))))
-    (object->array merged)))
+  "Walk the source list in precedence order (lowest first), merging
+   `mcpServers` blocks. Later sources override earlier ones on the
+   same server name. Returns array format [{:name :command :args :env}].
+
+   Sources, lowest → highest precedence:
+     1. ~/.nyma/mcp.json
+     2. <cwd>/.nyma/mcp.json
+     3. <cwd>/.cursor/mcp.json
+     4. <cwd>/.mcp.json"
+  ([project-root] (scan-mcp-servers project-root (os/homedir)))
+  ([project-root home]
+   (let [user-global   (read-mcp-json (path/join home ".nyma" "mcp.json"))
+         nyma-project  (read-mcp-json (path/join project-root ".nyma" "mcp.json"))
+         cursor-servers (read-mcp-json (path/join project-root ".cursor" "mcp.json"))
+         project-servers (read-mcp-json (path/join project-root ".mcp.json"))
+         merged #js {}
+         copy-into! (fn [src]
+                      (when src
+                        (doseq [k (js/Object.keys src)]
+                          (aset merged k (aget src k)))))]
+     ;; Lowest → highest precedence — each pass overwrites prior names.
+     (copy-into! user-global)
+     (copy-into! nyma-project)
+     (copy-into! cursor-servers)
+     (copy-into! project-servers)
+     (object->array merged))))
 
 (defn- scan-and-store!
   "Scan for MCP servers and update the shared atom."
@@ -95,11 +113,11 @@
   [servers]
   (str "MCP servers (" (count servers) "):\n"
        (str/join "\n"
-         (map (fn [s]
-                (str "  " (:name s) " — " (:command s)
-                     (when (seq (:args s))
-                       (str " " (str/join " " (:args s))))))
-              servers))))
+                 (map (fn [s]
+                        (str "  " (:name s) " — " (:command s)
+                             (when (seq (:args s))
+                               (str " " (str/join " " (:args s))))))
+                      servers))))
 
 ;;; ─── Activation ────────────────────────────────────────────────
 
@@ -115,22 +133,22 @@
 
   ;; Register /mcp command
   (.registerCommand api "mcp"
-    #js {:description "List or refresh project MCP servers"
-         :handler (fn [args _ctx]
-                    (let [subcmd (first args)]
-                      (cond
-                        (or (nil? subcmd) (= subcmd "list"))
-                        (let [servers @shared/mcp-servers]
-                          (if (empty? servers)
-                            (notify api "No MCP servers discovered. Add a .mcp.json to your project root.")
-                            (notify api (format-server-list servers))))
+                    #js {:description "List or refresh project MCP servers"
+                         :handler (fn [args _ctx]
+                                    (let [subcmd (first args)]
+                                      (cond
+                                        (or (nil? subcmd) (= subcmd "list"))
+                                        (let [servers @shared/mcp-servers]
+                                          (if (empty? servers)
+                                            (notify api "No MCP servers discovered. Add a .mcp.json to your project root.")
+                                            (notify api (format-server-list servers))))
 
-                        (= subcmd "refresh")
-                        (let [servers (scan-and-store! (js/process.cwd))]
-                          (notify api (str "Refreshed: " (count servers) " MCP server(s) found")))
+                                        (= subcmd "refresh")
+                                        (let [servers (scan-and-store! (js/process.cwd))]
+                                          (notify api (str "Refreshed: " (count servers) " MCP server(s) found")))
 
-                        :else
-                        (notify api "Usage: /agent-shell__mcp [list|refresh]" "error"))))})
+                                        :else
+                                        (notify api "Usage: /agent-shell__mcp [list|refresh]" "error"))))})
 
   ;; Return deactivator
   (fn []

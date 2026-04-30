@@ -41,14 +41,21 @@ typically save 60–95% of tokens vs nyma's native `read` / `grep`.
 
 ## Configuration files
 
-The same files agent-shell already discovers:
+Sources are loaded in this order (lowest → highest precedence —
+later sources override earlier ones on the same server name):
 
-| File | Scope |
-|---|---|
-| `.mcp.json` (project root) | Shared via VCS — primary config. |
-| `.cursor/mcp.json` | Read for compatibility with Cursor projects. |
+| # | File | Scope |
+|---|---|---|
+| 1 | `~/.nyma/mcp.json` | User-global. Servers you want available in every project. |
+| 2 | `<cwd>/.nyma/mcp.json` | Project-shared, nyma-specific. Lives under `.nyma/` like other nyma config. |
+| 3 | `<cwd>/.cursor/mcp.json` | Cursor compat — read for parity with Cursor projects. |
+| 4 | `<cwd>/.mcp.json` | Project-shared, CC convention. The most common form. |
 
-Both use the standard MCP shape:
+Drop `.mcp.json` (or any of the variants above) anywhere on this list
+and its servers appear. Same server name in multiple files: highest-
+precedence wins. Different names: all merged.
+
+All four locations use the standard MCP shape:
 
 ```json
 {
