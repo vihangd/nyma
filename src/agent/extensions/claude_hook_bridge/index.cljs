@@ -55,18 +55,48 @@
       (set! (.-getHookConfig api) (fn [] (clj->js @hooks-atom)))
       (catch :default _e nil))
 
+    ;; Always register handlers — even when no hooks are loaded at
+    ;; activation time. This matters because hot-reload mutates the
+    ;; hooks-atom in place (the per-event closures dereference it on
+    ;; every fire), so if the user starts nyma with no hooks and then
+    ;; adds some, only handlers that are already subscribed will see
+    ;; the new config. Conditional registration was a bug:
+    ;; subscriptions can't be added retroactively from inside the
+    ;; reload closure.
+    ;;
+    ;; The cost when the atom is empty is one nyma event-bus hash
+    ;; lookup per tool call (handlers no-op because the matched-block
+    ;; list is always empty). Negligible.
+    (let [shared {:api          api
+                  :hooks-atom   hooks-atom
+                  :cwd          cwd
+                  :sources      (:sources-loaded loaded)}]
+      (swap! cleanups conj (pre-tool-use/register! shared))
+      (swap! cleanups conj (post-tool-use/register! shared))
+      (swap! cleanups conj (session/register! shared))
+      (swap! cleanups conj (ups/register! shared))
+      (swap! cleanups conj (stop/register! shared))
+      (swap! cleanups conj (compact/register! shared))
+      (swap! cleanups conj (perm/register! shared)))
+
+    ;; Visible startup line — suppressed when neither hooks nor
+    ;; disableAll fired so users without hooks don't see noise.
     (when (or (seq @hooks-atom) (:disable-all-source loaded))
-      (let [shared {:api          api
-                    :hooks-atom   hooks-atom
-                    :cwd          cwd
-                    :sources      (:sources-loaded loaded)}]
-        (swap! cleanups conj (pre-tool-use/register! shared))
-        (swap! cleanups conj (post-tool-use/register! shared))
-        (swap! cleanups conj (session/register! shared))
-        (swap! cleanups conj (ups/register! shared))
-        (swap! cleanups conj (stop/register! shared))
-        (swap! cleanups conj (compact/register! shared))
-        (swap! cleanups conj (perm/register! shared))))
+      (js/console.log
+       (str "[hook-bridge] active — "
+            (count (:sources-loaded loaded)) " source(s), "
+            (count @hooks-atom) " event(s) configured"
+            (when (seq (:sources-loaded loaded))
+              (str ": "
+                   (.join (clj->js
+                           (mapv (fn [p]
+                                   (let [h (or (.-NYMA_HOME js/process.env)
+                                               (.homedir os))]
+                                     (if (and h (.startsWith p h))
+                                       (str "~" (.slice p (count h)))
+                                       p)))
+                                 (:sources-loaded loaded)))
+                          ", "))))))
 
     ;; Hot-reload watcher — fires the reload closure on any change to
     ;; any watched source path. The reload swaps the hooks-atom; per-

@@ -143,7 +143,9 @@
 (describe "config/load-compat-flags" (fn []
                                        (it "defaults to both off"
                                            (fn []
-                                             (let [flags (config/load-compat-flags @tmp-root)]
+                                             ;; Pass the isolated tmp-home so this doesn't pick up
+                                             ;; the user's real ~/.nyma/settings.json hooks-compat flag.
+                                             (let [flags (config/load-compat-flags @tmp-root @tmp-home)]
                                                (-> (expect (:claude flags)) (.toBe false))
                                                (-> (expect (:agents flags)) (.toBe false)))))
 
@@ -152,6 +154,6 @@
                                              (let [cwd @tmp-root]
                                                (write-json! (path/join cwd ".nyma" "settings.json")
                                                             {:hooks-compat {:claude true}})
-                                               (let [flags (config/load-compat-flags cwd)]
+                                               (let [flags (config/load-compat-flags cwd @tmp-home)]
                                                  (-> (expect (:claude flags)) (.toBe true))
                                                  (-> (expect (:agents flags)) (.toBe false))))))))

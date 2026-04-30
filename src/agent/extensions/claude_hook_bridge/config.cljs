@@ -155,16 +155,19 @@
    false :agents false}. We deliberately do NOT participate in nyma's
    normal settings merge here — those merges are shallow and would
    collapse our hook arrays. We do a tiny separate read for the flags
-   themselves."
-  [cwd]
-  (let [home (os/homedir)
-        candidates
-        [(path/join cwd  ".nyma" "settings.local.json")
-         (path/join cwd  ".nyma" "settings.json")
-         (path/join home ".nyma" "settings.json")]
-        compat (some (fn [p]
-                       (when-let [parsed (safe-read-json p)]
-                         (aget parsed "hooks-compat")))
-                     candidates)]
-    {:claude (boolean (and compat (.-claude compat)))
-     :agents (boolean (and compat (.-agents compat)))}))
+   themselves.
+
+   `home` overrides os/homedir() — used in tests to isolate from the
+   user's real ~/.nyma/settings.json."
+  ([cwd] (load-compat-flags cwd (os/homedir)))
+  ([cwd home]
+   (let [candidates
+         [(path/join cwd  ".nyma" "settings.local.json")
+          (path/join cwd  ".nyma" "settings.json")
+          (path/join home ".nyma" "settings.json")]
+         compat (some (fn [p]
+                        (when-let [parsed (safe-read-json p)]
+                          (aget parsed "hooks-compat")))
+                      candidates)]
+     {:claude (boolean (and compat (.-claude compat)))
+      :agents (boolean (and compat (.-agents compat)))})))
