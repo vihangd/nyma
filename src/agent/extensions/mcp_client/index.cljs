@@ -91,6 +91,19 @@
         manager-ref        (atom manager)
         show-detail?-ref   (atom (:show-detail-segment settings))
         registered-tools   (atom [])
+        ;; Probe configured server count up-front so the startup log
+        ;; surfaces whether mcp-client even sees what mcp_discovery
+        ;; loaded. Mirrors the hook-bridge convention — a visible
+        ;; activation line beats silent failure.
+        configured-count  (count (or @shell-shared/mcp-servers []))
+        _ (js/console.log
+           (str "[mcp-client] active — " configured-count
+                " server(s) configured"
+                (when (pos? configured-count)
+                  (str ": "
+                       (.join (clj->js
+                               (mapv :name @shell-shared/mcp-servers))
+                              ", ")))))
 
         ;; status segments
         seg-cleanup (segs/register-all! api manager-ref show-detail?-ref)
