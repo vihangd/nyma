@@ -11,7 +11,6 @@
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
-            [agent.hooks :as hooks]
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
@@ -190,11 +189,6 @@
 
       ;; Register .nymaignore file access restrictions
       (file-access/register-access-check (:events agent) (js/process.cwd))
-
-      ;; Load declarative hooks from .nyma/hooks.json
-      (when-let [hooks-map (hooks/load-hooks (js/process.cwd))]
-        (reset! (:hooks-cleanup agent)
-                (hooks/register-hooks (:events agent) hooks-map (js/process.cwd))))
 
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)

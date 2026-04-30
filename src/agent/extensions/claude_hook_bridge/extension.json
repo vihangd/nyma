@@ -1,0 +1,5 @@
+{
+  "namespace": "claude-hook-bridge",
+  "capabilities": ["events", "middleware"],
+  "dependsOn": []
+}

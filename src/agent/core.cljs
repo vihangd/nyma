@@ -70,7 +70,6 @@
         steer-queue       (atom [])
         follow-queue      (atom [])
         retry-state       (atom nil)   ;; nil | {:reason str :inject [msg]}
-        hooks-cleanup     (atom nil)   ;; cleanup thunk from register-hooks, nil until hooks are loaded
         commands          (atom {})
         shortcuts         (atom {})
         ;; Keybinding registry — action-id → combo, built from defaults
@@ -113,7 +112,6 @@
                  :steer-queue       steer-queue
                  :follow-queue      follow-queue
                  :retry-state       retry-state
-                 :hooks-cleanup     hooks-cleanup
                  :commands          commands
                  :shortcuts         shortcuts
                  :keybinding-registry keybinding-registry
