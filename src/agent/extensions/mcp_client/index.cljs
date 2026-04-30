@@ -15,6 +15,7 @@
    Returns a deactivator that unregisters everything."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
+            [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shell-shared]
             [agent.extensions.mcp-client.client :as client]
             [agent.extensions.mcp-client.manager :as mgr]
@@ -61,7 +62,7 @@
 
 ;; ── Helpers ──────────────────────────────────────────────────────
 
-(defn- format-status-table
+(defn format-status-table
   "Build a human-readable status table for /mcp-status."
   [manager]
   (let [pairs (mgr/all-clients manager)]
@@ -77,7 +78,7 @@
                        pairs)
             s    (mgr/summary manager)]
         (str "MCP servers: " (:running s) "/" (:total s) " connected\n"
-             (clojure.string/join "\n" rows))))))
+             (str/join "\n" rows))))))
 
 (defn- notify [api msg]
   (when (and (.-ui api) (.-available (.-ui api)))
@@ -116,19 +117,28 @@
                                  :handler (fn [_args _ctx]
                                             (notify api (format-status-table @manager-ref)))})
 
-        ;; session_start: spawn all, register tools.
-        on-session-start
+        ;; Bring up: spawn every configured server, register tools.
+        ;; Idempotent — if the manager already has clients, no-op.
+        ;; Critical detail discovered the hard way: nyma fires
+        ;;   session_ready  on every normal CLI launch,
+        ;;   session_start  ONLY on /new / /fork / /clear.
+        ;; So we subscribe to session_ready (always) and also
+        ;; session_start (so explicit new-session actions get the
+        ;; same wiring), and the idempotency check prevents
+        ;; double-spawn when both fire.
+        on-bring-up
         (^:async fn [_data]
-          (let [raw (or @shell-shared/mcp-servers [])
-                configs (enriched-configs raw settings)]
-            (when (seq configs)
-              (try
-                (js-await (mgr/start-all! @manager-ref configs))
-                (let [names (bridge/register-all! api @manager-ref)]
-                  (reset! registered-tools names))
-                (catch :default e
-                  (js/console.warn "[mcp-client] start-all error:"
-                                   (or (.-message e) (str e))))))))
+          (when (zero? (count (mgr/server-names @manager-ref)))
+            (let [raw (or @shell-shared/mcp-servers [])
+                  configs (enriched-configs raw settings)]
+              (when (seq configs)
+                (try
+                  (js-await (mgr/start-all! @manager-ref configs))
+                  (let [names (bridge/register-all! api @manager-ref)]
+                    (reset! registered-tools names))
+                  (catch :default e
+                    (js/console.warn "[mcp-client] start-all error:"
+                                     (or (.-message e) (str e)))))))))
 
         ;; session_shutdown: tools off, then stop all.
         on-session-shutdown
@@ -142,13 +152,18 @@
                                (or (.-message e) (str e))))))]
 
     ;; Subscribe on the MAIN event bus (api.on, not api.events.on).
-    (.on api "session_start" on-session-start 50)
+    ;; session_ready: vanilla CLI launch — primary entry point.
+    ;; session_start: explicit /new / /fork / /clear.
+    ;; session_shutdown / session_end: cleanup on exit.
+    (.on api "session_ready" on-bring-up 50)
+    (.on api "session_start" on-bring-up 50)
     (.on api "session_shutdown" on-session-shutdown 50)
     (.on api "session_end" on-session-shutdown 50)
 
     ;; Deactivator
     (fn []
-      (try (.off api "session_start" on-session-start) (catch :default _ nil))
+      (try (.off api "session_ready" on-bring-up) (catch :default _ nil))
+      (try (.off api "session_start" on-bring-up) (catch :default _ nil))
       (try (.off api "session_shutdown" on-session-shutdown) (catch :default _ nil))
       (try (.off api "session_end" on-session-shutdown) (catch :default _ nil))
       (try (.unregisterCommand api "mcp-status") (catch :default _ nil))

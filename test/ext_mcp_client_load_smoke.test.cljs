@@ -95,12 +95,20 @@
       (js/console.error "[mcp-smoke] activation threw:" (.-message dispose)))
     (-> (expect (or (fn? dispose) (nil? dispose))) (.toBe true))
 
-    ;; Verify session_start / session_shutdown were subscribed on the
-    ;; MAIN bus.
-    (let [start-count (when-let [hc (:handler-count events)] (hc "session_start"))
-          stop-count  (when-let [hc (:handler-count events)] (hc "session_shutdown"))]
-      (when (and (some? start-count) (some? stop-count))
-        (-> (expect (pos? start-count)) (.toBe true))
+    ;; Subscriptions must land on the bus — and on the RIGHT bus
+    ;; AND the RIGHT event names. The bug being defended against:
+    ;; subscribed only to session_start, but vanilla nyma launch
+    ;; fires session_ready (not session_start). So MCP servers
+    ;; never spawned and the status segment stayed hidden.
+    (let [hc-fn       (:handler-count events)
+          ready-count (when hc-fn (hc-fn "session_ready"))
+          start-count (when hc-fn (hc-fn "session_start"))
+          stop-count  (when hc-fn (hc-fn "session_shutdown"))]
+      (when (some? ready-count)
+        (-> (expect (pos? ready-count)) (.toBe true)))
+      (when (some? start-count)
+        (-> (expect (pos? start-count)) (.toBe true)))
+      (when (some? stop-count)
         (-> (expect (pos? stop-count))  (.toBe true))))
 
     (when (fn? dispose) (try (dispose) (catch :default _e nil)))))
