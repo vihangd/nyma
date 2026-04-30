@@ -110,6 +110,35 @@
                                                                     nm      (find-server servers "nm")]
                                                                 (-> (expect (:command nm)) (.toBe "PROJECT")))))
 
+                                                        (it "override is complete replacement — NO deep merge of env/args"
+                                                            (fn []
+        ;; Global config has full env. Project redefines the server
+        ;; with different command and no env. Project wins; the
+        ;; env from global must be GONE — not merged in. Locking
+        ;; this contract so users don't accidentally rely on
+        ;; partial inheritance and so future code changes don't
+        ;; silently switch to deep-merge semantics.
+                                                              (write-mcp! (path/join @tmp-home ".nyma" "mcp.json")
+                                                                          {:mcpServers
+                                                                           {:memory {:command "node"
+                                                                                     :args    ["/usr/local/bin/memory.js"]
+                                                                                     :env     {:STORAGE_DIR "/var/data"
+                                                                                               :LOG_LEVEL   "debug"}}}})
+                                                              (write-mcp! (path/join @tmp-root ".mcp.json")
+                                                                          {:mcpServers
+                                                                           {:memory {:command "npx"
+                                                                                     :args    ["-y" "@modelcontextprotocol/server-memory"]}}})
+                                                              (let [servers (disco/scan-mcp-servers @tmp-root @tmp-home)
+                                                                    mem     (find-server servers "memory")]
+                                                                (-> (expect (:command mem)) (.toBe "npx"))
+                                                                (-> (expect (count (:args mem))) (.toBe 2))
+                                                                (-> (expect (first (:args mem))) (.toBe "-y"))
+          ;; The crucial bit: env from global must NOT have leaked in.
+          ;; expand-env-obj returns nil/empty when input env is nil.
+                                                                (-> (expect (or (nil? (:env mem))
+                                                                                (zero? (count (js-keys (:env mem))))))
+                                                                    (.toBe true)))))
+
                                                         (it "all four sources visible together — distinct names persist"
                                                             (fn []
                                                               (write-mcp! (path/join @tmp-home ".nyma" "mcp.json")

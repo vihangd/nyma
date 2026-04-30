@@ -55,6 +55,14 @@ Drop `.mcp.json` (or any of the variants above) anywhere on this list
 and its servers appear. Same server name in multiple files: highest-
 precedence wins. Different names: all merged.
 
+**Collisions are full replacement, not deep merge.** If `~/.nyma/mcp.json`
+defines a server `memory` with `{command, args, env}` and a project's
+`.mcp.json` redefines `memory` with only `{command, args}`, the
+project version is used **verbatim** — the env from the global is
+gone, not merged. Use a different server name if you want both, or
+copy the env block into the project file if you want it inside that
+project.
+
 All four locations use the standard MCP shape:
 
 ```json
