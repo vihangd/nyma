@@ -65,7 +65,31 @@
                 (let [text (visible-text (render {:role "assistant"
                                                   :content "<think>hidden</think>visible"
                                                   :id "1"}))]
-                  (-> (expect (.includes text "visible")) (.toBe true))))))
+                  (-> (expect (.includes text "visible")) (.toBe true)))))
+
+          (it "indents continuation lines by 2 columns under the bullet"
+              (fn []
+                ;; Force a multi-line response by feeding an explicit \n.
+                ;; First line has the "● " prefix; subsequent lines should
+                ;; start with two spaces so the body aligns under the
+                ;; first-line content (Claude Code convention).
+                (let [lines (vec (render {:role "assistant"
+                                          :content "first line\nsecond line\nthird line"
+                                          :id "1"}))]
+                  (-> (expect (pos? (count lines))) (.toBe true))
+                  ;; First line has the ● bullet — visible text starts after
+                  ;; the bullet+space. Continuation lines start with "  ".
+                  (let [strip (fn [s] (.replace s (js/RegExp. "\u001b\\[[0-9;]*m" "g") ""))
+                        cont-lines (vec (.slice (clj->js lines) 1))]
+                    ;; At least one continuation line must exist for this
+                    ;; test to be meaningful.
+                    (-> (expect (pos? (.-length cont-lines))) (.toBe true))
+                    (doseq [i (range (.-length cont-lines))]
+                      (let [bare (strip (aget cont-lines i))]
+                        ;; Skip blank lines (they don't need indentation).
+                        (when (seq (.trim bare))
+                          (-> (expect (.startsWith bare "  "))
+                              (.toBe true))))))))))
 
 ;;; ─── tool-start ───────────────────────────────────────────────────────────
 

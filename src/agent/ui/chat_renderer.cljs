@@ -108,16 +108,19 @@
             result   (mb/incremental-render (or text "") prev {})
             _        (when md-cache (reset! md-cache result))
             rendered (:rendered result)
-            ;; Wrap at (w-2) to accommodate the "● " prefix on line 1.
-            ;; Uses hard:true so lines with no word-break (e.g. long filenames
-            ;; in bash output) are still clipped rather than crashing pi-tui.
+            ;; Wrap at (w-2) to leave room for the 2-col left gutter:
+            ;;   first line:   "● <content>"
+            ;;   continuation: "  <content>"
+            ;; The continuation indent matches the bullet+space width so
+            ;; multi-line responses align flush with the body of line 1
+            ;; (Claude Code's convention).
             safe     (when (seq rendered)
                        (ansi/wrap-ansi rendered (- w 2) {:hard true :trim false :word-wrap true}))]
         (let [lines (if (seq safe)
                       (vec (.split safe "\n"))
                       [(str mc DIM "…" RESET)])]
           (into [(str sc "● " RESET (first lines))]
-                (rest lines))))
+                (map #(str "  " %) (rest lines)))))
 
       ("tool-start" "tool-end")
       (let [tname    (:tool-name msg)
