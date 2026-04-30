@@ -15,6 +15,7 @@
   (:require [agent.extensions.claude-hook-bridge.config :as config]
             [agent.extensions.claude-hook-bridge.watch :as watch]
             [agent.extensions.claude-hook-bridge.audit :as audit]
+            [agent.extensions.claude-hook-bridge.diagnostics :as diag]
             [agent.extensions.claude-hook-bridge.events.pre-tool-use :as pre-tool-use]
             [agent.extensions.claude-hook-bridge.events.post-tool-use :as post-tool-use]
             [agent.extensions.claude-hook-bridge.events.session :as session]
@@ -76,6 +77,7 @@
                                        cwd (config/load-compat-flags cwd))]
                             (reset! hooks-atom (:hooks fresh))
                             (audit/reset-seen!)  ;; re-audit edited scripts
+                            (diag/reset!)        ;; old unseen matchers are no longer config
                             (when (seq (:sources-loaded fresh))
                               (js/console.log
                                (str "[hook-bridge] reloaded "

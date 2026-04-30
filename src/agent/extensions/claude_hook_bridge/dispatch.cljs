@@ -17,6 +17,7 @@
   (:require [agent.extensions.claude-hook-bridge.matcher :as matcher]
             [agent.extensions.claude-hook-bridge.response :as response]
             [agent.extensions.claude-hook-bridge.audit :as audit]
+            [agent.extensions.claude-hook-bridge.diagnostics :as diag]
             [agent.extensions.claude-hook-bridge.handlers.command :as cmd]
             [agent.extensions.claude-hook-bridge.handlers.http :as http]
             [agent.extensions.claude-hook-bridge.handlers.prompt :as prompt]
@@ -98,6 +99,10 @@
   [{:keys [hooks-map event-name discriminator stdin-payload abort-signal cwd api]}]
   (let [blocks   (get hooks-map event-name [])
         matched  (filterv #(matchers-fire? % discriminator) blocks)]
+    ;; Record each matched (event, matcher) pair so end-of-session
+    ;; diagnostics can flag unseen matchers as likely typos.
+    (doseq [block matched]
+      (diag/record-match! event-name (or (.-matcher block) "")))
     (when (seq matched)
       (let [parsed (atom [])]
         ;; Run each matched block, then each hook spec inside, in order.

@@ -22,7 +22,16 @@
 
 (defn matches?
   "Return true when `matcher` matches the inbound `value` (typically
-   a tool name or matcher-key like \"startup\" / \"resume\")."
+   a tool name or matcher-key like \"startup\" / \"resume\").
+
+   Case-tolerance for the simple shape:
+   nyma's bridge accepts `matcher: \"bash\"` as well as `\"Bash\"` —
+   strict CC is case-sensitive, but the lowercase forms come up so
+   often when CLJS users hand-write configs that the silent
+   no-match foot-gun is worth eating a small spec divergence for.
+   The regex branch stays strict (use `(?i)` if you want it
+   case-insensitive) so users with intentional regexes aren't
+   surprised."
   [matcher value]
   (let [m (when matcher (str matcher))
         v (when value (str value))]
@@ -34,8 +43,11 @@
       false
 
       (simple-shape? m)
-      (let [exacts (set (str/split m #"\|"))]
-        (contains? exacts v))
+      (let [lower-v (.toLowerCase v)
+            exacts  (->> (str/split m #"\|")
+                         (map #(.toLowerCase %))
+                         set)]
+        (contains? exacts lower-v))
 
       :else
       (try

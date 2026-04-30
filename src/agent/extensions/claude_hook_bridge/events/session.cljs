@@ -18,7 +18,8 @@
      sigint     → other
      user-exit  → other
      clear      → clear"
-  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]))
+  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.diagnostics :as diag]))
 
 (def ^:private bridge-priority 200)
 
@@ -74,6 +75,12 @@
 
         end-handler
         (fn [data]
+          ;; Diagnostic: warn about configured matchers that never
+          ;; fired this session. Done before the SessionEnd dispatch
+          ;; so any user-configured SessionEnd hook still runs cleanly
+          ;; whether or not warnings printed.
+          (try (diag/report-unseen @hooks-atom)
+               (catch :default _e nil))
           (let [r (str (or (.-reason data) "exit"))
                 m (or (get end-reason->matcher r) "other")
                 stdin (payload "SessionEnd" m)]

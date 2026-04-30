@@ -114,16 +114,40 @@ prompt 30, mcp_tool 60.
 | Form | Example | Matches |
 |---|---|---|
 | empty / `*` / omitted | `""` | everything |
-| simple (alnum/underscore/pipe) | `Bash`, `Edit\|Write` | exact string or pipe-list |
-| anything else | `^Notebook`, `mcp__memory__.*` | JS regex |
+| simple (alnum/underscore/pipe) | `Bash`, `Edit\|Write` | exact string or pipe-list (case-insensitive in nyma — see below) |
+| anything else | `^Notebook`, `mcp__memory__.*` | JS regex (strict, no case-folding) |
 
 Tool-name matchers use Claude Code's TitleCase: `Bash`, `Read`,
 `Edit`, `Write`, `Glob`, `Grep`, `WebFetch`, `WebSearch`,
 `Agent`, `LS`, `Think`. Nyma's lowercase tool names are
 translated automatically at the boundary.
 
+**Case tolerance for simple matchers.** Strict CC is case-sensitive,
+but `matcher: "bash"` is such a common typo of `matcher: "Bash"`
+(and either reads naturally) that nyma matches both lowercase and
+TitleCase forms. This is a deliberate divergence from CC; the
+regex branch stays strict so users with an intentional regex aren't
+surprised. If you want a case-insensitive regex, build it explicitly
+in the pattern (JS RegExp doesn't support inline `(?i)`).
+
 For MCP tools the matcher format is `mcp__<server>__<tool>` —
 e.g. `mcp__memory__write_graph` or `mcp__.*__read.*`.
+
+### Unseen-matcher diagnostics
+
+At session end the bridge logs a warning for every configured
+matcher that never fired during the session. Catches typos like
+`matcher: "Edot"` or `matcher: "BashCommands"` that case tolerance
+can't fix. Sample output:
+
+```
+[hook-bridge] 1 configured matcher(s) never fired this session:
+  PreToolUse matcher "Edot" (did you mean "Edit"?)
+```
+
+Pure observability — the hook still runs (or doesn't), this is just
+a tripwire. The `did you mean` hint fires when a known tool name is
+within Levenshtein distance 2 of the matcher.
 
 ---
 
