@@ -1,8 +1,10 @@
 (ns status-bar.test
-  "Tests for create-status-bar — covers role display (regression: name-not-defined)
-   and basic render contract."
-  (:require ["bun:test" :refer [describe it expect]]
-            [agent.ui.status-bar :refer [create-status-bar]]))
+  "Tests for create-status-bar — covers role display (regression: name-not-defined),
+   basic render contract, AND extension auto-append segment integration
+   (regression: register-segment used to write to a registry no consumer read)."
+  (:require ["bun:test" :refer [describe it expect afterEach]]
+            [agent.ui.status-bar :refer [create-status-bar]]
+            [agent.ui.status-line-segments :as segs]))
 
 (def ^:private theme
   {:colors {:primary   "#7aa2f7"
@@ -158,3 +160,89 @@
                                        (.setState bar {:model "a-very-long-model-name-that-wont-fit" :streaming false})
                                        (let [text (render-bar bar 30)]
                                          (-> (expect (.includes text "ready")) (.toBe true))))))))
+
+;;; ─── extension auto-append segments ───────────────────────────────────────
+;;; These regressions exist because for a long time register-segment
+;;; wrote to a registry that NO status-line consumer actually read.
+;;; Lock both directions: the bar reads the registry, hides invisible
+;;; segments, places by :position, and a render error in one segment
+;;; doesn't blank the bar.
+
+(defn- cleanup-segs! []
+  (doseq [id ["test.x" "test.y" "test.boom" "test.hidden"]]
+    (try (segs/unregister-segment id) (catch :default _ nil))))
+
+(afterEach cleanup-segs!)
+
+(describe "status-bar/extension-segments"
+          (fn []
+            (it "renders an auto-append :left segment in the bar"
+                (fn []
+                  (segs/register-segment
+                   "test.x"
+                   {:auto-append? true
+                    :position     :left
+                    :render       (fn [_] {:visible? true
+                                           :content  "MCP 1/1"
+                                           :color    "#9ece6a"})})
+                  (let [bar  (create-status-bar theme)
+                        text (render-bar bar 200)]
+                    (-> (expect (.includes text "MCP 1/1")) (.toBe true)))))
+
+            (it "renders :right segments on the right side, before 'ready'"
+                (fn []
+                  (segs/register-segment
+                   "test.y"
+                   {:auto-append? true
+                    :position     :right
+                    :render       (fn [_] {:visible? true
+                                           :content  "leanc ✓"})})
+                  (let [bar  (create-status-bar theme)
+                        text (render-bar bar 200)
+                        idx-x (.indexOf text "leanc")
+                        idx-r (.indexOf text "ready")]
+                    (-> (expect (>= idx-x 0)) (.toBe true))
+                    (-> (expect (>= idx-r 0)) (.toBe true))
+                    ;; right segments precede the built-in 'ready'
+                    (-> (expect (< idx-x idx-r)) (.toBe true)))))
+
+            (it "skips segments whose render returns :visible? false"
+                (fn []
+                  (segs/register-segment
+                   "test.hidden"
+                   {:auto-append? true
+                    :position     :left
+                    :render       (fn [_] {:visible? false})})
+                  (let [bar  (create-status-bar theme)
+                        text (render-bar bar 200)]
+                    (-> (expect (.includes text "test.hidden")) (.toBe false)))))
+
+            (it "skips non-auto-append segments"
+                (fn []
+                  (segs/register-segment
+                   "test.x"
+                   {:auto-append? false  ;; opt-in only via preset
+                    :position     :left
+                    :render       (fn [_] {:visible? true :content "OPTIN"})})
+                  (let [bar  (create-status-bar theme)
+                        text (render-bar bar 200)]
+                    (-> (expect (.includes text "OPTIN")) (.toBe false)))))
+
+            (it "isolates errors in one segment — doesn't blank the bar"
+                (fn []
+                  (segs/register-segment
+                   "test.boom"
+                   {:auto-append? true
+                    :position     :left
+                    :render       (fn [_] (throw (js/Error. "kaboom")))})
+                  (segs/register-segment
+                   "test.x"
+                   {:auto-append? true
+                    :position     :left
+                    :render       (fn [_] {:visible? true :content "OK1"})})
+                  (let [bar  (create-status-bar theme)
+                        text (render-bar bar 200)]
+                    ;; Built-in content still renders despite the bad segment.
+                    (-> (expect (.includes text "nyma")) (.toBe true))
+                    ;; Other working segment still renders.
+                    (-> (expect (.includes text "OK1")) (.toBe true)))))))

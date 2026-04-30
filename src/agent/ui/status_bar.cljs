@@ -1,6 +1,18 @@
 (ns agent.ui.status-bar
-  "Pi-tui Component: one-line status bar at the bottom of the screen."
-  (:require ["@mariozechner/pi-tui" :refer [truncateToWidth]]))
+  "Pi-tui Component: one-line status bar at the bottom of the screen.
+
+   Renders nyma's built-in status (`nyma │ <model> [streaming|ready]
+   N turns`) AND every visible segment registered via
+   `agent.ui.status-line-segments/register-segment` whose
+   `:auto-append?` is true. Segments fan out left or right based on
+   their `:position` and self-hide via `{:visible? false}` when
+   their data isn't applicable.
+
+   Each render call walks the registry fresh, so there's no caching
+   layer to invalidate when extensions add/remove segments at
+   runtime."
+  (:require ["@mariozechner/pi-tui" :refer [truncateToWidth]]
+            [agent.ui.status-line-segments :as segs]))
 
 (def ^:private ESC   (js/String.fromCharCode 27))
 (def ^:private RESET (str ESC "[0m"))
@@ -13,9 +25,43 @@
         b (js/parseInt (.slice hex 5 7) 16)]
     (str ESC "[38;2;" r ";" g ";" b "m")))
 
+(defn- render-extension-segments
+  "Walk the segment registry, call each auto-append segment's render
+   for the given `position` (:left or :right). Returns a vector of
+   {:content :color :id} entries that the bar prepends/appends.
+   Errors in a render fn are isolated — a misbehaving segment can't
+   blank the whole status bar."
+  [theme position]
+  (let [reg (segs/segment-registry)]
+    (->> (vals reg)
+         (filter #(and (:auto-append? %)
+                       (= (:position %) position)))
+         (sort-by :id)
+         (keep (fn [seg]
+                 (try
+                   (let [out ((:render seg) {:theme theme})]
+                     (when (:visible? out)
+                       {:id      (:id seg)
+                        :content (or (:content out) "")
+                        :color   (:color out)}))
+                   (catch :default _e nil))))
+         vec)))
+
+(defn- format-segment
+  "Wrap a segment's content in its color + a leading divider so it
+   reads as 'previous │ segment'. Divider color follows the theme
+   border so segments don't shout for attention."
+  [{:keys [content color]} border]
+  (str (fg border) " │ " RESET
+       (when color (fg color)) content RESET))
+
 (defn create-status-bar
   "Returns a pi-tui Component that renders a one-line status bar.
-   Call .setState({model, role, streaming, turn-count}) to update."
+   Call .setState({model, role, streaming, turn-count}) to update.
+
+   Auto-appends every registered status-line segment with
+   :auto-append? true; segments hide themselves via :visible? false
+   when not relevant."
   [theme]
   (let [state (atom {:model      "–"
                      :role       nil
@@ -34,19 +80,27 @@
                          role-str  (when (and (seq (str role))
                                               (not= (str role) "default"))
                                      (str (fg warning) "[" role "]" RESET " "))
-                         left  (str (fg muted) " nyma " RESET
-                                    (fg border) "│" RESET
-                                    " " (or role-str "")
-                                    (fg primary) (or model "–") RESET)
-                         right (str " "
-                                    (if streaming
-                                      (str (fg secondary) BOLD "● streaming" RESET)
-                                      (str (fg muted) DIM "ready" RESET))
-                                    (when (pos? turn-count)
-                                      (str (fg border) " │" RESET
-                                           (fg muted) DIM " " turn-count " turns" RESET))
-                                    " ")
-                         ;; Truncate left side to leave room for right side
+                         ;; Built-in left content.
+                         core-left (str (fg muted) " nyma " RESET
+                                        (fg border) "│" RESET
+                                        " " (or role-str "")
+                                        (fg primary) (or model "–") RESET)
+                         ;; Built-in right content.
+                         core-right (str " "
+                                         (if streaming
+                                           (str (fg secondary) BOLD "● streaming" RESET)
+                                           (str (fg muted) DIM "ready" RESET))
+                                         (when (pos? turn-count)
+                                           (str (fg border) " │" RESET
+                                                (fg muted) DIM " " turn-count " turns" RESET))
+                                         " ")
+                         ;; Extension auto-append segments.
+                         left-segs  (render-extension-segments theme :left)
+                         right-segs (render-extension-segments theme :right)
+                         left  (str core-left
+                                    (apply str (map #(format-segment % border) left-segs)))
+                         right (str (apply str (map #(format-segment % border) right-segs))
+                                    core-right)
                          right-w (count (.replace right (js/RegExp. (str ESC "\\[[0-9;]*m") "g") ""))
                          left-w  (max 0 (- width right-w))
                          left-t  (truncateToWidth left left-w "…" false)]
