@@ -1,22 +1,33 @@
 (ns ext-mcp-client-load-smoke.test
-  "Real-agent activation smoke test — the same shape that caught
-   the hook-bridge wrong-bus bug. Verifies the MCP client extension:
+  "Real-agent activation smoke test — production-shaped.
 
-   1. Module loads (everything in dist/agent/extensions/mcp_client/
-      imports cleanly).
-   2. default(api) activates against a real
-      create-extension-api(create-agent) without throwing — even
-      when no MCP servers are configured (no .mcp.json present).
-   3. Subscribes its handlers to the MAIN agent event bus
-      (api.on / api.off — NOT api.events.on the inter-extension bus).
+   This test catches the WHOLE activation pipeline, not just module
+   imports. Past bugs proved isolated probes lie:
+     - L1 'every .mjs imports' missed the 'await outside async' bug.
+     - L2 'default(api) doesn't throw' against a hand-built mock api
+       missed the 'subscribed to wrong bus' bug.
+     - L2 against a real create-extension-api(agent) missed the
+       'manifest declared wrong capabilities' bug — because the
+       capability gating lives in extension_scope/create-scoped-api,
+       which the production loader runs but a raw default(api)
+       call doesn't.
 
-   If the activation path drifts from how nyma actually exposes
-   events to extensions, this test fails."
+   This test now runs the full chain:
+     1. Recursively import every .mjs (catches syntax / top-level
+        eval throws).
+     2. Read extension.json to get the declared capabilities list.
+     3. Wrap the real api with create-scoped-api using that list.
+     4. Call default(scoped-api) and assert no throw.
+
+   If any registerX call inside default uses an undeclared
+   capability, the gate throws synchronously at activation —
+   exactly the way it does in production."
   (:require ["bun:test" :refer [describe it expect]]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.core :refer [create-agent]]
-            [agent.extensions :refer [create-extension-api]]))
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extension-scope :refer [create-scoped-api]]))
 
 (def ^:private dist-mcp-dir
   "/Users/vihangd/projects/pers/nyma/dist/agent/extensions/mcp_client")
@@ -49,37 +60,54 @@
       (-> (expect (count failures)) (.toBe 0))
       (-> (expect (pos? (count @results))) (.toBe true)))))
 
-(defn ^:async test-default-activates-against-real-api []
+(defn- read-manifest-capabilities
+  "Read declared capabilities from extension.json next to index.mjs.
+   In squint, keywords compile to strings — so the set this returns
+   matches what the production loader builds via parse-capabilities
+   (a set of strings)."
+  []
+  (let [p      (path/join dist-mcp-dir "extension.json")
+        raw    (fs/readFileSync p "utf8")
+        parsed (js/JSON.parse raw)
+        caps   (.-capabilities parsed)
+        n      (or (and caps (.-length caps)) 0)]
+    (set (for [i (range n)] (aget caps i)))))
+
+(defn ^:async test-default-activates-with-scoped-api []
+  ;; The production path wraps the base api with extension_scope/
+  ;; create-scoped-api, which gates registerX calls behind the
+  ;; declared capabilities. We replicate that exactly so a missing
+  ;; capability declaration fails this test instead of silently
+  ;; activating in a permissive test environment and crashing in
+  ;; the real loader.
   (let [agent      (create-agent
                     {:model #js {:modelId "test-model"}
                      :system-prompt "test"})
-        api        (create-extension-api agent)
-        ;; Track what got subscribed on the MAIN bus.
+        base-api   (create-extension-api agent)
+        caps       (read-manifest-capabilities)
+        scoped-api (create-scoped-api base-api "mcp-client" caps)
         events     (:events agent)
-        before-on  (count (filter (fn [_] true) (or @(or (:handlers events) (atom {})) {})))
         bridge-mod (js-await (js/import (path/join dist-mcp-dir "index.mjs")))
-        dispose    (try ((.-default bridge-mod) api)
+        dispose    (try ((.-default bridge-mod) scoped-api)
                         (catch :default e e))]
-    ;; Activation must not throw.
+    ;; Activation must not throw — captured value must be a fn or nil.
+    (when (instance? js/Error dispose)
+      (js/console.error "[mcp-smoke] activation threw:" (.-message dispose)))
     (-> (expect (or (fn? dispose) (nil? dispose))) (.toBe true))
 
-    ;; Verify session_start / session_shutdown / session_end were
-    ;; subscribed on the MAIN event bus (not the inter-extension bus).
-    ;; We can probe this via :handler-count if exposed; otherwise
-    ;; check via emit + atom side-effect.
+    ;; Verify session_start / session_shutdown were subscribed on the
+    ;; MAIN bus.
     (let [start-count (when-let [hc (:handler-count events)] (hc "session_start"))
           stop-count  (when-let [hc (:handler-count events)] (hc "session_shutdown"))]
-      ;; If handler-count is available, both must be > 0.
       (when (and (some? start-count) (some? stop-count))
         (-> (expect (pos? start-count)) (.toBe true))
         (-> (expect (pos? stop-count))  (.toBe true))))
 
-    ;; Cleanup
     (when (fn? dispose) (try (dispose) (catch :default _e nil)))))
 
 (describe "mcp-client/load-smoke"
           (fn []
             (it "every compiled .mjs in mcp_client/ imports cleanly"
                 test-every-module-imports)
-            (it "default(api) activates against a real agent without throwing"
-                test-default-activates-against-real-api)))
+            (it "default(scoped-api) activates with manifest-declared capabilities"
+                test-default-activates-with-scoped-api)))
