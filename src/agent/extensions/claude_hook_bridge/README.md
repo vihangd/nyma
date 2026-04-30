@@ -2,6 +2,9 @@
 
 Claude-Code-shape hooks for nyma.
 
+> **Full reference:** [`docs/hooks.md`](../../../../docs/hooks.md).
+> This README is a short pointer to the canonical recipe.
+
 This extension lets nyma run hook scripts written in Claude Code's
 canonical schema. Hook scripts and HTTP endpoints from the entire
 Claude Code ecosystem (rtk, claude-mem, validators, audit tools, …)
