@@ -12,7 +12,8 @@
    settings file changes, the atom is atomically updated. No
    subscriber churn — old handler closures keep working with the new
    config on their next call."
-  (:require [agent.extensions.claude-hook-bridge.config :as config]
+  (:require ["node:os" :as os]
+            [agent.extensions.claude-hook-bridge.config :as config]
             [agent.extensions.claude-hook-bridge.watch :as watch]
             [agent.extensions.claude-hook-bridge.audit :as audit]
             [agent.extensions.claude-hook-bridge.diagnostics :as diag]
@@ -70,7 +71,11 @@
     ;; Hot-reload watcher — fires the reload closure on any change to
     ;; any watched source path. The reload swaps the hooks-atom; per-
     ;; event closures pick up the new config on their next call.
-    (let [watch-paths (watch/watched-paths cwd compat (.-NYMA_HOME js/process.env))
+    ;; NYMA_HOME is an undocumented test-isolation override. When unset
+    ;; (the common case) fall back to os.homedir() so path/join doesn't
+    ;; receive undefined and throw ERR_INVALID_ARG_TYPE on extension load.
+    (let [home        (or (.-NYMA_HOME js/process.env) (.homedir os))
+          watch-paths (watch/watched-paths cwd compat home)
           on-reload   (fn []
                         (try
                           (let [fresh (config/load-merged-hooks
