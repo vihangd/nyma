@@ -26,6 +26,7 @@
     "@ai-sdk/google": "^3.0.55",
     "@ai-sdk/openai": "^3.0.0",
     "@mariozechner/pi-tui": "^0.70.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^6.0.142",
     "diff": "^7.0.0",
     "linkedom": "^0.18.12",

@@ -1,0 +1,5 @@
+{
+  "namespace": "mcp-client",
+  "capabilities": ["events", "tools"],
+  "dependsOn": ["agent-shell"]
+}
