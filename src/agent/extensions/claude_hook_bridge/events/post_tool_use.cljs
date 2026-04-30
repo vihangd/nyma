@@ -50,7 +50,7 @@
   [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         handler
-        (fn [data]
+        (^:async fn [data]
           (let [is-error? (boolean (or (.-isError data) (.-is-error data)))
                 tool-name (str (or (.-toolName data) (.-name data) ""))
                 disc      (tool-names/cc-name tool-name)

@@ -30,7 +30,7 @@
   [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         handler
-        (fn [data]
+        (^:async fn [data]
           (let [tool-name (str (or (.-tool data) ""))
                 disc      (tool-names/cc-name tool-name)
                 merged    (js-await

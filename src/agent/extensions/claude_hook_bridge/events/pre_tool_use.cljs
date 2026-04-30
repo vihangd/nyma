@@ -90,7 +90,7 @@
         ;; The actual handler. Returns a JS object that emit-collect
         ;; merges with other handlers' returns.
         handler
-        (fn [data]
+        (^:async fn [data]
           (let [tool-name (str (or (.-name data) (.-toolName data) ""))
                 args      (or (.-args data) #js {})
                 stdin     (payload-for-hook api data tool-name args)

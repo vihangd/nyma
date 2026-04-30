@@ -36,7 +36,7 @@
   (let [events (.-events api)
 
         pre-handler
-        (fn [evt-ctx]
+        (^:async fn [evt-ctx]
           (let [trigger (str (or (.-trigger evt-ctx) "auto"))
                 merged  (js-await
                          (dispatch/dispatch
