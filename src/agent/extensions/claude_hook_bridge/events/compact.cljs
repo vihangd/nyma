@@ -44,7 +44,8 @@
                            :event-name    "PreCompact"
                            :discriminator trigger
                            :stdin-payload (pre-payload evt-ctx)
-                           :cwd           cwd}))]
+                           :cwd           cwd
+                           :api           api}))]
             (when (and merged (:decision-block? merged))
               ;; Signal sessions/compaction.cljs to bail.
               (when evt-ctx
@@ -61,7 +62,8 @@
               :event-name    "PostCompact"
               :discriminator trigger
               :stdin-payload (post-payload data)
-              :cwd           cwd})))]
+              :cwd           cwd
+              :api           api})))]
 
     ((:on events) "before_compact" pre-handler bridge-priority)
     ((:on events) "compact" post-handler bridge-priority)

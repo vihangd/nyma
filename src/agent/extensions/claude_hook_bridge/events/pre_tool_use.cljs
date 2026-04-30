@@ -104,7 +104,8 @@
                              :stdin-payload stdin
                              :abort-signal  (when-let [a (.-abortController api)]
                                               (.-signal a))
-                             :cwd           cwd}))]
+                             :cwd           cwd
+                             :api           api}))]
             (when merged
               (merged->effects merged))))]
     ((:on events) "before_tool_call" handler bridge-priority)

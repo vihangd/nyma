@@ -42,7 +42,8 @@
             :event-name    "Stop"
             :discriminator nil
             :stdin-payload (stop-payload data)
-            :cwd           cwd}))
+            :cwd           cwd
+            :api           api}))
 
         fail-handler
         (fn [data]
@@ -52,7 +53,8 @@
               :event-name    "StopFailure"
               :discriminator t
               :stdin-payload (stop-failure-payload data)
-              :cwd           cwd})))]
+              :cwd           cwd
+              :api           api})))]
 
     ((:on events) "agent_end" stop-handler bridge-priority)
     ((:on events) "provider_error" fail-handler bridge-priority)

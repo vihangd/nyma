@@ -56,7 +56,8 @@
                   :event-name    "SessionStart"
                   :discriminator m
                   :stdin-payload stdin
-                  :cwd           cwd})
+                  :cwd           cwd
+                  :api           api})
                 (.then (fn [merged]
                          (when (and merged (seq (:additional-context merged)))
                            ;; Surface the context as a system reminder
@@ -81,7 +82,8 @@
               :event-name    "SessionEnd"
               :discriminator m
               :stdin-payload stdin
-              :cwd           cwd})))]
+              :cwd           cwd
+              :api           api})))]
 
     ((:on events) "session_start" start-handler bridge-priority)
     ((:on events) "session_end" end-handler bridge-priority)

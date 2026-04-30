@@ -75,12 +75,20 @@
   [{:keys [command timeout-ms shell env cwd abort-signal stdin-json]}]
   (let [start  (now)
         argv   (resolve-command command shell)
+        ;; Build env: shallow-merge user env over process.env at the
+        ;; JS level (squint has no js->clj). Object.assign is fine —
+        ;; we want the user's vars to win over the parent's.
+        merged-env (let [base (js/Object.assign #js {} js/process.env)]
+                     (when env
+                       (doseq [k (keys env)]
+                         (aset base (str k) (str (get env k)))))
+                     base)
         spawn-opts
         #js {:cwd    (or cwd (js/process.cwd))
              :stdin  "pipe"
              :stdout "pipe"
              :stderr "pipe"
-             :env    (clj->js (merge (js->clj js/process.env) (or env {})))}]
+             :env    merged-env}]
     (try
       (let [proc       (js/Bun.spawn (clj->js argv) spawn-opts)
             ;; Pipe the stdin JSON in.

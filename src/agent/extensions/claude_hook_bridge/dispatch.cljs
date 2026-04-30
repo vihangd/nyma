@@ -16,7 +16,10 @@
    here and one new module under `handlers/`."
   (:require [agent.extensions.claude-hook-bridge.matcher :as matcher]
             [agent.extensions.claude-hook-bridge.response :as response]
-            [agent.extensions.claude-hook-bridge.handlers.command :as cmd]))
+            [agent.extensions.claude-hook-bridge.handlers.command :as cmd]
+            [agent.extensions.claude-hook-bridge.handlers.http :as http]
+            [agent.extensions.claude-hook-bridge.handlers.prompt :as prompt]
+            [agent.extensions.claude-hook-bridge.handlers.mcp-tool :as mcp-tool]))
 
 (defn- matchers-fire?
   "Decide whether a hook block fires for this discriminator. The block
@@ -27,24 +30,49 @@
 
 (defn- hook-spec->result
   "Dispatch a single hook spec to the right handler module."
-  [spec stdin-json {:keys [abort-signal cwd]}]
+  [spec stdin-json {:keys [abort-signal cwd api]}]
   (let [t (str (or (.-type spec) "command"))]
     (case t
       "command"
       (cmd/run-command
        {:command      (.-command spec)
-        :timeout-ms   (when-let [t (.-timeout spec)] (* t 1000))
+        :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
         :shell        (.-shell spec)
         :cwd          cwd
         :abort-signal abort-signal
         :stdin-json   stdin-json})
 
-      ;; Other handler types land in later phases. For now, return
-      ;; a non-blocking error so misconfigured settings don't crash.
+      "http"
+      (http/run-http
+       {:url          (.-url spec)
+        :headers      (.-headers spec)
+        :allowed-env  (.-allowedEnvVars spec)
+        :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
+        :stdin-json   stdin-json
+        :abort-signal abort-signal})
+
+      "prompt"
+      (prompt/run-prompt
+       {:api          api
+        :prompt       (.-prompt spec)
+        :model        (.-model spec)
+        :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
+        :stdin-json   stdin-json
+        :abort-signal abort-signal})
+
+      "mcp_tool"
+      (mcp-tool/run-mcp-tool
+       {:server       (.-server spec)
+        :tool         (.-tool spec)
+        :input        (.-input spec)
+        :stdin-json   stdin-json
+        :abort-signal abort-signal})
+
+      ;; Unknown / not-implemented types still degrade non-blocking.
       (js/Promise.resolve
        {:exit-code 1
         :stdout    ""
-        :stderr    (str "[hook-bridge] handler type '" t "' not implemented yet")
+        :stderr    (str "[hook-bridge] handler type '" t "' not implemented")
         :timed-out? false
         :aborted?   false}))))
 
@@ -61,7 +89,7 @@
 
    Returns the merged response map (see response/merge-many) or nil if
    no hooks matched."
-  [{:keys [hooks-map event-name discriminator stdin-payload abort-signal cwd]}]
+  [{:keys [hooks-map event-name discriminator stdin-payload abort-signal cwd api]}]
   (let [blocks   (get hooks-map event-name [])
         matched  (filterv #(matchers-fire? % discriminator) blocks)]
     (when (seq matched)
@@ -74,7 +102,8 @@
                     raw    (js-await
                             (hook-spec->result spec stdin-payload
                                                {:abort-signal abort-signal
-                                                :cwd          cwd}))
+                                                :cwd          cwd
+                                                :api          api}))
                     parsed-r (response/parse-one raw)]
                 (when parsed-r
                   (swap! parsed conj parsed-r))))))

@@ -41,7 +41,8 @@
                              :stdin-payload (payload data)
                              :abort-signal  (when-let [a (.-abortController api)]
                                               (.-signal a))
-                             :cwd           cwd}))]
+                             :cwd           cwd
+                             :api           api}))]
             (when merged
               (let [hso (:hook-specific merged)
                     nested (when (and hso (object? hso)) (.-decision hso))

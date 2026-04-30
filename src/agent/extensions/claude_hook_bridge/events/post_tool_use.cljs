@@ -63,7 +63,8 @@
                              :stdin-payload stdin
                              :abort-signal  (when-let [a (.-abortController api)]
                                               (.-signal a))
-                             :cwd           cwd}))]
+                             :cwd           cwd
+                             :api           api}))]
             (when merged
               (let [out  #js {}
                     base (str (or (.-result data) ""))

@@ -36,7 +36,8 @@
                   :event-name    "UserPromptSubmit"
                   :discriminator nil
                   :stdin-payload stdin
-                  :cwd           cwd})
+                  :cwd           cwd
+                  :api           api})
                 (.then (fn [merged]
                          (when merged
                            (let [ctx (:additional-context merged)
