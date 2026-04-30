@@ -32,13 +32,13 @@
          :error_message   (str msg)}))
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
 
         stop-handler
         (fn [data]
           (dispatch/dispatch
-           {:hooks-map     hooks-map
+           {:hooks-map     @hooks-atom
             :event-name    "Stop"
             :discriminator nil
             :stdin-payload (stop-payload data)
@@ -49,7 +49,7 @@
         (fn [data]
           (let [t (str (or (.-errorType data) "unknown"))]
             (dispatch/dispatch
-             {:hooks-map     hooks-map
+             {:hooks-map     @hooks-atom
               :event-name    "StopFailure"
               :discriminator t
               :stdin-payload (stop-failure-payload data)

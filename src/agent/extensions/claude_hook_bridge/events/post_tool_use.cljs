@@ -47,7 +47,7 @@
                                    (.-errorMessage event-data) "")))})
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         handler
         (fn [data]
@@ -57,7 +57,7 @@
                 stdin     (payload data is-error?)
                 merged    (js-await
                            (dispatch/dispatch
-                            {:hooks-map     hooks-map
+                            {:hooks-map     @hooks-atom
                              :event-name    (if is-error? "PostToolUseFailure" "PostToolUse")
                              :discriminator disc
                              :stdin-payload stdin

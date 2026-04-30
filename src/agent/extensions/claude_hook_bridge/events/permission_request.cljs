@@ -27,7 +27,7 @@
          :tool_input      (or (.-args data) #js {})}))
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         handler
         (fn [data]
@@ -35,7 +35,7 @@
                 disc      (tool-names/cc-name tool-name)
                 merged    (js-await
                            (dispatch/dispatch
-                            {:hooks-map     hooks-map
+                            {:hooks-map     @hooks-atom
                              :event-name    "PermissionRequest"
                              :discriminator disc
                              :stdin-payload (payload data)

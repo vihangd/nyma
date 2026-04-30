@@ -32,7 +32,7 @@
        :tokens_removed  (or (.-tokensRemoved data) 0)})
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
 
         pre-handler
@@ -40,7 +40,7 @@
           (let [trigger (str (or (.-trigger evt-ctx) "auto"))
                 merged  (js-await
                          (dispatch/dispatch
-                          {:hooks-map     hooks-map
+                          {:hooks-map     @hooks-atom
                            :event-name    "PreCompact"
                            :discriminator trigger
                            :stdin-payload (pre-payload evt-ctx)
@@ -58,7 +58,7 @@
         (fn [data]
           (let [trigger (str (or (.-trigger data) "auto"))]
             (dispatch/dispatch
-             {:hooks-map     hooks-map
+             {:hooks-map     @hooks-atom
               :event-name    "PostCompact"
               :discriminator trigger
               :stdin-payload (post-payload data)

@@ -25,14 +25,14 @@
        :prompt          (str (or prompt ""))})
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         handler
         (fn [data]
           (let [text (str (or (.-text data) (.-prompt data) ""))
                 stdin (payload text)]
             (-> (dispatch/dispatch
-                 {:hooks-map     hooks-map
+                 {:hooks-map     @hooks-atom
                   :event-name    "UserPromptSubmit"
                   :discriminator nil
                   :stdin-payload stdin

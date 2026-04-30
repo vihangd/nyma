@@ -16,6 +16,7 @@
    here and one new module under `handlers/`."
   (:require [agent.extensions.claude-hook-bridge.matcher :as matcher]
             [agent.extensions.claude-hook-bridge.response :as response]
+            [agent.extensions.claude-hook-bridge.audit :as audit]
             [agent.extensions.claude-hook-bridge.handlers.command :as cmd]
             [agent.extensions.claude-hook-bridge.handlers.http :as http]
             [agent.extensions.claude-hook-bridge.handlers.prompt :as prompt]
@@ -29,27 +30,32 @@
     (matcher/matches? m discriminator)))
 
 (defn- hook-spec->result
-  "Dispatch a single hook spec to the right handler module."
-  [spec stdin-json {:keys [abort-signal cwd api]}]
+  "Dispatch a single hook spec to the right handler module. Logs the
+   first execution of each unique (event, command) pair via audit/note!"
+  [spec stdin-json event-name {:keys [abort-signal cwd api]}]
   (let [t (str (or (.-type spec) "command"))]
     (case t
       "command"
-      (cmd/run-command
-       {:command      (.-command spec)
-        :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
-        :shell        (.-shell spec)
-        :cwd          cwd
-        :abort-signal abort-signal
-        :stdin-json   stdin-json})
+      (do
+        (audit/note! event-name (str "command:" (.-command spec)))
+        (cmd/run-command
+         {:command      (.-command spec)
+          :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
+          :shell        (.-shell spec)
+          :cwd          cwd
+          :abort-signal abort-signal
+          :stdin-json   stdin-json}))
 
       "http"
-      (http/run-http
-       {:url          (.-url spec)
-        :headers      (.-headers spec)
-        :allowed-env  (.-allowedEnvVars spec)
-        :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
-        :stdin-json   stdin-json
-        :abort-signal abort-signal})
+      (do
+        (audit/note! event-name (str "http:" (.-url spec)))
+        (http/run-http
+         {:url          (.-url spec)
+          :headers      (.-headers spec)
+          :allowed-env  (.-allowedEnvVars spec)
+          :timeout-ms   (when-let [tt (.-timeout spec)] (* tt 1000))
+          :stdin-json   stdin-json
+          :abort-signal abort-signal}))
 
       "prompt"
       (prompt/run-prompt
@@ -100,7 +106,7 @@
             (doseq [i (range (.-length hook-arr))]
               (let [spec   (aget hook-arr i)
                     raw    (js-await
-                            (hook-spec->result spec stdin-payload
+                            (hook-spec->result spec stdin-payload event-name
                                                {:abort-signal abort-signal
                                                 :cwd          cwd
                                                 :api          api}))

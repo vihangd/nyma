@@ -43,7 +43,7 @@
        :reason          (or reason "other")})
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
 
         start-handler
@@ -52,7 +52,7 @@
                 m (or (get start-reason->matcher r) "startup")
                 stdin (payload "SessionStart" m)]
             (-> (dispatch/dispatch
-                 {:hooks-map     hooks-map
+                 {:hooks-map     @hooks-atom
                   :event-name    "SessionStart"
                   :discriminator m
                   :stdin-payload stdin
@@ -78,7 +78,7 @@
                 m (or (get end-reason->matcher r) "other")
                 stdin (payload "SessionEnd" m)]
             (dispatch/dispatch
-             {:hooks-map     hooks-map
+             {:hooks-map     @hooks-atom
               :event-name    "SessionEnd"
               :discriminator m
               :stdin-payload stdin

@@ -85,7 +85,7 @@
     out))
 
 (defn register!
-  [{:keys [api hooks-map cwd]}]
+  [{:keys [api hooks-atom cwd]}]
   (let [events (.-events api)
         ;; The actual handler. Returns a JS object that emit-collect
         ;; merges with other handlers' returns.
@@ -98,7 +98,7 @@
                 disc      (tool-names/cc-name tool-name)
                 merged    (js-await
                            (dispatch/dispatch
-                            {:hooks-map     hooks-map
+                            {:hooks-map     @hooks-atom
                              :event-name    "PreToolUse"
                              :discriminator disc
                              :stdin-payload stdin
