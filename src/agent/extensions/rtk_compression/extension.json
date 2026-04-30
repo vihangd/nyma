@@ -1,8 +1,0 @@
-{
-  "namespace": "rtk-compression",
-  "capabilities": ["middleware", "exec", "events"],
-  "dependsOn": ["bash-suite"],
-  "dependencies": {
-    "shell-quote": "^1.8.1"
-  }
-}
