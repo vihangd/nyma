@@ -1,0 +1,5 @@
+{
+  "namespace": "advisor",
+  "capabilities": ["tools", "commands"],
+  "dependsOn": []
+}
