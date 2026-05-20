@@ -6,9 +6,12 @@ dist/
 .DS_Store
 .clj-kondo/
 .lsp/
+.lean-ctx/
+.serena/
 
 .claude/
 .nyma/
 cli
 nyma
 docs/plan-*.md
+*.bak
