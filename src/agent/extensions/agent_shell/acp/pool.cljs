@@ -11,11 +11,16 @@
 
 (defn- create-connection
   "Spawn an ACP agent process and perform the full handshake.
-   Returns a promise resolving to a connection map."
-  [agent-key agent-def api]
+   Returns a promise resolving to a connection map.
+
+   `cwd` is the working directory passed to the subprocess and to `session/new`.
+   Callers that don't specify one get `(js/process.cwd)` — matches the historical
+   UI behaviour. Gateway flows pass an explicit project root."
+  [agent-key agent-def api cwd]
   (let [command      (:command agent-def)
         args         (:args agent-def)
-        project-root (js/process.cwd)
+        project-root cwd
+        p-key        (shared/pool-key agent-key cwd)
         ;; Emit function that routes ACP events onto the global agent event bus.
         ;; Uses api.emitGlobal (added in extensions.cljs) so subscribers using
         ;; api.on can observe acp_connect, acp_disconnect, acp_message, etc.
@@ -35,9 +40,15 @@
                        :stdout       (.-stdout handle)
                        :stderr       (.-stderr handle)
                        :project-root project-root
+                       :pool-key     p-key
                        :agent-key    agent-key
                        :state        (atom {:pending {} :terminals {}})
                        :prompt-state (atom {:text "" :tool-calls []})
+                       ;; Per-connection notification callbacks. The interactive UI
+                       ;; uses the global shared/*-callback atoms; the gateway's
+                       ;; programmatic api/run-prompt sets these per-conn so parallel
+                       ;; cross-project calls don't clobber each other's stream.
+                       :callbacks    (atom nil)
                        :id-counter   (atom 0)
                        :session-id   (atom nil)
                        :on-reverse-request (fn [conn parsed]
@@ -59,8 +70,8 @@
                          ;; Reject all pending requests
                         (doseq [[rid {:keys [reject]}] (get @(:state conn) :pending)]
                           (reject (js/Error. (str "ACP process exited (code " exit-code ")"))))
-                         ;; Clean up pool
-                        (swap! shared/connections dissoc agent-key)
+                         ;; Clean up pool — dissoc the composite (agent, cwd) key
+                        (swap! shared/connections dissoc p-key)
                          ;; Notify if this was the active agent
                         (when (= @shared/active-agent agent-key)
                           (when (and (.-ui api) (.-available (.-ui api)))
@@ -135,10 +146,19 @@
 ;;; ─── Pool operations ───────────────────────────────────────
 
 (defn get-or-create
-  "Get or create an ACP connection for an agent.
-   Uses promise sentinel to prevent duplicate spawns."
-  [agent-key agent-def api]
-  (let [existing (get @shared/connections agent-key)]
+  "Get or create an ACP connection for an agent in a given working directory.
+
+   The pool is keyed by `[agent-key, cwd]` (composed via `shared/pool-key`) so
+   the same agent can be running against multiple projects in parallel — the
+   gateway uses this to fan out `claude` across vyom / nyma / scratch from one
+   inbox. Callers in the interactive UI omit `cwd`; it defaults to
+   `(js/process.cwd)` and the pool key is stable for the process lifetime.
+
+   Promise sentinel prevents duplicate spawns when concurrent requests race."
+  [agent-key agent-def api & [cwd]]
+  (let [resolved-cwd (or cwd (js/process.cwd))
+        p-key        (shared/pool-key agent-key resolved-cwd)
+        existing     (get @shared/connections p-key)]
     (cond
       ;; Already have a resolved connection with a session
       (and (map? existing) (:session-id existing))
@@ -148,30 +168,35 @@
       (some? existing)
       existing
 
-      ;; No entry — create
+      ;; No entry — create (in-process or subprocess)
       :else
-      (let [promise (-> (create-connection agent-key agent-def api)
+      (let [factory (or (:create-fn agent-def) create-connection)
+            promise (-> (js/Promise.resolve (factory agent-key agent-def api resolved-cwd))
                         (.then (fn [conn]
-                                 (swap! shared/connections assoc agent-key conn)
+                                 (swap! shared/connections assoc p-key conn)
                                  conn))
                         (.catch (fn [e]
                                   ;; Remove poisoned entry
-                                  (swap! shared/connections dissoc agent-key)
+                                  (swap! shared/connections dissoc p-key)
                                   (throw e))))]
         ;; Insert promise as sentinel
-        (swap! shared/connections assoc agent-key promise)
+        (swap! shared/connections assoc p-key promise)
         promise))))
 
-(defn disconnect
-  "Gracefully shut down an ACP agent connection.
-   Cascade: close stdin → 100ms → SIGTERM → 1500ms → SIGKILL → 1s → resolve."
-  [agent-key]
-  (let [entry (get @shared/connections agent-key)]
-    (swap! shared/connections dissoc agent-key)
-    (when (= @shared/active-agent agent-key)
-      (reset! shared/active-agent nil))
+(defn- disconnect-by-pool-key
+  "Internal: shut down a single connection identified by its composite pool-key."
+  [p-key]
+  (let [entry (get @shared/connections p-key)]
+    (swap! shared/connections dissoc p-key)
     (cond
-      ;; Resolved connection
+      ;; In-process agent — no subprocess to kill, just clean up
+      (and (map? entry) (:in-process? entry))
+      (do
+        (when-let [close-fn (:close entry)]
+          (try (close-fn) (catch :default _ nil)))
+        (js/Promise.resolve nil))
+
+      ;; Resolved subprocess connection
       (and (map? entry) (:proc entry))
       (js/Promise.
        (fn [resolve _]
@@ -182,6 +207,12 @@
                               (resolve)))]
             ;; Resolve when process exits
            (-> (.-exited handle) (.then (fn [_] (do-resolve))))
+            ;; Send session/close before closing stdin (fire-and-forget)
+           (when-let [sid (and (:session-id entry) @(:session-id entry))]
+             (try
+               (client/send-request entry (client/next-id entry) "session/close"
+                                    {:sessionId sid})
+               (catch :default _ nil)))
             ;; Close stdin
            (when-let [stdin (:stdin entry)]
              (try (.end stdin) (catch :default _ nil)))
@@ -209,9 +240,33 @@
       :else
       (js/Promise.resolve nil))))
 
+(defn disconnect
+  "Gracefully shut down ACP agent connection(s).
+
+   - `(disconnect agent-key)`        — disconnect every live connection for that
+     agent across any cwd. Used by the interactive UI's `/agent disconnect` and
+     by shutdown hooks: the user never tracks individual project workers.
+   - `(disconnect agent-key cwd)`    — disconnect a specific (agent, cwd) entry.
+     Used by gateway-side cleanup when a project session goes idle.
+
+   Cascade per connection: close stdin → 100ms → SIGTERM → 1500ms → SIGKILL → 1s → resolve."
+  [agent-key & [cwd]]
+  (when (= @shared/active-agent agent-key)
+    (reset! shared/active-agent nil))
+  (if cwd
+    (disconnect-by-pool-key (shared/pool-key agent-key cwd))
+    (let [prefix  (str (shared/kw-name agent-key) "@")
+          matches (filter (fn [k] (and (string? k) (.startsWith k prefix)))
+                          (keys @shared/connections))]
+      (if (seq matches)
+        (js/Promise.all (clj->js (mapv disconnect-by-pool-key matches)))
+        (js/Promise.resolve nil)))))
+
 (defn disconnect-all
-  "Disconnect all ACP agents."
+  "Disconnect every connection in the pool. Used by gateway shutdown so ACP
+   workers don't outlive the gateway process. Bypasses the agent-key splitting
+   in `disconnect` because the atom keys are already the composite pool-keys."
   []
-  (let [keys (keys @shared/connections)]
+  (let [ks (keys @shared/connections)]
     (js/Promise.all
-     (clj->js (mapv disconnect keys)))))
+     (clj->js (mapv disconnect-by-pool-key ks)))))

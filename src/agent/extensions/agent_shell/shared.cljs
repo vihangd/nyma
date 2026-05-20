@@ -10,7 +10,12 @@
   (atom nil))
 
 (def connections
-  "Pool of live ACP connections: {agent-key -> connection-map}."
+  "Pool of live ACP connections: {pool-key -> connection-map}.
+   Pool keys are `\"<agent-key>@<resolved-cwd>\"` so the same agent can be
+   running against multiple project directories in parallel — required for
+   gateway-driven multi-project routing. Interactive UI flows omit cwd and
+   default to `(js/process.cwd)`, so the key is stable across the lifetime
+   of a single nyma process."
   (atom {}))
 
 (def agent-state
@@ -107,6 +112,25 @@
       (str n))
     "0"))
 
+(defn pool-key
+  "Compose the connections-atom key from an agent-key and a working directory.
+   Used by pool/get-or-create + the gateway's run_in_project tool. Path is
+   `path.resolve`-d so callers can pass `~/…` or relative paths."
+  [agent-key cwd]
+  (let [resolved (try (path/resolve cwd) (catch :default _ cwd))]
+    (str (kw-name agent-key) "@" resolved)))
+
+(defn find-conn-by-agent
+  "Return any live connection for the given agent-key, ignoring cwd. Used by
+   single-active-agent UI flows (session_clear, header rendering) that don't
+   care which project the connection points at."
+  [agent-key]
+  (let [prefix (str (kw-name agent-key) "@")]
+    (some (fn [[k v]]
+            (when (and (string? k) (.startsWith k prefix) (map? v))
+              v))
+          @connections)))
+
 (defn update-agent-state!
   "Update a field in the active agent's state."
   [agent-key field value]
@@ -116,6 +140,72 @@
   "Get a field from an agent's state."
   [agent-key field]
   (get-in @agent-state [agent-key field]))
+
+(defn- ->camel-case
+  "kebab-case-string → camelCaseString."
+  [s]
+  (let [parts (str/split (str s) #"-")]
+    (str (first parts)
+         (str/join "" (map (fn [p]
+                             (if (zero? (count p))
+                               ""
+                               (str (.toUpperCase (subs p 0 1)) (subs p 1))))
+                           (rest parts))))))
+
+(defn- cap-key-strings
+  "Lookup candidates for an agent capability key, in priority order.
+   Accepts a kebab-case keyword (`:load-session`) or string. Returns
+   string candidates only — `js->clj*` builds plain JS objects, so
+   keys are strings. We try kebab-case first, then camelCase, since
+   different agents use different conventions."
+  [k]
+  (let [raw     (str k)
+        s       (if (.startsWith raw ":") (subs raw 1) raw)
+        camel-s (->camel-case s)]
+    (if (= s camel-s) [s] [s camel-s])))
+
+(defn agent-supports?
+  "Check whether the agent (as reported in `agentCapabilities` from the
+   `initialize` handshake) declares support for a capability.
+
+   Returns boolean. Defensive on missing data: if no capabilities have
+   been recorded yet (pre-handshake) OR the specific capability isn't
+   in the map at all, returns `true` — better to optimistically
+   attempt the call and surface the agent's own error than to refuse
+   based on stale local state."
+  [agent-key cap]
+  (let [caps (get-agent-state agent-key :capabilities)]
+    (cond
+      (nil? caps)        true
+      (not (object? caps)) true
+      :else
+      (let [candidates (cap-key-strings cap)
+            ;; Walk candidates; first one that's actually present wins.
+            hit-key    (some (fn [k]
+                               (when (some? (aget caps k)) k))
+                             candidates)]
+        (cond
+          hit-key (boolean (aget caps hit-key))
+          ;; Spec-default for absent capability: assume supported.
+          :else   true)))))
+
+(defn agent-supports-resume?
+  "Check if agent supports session resume.
+   Accepts either new ACP spec (sessionCapabilities.resume) or old flat loadSession."
+  [agent-key]
+  (let [caps (get-agent-state agent-key :capabilities)]
+    (cond
+      (nil? caps)          true
+      (not (object? caps)) true
+      :else
+      (let [session-caps (aget caps "sessionCapabilities")
+            new-resume   (and session-caps (aget session-caps "resume"))
+            old-load     (aget caps "loadSession")]
+        (cond
+          (some? new-resume) (boolean new-resume)
+          (some? old-load)   (boolean old-load)
+          ;; Neither declared — optimistic
+          :else true)))))
 
 (defn- footer-factory
   "Returns footer text string or nil (for default fallback)."

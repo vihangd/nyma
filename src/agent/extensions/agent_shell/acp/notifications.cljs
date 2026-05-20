@@ -15,8 +15,9 @@
       (let [text (.-text content)]
         ;; Accumulate in prompt-state for final result
         (swap! (:prompt-state conn) update :text str text)
-        ;; Stream chunk to UI via callback
-        (when-let [cb @shared/stream-callback]
+        ;; Stream chunk to UI/gateway via callback (per-conn takes precedence over global)
+        (when-let [cb (or (and (:callbacks conn) (:on-stream @(:callbacks conn)))
+                          @shared/stream-callback)]
           (cb text))
         ;; Emit acp_message so extensions can observe agent output
         (when-let [emit (:emit conn)]
@@ -30,8 +31,9 @@
   (when-let [content (.-content upd)]
     (let [text (if (string? content) content (.-text content))]
       (when text
-        ;; Stream thinking chunk to UI
-        (when-let [cb @shared/thought-callback]
+        ;; Stream thinking chunk to UI (per-conn takes precedence)
+        (when-let [cb (or (and (:callbacks conn) (:on-thought @(:callbacks conn)))
+                          @shared/thought-callback)]
           (cb text))
         (when-let [emit (:emit conn)]
           (emit "acp_thought" #js {:agent-key (:agent-key conn) :text text}))))))
@@ -93,8 +95,9 @@
                                :status   (.-status entry)})
                             entries)]
         (shared/update-agent-state! (:agent-key conn) :plan plan-data)
-        ;; Stream plan to UI
-        (when-let [cb @shared/plan-callback]
+        ;; Stream plan to UI (per-conn takes precedence)
+        (when-let [cb (or (and (:callbacks conn) (:on-plan @(:callbacks conn)))
+                          @shared/plan-callback)]
           (cb plan-data))
         (when-let [emit (:emit conn)]
           (emit "acp_plan" (clj->js {:agent-key (:agent-key conn) :entries plan-data})))))))
@@ -122,7 +125,7 @@
                                    :forward-to  "agent-shell"
                                    :agent-key   agent-key
                                    :handler    (fn [args _ctx]
-                                                 (let [conn (get @shared/connections agent-key)
+                                                 (let [conn (shared/find-conn-by-agent agent-key)
                                                        text (str "/" name
                                                                  (when (seq args) (str " " (str/join " " args))))]
                                                    (when conn

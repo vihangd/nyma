@@ -98,7 +98,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["opus-4"] nil)
         (let [rpc (parse-last-rpc conn)]
           (-> (expect (.-method rpc)) (.toBe "session/set_config_option"))))))
@@ -110,7 +110,7 @@
             conn    (make-mock-conn :opencode)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :opencode)
-        (reset! shared/connections {:opencode conn})
+        (reset! shared/connections {(shared/pool-key "opencode" (js/process.cwd)) conn})
         (handler #js ["opencode-go/minimax-m2.5"] nil)
         (let [rpc (parse-last-rpc conn)]
           (-> (expect (.-method rpc)) (.toBe "session/set_model"))))))
@@ -122,7 +122,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["some-model"] nil)
         (let [rpc    (parse-last-rpc conn)
               params (.-params rpc)]
@@ -136,7 +136,7 @@
             conn    (make-mock-conn :opencode)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :opencode)
-        (reset! shared/connections {:opencode conn})
+        (reset! shared/connections {(shared/pool-key "opencode" (js/process.cwd)) conn})
         (handler #js ["opencode-go/test-model"] nil)
         (let [rpc    (parse-last-rpc conn)
               params (.-params rpc)]
@@ -350,7 +350,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["test-model"] nil)
         (let [rpc    (parse-last-rpc conn)
               params (.-params rpc)]
@@ -363,7 +363,7 @@
             conn    (make-mock-conn :opencode)
             handler (.-handler (get @(.-_commands api) "model"))]
         (reset! shared/active-agent :opencode)
-        (reset! shared/connections {:opencode conn})
+        (reset! shared/connections {(shared/pool-key "opencode" (js/process.cwd)) conn})
         (handler #js ["some-model"] nil)
         (let [rpc    (parse-last-rpc conn)
               params (.-params rpc)]

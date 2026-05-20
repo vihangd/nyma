@@ -14,7 +14,7 @@
   "Call session/list on the active agent and display results."
   [api]
   (let [agent-key @shared/active-agent
-        conn      (get @shared/connections agent-key)]
+        conn      (shared/find-conn-by-agent agent-key)]
     (if-not conn
       (notify api "No agent connected" "error")
       (-> (client/send-request conn (client/next-id conn) "session/list"
@@ -47,7 +47,7 @@
   "Load a specific session by ID."
   [api session-id]
   (let [agent-key @shared/active-agent
-        conn      (get @shared/connections agent-key)]
+        conn      (shared/find-conn-by-agent agent-key)]
     (if-not conn
       (notify api "No agent connected" "error")
       (do

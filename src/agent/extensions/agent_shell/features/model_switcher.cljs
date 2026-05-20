@@ -34,7 +34,7 @@
   "Send the model change request and update state on success."
   [api model-value]
   (let [agent-key @shared/active-agent
-        conn      (get @shared/connections agent-key)
+        conn      (shared/find-conn-by-agent agent-key)
         agent-def (get registry/agents agent-key)]
     (if (and conn agent-key)
       (-> (send-model-change conn agent-def model-value)

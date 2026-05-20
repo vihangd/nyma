@@ -56,7 +56,7 @@
       (.on api "session_clear"
         (fn [_ _]
           (when-let [agent-key @shared/active-agent]
-            (when-let [conn (get @shared/connections agent-key)]
+            (when-let [conn (shared/find-conn-by-agent agent-key)]
               (client/cancel-prompt conn)
               (-> (client/send-request conn (client/next-id conn) "session/new" {})
                   (.then (fn [resp]
@@ -79,7 +79,7 @@
           ;; Auto-connect if configured
           (when (and (:default-agent config) (:auto-connect config))
             (let [agent-key (:default-agent config)]
-              (when-not (get @shared/connections agent-key)
+              (when-not (shared/find-conn-by-agent agent-key)
                 (when (and (.-ui api) (.-available (.-ui api)))
                   (.notify (.-ui api) (str "Auto-connecting to " (str agent-key) "...") "info"))
                 (when-let [agent-def (registry/get-agent agent-key)]

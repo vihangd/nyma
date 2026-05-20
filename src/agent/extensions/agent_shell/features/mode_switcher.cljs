@@ -13,7 +13,7 @@
   "Send session/set_mode to the active agent."
   [api mode-key]
   (let [agent-key @shared/active-agent
-        conn      (get @shared/connections agent-key)
+        conn      (shared/find-conn-by-agent agent-key)
         agent-def (get registry/agents agent-key)]
     (cond
       (not agent-key)

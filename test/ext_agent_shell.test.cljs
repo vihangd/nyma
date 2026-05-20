@@ -668,7 +668,7 @@
                                            (fn []
                                              (let [mock-conn (make-test-conn)]
                                                (reset! shared/active-agent "claude")
-                                               (reset! shared/connections {"claude" mock-conn})
+                                               (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) mock-conn})
                                                (let [api     (make-mock-api)
                                                      _       (input-router/activate api)
                                                      handler (first (get @(.-_events api) "input"))
@@ -937,7 +937,7 @@
                                              (fn []
                                                (reset! shared/active-agent "claude")
                                                (let [conn (make-full-conn)
-                                                     _    (reset! shared/connections {"claude" conn})
+                                                     _    (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
                                                      api  (make-mock-api)]
         ;; Add .select to the mock UI — simulates app.cljs resolving with full option object
                                                  (set! (.-select (.-ui api))
@@ -967,7 +967,7 @@
                                              (fn []
                                                (reset! shared/active-agent "claude")
                                                (let [conn (make-full-conn)
-                                                     _    (reset! shared/connections {"claude" conn})
+                                                     _    (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
                                                      api  (make-mock-api)]
                                                  (set! (.-select (.-ui api))
                                                        (fn [_title _opts] (js/Promise.resolve nil)))

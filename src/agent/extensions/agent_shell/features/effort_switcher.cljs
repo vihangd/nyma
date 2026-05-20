@@ -14,7 +14,7 @@
   "Send session/set_config_option to set effort level on the active agent."
   [api level]
   (let [agent-key @shared/active-agent
-        conn      (get @shared/connections agent-key)]
+        conn      (shared/find-conn-by-agent agent-key)]
     (cond
       (not agent-key)
       (notify api "No agent connected" "error")

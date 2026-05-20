@@ -105,7 +105,7 @@
   (it "invalid level shows error with the invalid name"
     (fn []
       (reset! shared/active-agent :claude)
-      (reset! shared/connections {:claude (make-mock-conn :claude)})
+      (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) (make-mock-conn :claude)})
       (let [api     (make-mock-api)
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
@@ -120,7 +120,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["HIGH"] nil)
         (-> (expect (.-value (.-params (parse-last-rpc conn)))) (.toBe "high")))))))
 
@@ -134,7 +134,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["high"] nil)
         (-> (expect (.-method (parse-last-rpc conn))) (.toBe "session/set_config_option")))))
   (it "params include configId effort and correct value"
@@ -144,7 +144,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["max"] nil)
         (let [params (.-params (parse-last-rpc conn))]
           (-> (expect (.-configId params)) (.toBe "effort"))
@@ -156,7 +156,7 @@
             conn    (make-mock-conn :claude)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (reset! shared/active-agent :claude)
-        (reset! shared/connections {:claude conn})
+        (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
         (handler #js ["low"] nil)
         (-> (expect (.-sessionId (.-params (parse-last-rpc conn)))) (.toBe "test-session-123")))))
   (it "each valid level sends the correct value"
@@ -167,7 +167,7 @@
               conn    (make-mock-conn :claude)
               handler (.-handler (get @(.-_commands api) "effort"))]
           (reset! shared/active-agent :claude)
-          (reset! shared/connections {:claude conn})
+          (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
           (handler #js [level] nil)
           (-> (expect (.-value (.-params (parse-last-rpc conn)))) (.toBe level))))))))
 
@@ -188,7 +188,7 @@
     (fn []
       (reset! shared/active-agent :claude)
       (let [conn    (make-mock-conn :claude)
-            _       (reset! shared/connections {:claude conn})
+            _       (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
             api     (make-mock-api)
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
@@ -209,7 +209,7 @@
     (fn []
       (reset! shared/active-agent :claude)
       (let [conn    (make-mock-conn :claude)
-            _       (reset! shared/connections {:claude conn})
+            _       (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
             api     (make-mock-api)
             deact   (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
@@ -224,7 +224,7 @@
     (fn []
       (reset! shared/active-agent :claude)
       (let [conn    (make-mock-conn :claude)
-            _       (reset! shared/connections {:claude conn})
+            _       (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
             api     (make-mock-api)
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
@@ -242,7 +242,7 @@
     (fn []
       (reset! shared/active-agent :claude)
       (let [conn    (make-mock-conn :claude)
-            _       (reset! shared/connections {:claude conn})
+            _       (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) conn})
             api     (make-mock-api)
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]

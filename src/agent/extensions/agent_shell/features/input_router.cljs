@@ -123,7 +123,7 @@
           (let [text      (.-input data)
                 agent-key @shared/active-agent]
             (when (and agent-key (seq text))
-              (let [conn (get @shared/connections agent-key)]
+              (let [conn (shared/find-conn-by-agent agent-key)]
                 (cond
                   (.startsWith text "//")
                   (when conn
