@@ -31,13 +31,17 @@
    tools always see the current response context.
 
    `create-session-fn` is `agent.modes.sdk/create-session` (injected to avoid
-   a circular require; gateway.core threads it through)."
-  [pool session-key create-session-fn agent-opts]
+   a circular require; gateway.core threads it through).
+
+   `tool-set-opts` carries `:projects` + `:default-agent`; when present the
+   tool set includes `run_in_project` and the router LLM gains multi-project
+   dispatch."
+  [pool session-key create-session-fn agent-opts tool-set-opts]
   (let [existing (sp/get-data pool session-key :session-bundle)]
     (if (some? existing)
       (js/Promise.resolve existing)
       ;; First message for this conversation — create tool-set + sdk-session together
-      (let [tool-set   (gtools/create-gateway-tool-set)
+      (let [tool-set   (gtools/create-gateway-tool-set tool-set-opts)
             merged-opts (update agent-opts :tools
                                 (fn [existing-tools]
                                   (merge (or existing-tools {}) (:tools tool-set))))]
@@ -60,10 +64,12 @@
      response-ctx     — IResponseContext map
      opts             — {:create-session-fn :agent-opts :streaming-policy}"
   [pool session-key msg response-ctx opts]
-  (let [{:keys [create-session-fn agent-opts streaming-policy]} opts
+  (let [{:keys [create-session-fn agent-opts streaming-policy
+                projects default-agent]} opts
         bundle      (js-await
                      (get-or-init-sdk-session!
-                      pool session-key create-session-fn agent-opts))
+                      pool session-key create-session-fn agent-opts
+                      {:projects projects :default-agent default-agent}))
         sdk-session (:sdk-session bundle)
         tool-set    (:tool-set bundle)
         ;; Point gateway tools at the current request's response context

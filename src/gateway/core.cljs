@@ -25,7 +25,8 @@
             [gateway.protocols :as proto]
             [gateway.session-pool :as pool]
             [gateway.pipelines :as pipelines]
-            [gateway.loop :as gloop]))
+            [gateway.loop :as gloop]
+            [agent.extensions.agent-shell.acp.pool :as as-pool]))
 
 ;;; ─── Channel type registry ────────────────────────────────────────────
 
@@ -123,6 +124,12 @@
         agent-opts       (config/agent-opts-from-config cfg)
         streaming-policy (config/streaming-policy-from-config cfg)
 
+        ;; Multi-project routing: when gateway.projects is present, the router
+        ;; LLM gets a run_in_project tool that dispatches to ACP coding agents.
+        ;; Absence of :projects keeps the gateway pure-chat (no code surface).
+        projects         (config/projects-from-config cfg)
+        default-agent    (config/default-agent-from-config cfg)
+
         ;; Pipelines
         auth-pipeline     (pipelines/create-auth-pipeline)
         approval-pipeline (pipelines/create-approval-pipeline)
@@ -141,7 +148,9 @@
 
         handle-opts {:create-session-fn create-session-fn
                      :agent-opts        agent-opts
-                     :streaming-policy  streaming-policy}]
+                     :streaming-policy  streaming-policy
+                     :projects          projects
+                     :default-agent     default-agent}]
 
     {:channels          channels
      :pool              the-pool
@@ -184,16 +193,25 @@
          (js/clearInterval @maint-timer)
          (reset! maint-timer nil))
        (js/console.log "[gateway] Stopping channels...")
-       (js/Promise.all
-        (clj->js
-         (mapv (fn [ch]
-                 (let [stop-fn (or (:stop! ch) (.-stop! ch))]
-                   (.. (stop-fn)
-                       (catch (fn [e]
-                                (js/console.error
-                                 (str "[gateway] Error stopping "
-                                      (proto/channel-name-str ch) ":") e))))))
-               channels))))}))
+       (-> (js/Promise.all
+            (clj->js
+             (mapv (fn [ch]
+                     (let [stop-fn (or (:stop! ch) (.-stop! ch))]
+                       (.. (stop-fn)
+                           (catch (fn [e]
+                                    (js/console.error
+                                     (str "[gateway] Error stopping "
+                                          (proto/channel-name-str ch) ":") e))))))
+                   channels)))
+           ;; Tear down ACP worker subprocesses spawned by run_in_project.
+           ;; Without this, gateway restarts orphan claude/gemini subprocesses
+           ;; from the prior run; for a daemon expected to run for weeks they
+           ;; accumulate fast.
+           (.then (fn [_]
+                    (-> (as-pool/disconnect-all)
+                        (.catch (fn [e]
+                                  (js/console.error
+                                   "[gateway] ACP pool teardown error:" e))))))))}))
 
 (defn ^:async start-gateway!
   "Load config from `config-path`, create and start a gateway. Returns the gateway map.

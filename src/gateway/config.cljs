@@ -32,7 +32,14 @@
        \"auth\": {
          \"allowed-user-ids\": [\"U12345\"],   // optional allow-list
          \"allowed-channels\": [\"C12345\"]    // optional allow-list
-       }
+       },
+       \"projects\": {                       // optional — enables multi-project routing
+         \"vyom\":  { \"root\": \"~/projects/pers/vyom\",
+                    \"agents\": [\"claude\", \"gemini\"] },
+         \"nyma\":  { \"root\": \"~/projects/pers/nyma\",
+                    \"agents\": [\"claude\"] }
+       },
+       \"default-agent\": \"claude\"           // fallback when run_in_project omits :agent
      },
      \"channels\": [
        {
@@ -46,6 +53,7 @@
    See docs/gateway.md for the full reference, including per-channel config keys
    and the behaviour of each streaming/session policy."
   (:require ["node:fs/promises" :as fsp]
+            ["node:os" :as os]
             ["node:path" :as path]
             [clojure.string :as str]))
 
@@ -109,9 +117,58 @@
           dupes (filter (fn [n] (> (count (filter #(= % n) names)) 1)) names)]
       (when (seq dupes)
         (swap! errors conj (str "Duplicate channel names: " (str/join ", " dupes)))))
+    ;; Projects, if present, must declare a root + non-empty agent allow-list.
+    ;; Without these, chat-driven project selection becomes a remote-shell exploit.
+    (when-let [projects (get-in cfg [:gateway :projects])]
+      (doseq [[pname pcfg] projects]
+        (when-not (:root pcfg)
+          (swap! errors conj (str "gateway.projects." (strip-kw-colon pname) ".root is required")))
+        (when-not (seq (:agents pcfg))
+          (swap! errors conj
+                 (str "gateway.projects." (strip-kw-colon pname)
+                      ".agents must be a non-empty array")))))
     (if (empty? @errors)
       {:valid? true}
       {:valid? false :errors @errors})))
+
+(defn- strip-kw-colon
+  "Squint compiles keywords to strings like `\":vyom\"`. When we need the bare
+   name (\"vyom\") for user-facing strings or as a string key, strip the colon."
+  [k]
+  (let [s (str k)]
+    (if (str/starts-with? s ":") (subs s 1) s)))
+
+(defn expand-home
+  "Expand a leading `~` in a path to the user's home directory."
+  [p]
+  (cond
+    (not (string? p)) p
+    (= p "~")         (os/homedir)
+    (str/starts-with? p "~/") (path/join (os/homedir) (subs p 2))
+    :else p))
+
+(defn projects-from-config
+  "Return the resolved project allow-list as
+   `{project-name {:root <abs-path>, :agents #{...}}}`.
+
+   Roots are expanded (`~/...`) and `path.resolve`-d at load time so the
+   gateway never has to perform path operations on chat-supplied strings —
+   the project name is a dictionary lookup, the resolved root is read from
+   the value. Returns `nil` if no projects section is configured."
+  [cfg]
+  (when-let [projects (get-in cfg [:gateway :projects])]
+    (reduce-kv
+     (fn [acc pname pcfg]
+       (assoc acc (strip-kw-colon pname)
+              {:root   (path/resolve (expand-home (:root pcfg)))
+               :agents (set (mapv str (:agents pcfg)))}))
+     {} projects)))
+
+(defn default-agent-from-config
+  "The fallback agent key for run_in_project when :agent is omitted by the
+   router LLM. Defaults to `\"claude\"` if not configured."
+  [cfg]
+  (or (get-in cfg [:gateway :default-agent]) "claude"))
 
 (defn streaming-policy-from-config
   "Extract streaming policy keyword or opts map from the gateway config."

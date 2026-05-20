@@ -160,6 +160,45 @@ Check-fn return shape: `{allow?: bool, reason?: string}` (or nil = allow).
 The pipeline short-circuits on the first deny. Handlers that throw default
 to allow (logged to stderr).
 
+### `gateway.projects` — multi-project routing (optional)
+
+When `projects` is configured, the gateway agent gains a `run_in_project` tool
+that dispatches the user's instructions to an ACP coding agent (Claude Code,
+Gemini CLI, OpenCode, etc.) running inside the project's directory. The router
+LLM picks `(project, agent)` from the natural-language inbound message; the
+tool spawns or reuses an ACP worker via `agent-shell.api/run-prompt` and streams
+the worker's output back through the conversation's response context.
+
+```json
+"gateway": {
+  "projects": {
+    "vyom":    { "root": "~/projects/pers/vyom", "agents": ["claude", "gemini"] },
+    "nyma":    { "root": "~/projects/pers/nyma", "agents": ["claude"] },
+    "scratch": { "root": "~/scratch",            "agents": ["claude", "opencode"] }
+  },
+  "default-agent": "claude"
+}
+```
+
+- **`projects[name].root`** is `path.resolve`-d at load time; `~` is expanded.
+  Chat-supplied project names are dictionary lookups — there are no path
+  operations on user-supplied strings.
+- **`projects[name].agents`** is a per-project allow-list. The tool rejects any
+  `(project, agent)` combination not on the list, regardless of `default-agent`.
+- **`default-agent`** fills in when `run_in_project` is called without an
+  explicit `agent` argument. Defaults to `"claude"`.
+
+Sessions are pooled by `(agent, cwd)` — follow-up messages targeting the same
+project reuse the same ACP subprocess and its in-process session, so the
+underlying coding agent retains conversational memory across turns. Different
+projects spin up parallel workers.
+
+**v1 limitations:** there is no idle eviction for ACP subprocesses — they live
+until gateway shutdown. Large project lists or long-running daemons will
+accumulate workers. The gateway's existing `:stop!` tears down the entire pool
+via `agent-shell.acp.pool/disconnect-all`, but a per-worker idle timer is
+follow-up work.
+
 ### `channels[]` — platform adapters
 
 Each entry is `{type, name, config}`. `name` must be unique. `type` is a
