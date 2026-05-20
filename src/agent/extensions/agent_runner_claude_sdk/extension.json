@@ -1,0 +1,6 @@
+{
+  "namespace": "agent-runner-claude-sdk",
+  "capabilities": ["events", "commands", "ui", "state"],
+  "dependsOn": ["agent-shell"],
+  "dependencies": { "@anthropic-ai/claude-agent-sdk": "*" }
+}
