@@ -19,26 +19,31 @@
 ;; The full set of built-in extension namespaces shipped under
 ;; src/agent/extensions/. If you ADD a new built-in, add it here.
 (def expected-builtin-namespaces
-  #{"agent-shell"
+  #{"advisor"
+    "agent-runner-claude-sdk"
+    "agent-shell"
     "ast-tools"
     "bash-suite"
+    "claude-hook-bridge"
     "custom-provider-claude-native"
+    "custom-provider-deepseek"
+    "custom-provider-groq"
     "custom-provider-kimi"
     "custom-provider-minimax"
     "custom-provider-opencode-zen"
-    "custom-provider-groq"
     "custom-provider-openrouter"
     "custom-provider-qwen-cli"
     "desktop-notify"
+    "lsp-suite"
+    "mcp-client"
     "mention-files"
     "model-roles"
     "prompt-history"
     "questionnaire"
-    "rtk-compression"
+    "spec-driven"
     "stats-dashboard"
     "token-suite"
-    "workspace-config"
-    "lsp-suite"})
+    "workspace-config"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so
@@ -90,7 +95,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 19 expected namespaces load and none collide on 'index'"
+            (it "all 25 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)
