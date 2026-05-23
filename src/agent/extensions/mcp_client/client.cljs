@@ -22,8 +22,10 @@
      (last-error client)       — string or nil
      (on-state-change! client f) — register a one-arg listener; useful
                                    for the status line atom"
-  (:require ["@modelcontextprotocol/sdk/client/index.js" :as sdk-client]
-            ["@modelcontextprotocol/sdk/client/stdio.js" :as sdk-stdio]))
+  (:require ["@modelcontextprotocol/sdk/client/index.js"          :as sdk-client]
+            ["@modelcontextprotocol/sdk/client/stdio.js"          :as sdk-stdio]
+            ["@modelcontextprotocol/sdk/client/streamableHttp.js" :as sdk-http]
+            ["@modelcontextprotocol/sdk/client/sse.js"            :as sdk-sse]))
 
 (def ^:private default-max-restarts 3)
 (def ^:private default-call-timeout-ms 30000)
@@ -100,25 +102,103 @@
   (reset! (:last-error client)
           (str (or (.-message e) e))))
 
+;; ── Transport selection ─────────────────────────────────────────
+
+(defn- normalize-headers
+  "Convert a CLJS map or JS object of headers to a plain JS object,
+   stripping nil/empty values. Returns nil if the input has no usable
+   entries (so we can omit `requestInit` entirely when not needed)."
+  [headers]
+  (cond
+    (nil? headers) nil
+    (map? headers)
+    (let [out  #js {}
+          seen (atom false)]
+      (doseq [[k v] headers]
+        (when (and v (not= v ""))
+          (let [s     (str k)
+                k-str (if (and (pos? (count s)) (= (.charAt s 0) ":"))
+                        (subs s 1) s)]
+            (reset! seen true)
+            (aset out k-str (str v)))))
+      (when @seen out))
+    (object? headers)
+    (let [out  #js {}
+          seen (atom false)]
+      (doseq [k (js-keys headers)]
+        (let [v (aget headers k)]
+          (when (and v (not= v ""))
+            (reset! seen true)
+            (aset out k (str v)))))
+      (when @seen out))
+    :else nil))
+
+(defn transport-kind
+  "Decide which transport to construct for cfg. Mirrors Claude Code's
+   precedence: explicit `:type` wins; else `:command` → stdio; else
+   `:url` → streamable-http (current standard). `http` and
+   `streamableHttp` are synonyms."
+  [cfg]
+  (let [t (some-> (:type cfg) (.toLowerCase))]
+    (cond
+      (= t "stdio")                            :stdio
+      (or (= t "sse"))                         :sse
+      (or (= t "http") (= t "streamablehttp")) :http
+      (:command cfg)                           :stdio
+      (:url cfg)                               :http
+      :else                                    :stdio)))
+
+(defn build-transport
+  "Construct the SDK transport object from a client config.
+   Throws with a clear message if required fields are missing."
+  [cfg]
+  (case (transport-kind cfg)
+    :stdio
+    (do
+      (when-not (:command cfg)
+        (throw (js/Error. (str "MCP server '" (:name cfg)
+                               "' has no :command (stdio transport requires command/args)."))))
+      (sdk-stdio/StdioClientTransport.
+       #js {:command (:command cfg)
+            :args    (clj->js (or (:args cfg) []))
+            :env     (env-merge (:env cfg))
+            :cwd     (or (:cwd cfg) (js/process.cwd))
+            :stderr  "pipe"}))
+
+    :http
+    (do
+      (when-not (:url cfg)
+        (throw (js/Error. (str "MCP server '" (:name cfg)
+                               "' has no :url (http transport requires url)."))))
+      (let [hdrs (normalize-headers (:headers cfg))
+            opts (cond-> #js {}
+                   hdrs (doto (aset "requestInit" #js {:headers hdrs})))]
+        (sdk-http/StreamableHTTPClientTransport. (js/URL. (:url cfg)) opts)))
+
+    :sse
+    (do
+      (when-not (:url cfg)
+        (throw (js/Error. (str "MCP server '" (:name cfg)
+                               "' has no :url (sse transport requires url)."))))
+      (let [hdrs (normalize-headers (:headers cfg))
+            opts (cond-> #js {}
+                   hdrs (doto (aset "requestInit" #js {:headers hdrs})))]
+        (sdk-sse/SSEClientTransport. (js/URL. (:url cfg)) opts)))))
+
 ;; ── Lifecycle ────────────────────────────────────────────────────
 
 (declare maybe-restart!)
 
 (defn ^:async start!
-  "Spawn the configured server, connect via stdio, and fetch the
-   tools list. Returns the client (with state == :running) on
+  "Spawn or connect to the configured server (stdio / http / sse) and
+   fetch the tools list. Returns the client (with state == :running) on
    success. Throws and leaves state :stopped-error on failure."
   [client]
   (let [cfg (:config client)]
     (reset! (:stopping? client) false)
     (transition! client :starting)
     (try
-      (let [transport (sdk-stdio/StdioClientTransport.
-                       #js {:command (:command cfg)
-                            :args    (clj->js (or (:args cfg) []))
-                            :env     (env-merge (:env cfg))
-                            :cwd     (or (:cwd cfg) (js/process.cwd))
-                            :stderr  "pipe"})
+      (let [transport (build-transport cfg)
             sdk-c     (sdk-client/Client.
                        #js {:name    (str "nyma-mcp-client/" (:name cfg))
                             :version "0.1.0"})]

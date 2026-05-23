@@ -80,7 +80,7 @@
         unseen (->> all-pairs
                     (remove (fn [[ev m]] (contains? seen-set (key-of ev m))))
                     vec)]
-    (when (seq unseen)
+    (when (and (seq unseen) (.-NYMA_DEBUG js/process.env))
       (js/console.warn
        (str "[hook-bridge] " (count unseen)
             " configured matcher(s) never fired this session:"))

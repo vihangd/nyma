@@ -39,8 +39,10 @@
 
 (defn- normalize-config
   "Accept either CLJS map or JS object form. mcp_discovery's
-   `shared/mcp-servers` atom stores CLJS-shaped maps with :name
-   :command :args :env keys."
+   `shared/mcp-servers` atom stores CLJS-shaped maps with stdio
+   (:command :args :env :cwd) and/or remote (:url :type :headers)
+   keys. Both branches are carried through so the per-client
+   transport selector can dispatch."
   [cfg]
   (cond
     (map? cfg)    cfg
@@ -48,7 +50,10 @@
                    :command (.-command cfg)
                    :args    (when-let [a (.-args cfg)] (vec (js/Array.from a)))
                    :env     (.-env cfg)
-                   :cwd     (.-cwd cfg)}
+                   :cwd     (.-cwd cfg)
+                   :url     (.-url cfg)
+                   :type    (or (.-type cfg) (.-transportType cfg))
+                   :headers (.-headers cfg)}
     :else nil))
 
 ;; ── Lifecycle ───────────────────────────────────────────────────

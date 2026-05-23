@@ -9,6 +9,8 @@
   (let [reg (atom {})]
     #js {:registerTool   (fn [name def] (swap! reg assoc name def) nil)
          :unregisterTool (fn [name]      (swap! reg dissoc name) nil)
+         :overrideTool   (fn [name def] (swap! reg assoc name def) nil)
+         :unoverrideTool (fn [name]     (swap! reg dissoc name) nil)
          :__registry     reg}))
 
 (defn- fake-client-with-tools

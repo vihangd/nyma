@@ -79,9 +79,9 @@
       (swap! cleanups conj (compact/register! shared))
       (swap! cleanups conj (perm/register! shared)))
 
-    ;; Visible startup line — suppressed when neither hooks nor
-    ;; disableAll fired so users without hooks don't see noise.
-    (when (or (seq @hooks-atom) (:disable-all-source loaded))
+    ;; Visible startup line — only when NYMA_DEBUG=1, otherwise silent.
+    (when (and (.-NYMA_DEBUG js/process.env)
+               (or (seq @hooks-atom) (:disable-all-source loaded)))
       (js/console.log
        (str "[hook-bridge] active — "
             (count (:sources-loaded loaded)) " source(s), "

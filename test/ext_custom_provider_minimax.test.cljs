@@ -195,3 +195,78 @@
                                                                             (aset js/process.env "MINIMAX_API_KEY" orig-key)
                                                                             (js-delete js/process.env "MINIMAX_API_KEY"))
                                                                           (fs/rmSync tmp-dir #js {:recursive true :force true}))))))))
+
+;; ── reasoning_split splice ──────────────────────────────────
+
+(describe "custom-provider-minimax — reasoning_split splice"
+          (fn []
+            (it "adds reasoning_split: true to a JSON body"
+                (fn []
+                  (let [body (js/JSON.stringify
+                              #js {:model "MiniMax-M2.5"
+                                   :messages #js [#js {:role "user" :content "hi"}]})
+                        out  (minimax-ext/splice-reasoning-split body)
+                        parsed (js/JSON.parse out)]
+                    (-> (expect (.-reasoning_split parsed)) (.toBe true))
+                    (-> (expect (.-model parsed)) (.toBe "MiniMax-M2.5")))))
+
+            (it "preserves existing keys"
+                (fn []
+                  (let [body (js/JSON.stringify
+                              #js {:model "x" :temperature 0.7 :stream true})
+                        parsed (js/JSON.parse (minimax-ext/splice-reasoning-split body))]
+                    (-> (expect (.-temperature parsed)) (.toBe 0.7))
+                    (-> (expect (.-stream parsed)) (.toBe true))
+                    (-> (expect (.-reasoning_split parsed)) (.toBe true)))))
+
+            (it "non-JSON body passes through unchanged"
+                (fn []
+                  (let [body "not-json-at-all"
+                        out (minimax-ext/splice-reasoning-split body)]
+                    (-> (expect out) (.toBe body)))))
+
+            (it "JSON null body passes through (no crash)"
+                (fn []
+                  (-> (expect (minimax-ext/splice-reasoning-split "null"))
+                      (.toBe "null"))))))
+
+(describe "custom-provider-minimax — wrap-fetch-with-reasoning"
+          (fn []
+            (it "wraps POST with JSON body to add reasoning_split"
+                (fn []
+                  (let [captured-body (atom nil)
+                        fake-fetch (fn [_url init]
+                                     (reset! captured-body (.-body init))
+                                     (js/Promise.resolve #js {}))
+                        wrapped (minimax-ext/wrap-fetch-with-reasoning fake-fetch)
+                        body    (js/JSON.stringify #js {:model "MiniMax-M2.5"})]
+                    (wrapped "https://example.com/v1/chat/completions"
+                             #js {:method "POST" :body body})
+                    (-> (expect (.-reasoning_split (js/JSON.parse @captured-body)))
+                        (.toBe true)))))
+
+            (it "passes GET requests through untouched"
+                (fn []
+                  (let [captured (atom nil)
+                        fake-fetch (fn [url init]
+                                     (reset! captured #js {:url url :init init})
+                                     (js/Promise.resolve #js {}))
+                        wrapped (minimax-ext/wrap-fetch-with-reasoning fake-fetch)]
+                    (wrapped "https://example.com/v1/models"
+                             #js {:method "GET"})
+                    (-> (expect (.-method (.-init @captured))) (.toBe "GET"))
+                    ;; No body on GETs — just check we didn't add one.
+                    (-> (expect (.-body (.-init @captured))) (.toBeNil)))))
+
+            (it "passes POST with non-string body untouched"
+                (fn []
+                  (let [captured (atom nil)
+                        fake-fetch (fn [_url init]
+                                     (reset! captured (.-body init))
+                                     (js/Promise.resolve #js {}))
+                        wrapped (minimax-ext/wrap-fetch-with-reasoning fake-fetch)
+                        ;; Some clients send a Buffer/Uint8Array — don't touch.
+                        binary  (new js/Uint8Array #js [1 2 3])]
+                    (wrapped "https://example.com/v1/chat/completions"
+                             #js {:method "POST" :body binary})
+                    (-> (expect (= @captured binary)) (.toBe true)))))))

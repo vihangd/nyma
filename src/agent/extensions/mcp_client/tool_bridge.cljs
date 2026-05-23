@@ -90,14 +90,20 @@
           (doseq [t (client/list-tools cli)]
             (let [full-name (nyma-tool-name name (:name t))
                   tool-def  (build-tool-def name cli t)]
-              (.registerTool api full-name tool-def)
+              ;; Use overrideTool (unprefixed) so the registered name
+              ;; stays the canonical CC-shape `mcp__server__tool`
+              ;; rather than `mcp-client__mcp__server__tool`. The
+              ;; double-prefix burns tool-block tokens with no benefit
+              ;; — `mcp__` already marks these as MCP-sourced.
+              (.overrideTool api full-name tool-def)
               (swap! registered conj full-name))))))
     @registered))
 
 (defn unregister-all!
   "Best-effort unregister of every name in `names`. Safe to call
-   with names that aren't currently registered."
+   with names that aren't currently registered. Mirrors
+   register-all!'s use of overrideTool — names are unprefixed."
   [api names]
   (doseq [n (or names [])]
-    (try (.unregisterTool api n)
+    (try (.unoverrideTool api n)
          (catch :default _e nil))))

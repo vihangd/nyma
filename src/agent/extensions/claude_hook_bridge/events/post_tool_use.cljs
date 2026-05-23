@@ -27,7 +27,8 @@
                                        react in the next turn)
      - additionalContext            → appended to the result string"
   (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
-            [agent.extensions.claude-hook-bridge.tool-names :as tool-names]))
+            [agent.extensions.claude-hook-bridge.tool-names :as tool-names]
+            [clojure.string :as str]))
 
 (def ^:private bridge-priority 200)
 
@@ -48,8 +49,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-        handler
+  (let [handler
         (^:async fn [data]
           (let [is-error? (boolean (or (.-isError data) (.-is-error data)))
                 tool-name (str (or (.-toolName data) (.-name data) ""))

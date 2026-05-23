@@ -46,6 +46,40 @@
   (or (aget js/process.env "MINIMAX_API_KEY")
       (read-credentials-file)))
 
+;; ── reasoning_split fetch wrapper ──────────────────────────────
+;;
+;; MiniMax M2.x emits chain-of-thought via the `reasoning_split: true`
+;; extra_body parameter on /v1/chat/completions. @ai-sdk/openai v3.x has
+;; no `extraBody` option, so we wrap the fetch to splice the field in
+;; just before the request goes out. When the field is present, MiniMax
+;; returns reasoning in a separate channel that the AI SDK surfaces as
+;; `reasoning-start`/`-delta`/`-end` events (already wired in loop.cljs).
+;;
+;; If splice fails (non-JSON body, malformed, etc.) we fall through to
+;; the original request rather than break the call.
+
+(defn splice-reasoning-split
+  "Add `reasoning_split: true` to a JSON body string. Returns the
+   modified string, or the original on parse failure."
+  [body-str]
+  (try
+    (let [obj (js/JSON.parse body-str)]
+      (when (object? obj)
+        (aset obj "reasoning_split" true))
+      (js/JSON.stringify obj))
+    (catch :default _ body-str)))
+
+(defn wrap-fetch-with-reasoning [base-fetch]
+  (fn [url init]
+    (let [;; init may be undefined for GET; only POSTs need the splice.
+          method (and init (.-method init))
+          body   (and init (.-body init))]
+      (if (and (= method "POST") (string? body))
+        (let [new-body (splice-reasoning-split body)
+              new-init (js/Object.assign #js {} init #js {:body new-body})]
+          (base-fetch url new-init))
+        (base-fetch url init)))))
+
 (defn- create-minimax-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -56,8 +90,13 @@
     ;; .chat() forces the Chat Completions endpoint (/v1/chat/completions).
     ;; Calling the provider directly now routes to the Responses API
     ;; (/v1/responses) which MiniMax does not implement — 404.
+    ;;
+    ;; The custom :fetch hook splices `reasoning_split: true` into every
+    ;; outbound request body so MiniMax emits the chain-of-thought
+    ;; channel; without it the model produces only the final answer.
     (.chat (createOpenAI #js {:apiKey  key
-                              :baseURL (resolve-base-url)})
+                              :baseURL (resolve-base-url)
+                              :fetch   (wrap-fetch-with-reasoning js/fetch)})
            id)))
 
 (defn ^:export default [api]

@@ -1,7 +1,8 @@
 (ns agent.extensions.custom-provider-groq.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "groq")
 (def ^:private default-base-url "https://api.groq.com/openai/v1")
@@ -84,7 +85,8 @@
                    "env var or run /login groq to save a key. "
                    "Get a key at https://console.groq.com/keys"))))
     (.chat (createOpenAI #js {:apiKey  key
-                              :baseURL (resolve-base-url)})
+                              :baseURL (resolve-base-url)
+                              :fetch   (rs/make-fetch)})
            id)))
 
 (defn ^:export default [api]

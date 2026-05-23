@@ -1,7 +1,8 @@
 (ns agent.extensions.custom-provider-openrouter.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "openrouter")
 (def ^:private default-base-url "https://openrouter.ai/api/v1")
@@ -89,7 +90,8 @@
     (.chat (createOpenAI #js {:apiKey  key
                               :baseURL (resolve-base-url)
                               :headers #js {"HTTP-Referer" (resolve-referer)
-                                            "X-Title"      (resolve-title)}})
+                                            "X-Title"      (resolve-title)}
+                              :fetch   (rs/make-fetch)})
            id)))
 
 (defn ^:export default [api]

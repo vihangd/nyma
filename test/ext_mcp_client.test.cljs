@@ -108,6 +108,60 @@
 
 ;; ─── State machine and pure helpers ──────────────────────────────
 
+;; ─── Transport dispatch ─────────────────────────────────────────
+
+(describe "client/transport-kind"
+          (fn []
+            (it "stdio for command-only config"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :command "echo"})) (.toBe :stdio))))
+            (it "http for url-only config (Cursor shape)"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :url "https://example.com/mcp"})) (.toBe :http))))
+            (it "explicit type=http overrides command"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :type "http" :url "https://e.com" :command "echo"})) (.toBe :http))))
+            (it "type=streamableHttp synonym for http (Cline shape)"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :type "streamableHttp" :url "https://e.com"})) (.toBe :http))))
+            (it "type=sse selects SSE"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :type "sse" :url "https://e.com"})) (.toBe :sse))))
+            (it "type=stdio overrides url"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :type "stdio" :command "echo" :url "https://e.com"})) (.toBe :stdio))))
+            (it "case-insensitive type"
+                (fn []
+                  (-> (expect (mcp/transport-kind {:name "x" :type "HTTP" :url "https://e.com"})) (.toBe :http))))))
+
+(describe "client/build-transport"
+          (fn []
+            (it "throws if http type has no url"
+                (fn []
+                  (let [threw? (atom false)]
+                    (try (mcp/build-transport {:name "x" :type "http"})
+                         (catch :default _ (reset! threw? true)))
+                    (-> (expect @threw?) (.toBe true)))))
+            (it "throws if stdio has no command"
+                (fn []
+                  (let [threw? (atom false)]
+                    (try (mcp/build-transport {:name "x" :type "stdio"})
+                         (catch :default _ (reset! threw? true)))
+                    (-> (expect @threw?) (.toBe true)))))
+            (it "constructs http transport with headers"
+                (fn []
+                  (let [t (mcp/build-transport
+                           {:name "ctx7" :url "https://mcp.context7.com/mcp"
+                            :headers {:Authorization "Bearer xyz"}})]
+                    ;; transport object exists and has the SDK methods
+                    (-> (expect (some? t)) (.toBe true))
+                    (-> (expect (fn? (.-start t))) (.toBe true)))))
+            (it "constructs stdio transport"
+                (fn []
+                  (let [t (mcp/build-transport {:name "x" :command "echo" :args ["hi"]})]
+                    (-> (expect (some? t)) (.toBe true))
+                    (-> (expect (fn? (.-start t))) (.toBe true)))))))
+
 (describe "client/create"
           (fn []
             (it "starts in :stopped state"
