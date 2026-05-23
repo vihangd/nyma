@@ -375,3 +375,71 @@
                 test-before-message-send-via-api-receives-data-and-ctx)
             (it "handler returning nil has no effect"
                 test-before-message-send-via-api-nil-is-no-op)))
+
+;; ── setModel: provider persistence + model_select event payload ─
+
+(defn- register-fake-provider!
+  "Register a minimal provider entry into the registry. Production
+   `registerProvider` does field normalization through the API; we
+   bypass it and write directly so the resolver finds `:create-model`
+   under its exact (kebab-case) key."
+  [agent provider-name]
+  (let [registry (:provider-registry agent)
+        entry    {:create-model (fn [id]
+                                  #js {:modelId id
+                                       :__test-provider provider-name})
+                  :base-url     "https://example.com/v1"
+                  :api          "openai-compatible"
+                  :models       []}]
+    ((:register registry) provider-name entry)
+    nil))
+
+(describe "agent.extensions - setModel persists provider name"
+          (fn []
+            (it "captures `provider` from `provider/model` form on config"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)]
+                    (register-fake-provider! agent "minimax")
+                    (.setModel api "minimax/MiniMax-M2.5")
+                    (-> (expect (.-active-provider-name (:config agent)))
+                        (.toBe "minimax")))))
+
+            (it "writes empty string when bare-model id is passed"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)]
+                    (.setModel api "claude-sonnet-4-5")
+                    (-> (expect (.-active-provider-name (:config agent)))
+                        (.toBe "")))))
+
+            (it "overwrites previous provider on subsequent calls"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)]
+                    (register-fake-provider! agent "minimax")
+                    (register-fake-provider! agent "openrouter")
+                    (.setModel api "minimax/MiniMax-M2.5")
+                    (.setModel api "openrouter/qwen/qwen3-coder:free")
+                    ;; Note: openrouter/qwen/qwen3-coder:free splits at the
+                    ;; FIRST slash so provider="openrouter", model="qwen/qwen3-coder:free"
+                    (-> (expect (.-active-provider-name (:config agent)))
+                        (.toBe "openrouter")))))
+
+            (it "model_select event includes :provider field"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)
+                        captured (atom nil)]
+                    (register-fake-provider! agent "minimax")
+                    (.on api "model_select"
+                         (fn [data] (reset! captured data) nil))
+                    (.setModel api "minimax/MiniMax-M2.5")
+                    (-> (expect (some? @captured)) (.toBe true))
+                    (-> (expect (.-provider @captured)) (.toBe "minimax"))
+                    (-> (expect (.-modelId @captured)) (.toBe "minimax/MiniMax-M2.5")))))
+
+            (it "model_select :provider is empty for bare-model id"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)
+                        captured (atom nil)]
+                    (.on api "model_select"
+                         (fn [data] (reset! captured data) nil))
+                    (.setModel api "claude-sonnet-4-5")
+                    (-> (expect (.-provider @captured)) (.toBe "")))))))

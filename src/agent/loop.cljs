@@ -26,27 +26,33 @@
 (defn wrap-tools-with-before-hook
   "DEPRECATED: Use wrap-tools-with-middleware instead.
    Wrap each tool's execute fn to emit before_tool_call.
-   If any handler sets cancelled=true on the context, returns a cancellation message."
+   If any handler sets cancelled=true on the context, returns a cancellation message.
+
+   IMPORTANT: do NOT pass `tools` through `clj->js`. Squint's clj->js
+   recursively rebuilds JS objects with only string-keyed enumerable
+   own properties — that drops Symbol-keyed properties, including the
+   AI-SDK `Symbol.for(\"vercel.ai.schema\")` marker on jsonSchema-wrapped
+   inputSchemas. Once that symbol is stripped, asSchema's `isSchema`
+   check fails and streamText throws `schema is not a function`. Iterate
+   the cljs map directly via reduce-kv to keep tool defs intact."
   [tools events]
-  (let [emit    (:emit events)
-        entries (js/Object.entries (clj->js tools))]
-    (into {}
-          (map (fn [entry]
-                 (let [tool-name (aget entry 0)
-                       t         (aget entry 1)]
-                   [tool-name
-                    (js/Object.assign
-                     #js {} t
-                     #js {:execute
-                          (fn [args]
-                            (let [ctx #js {:name      tool-name
-                                           :args      args
-                                           :cancelled false}]
-                              (emit "before_tool_call" ctx)
-                              (if (.-cancelled ctx)
-                                (str "Tool call '" tool-name "' was cancelled by extension")
-                                ((.-execute t) args))))})])))
-          entries)))
+  (let [emit (:emit events)]
+    (reduce-kv
+     (fn [acc tool-name t]
+       (assoc acc tool-name
+              (js/Object.assign
+               #js {} t
+               #js {:execute
+                    (fn [args]
+                      (let [ctx #js {:name      tool-name
+                                     :args      args
+                                     :cancelled false}]
+                        (emit "before_tool_call" ctx)
+                        (if (.-cancelled ctx)
+                          (str "Tool call '" tool-name "' was cancelled by extension")
+                          ((.-execute t) args))))})))
+     {}
+     tools)))
 
 (defn- inject-steer-messages!
   "Move steer queue messages into agent state between tool steps."
@@ -268,12 +274,16 @@
                       (if (< attempt 2)
                         (recur (inc attempt))
                         ;; Max retries exceeded
-                        (emit "agent_end" {:text @accumulated :usage nil})))
+                        (emit "agent_end" {:text         @accumulated
+                                           :usage        nil
+                                           :finishReason "stream-filter-aborted"})))
 
                     ;; Normal completion — capture final state, track usage
-                    (let [final-text (js-await (.-text result))
-                          usage      (js-await (.-totalUsage result))
-                          store      (:store agent)]
+                    (let [final-text     (js-await (.-text result))
+                          usage          (js-await (.-totalUsage result))
+                          finish-reason  (try (js-await (.-finishReason result))
+                                              (catch :default _ "unknown"))
+                          store          (:store agent)]
 
                       ;; message_before_store — extensions can modify content before storage
                       (let [store-result (js-await
@@ -303,7 +313,9 @@
                                      :cachedTokens (.-cachedTokens usage)
                                      :turnCount    (or (:turn-count @state) 0)})))
 
-                      (emit "agent_end" {:text final-text :usage usage})))))
+                      (emit "agent_end" {:text         final-text
+                                         :usage        usage
+                                         :finishReason finish-reason})))))
 
               ;; Process follow-up queue — outside retry loop, recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]

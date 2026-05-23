@@ -1,19 +1,49 @@
 (ns agent.tool-registry
-  (:require [agent.protocols :refer [IToolProvider_provide_tools
+  (:require ["ai" :refer [jsonSchema]]
+            [agent.protocols :refer [IToolProvider_provide_tools
                                      IToolProvider_register_tool
                                      IToolProvider_unregister_tool
                                      IToolProvider_set_active_tools
                                      IToolProvider_get_active_tools]]))
 
+(defn- raw-json-schema?
+  "True if `s` looks like a plain JSON Schema object — has a `type`
+   field but lacks the AI-SDK Standard Schema marker (Zod / wrapped
+   schemas have a `~standard` property). These crash inside `asSchema`
+   later because AI SDK calls `schema()` expecting a callable."
+  [s]
+  (and s
+       (= (js* "typeof ~{}" s) "object")
+       (some? (.-type s))
+       (nil? (aget s "~standard"))
+       (nil? (.-validate s))
+       (nil? (.-jsonSchema s))))
+
+(defn- normalize-tool!
+  "Mutate `t` so it has a callable `inputSchema` the AI SDK can use:
+   - migrate `:parameters` → `:inputSchema` (old AI SDK key)
+   - wrap raw JSON Schema objects with `jsonSchema(...)`
+   Idempotent: safe to call on already-wrapped or Zod-shaped schemas."
+  [t]
+  (when t
+    (when (and (nil? (.-inputSchema t)) (some? (.-parameters t)))
+      (set! (.-inputSchema t) (.-parameters t)))
+    (let [s (.-inputSchema t)]
+      (when (raw-json-schema? s)
+        (set! (.-inputSchema t) (jsonSchema s))))
+    t))
+
 (defn create-registry
   "Manage tools: built-in + extension-registered. Tracks active state.
    Conforms to IToolProvider protocol."
   [initial-tools]
-  (let [tools      (atom initial-tools)
+  (let [_          (doseq [[_ t] initial-tools] (normalize-tool! t))
+        tools      (atom initial-tools)
         active     (atom (set (keys initial-tools)))
         overridden (atom {})  ;; name → original tool (preserved on override)
 
         register-fn   (fn [name t]
+                        (normalize-tool! t)
                         ;; If overriding an existing tool, preserve the original
                         (when (and (contains? @tools name) (not (contains? @overridden name)))
                           (swap! overridden assoc name (get @tools name)))

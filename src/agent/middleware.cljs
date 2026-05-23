@@ -404,20 +404,23 @@
 
 (defn wrap-tools-with-middleware
   "Wrap each tool's execute fn to run through the middleware pipeline.
-   Returns a new tools map with wrapped execute functions."
+   Returns a new tools map with wrapped execute functions.
+
+   IMPORTANT: do NOT clj->js the tools map — squint's clj->js strips
+   Symbol-keyed properties recursively, which kills the AI-SDK
+   `Symbol.for(\"vercel.ai.schema\")` marker on jsonSchema-wrapped
+   inputSchemas and makes streamText throw `schema is not a function`."
   [tools pipeline events]
-  (let [entries (js/Object.entries (clj->js tools))]
-    (into {}
-          (map (fn [entry]
-                 (let [tool-name (aget entry 0)
-                       t         (aget entry 1)]
-                   [tool-name
-                    (js/Object.assign #js {} t
-                                      #js {:execute
-                                           (fn [args]
-                                             (let [result-promise ((:execute pipeline) tool-name t args)]
-                                               (.then result-promise (fn [ctx] (:result ctx)))))})])))
-          entries)))
+  (reduce-kv
+   (fn [acc tool-name t]
+     (assoc acc tool-name
+            (js/Object.assign #js {} t
+                              #js {:execute
+                                   (fn [args]
+                                     (let [result-promise ((:execute pipeline) tool-name t args)]
+                                       (.then result-promise (fn [ctx] (:result ctx)))))})))
+   {}
+   tools))
 
 (defn tool-persistence-interceptor
   "Interceptor that persists tool call results to the session JSONL.
