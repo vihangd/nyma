@@ -45,13 +45,13 @@
   [prev plan-data current-prompt-id]
   (let [all       (vec prev)
         formatted (str/join "\n"
-                    (mapv (fn [e]
-                            (str (case (:status e)
-                                   "done"   "✓"
-                                   "active" "→"
-                                   " ")
-                                 " " (:content e)))
-                          plan-data))
+                            (mapv (fn [e]
+                                    (str (case (:status e)
+                                           "done"   "✓"
+                                           "active" "→"
+                                           " ")
+                                         " " (:content e)))
+                                  plan-data))
         plan-msg  {:role "plan" :content formatted :prompt-id current-prompt-id}]
     ;; Replace existing plan message or append new one
     (let [idx (some (fn [[i m]] (when (and (= (:role m) "plan")
@@ -80,37 +80,37 @@
       (fn [set-messages]
         ;; Wire text streaming callback
         (reset! shared/stream-callback
-          (fn [text-delta]
-            (let [delta (if (compare-and-set! first? true false)
-                          (str "❯ " user-text "\n" text-delta)
-                          text-delta)]
-              (set-messages (fn [prev] (append-chunk prev delta pid))))))
+                (fn [text-delta]
+                  (let [delta (if (compare-and-set! first? true false)
+                                (str "❯ " user-text "\n" text-delta)
+                                text-delta)]
+                    (set-messages (fn [prev] (append-chunk prev delta pid))))))
         ;; Wire thinking callback (skip if thinking-renderer extension is active)
         (when-not (.getGlobalFlag api "thinking-renderer__active")
           (reset! shared/thought-callback
-            (fn [thought-text]
-              (set-messages (fn [prev] (append-thought prev thought-text pid))))))
+                  (fn [thought-text]
+                    (set-messages (fn [prev] (append-thought prev thought-text pid))))))
         ;; Wire plan callback
         (reset! shared/plan-callback
-          (fn [plan-data]
-            (set-messages (fn [prev] (append-plan prev plan-data pid)))))
+                (fn [plan-data]
+                  (set-messages (fn [prev] (append-plan prev plan-data pid)))))
         (-> (client/send-prompt conn text)
             (.then
-              (fn [result]
-                (clear-callbacks!)
-                (when @first?
-                  (set-messages
-                    (fn [prev]
-                      (append-chunk prev
-                        (str "❯ " user-text "\n(no response)") pid))))
-                (when-let [usage (:usage result)]
-                  (shared/update-agent-state! agent-key :turn-usage usage))))
+             (fn [result]
+               (clear-callbacks!)
+               (when @first?
+                 (set-messages
+                  (fn [prev]
+                    (append-chunk prev
+                                  (str "❯ " user-text "\n(no response)") pid))))
+               (when-let [usage (:usage result)]
+                 (shared/update-agent-state! agent-key :turn-usage usage))))
             (.catch
-              (fn [e]
-                (clear-callbacks!)
-                (when (and (.-ui api) (.-available (.-ui api)))
-                  (.notify (.-ui api)
-                    (str "ACP error: " (.-message e)) "error"))))))}))
+             (fn [e]
+               (clear-callbacks!)
+               (when (and (.-ui api) (.-available (.-ui api)))
+                 (.notify (.-ui api)
+                          (str "ACP error: " (.-message e)) "error"))))))}))
 
 (defn activate
   "Hook the 'input' event at high priority. When an agent is active:

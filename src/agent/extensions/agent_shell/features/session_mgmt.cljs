@@ -15,10 +15,20 @@
   [api]
   (let [agent-key @shared/active-agent
         conn      (shared/find-conn-by-agent agent-key)]
-    (if-not conn
+    (cond
+      (not conn)
       (notify api "No agent connected" "error")
+
+      (not (shared/agent-supports-resume? agent-key))
+      (notify api
+              (str "Agent `" (name (or agent-key "?"))
+                   "` does not declare session resume capability — "
+                   "session list/resume isn't available.")
+              "warning")
+
+      :else
       (-> (client/send-request conn (client/next-id conn) "session/list"
-            {:cwd (js/process.cwd)})
+                               {:cwd (js/process.cwd)})
           (.then (fn [result]
                    (let [sessions (when-let [s (.-sessions result)] (seq s))]
                      (if (empty? sessions)
@@ -26,11 +36,11 @@
                        ;; Interactive picker when UI select is available
                        (if (and (.-ui api) (.-available (.-ui api)) (.-select (.-ui api)))
                          (-> (.select (.-ui api) "Pick a session to resume"
-                               (clj->js (mapv (fn [s]
-                                                {:label (str (or (.-title s) "untitled")
-                                                             " (" (.-sessionId s) ")")
-                                                 :value (.-sessionId s)})
-                                              (take 20 sessions))))
+                                      (clj->js (mapv (fn [s]
+                                                       {:label (str (or (.-title s) "untitled")
+                                                                    " (" (.-sessionId s) ")")
+                                                        :value (.-sessionId s)})
+                                                     (take 20 sessions))))
                              (.then (fn [choice]
                                       (when (some? choice)
                                         (resume-session api (.-value choice))))))
@@ -43,42 +53,78 @@
           (.catch (fn [e]
                     (notify api (str "session/list failed: " (.-message e)) "error")))))))
 
+(defn- do-session-load-fallback
+  "Fallback to legacy session/load when agent doesn't support session/resume."
+  [conn api session-id]
+  (-> (client/send-request conn (client/next-id conn) "session/load"
+                           {:sessionId  session-id
+                            :cwd        (js/process.cwd)
+                            :mcpServers (let [servers @shared/mcp-servers]
+                                          (if (seq servers)
+                                            (clj->js servers)
+                                            []))})
+      (.then (fn [_]
+               (reset! (:session-id conn) session-id)
+               (notify api (str "Resumed session: " session-id))))
+      (.catch (fn [e]
+                (notify api (str "session/load failed: " (.-message e)) "error")))))
+
 (defn- resume-session
-  "Load a specific session by ID."
+  "Resume a specific session by ID.
+   Tries session/resume (ACP spec Apr 2026) first; falls back to session/load
+   if the agent returns -32601 (method not found)."
   [api session-id]
   (let [agent-key @shared/active-agent
         conn      (shared/find-conn-by-agent agent-key)]
-    (if-not conn
+    (cond
+      (not conn)
       (notify api "No agent connected" "error")
+
+      (not (shared/agent-supports-resume? agent-key))
+      (notify api
+              (str "Agent `" (name (or agent-key "?"))
+                   "` does not declare session resume capability — "
+                   "cannot resume.")
+              "warning")
+
+      :else
       (do
-        (notify api (str "Loading session " session-id "..."))
-        (-> (client/send-request conn (client/next-id conn) "session/load"
-              {:sessionId session-id
-               :cwd       (js/process.cwd)})
+        (notify api (str "Resuming session " session-id "..."))
+        (-> (client/send-request conn (client/next-id conn) "session/resume"
+                                 {:sessionId  session-id
+                                  :cwd        (js/process.cwd)
+                                  :mcpServers (let [servers @shared/mcp-servers]
+                                                (if (seq servers)
+                                                  (clj->js servers)
+                                                  []))})
             (.then (fn [_]
                      (reset! (:session-id conn) session-id)
                      (notify api (str "Resumed session: " session-id))))
             (.catch (fn [e]
-                      (notify api (str "session/load failed: " (.-message e)) "error"))))))))
+                      (if (or (.includes (or (.-message e) "") "-32601")
+                              (.includes (or (.-message e) "") "Method not found"))
+                        ;; Agent uses old session/load — try that instead
+                        (do-session-load-fallback conn api session-id)
+                        (notify api (str "session/resume failed: " (.-message e)) "error")))))))))
 
 (defn activate
   "Register the /sessions command."
   [api]
   (.registerCommand api "sessions"
-    #js {:description "List, resume, or create agent sessions"
-         :handler (fn [args _ctx]
-                    (let [subcmd (first args)]
-                      (cond
-                        (or (nil? subcmd) (= subcmd "list"))
-                        (list-sessions api)
+                    #js {:description "List, resume, or create agent sessions"
+                         :handler (fn [args _ctx]
+                                    (let [subcmd (first args)]
+                                      (cond
+                                        (or (nil? subcmd) (= subcmd "list"))
+                                        (list-sessions api)
 
-                        (= subcmd "resume")
-                        (if-let [sid (second args)]
-                          (resume-session api sid)
-                          (notify api "Usage: /agent-shell__sessions resume <session-id>" "error"))
+                                        (= subcmd "resume")
+                                        (if-let [sid (second args)]
+                                          (resume-session api sid)
+                                          (notify api "Usage: /agent-shell__sessions resume <session-id>" "error"))
 
-                        :else
-                        (notify api "Usage: /agent-shell__sessions [list|resume <id>]" "error"))))})
+                                        :else
+                                        (notify api "Usage: /agent-shell__sessions [list|resume <id>]" "error"))))})
 
   (fn []
     (.unregisterCommand api "sessions")))

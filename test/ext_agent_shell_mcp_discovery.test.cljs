@@ -134,9 +134,8 @@
                                                                 (-> (expect (count (:args mem))) (.toBe 2))
                                                                 (-> (expect (first (:args mem))) (.toBe "-y"))
           ;; The crucial bit: env from global must NOT have leaked in.
-          ;; expand-env-obj returns nil/empty when input env is nil.
-                                                                (-> (expect (or (nil? (:env mem))
-                                                                                (zero? (count (js-keys (:env mem))))))
+          ;; env is [{name,value}] array format; project override with no env → empty array.
+                                                                (-> (expect (zero? (count (:env mem))))
                                                                     (.toBe true)))))
 
                                                         (it "all four sources visible together — distinct names persist"

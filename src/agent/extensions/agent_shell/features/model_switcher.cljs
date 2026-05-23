@@ -23,12 +23,12 @@
     (case method
       :set_model
       (client/send-request conn (client/next-id conn) "session/set_model"
-        {:sessionId sid :modelId model-value})
+                           {:sessionId sid :modelId model-value})
       ;; default: session/set_config_option
       (client/send-request conn (client/next-id conn) "session/set_config_option"
-        {:sessionId sid
-         :configId (or (:model-config-id agent-def) "model")
-         :value model-value}))))
+                           {:sessionId sid
+                            :configId (or (:model-config-id agent-def) "model")
+                            :value model-value}))))
 
 (defn- switch-model!
   "Send the model change request and update state on success."
@@ -85,13 +85,13 @@
         (if (empty? models)
           (notify api "No models available from agent")
           (notify api (str "Models (" (count models) "):\n"
-                       (str/join "\n"
-                         (mapv (fn [m]
-                                 (str (if (= (:id m) current) " * " "   ")
-                                      (:id m)
-                                      (when (not= (:id m) (:display m))
-                                        (str "  (" (:display m) ")"))))
-                               models)))))))))
+                           (str/join "\n"
+                                     (mapv (fn [m]
+                                             (str (if (= (:id m) current) " * " "   ")
+                                                  (:id m)
+                                                  (when (not= (:id m) (:display m))
+                                                    (str "  (" (:display m) ")"))))
+                                           models)))))))))
 
 ;;; ─── /model (picker) ──────────────────────────────────────────
 
@@ -113,11 +113,11 @@
           ;; Show fuzzy picker
           (when (and (.-ui api) (.-custom (.-ui api)))
             (.custom (.-ui api)
-              (picker/create-picker models
-                (fn [selected-id]
-                  (if selected-id
-                    (switch-model! api selected-id)
-                    (notify api "Model selection cancelled")))))))))))
+                     (picker/create-picker models
+                                           (fn [selected-id]
+                                             (if selected-id
+                                               (switch-model! api selected-id)
+                                               (notify api "Model selection cancelled")))))))))))
 
 ;;; ─── Activation ───────────────────────────────────────────────
 
@@ -125,13 +125,13 @@
   "Register the /model command."
   [api]
   (.registerCommand api "model"
-    #js {:description "Show, list, or change agent model"
-         :handler (fn [args _ctx]
-                    (let [first-arg (first args)]
-                      (cond
-                        (= first-arg "list") (show-model-list api)
-                        (seq args)           (switch-model! api (str/join " " args))
-                        :else                (show-model-picker api))))})
+                    #js {:description "Show, list, or change agent model"
+                         :handler (fn [args _ctx]
+                                    (let [first-arg (first args)]
+                                      (cond
+                                        (= first-arg "list") (show-model-list api)
+                                        (seq args)           (switch-model! api (str/join " " args))
+                                        :else                (show-model-picker api))))})
 
   (fn []
     (.unregisterCommand api "model")))

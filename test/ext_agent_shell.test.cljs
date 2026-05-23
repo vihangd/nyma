@@ -799,8 +799,8 @@
                                                                 api    #js {:ui #js {:available false}}]
                                                             (handlers/handle-permission-request conn parsed api)
                                                             (let [r (.-result (last-write-parsed conn))]
-                                                              (-> (expect (.-outcome r)) (.toBe "selected"))
-                                                              (-> (expect (.-optionId r)) (.toBe "id-allow-always"))))))
+                                                              (-> (expect (.. r -outcome -outcome)) (.toBe "selected"))
+                                                              (-> (expect (.. r -outcome -optionId)) (.toBe "id-allow-always"))))))
 
                                                     (it "auto-approves — picks allow_once when no allow_always"
                                                         (fn []
@@ -812,8 +812,8 @@
                                                                 api    #js {:ui #js {:available false}}]
                                                             (handlers/handle-permission-request conn parsed api)
                                                             (let [r (.-result (last-write-parsed conn))]
-                                                              (-> (expect (.-outcome r)) (.toBe "selected"))
-                                                              (-> (expect (.-optionId r)) (.toBe "id-allow-once"))))))
+                                                              (-> (expect (.. r -outcome -outcome)) (.toBe "selected"))
+                                                              (-> (expect (.. r -outcome -optionId)) (.toBe "id-allow-once"))))))
 
                                                     (it "auto-approves — falls back to first option when no allow_always or allow_once"
                                                         (fn []
@@ -824,8 +824,8 @@
                                                                 api    #js {:ui #js {:available false}}]
                                                             (handlers/handle-permission-request conn parsed api)
                                                             (let [r (.-result (last-write-parsed conn))]
-                                                              (-> (expect (.-outcome r)) (.toBe "selected"))
-                                                              (-> (expect (.-optionId r)) (.toBe "first-id"))))))
+                                                              (-> (expect (.. r -outcome -outcome)) (.toBe "selected"))
+                                                              (-> (expect (.. r -outcome -optionId)) (.toBe "first-id"))))))
 
                                                     (it "auto-approves when api is nil"
                                                         (fn []
@@ -835,8 +835,8 @@
                                                                                          nil)]
                                                             (handlers/handle-permission-request conn parsed nil)
                                                             (let [r (.-result (last-write-parsed conn))]
-                                                              (-> (expect (.-outcome r)) (.toBe "selected"))
-                                                              (-> (expect (.-optionId r)) (.toBe "opt-1"))))))
+                                                              (-> (expect (.. r -outcome -outcome)) (.toBe "selected"))
+                                                              (-> (expect (.. r -outcome -optionId)) (.toBe "opt-1"))))))
 
                                                     (it "UI path: extracts .value from selected option object" ^:async
                                                         (fn []
@@ -853,9 +853,9 @@
                                                             (-> (handlers/handle-permission-request conn parsed api)
                                                                 (.then (fn [_]
                                                                          (let [r (.-result (last-write-parsed conn))]
-                                                                           (-> (expect (.-outcome r)) (.toBe "selected"))
+                                                                           (-> (expect (.. r -outcome -outcome)) (.toBe "selected"))
                        ;; Must be the string ID, NOT the JS option object
-                                                                           (-> (expect (.-optionId r)) (.toBe "real-opt-id")))))))))
+                                                                           (-> (expect (.. r -outcome -optionId)) (.toBe "real-opt-id")))))))))
 
                                                     (it "UI path: sends cancelled when dialog resolves nil (Escape pressed)" ^:async
                                                         (fn []
@@ -869,7 +869,7 @@
                                                             (-> (handlers/handle-permission-request conn parsed api)
                                                                 (.then (fn [_]
                                                                          (let [r (.-result (last-write-parsed conn))]
-                                                                           (-> (expect (.-outcome r)) (.toBe "cancelled")))))))))
+                                                                           (-> (expect (.. r -outcome -outcome)) (.toBe "cancelled")))))))))
 
                                                     (it "UI path: sends cancelled when dialog rejects" ^:async
                                                         (fn []
@@ -883,7 +883,7 @@
                                                             (-> (handlers/handle-permission-request conn parsed api)
                                                                 (.then (fn [_]
                                                                          (let [r (.-result (last-write-parsed conn))]
-                                                                           (-> (expect (.-outcome r)) (.toBe "cancelled")))))))))
+                                                                           (-> (expect (.. r -outcome -outcome)) (.toBe "cancelled")))))))))
 
                                                     (it "title uses tool name when tool-call is provided" ^:async
                                                         (fn []
@@ -955,13 +955,13 @@
           ;; Let the .then chain run (select resolves, resume-session fires)
                                                    (js-await (js/Promise. (fn [r] (js/setTimeout r 0))))
                                                    (js-await (js/Promise. (fn [r] (js/setTimeout r 0))))
-          ;; The session/load request must carry sessionId as a plain string
-                                                   (let [load-req (some (fn [w]
-                                                                          (let [p (js/JSON.parse w)]
-                                                                            (when (= (.-method p) "session/load") p)))
-                                                                        @(:_writes conn))]
-                                                     (-> (expect (some? load-req)) (.toBe true))
-                                                     (-> (expect (.-sessionId (.-params load-req))) (.toBe "sess-abc")))))))
+          ;; session/resume must be sent first (falls back to session/load if -32601)
+                                                   (let [resume-req (some (fn [w]
+                                                                            (let [p (js/JSON.parse w)]
+                                                                              (when (= (.-method p) "session/resume") p)))
+                                                                          @(:_writes conn))]
+                                                     (-> (expect (some? resume-req)) (.toBe true))
+                                                     (-> (expect (.-sessionId (.-params resume-req))) (.toBe "sess-abc")))))))
 
                                          (it "does not call resume-session when dialog is cancelled (nil)" ^:async
                                              (fn []
@@ -978,12 +978,13 @@
                                                    (resolve-pending! conn #js {:sessions #js [#js {:sessionId "sess-1" :title "S1"}]})
                                                    (js-await (js/Promise. (fn [r] (js/setTimeout r 0))))
                                                    (js-await (js/Promise. (fn [r] (js/setTimeout r 0))))
-          ;; No session/load should have been written
-                                                   (let [load-req (some (fn [w]
-                                                                          (let [p (js/JSON.parse w)]
-                                                                            (when (= (.-method p) "session/load") p)))
-                                                                        @(:_writes conn))]
-                                                     (-> (expect (nil? load-req)) (.toBe true)))))))))
+          ;; No session/resume or session/load should have been written
+                                                   (let [resume-req (some (fn [w]
+                                                                            (let [p (js/JSON.parse w)]
+                                                                              (when (or (= (.-method p) "session/resume")
+                                                                                        (= (.-method p) "session/load")) p)))
+                                                                          @(:_writes conn))]
+                                                     (-> (expect (nil? resume-req)) (.toBe true)))))))))
 
 ;;; ─── Permission UI ──────────────────────────────────────────────────────────
 

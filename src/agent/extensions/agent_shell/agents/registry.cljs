@@ -116,17 +116,20 @@
     {}))
 
 (defn- normalize-agent-config
-  "Normalize an agent config from settings.json into internal format."
+  "Normalize an agent config from settings.json into internal format.
+   In-process agents (`:in-process? true`) are allowed without `:command`."
   [config]
-  (when (and config (:command config))
-    (cond-> {:command        (:command config)
-             :args           (or (:args config) [])
-             :features       (normalize-features (or (:features config) []))
-             :modes          (normalize-modes (or (:modes config) {}))
+  (when (and config (or (:command config) (:in-process? config)))
+    (cond-> {:command         (:command config)
+             :args            (or (:args config) [])
+             :features        (normalize-features (or (:features config) []))
+             :modes           (normalize-modes (or (:modes config) {}))
              :model-config-id (or (:model-config-id config) "model")
              :init-mode       (:init-mode config)}
       (:name config)         (assoc :name (:name config))
-      (:model-method config) (assoc :model-method (->key (:model-method config))))))
+      (:model-method config) (assoc :model-method (->key (:model-method config)))
+      (:in-process? config)  (assoc :in-process? true)
+      (:create-fn config)    (assoc :create-fn (:create-fn config)))))
 
 ;;; ─── Registry operations ──────────────────────────────────────
 
@@ -134,7 +137,7 @@
   "Recompute the merged registry from all three tiers."
   []
   (reset! merged-registry
-    (merge builtin-agents @config-agents @dynamic-agents)))
+          (merge builtin-agents @config-agents @dynamic-agents)))
 
 (defn refresh!
   "Reload config agents from settings and recompute the merged registry.
@@ -143,12 +146,12 @@
   (let [raw-agents (:agents config)]
     (if (and raw-agents (map? raw-agents))
       (let [parsed (reduce-kv
-                     (fn [acc k v]
-                       (let [key (->key k)]
-                         (if-let [normalized (normalize-agent-config v)]
-                           (assoc acc key (assoc normalized :name (or (:name normalized) (->key key))))
-                           acc)))
-                     {} raw-agents)]
+                    (fn [acc k v]
+                      (let [key (->key k)]
+                        (if-let [normalized (normalize-agent-config v)]
+                          (assoc acc key (assoc normalized :name (or (:name normalized) (->key key))))
+                          acc)))
+                    {} raw-agents)]
         (reset! config-agents parsed))
       (reset! config-agents {})))
   (recompute-merge!))

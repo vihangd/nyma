@@ -31,11 +31,11 @@
          :spawn             (fn [cmd args opts]
                               (let [cmd-args (into [cmd] (or args []))
                                     proc     (js/Bun.spawn (clj->js cmd-args)
-                                               #js {:stdout "pipe"
-                                                    :stderr "pipe"
-                                                    :stdin  "pipe"
-                                                    :cwd    (or (and opts (.-cwd opts)) (js/process.cwd))
-                                                    :env    js/process.env})]
+                                                           #js {:stdout "pipe"
+                                                                :stderr "pipe"
+                                                                :stdin  "pipe"
+                                                                :cwd    (or (and opts (.-cwd opts)) (js/process.cwd))
+                                                                :env    js/process.env})]
                                 #js {:pid    (.-pid proc)
                                      :stdin  (.-stdin proc)
                                      :stdout (.-stdout proc)
@@ -50,10 +50,10 @@
 ;; ── State reset ─────────────────────────────────────────────────────────────
 
 (beforeEach
-  (fn []
-    (reset! shared/active-agent nil)
-    (reset! shared/connections {})
-    (reset! shared/agent-state {})))
+ (fn []
+   (reset! shared/active-agent nil)
+   (reset! shared/connections {})
+   (reset! shared/agent-state {})))
 
 (defn ^:async cleanup []
   (js-await (pool/disconnect-all)))
@@ -115,11 +115,11 @@
   (let [api  (make-spawn-api)
         _    (js-await (pool/get-or-create "qwen" qwen-def api))]
     ;; Verify connected
-    (-> (expect (some? (get @shared/connections "qwen"))) (.toBe true))
+    (-> (expect (some? (shared/find-conn-by-agent "qwen"))) (.toBe true))
     ;; Disconnect
     (js-await (pool/disconnect "qwen"))
     ;; State cleared
-    (-> (expect (nil? (get @shared/connections "qwen"))) (.toBe true))))
+    (-> (expect (nil? (shared/find-conn-by-agent "qwen"))) (.toBe true))))
 
 (defn ^:async test-stream-callback-invoked-during-prompt []
   (let [api      (make-spawn-api)
@@ -127,7 +127,7 @@
         chunks   (atom [])
         ;; Set stream-callback before prompt — should receive text chunks
         _        (reset! shared/stream-callback
-                   (fn [text] (swap! chunks conj text)))]
+                         (fn [text] (swap! chunks conj text)))]
     (js-await (client/send-prompt conn "Reply with just: ok"))
     ;; stream-callback must have been called with at least one chunk
     (-> (expect (pos? (count @chunks))) (.toBe true))
@@ -154,7 +154,7 @@
         thought-chunks (atom [])
         ;; Pre-set thought-callback before prompt so we can observe it
         _       (reset! shared/thought-callback
-                  (fn [text] (swap! thought-chunks conj text)))
+                        (fn [text] (swap! thought-chunks conj text)))
         result  (js-await (client/send-prompt conn "Reply with just: ok"))]
     ;; After prompt completes, thought-callback should be cleared (set by make-stream-handler,
     ;; but we pre-set it here to test the clearing behavior)
@@ -199,7 +199,7 @@
         conn   (js-await (pool/get-or-create "claude" claude-def api))
         thoughts (atom [])
         _      (reset! shared/thought-callback
-                 (fn [text] (swap! thoughts conj text)))
+                       (fn [text] (swap! thoughts conj text)))
         result (js-await (client/send-prompt conn "What is 3*7? Think step by step, then reply."))]
     (js/console.log (str "[e2e:claude] Thought chunks: " (count @thoughts)))
     (js/console.log (str "[e2e:claude] Response: " (pr-str (:text result))))
@@ -214,7 +214,7 @@
         conn   (js-await (pool/get-or-create "claude" claude-def api))
         chunks (atom [])
         _      (reset! shared/stream-callback
-                 (fn [text] (swap! chunks conj text)))]
+                       (fn [text] (swap! chunks conj text)))]
     (js-await (client/send-prompt conn "Reply with just: ok"))
     (-> (expect (pos? (count @chunks))) (.toBe true))
     (reset! shared/stream-callback nil)))
@@ -222,22 +222,22 @@
 (defn ^:async claude-test-disconnect []
   (let [api (make-spawn-api)
         _   (js-await (pool/get-or-create "claude" claude-def api))]
-    (-> (expect (some? (get @shared/connections "claude"))) (.toBe true))
+    (-> (expect (some? (shared/find-conn-by-agent "claude"))) (.toBe true))
     (js-await (pool/disconnect "claude"))
-    (-> (expect (nil? (get @shared/connections "claude"))) (.toBe true))))
+    (-> (expect (nil? (shared/find-conn-by-agent "claude"))) (.toBe true))))
 
 ;; ── Test suite ──────────────────────────────────────────────────────────────
 
 (def e2e-timeout 60000)  ;; 60s per test — real LLM calls
 
 (describe "agent-shell e2e (qwen)" (fn []
-  (it "connects via pool and gets a session ID" test-connect-via-pool e2e-timeout)
-  (it "sends a prompt and receives a non-empty response" test-send-prompt-gets-response e2e-timeout)
-  (it "returns usage stats in the response" test-usage-in-response e2e-timeout)
-  (it "disconnects cleanly and clears state" test-disconnect-cleans-up e2e-timeout)
-  (it "stream-callback invoked with chunks during a real prompt" test-stream-callback-invoked-during-prompt e2e-timeout)
-  (it "agent-state populated after connection handshake" test-commands-registered-after-connect e2e-timeout)
-  (it "thought-callback atom observable during streaming" test-thought-callback-wired-during-stream e2e-timeout)))
+                                     (it "connects via pool and gets a session ID" test-connect-via-pool e2e-timeout)
+                                     (it "sends a prompt and receives a non-empty response" test-send-prompt-gets-response e2e-timeout)
+                                     (it "returns usage stats in the response" test-usage-in-response e2e-timeout)
+                                     (it "disconnects cleanly and clears state" test-disconnect-cleans-up e2e-timeout)
+                                     (it "stream-callback invoked with chunks during a real prompt" test-stream-callback-invoked-during-prompt e2e-timeout)
+                                     (it "agent-state populated after connection handshake" test-commands-registered-after-connect e2e-timeout)
+                                     (it "thought-callback atom observable during streaming" test-thought-callback-wired-during-stream e2e-timeout)))
 
 ;; ── OpenCode test functions ──────────────────────────────────────────────────
 
@@ -249,8 +249,8 @@
         sid  @(:session-id conn)]
     ;; opencode uses session/set_model (not session/set_config_option)
     (js-await (client/send-request conn (client/next-id conn) "session/set_model"
-                {:sessionId sid
-                 :modelId   opencode-minimax-model}))
+                                   {:sessionId sid
+                                    :modelId   opencode-minimax-model}))
     conn))
 
 (defn ^:async opencode-test-connect []
@@ -287,7 +287,7 @@
         conn   (js-await (opencode-connect-and-set-model api))
         chunks (atom [])
         _      (reset! shared/stream-callback
-                 (fn [text] (swap! chunks conj text)))]
+                       (fn [text] (swap! chunks conj text)))]
     (js-await (client/send-prompt conn "Reply with just: ok"))
     (-> (expect (pos? (count @chunks))) (.toBe true))
     (reset! shared/stream-callback nil)))
@@ -295,21 +295,21 @@
 (defn ^:async opencode-test-disconnect []
   (let [api (make-spawn-api)
         _   (js-await (opencode-connect-and-set-model api))]
-    (-> (expect (some? (get @shared/connections "opencode"))) (.toBe true))
+    (-> (expect (some? (shared/find-conn-by-agent "opencode"))) (.toBe true))
     (js-await (pool/disconnect "opencode"))
-    (-> (expect (nil? (get @shared/connections "opencode"))) (.toBe true))))
+    (-> (expect (nil? (shared/find-conn-by-agent "opencode"))) (.toBe true))))
 
 (describe "agent-shell e2e (claude)" (fn []
-  (it "connects via pool and gets a session ID" claude-test-connect e2e-timeout)
-  (it "sends a prompt and receives a non-empty response" claude-test-send-prompt e2e-timeout)
-  (it "reports non-zero token usage" claude-test-usage-non-zero e2e-timeout)
-  (it "thought-callback receives thinking chunks" claude-test-thinking-chunks e2e-timeout)
-  (it "stream-callback invoked with chunks during a real prompt" claude-test-stream-callback e2e-timeout)
-  (it "disconnects cleanly and clears state" claude-test-disconnect e2e-timeout)))
+                                       (it "connects via pool and gets a session ID" claude-test-connect e2e-timeout)
+                                       (it "sends a prompt and receives a non-empty response" claude-test-send-prompt e2e-timeout)
+                                       (it "reports non-zero token usage" claude-test-usage-non-zero e2e-timeout)
+                                       (it "thought-callback receives thinking chunks" claude-test-thinking-chunks e2e-timeout)
+                                       (it "stream-callback invoked with chunks during a real prompt" claude-test-stream-callback e2e-timeout)
+                                       (it "disconnects cleanly and clears state" claude-test-disconnect e2e-timeout)))
 
 (describe "agent-shell e2e (opencode/minimax-m2.5)" (fn []
-  (it "connects via pool and sets model to minimax-m2.5" opencode-test-connect e2e-timeout)
-  (it "sends a prompt and receives a non-empty response" opencode-test-send-prompt e2e-timeout)
-  (it "returns usage stats in the response" opencode-test-usage e2e-timeout)
-  (it "stream-callback invoked with chunks during a real prompt" opencode-test-stream-callback e2e-timeout)
-  (it "disconnects cleanly and clears state" opencode-test-disconnect e2e-timeout)))
+                                                      (it "connects via pool and sets model to minimax-m2.5" opencode-test-connect e2e-timeout)
+                                                      (it "sends a prompt and receives a non-empty response" opencode-test-send-prompt e2e-timeout)
+                                                      (it "returns usage stats in the response" opencode-test-usage e2e-timeout)
+                                                      (it "stream-callback invoked with chunks during a real prompt" opencode-test-stream-callback e2e-timeout)
+                                                      (it "disconnects cleanly and clears state" opencode-test-disconnect e2e-timeout)))

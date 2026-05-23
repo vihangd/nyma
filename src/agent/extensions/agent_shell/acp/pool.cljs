@@ -95,13 +95,28 @@
                     ;; Store agent capabilities for reference
                   (shared/update-agent-state! agent-key :capabilities
                                               (shared/js->clj* (.-agentCapabilities init-result)))
-                    ;; Phase 2: Create session (pass discovered MCP servers)
-                  (client/send-request conn (client/next-id conn) "session/new"
-                                       {:cwd project-root
-                                        :mcpServers (let [servers @shared/mcp-servers]
-                                                      (if (seq servers)
-                                                        (clj->js servers)
-                                                        []))})))
+                    ;; Detect auth requirements and surface to user
+                  (let [auth-methods (when-let [am (.-authMethods init-result)] (seq am))]
+                    (when auth-methods
+                      (shared/update-agent-state! agent-key :auth-methods
+                                                  (mapv shared/js->clj* auth-methods))
+                      (when (and (.-ui api) (.-available (.-ui api)))
+                        (.notify (.-ui api)
+                                 (str "Agent requires authentication ("
+                                      (str/join ", " (map #(or (.-id %) (.-type %)) auth-methods))
+                                      "). Log in via the agent's own CLI (e.g. `claude /login`, `gemini auth`) and reconnect.")
+                                 "warning"))))
+                    ;; Phase 2: Create session (pass discovered MCP servers + optional extra dirs)
+                  (let [base-params {:cwd        project-root
+                                     :mcpServers (let [servers @shared/mcp-servers]
+                                                   (if (seq servers)
+                                                     (clj->js servers)
+                                                     []))}
+                        extra-dirs  (:additional-directories agent-def)
+                        params      (if (seq extra-dirs)
+                                      (assoc base-params :additionalDirectories (vec extra-dirs))
+                                      base-params)]
+                    (client/send-request conn (client/next-id conn) "session/new" params))))
                (.then
                 (fn [session-result]
                   (let [sid (.-sessionId session-result)]

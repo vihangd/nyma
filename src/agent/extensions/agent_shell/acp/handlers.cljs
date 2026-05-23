@@ -34,8 +34,12 @@
         first-id     (when (seq options) (.-optionId (first options)))]
     (if (or auto? (not (and api (.-ui api) (.-available (.-ui api)))))
       ;; Auto-approve: pick allow_always > allow_once > first option
-      (client/send-response conn (.-id parsed)
-        {:outcome "selected" :optionId (or allow-always allow-once first-id)})
+      (let [option-id (or allow-always allow-once first-id)]
+        (if option-id
+          (client/send-response conn (.-id parsed)
+                                {:outcome {:outcome "selected" :optionId option-id}})
+          (client/send-response conn (.-id parsed)
+                                {:outcome {:outcome "cancelled"}})))
       ;; Show UI dialog
       (let [labels (mapv (fn [opt]
                            #js {:label (str (.-name opt) " (" (.-kind opt) ")")
@@ -49,12 +53,12 @@
             (.then (fn [selected]
                      (if (some? selected)
                        (client/send-response conn (.-id parsed)
-                         {:outcome "selected" :optionId (.-value selected)})
+                                             {:outcome {:outcome "selected" :optionId (.-value selected)}})
                        (client/send-response conn (.-id parsed)
-                         {:outcome "cancelled"}))))
+                                             {:outcome {:outcome "cancelled"}}))))
             (.catch (fn [_]
                       (client/send-response conn (.-id parsed)
-                        {:outcome "cancelled"}))))))))
+                                            {:outcome {:outcome "cancelled"}}))))))))
 
 ;;; ─── Filesystem handlers ───────────────────────────────────
 
@@ -67,7 +71,7 @@
         (client/send-response conn (.-id parsed) {:content content}))
       (catch :default e
         (client/send-error-response conn (.-id parsed) -32000
-          (str "Read failed: " (.-message e)))))))
+                                    (str "Read failed: " (.-message e)))))))
 
 (defn handle-fs-write
   "Write a text file for the agent. Restricted to project root."
@@ -77,7 +81,7 @@
         project-root (:project-root conn)]
     (if (and project-root (not (safe-path? project-root target-path)))
       (client/send-error-response conn (.-id parsed) -32000
-        (str "Write denied: path outside project root: " target-path))
+                                  (str "Write denied: path outside project root: " target-path))
       (try
         ;; Ensure parent directory exists
         (let [dir (path/dirname target-path)]
@@ -87,7 +91,7 @@
         (client/send-response conn (.-id parsed) {})
         (catch :default e
           (client/send-error-response conn (.-id parsed) -32000
-            (str "Write failed: " (.-message e))))))))
+                                      (str "Write failed: " (.-message e))))))))
 
 ;;; ─── Terminal handlers ─────────────────────────────────────
 
@@ -102,10 +106,10 @@
         tid          (str "t-" (js/Date.now) "-" (js/Math.round (* (js/Math.random) 10000)))
         cmd-args     (into [command] args)
         proc         (js/Bun.spawn (clj->js cmd-args)
-                       #js {:cwd   (or cwd project-root (js/process.cwd))
-                            :stdout "pipe"
-                            :stderr "pipe"
-                            :stdin  "pipe"})
+                                   #js {:cwd   (or cwd project-root (js/process.cwd))
+                                        :stdout "pipe"
+                                        :stderr "pipe"
+                                        :stdin  "pipe"})
         output       (atom "")
         decoder      (js/TextDecoder.)]
     ;; Collect stdout + stderr
@@ -133,7 +137,7 @@
         terminal (get-in @(:state conn) [:terminals tid])]
     (if terminal
       (client/send-response conn (.-id parsed)
-        {:output @(:output terminal)})
+                            {:output @(:output terminal) :truncated false})
       (client/send-error-response conn (.-id parsed) -32000 "Terminal not found"))))
 
 (defn handle-terminal-wait
@@ -146,7 +150,7 @@
         (-> (.-exited proc)
             (.then (fn [exit-code]
                      (client/send-response conn (.-id parsed)
-                       {:exitCode (or exit-code 0) :output @(:output terminal)})))))
+                                           {:exitCode (or exit-code 0) :output @(:output terminal)})))))
       (client/send-error-response conn (.-id parsed) -32000 "Terminal not found"))))
 
 (defn handle-terminal-kill
@@ -188,30 +192,30 @@
           (let [field-keys (js/Object.keys properties)
                 answers    (atom {})]
             (-> (reduce
-                  (fn [chain field-key]
-                    (.then chain
-                      (fn [_]
-                        (let [field (aget properties field-key)
-                              label (or (.-title field) (.-description field) field-key)
-                              hint  (or (.-default field) "")]
-                          (-> (.input (.-ui api) (str title ": " label) (str hint))
-                              (.then (fn [value]
-                                       (when (some? value)
-                                         (swap! answers assoc field-key value)))))))))
-                  (js/Promise.resolve nil)
-                  field-keys)
+                 (fn [chain field-key]
+                   (.then chain
+                          (fn [_]
+                            (let [field (aget properties field-key)
+                                  label (or (.-title field) (.-description field) field-key)
+                                  hint  (or (.-default field) "")]
+                              (-> (.input (.-ui api) (str title ": " label) (str hint))
+                                  (.then (fn [value]
+                                           (when (some? value)
+                                             (swap! answers assoc field-key value)))))))))
+                 (js/Promise.resolve nil)
+                 field-keys)
                 (.then (fn [_]
                          (if (empty? @answers)
                            (client/send-response conn (.-id parsed)
-                             {:action "cancel"})
+                                                 {:action "cancel"})
                            (client/send-response conn (.-id parsed)
-                             {:action "accept" :content (clj->js @answers)}))))
+                                                 {:action "accept" :content (clj->js @answers)}))))
                 (.catch (fn [_]
                           (client/send-response conn (.-id parsed)
-                            {:action "cancel"})))))
+                                                {:action "cancel"})))))
           ;; No UI — decline
           (client/send-response conn (.-id parsed)
-            {:action "decline"})))
+                                {:action "decline"})))
 
       ;; URL mode: show URL to user
       "url"
@@ -220,11 +224,11 @@
           (.notify (.-ui api) (str "Open this URL: " url) "info"))
         ;; Accept after showing URL
         (client/send-response conn (.-id parsed)
-          {:action "accept"}))
+                              {:action "accept"}))
 
       ;; Unknown mode — cancel
       (client/send-response conn (.-id parsed)
-        {:action "cancel"}))))
+                            {:action "cancel"}))))
 
 ;;; ─── Reverse request dispatcher ────────────────────────────
 
@@ -241,6 +245,8 @@
     "terminal/kill"              (handle-terminal-kill conn parsed)
     "terminal/release"           (handle-terminal-release conn parsed)
     "session/elicitation"        (handle-elicitation conn parsed api)
+    ;; Renamed in ACP spec (Apr 2026) — keep both names for compat
+    "elicitation/create"         (handle-elicitation conn parsed api)
     ;; Unknown method
     (client/send-error-response conn (.-id parsed) -32601
-      (str "Method not found: " (.-method parsed)))))
+                                (str "Method not found: " (.-method parsed)))))

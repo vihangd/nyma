@@ -49,41 +49,41 @@
 
       ;; Hook session shutdown for cleanup
       (.on api "session_shutdown"
-        (fn [_ _]
-          (pool/disconnect-all)))
+           (fn [_ _]
+             (pool/disconnect-all)))
 
       ;; Hook /clear → reset ACP session
       (.on api "session_clear"
-        (fn [_ _]
-          (when-let [agent-key @shared/active-agent]
-            (when-let [conn (shared/find-conn-by-agent agent-key)]
-              (client/cancel-prompt conn)
-              (-> (client/send-request conn (client/next-id conn) "session/new" {})
-                  (.then (fn [resp]
-                           (when-let [sid (and resp (.-sessionId resp))]
-                             (reset! (:session-id conn) sid))
-                           (let [ui (.-ui api)]
-                             (when (and ui (.-available ui))
-                               (.notify ui "Agent session reset" "info")))))
-                  (.catch (fn [e]
-                            (let [ui (.-ui api)]
-                              (when (and ui (.-available ui))
-                                (.notify ui (str "Session reset failed: " (.-message e)) "error"))))))))))
+           (fn [_ _]
+             (when-let [agent-key @shared/active-agent]
+               (when-let [conn (shared/find-conn-by-agent agent-key)]
+                 (client/cancel-prompt conn)
+                 (-> (client/send-request conn (client/next-id conn) "session/new" {})
+                     (.then (fn [resp]
+                              (when-let [sid (and resp (.-sessionId resp))]
+                                (reset! (:session-id conn) sid))
+                              (let [ui (.-ui api)]
+                                (when (and ui (.-available ui))
+                                  (.notify ui "Agent session reset" "info")))))
+                     (.catch (fn [e]
+                               (let [ui (.-ui api)]
+                                 (when (and ui (.-available ui))
+                                   (.notify ui (str "Session reset failed: " (.-message e)) "error"))))))))))
 
       ;; session_ready — UI guaranteed available, setup header + status
       ;; segments and auto-connect.
       (.on api "session_ready"
-        (fn [_data]
-          (shared/setup-ui!)
-          (status-segments/register-all! api)
+           (fn [_data]
+             (shared/setup-ui!)
+             (status-segments/register-all! api)
           ;; Auto-connect if configured
-          (when (and (:default-agent config) (:auto-connect config))
-            (let [agent-key (:default-agent config)]
-              (when-not (shared/find-conn-by-agent agent-key)
-                (when (and (.-ui api) (.-available (.-ui api)))
-                  (.notify (.-ui api) (str "Auto-connecting to " (str agent-key) "...") "info"))
-                (when-let [agent-def (registry/get-agent agent-key)]
-                  (pool/get-or-create agent-key agent-def api)))))))
+             (when (and (:default-agent config) (:auto-connect config))
+               (let [agent-key (:default-agent config)]
+                 (when-not (shared/find-conn-by-agent agent-key)
+                   (when (and (.-ui api) (.-available (.-ui api)))
+                     (.notify (.-ui api) (str "Auto-connecting to " (str agent-key) "...") "info"))
+                   (when-let [agent-def (registry/get-agent agent-key)]
+                     (pool/get-or-create agent-key agent-def api)))))))
 
       ;; Return combined deactivator
       (fn []

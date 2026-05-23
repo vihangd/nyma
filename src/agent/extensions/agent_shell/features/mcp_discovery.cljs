@@ -41,32 +41,63 @@
                 (or (aget js/process.env var-name) "")))
     s))
 
-(defn- expand-env-obj
-  "Expand ${ENV_VAR} placeholders in all string values of a JS object."
+(defn- obj->name-value-array
+  "Convert a JS object {K: V} to ACP array [{name: K, value: V}] with env-expansion."
   [obj]
-  (when obj
-    (let [result #js {}]
-      (doseq [k (js/Object.keys obj)]
-        (aset result k (expand-env (aget obj k))))
-      result)))
+  (if (and obj (< 0 (.-length (js/Object.keys obj))))
+    (let [ks (js/Object.keys obj)]
+      (mapv (fn [k] {:name k :value (expand-env (aget obj k))}) ks))
+    []))
+
+(defn- expand-env-args
+  "Expand ${ENV_VAR} placeholders in each string element of an args array.
+   Non-string elements pass through unchanged (defensive — JSON args are
+   always strings, but be safe)."
+  [args]
+  (when args
+    (let [out  #js []
+          n    (.-length args)]
+      (doseq [i (range n)]
+        (let [v (aget args i)]
+          (.push out (if (string? v) (expand-env v) v))))
+      out)))
 
 ;;; ─── Format conversion ────────────────────────────────────────
 
 (defn object->array
   "Convert MCP servers from .mcp.json object format to ACP array format.
-   Input:  {\"my-db\": {command: \"npx\", args: [...], env: {...}}}
-   Output: [{name: \"my-db\", command: \"npx\", args: [...], env: {...}}]"
+   Produces schema-valid objects:
+   - Stdio: {name, command, args, env: [{name,value}...]}
+   - HTTP/SSE: {name, url, type, headers: [{name,value}...]}
+
+   Discriminator: explicit `type` > presence of `url` (defaults to \"http\") > stdio."
   [servers-obj]
   (if (and servers-obj (> (.-length (js/Object.keys servers-obj)) 0))
-    (let [keys (js/Object.keys servers-obj)]
+    (let [ks (js/Object.keys servers-obj)]
       (vec
-       (map (fn [name]
-              (let [config (aget servers-obj name)]
-                {:name    name
-                 :command (.-command config)
-                 :args    (or (.-args config) [])
-                 :env     (expand-env-obj (.-env config))}))
-            keys)))
+       (keep (fn [server-name]
+               (let [config  (aget servers-obj server-name)
+                     url     (.-url config)
+                     command (.-command config)
+                     type-   (or (.-type config) (.-transportType config)
+                                 (when url "http"))]
+                 (cond
+                   ;; HTTP or SSE transport
+                   (and url (or (= type- "http") (= type- "sse")))
+                   {:name    server-name
+                    :url     (expand-env url)
+                    :type    type-
+                    :headers (obj->name-value-array (.-headers config))}
+
+                   ;; Stdio transport
+                   command
+                   {:name    server-name
+                    :command command
+                    :args    (or (expand-env-args (.-args config)) [])
+                    :env     (obj->name-value-array (.-env config))}
+
+                   :else nil)))
+             ks)))
     []))
 
 ;;; ─── Discovery ─────────────────────────────────────────────────

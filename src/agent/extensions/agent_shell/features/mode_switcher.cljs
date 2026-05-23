@@ -28,7 +28,7 @@
           (notify api (str (:name agent-def) " does not support " (shared/kw-name mode-key) " mode") "error")
           (let [sid @(:session-id conn)]
             (-> (client/send-request conn (client/next-id conn) "session/set_mode"
-                  {:sessionId sid :modeId mode-id})
+                                     {:sessionId sid :modeId mode-id})
                 (.then (fn [_]
                          (shared/update-agent-state! agent-key :mode mode-id)
                          (notify api (str "Switched to " (shared/kw-name mode-key) " mode"))))
@@ -44,8 +44,8 @@
                   ["auto-edit" :auto-edit "Switch to auto-edit mode (edits approved, shell prompts)"]]]
     (doseq [[cmd-name mode-key description] commands]
       (.registerCommand api cmd-name
-        #js {:description description
-             :handler (fn [_args _ctx] (switch-mode! api mode-key))}))
+                        #js {:description description
+                             :handler (fn [_args _ctx] (switch-mode! api mode-key))}))
 
     ;; Return deactivator
     (fn []

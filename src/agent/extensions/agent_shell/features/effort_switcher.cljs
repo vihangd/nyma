@@ -25,7 +25,7 @@
       :else
       (let [sid @(:session-id conn)]
         (-> (client/send-request conn (client/next-id conn) "session/set_config_option"
-              {:sessionId sid :configId "effort" :value level})
+                                 {:sessionId sid :configId "effort" :value level})
             (.then (fn [_]
                      (shared/update-agent-state! agent-key :effort level)
                      (notify api (str "Effort set to " level))))
@@ -36,18 +36,18 @@
   "Register /effort command. Returns deactivator."
   [api]
   (.registerCommand api "effort"
-    #js {:description "Set thinking effort level (low/medium/high/max/auto)"
-         :handler (fn [args _ctx]
-                    (let [level (some-> (first args) str/lower-case)]
-                      (cond
-                        (nil? level)
-                        (notify api "Usage: /effort <low|medium|high|max|auto>")
+                    #js {:description "Set thinking effort level (low/medium/high/max/auto)"
+                         :handler (fn [args _ctx]
+                                    (let [level (some-> (first args) str/lower-case)]
+                                      (cond
+                                        (nil? level)
+                                        (notify api "Usage: /effort <low|medium|high|max|auto>")
 
-                        (contains? valid-levels level)
-                        (set-effort! api level)
+                                        (contains? valid-levels level)
+                                        (set-effort! api level)
 
-                        :else
-                        (notify api (str "Invalid effort level: " level ". Valid: low, medium, high, max, auto") "error"))))})
+                                        :else
+                                        (notify api (str "Invalid effort level: " level ". Valid: low, medium, high, max, auto") "error"))))})
 
   (fn []
     (.unregisterCommand api "effort")))
