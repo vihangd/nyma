@@ -301,3 +301,106 @@ These items showed up in the research but are already planned or already done �
 - **D36** Hash-anchored edits → extension-ideas #26 (augmented)
 - **D30** Yolo mode → extension-ideas #11 (approval profiles)
 - **D22/C10/D2/D33/D15** Tier 1 plan → `docs/plan-borrows-caveman-dirac.md`
+
+---
+
+## 6. Deferred /spec evolution
+
+### 6a. Per-task orchestrated implementation mode (`/spec drive`)
+
+**Problem this solves:** today `/spec start` is a passive context flag — it activates `:active-spec` and adds a `context_assembly` hook that appends spec/plan/tasks to the system prompt. The model is then expected to implement the entire feature in free-form turns. Two failure modes:
+1. Big features blow through `max-steps` (currently 100), forcing the user to manually type "continue" repeatedly.
+2. The model treats tasks.md as documentation and forgets to mark items `[x]` as it goes (compounded by the `skill_content.cljs` guidance that explicitly tells it not to flip checkboxes).
+
+The two fixes landed alongside this entry — skill-prompt flip + next-task callout (Pain 2), and `finish_reason` exposure + auto-continue on `length` (Pain 1) — close most of the gap. They don't solve the underlying mismatch: a free-form mega-run is the wrong control flow for a feature whose tasks are already enumerated. Other agents (spec-kit, Aider, Plandex) orchestrate per-task.
+
+**Design sketch:**
+
+A new mode (`/spec drive [name]` or `/spec start --orchestrated`) that actively pumps the work:
+
+1. Find next open task via existing `next-open-task` (`spec_driven/index.cljs:268`).
+2. Enqueue a focused follow-up: `"Implement: <task-text>. When done, mark it [x] in tasks.md and stop. Do NOT start the next task — the orchestrator handles that."`
+3. On `agent_end`, if the spec still has open tasks: enqueue the next one. If no open tasks: emit `spec_drive_complete`.
+4. Each task gets a fresh step budget (max-steps resets per loop entry — already true, just unused for this purpose).
+5. Soft cap on iterations (e.g., 20 tasks/session) with a "continue driving?" prompt.
+
+**Wiring:** the building blocks already exist:
+- `spec_task_start` and `spec_task_complete` events are already emitted by `/spec next` and `/spec done` (`index.cljs:1221–1281`). The orchestrator subscribes.
+- `agent.loop/follow-up` is the canonical cross-mode injection path (proven by `/spec import` and recently-shipped advisor extension).
+- After landing items 1+2 above, `agent_end` carries `finishReason` so the orchestrator can distinguish natural stop from budget hit and decide whether to continue the same task or advance.
+
+**When to do it:**
+- After items 1+2 ship, watch real sessions for "/spec start drives a 12-task feature smoothly" vs "still hitting limits / still forgetting tasks." If the prompt-only fixes don't hold, /spec drive is the durable answer.
+- Concrete trigger: 3+ user reports of "/spec start ran out partway through" after the prompt fixes are in.
+
+**What's NOT planned:** auto-applying changes without per-task user review, parallel task execution, or any sub-agent / worktree integration. Those are independent ideas (extension-ideas #22, #30); /spec drive is sequential and stays inside the current agent loop.
+
+---
+
+## 7. Deferred ACP improvements (`agent_shell` extension)
+
+The `agent_shell` extension implements ACP (Agent Client Protocol — Zed's JSON-RPC stdio standard for editor↔agent integration). Coverage is broad — `initialize` / `session/{new,list,load,prompt,cancel,set_mode,set_config_option,set_model}` / 11 `session/update` notification kinds / 9 reverse-request handlers (`fs/*`, `terminal/*`, `session/{request_permission,elicitation}`) / 6 backends (Claude Code, Gemini CLI, OpenCode, Qwen, Goose, Kiro). Audited in this session against the current ACP spec; gaps below.
+
+**Already shipped in this session:**
+- Stderr file logging (`~/.nyma/logs/agent-shell-<agent>.log`) — replaces silent drop in `client.cljs` `setup-stderr-handler`
+- NDJSON parse failure + write-failure logging via `dbg/warn`
+- Capability gating helper `shared/agent-supports?` + gating on `/sessions list` and `/sessions resume` against the agent's declared `loadSession` capability
+
+### 7a. Diff rendering for `tool_call_update`
+
+- **Status:** content captured (`notifications.cljs:49–81`), rendered as raw text.
+- **Problem:** when a backend (Claude Code, OpenCode, etc.) emits a structured file-edit diff in a `tool_call_update`, the user sees a blob instead of a syntax-highlighted unified diff. Big UX miss for code-heavy sessions — most agents using `agent_shell` are *here* to do code edits.
+- **Approach:** chat_renderer already has diff infrastructure for built-in tools. Wire the ACP path through it: detect `tool_call_update` payloads with `diff` / `oldText` / `newText` shapes, route to the existing diff renderer.
+- **Estimate:** half a day.
+
+### 7b. `session/fork` support
+
+- **Status:** not implemented.
+- **What it is:** ACP TS SDK v0.18+ exposes `ForkSessionRequest` — branch an existing session for what-if exploration without polluting the original transcript.
+- **Why interesting:** pairs naturally with the `/spec drive` deferred plan (6a) — fork before each task so a failed implementation rolls back cleanly.
+- **Approach:** new client method, picker UI for "fork from <session>", persist the fork ID alongside the parent.
+- **Estimate:** half a day.
+
+### 7c. Per-tool / per-path permission rules
+
+- **Status:** single global `auto-approve` toggle (`features/permission_ui.cljs`). On or off, applies to all backends.
+- **What's missing:** no per-tool, per-mode, per-path-prefix, or regex-based approval rules. Spec lets clients send `allow_always` for repeat patterns; we only ever send `allow_once` (or pick the agent's recommended `allow_always` option as-is).
+- **Blocker:** `handlers.cljs:20` carries a long-standing TODO — permission resolution is currently synchronous to meet JSON-RPC response timing, which prevents an `emit-collect`-based pipeline where extensions vote on each request. Refactoring to async resolution is the prerequisite, not the rule engine itself.
+- **Approach:**
+  1. Add a permission-decision pipeline that runs `emit-collect "acp_permission_request"` and awaits the result before responding.
+  2. Define a settings schema for rules: `{tool: <name|regex>, path: <prefix>, mode: <plan|edit|yolo>, decision: allow|deny|prompt}`.
+  3. Per-agent `auto-approve` scoping (today it's global — Goose-on-trust + Claude-Code-on-stranger's-repo currently share one toggle).
+- **Estimate:** 1–2 days.
+
+### 7d. Session persistence across nyma restarts
+
+- **Status:** session IDs held only in memory via `(:session-id conn)` (`pool.cljs:42, 97`).
+- **Problem:** restart nyma → every backend session goes orphan. The selector picker (`features/session_mgmt.cljs`) shows the agent's history but nyma can't auto-reattach the one we were just using.
+- **Approach:** persist `{agent-key → session-id}` map under `~/.nyma/agent-shell-sessions.json`; on `session_ready`, attempt `session/load` for the previous session before falling back to `session/new`.
+- **Caveats:** must be capability-gated (depends on `loadSession` — already covered by 7.b above and the shared helper we shipped).
+- **Estimate:** 1–2 days.
+
+### 7e. Capability-driven behavior beyond `loadSession`
+
+- **Status:** infrastructure ready (`shared/agent-supports?` helper, capabilities recorded at handshake) but only `loadSession` is consulted today.
+- **Outstanding gates:**
+  - `promptCapabilities` (image / audio / embedded-context blocks) — we currently only send text, but if a future feature wants to forward an image we should refuse on agents that don't claim support rather than letting the agent reject mid-stream.
+  - `mcpCapabilities` (`http`, `sse`, `stdio` transports) — today we forward every discovered MCP server regardless of transport. Should filter to what the agent supports.
+  - Optional reverse-request handlers — if an agent doesn't implement `terminal/*`, advertise our ability anyway (we do today) but don't expect the agent to ever call it.
+- **Estimate:** half a day, mechanical now that the helper exists.
+
+### 7f. Multimodal block handling in `session/update`
+
+- **Status:** non-text blocks (image / document content parts in agent messages) stripped to text/JSON.
+- **Lower priority:** few of the supported backends emit multimodal blocks today, and the user impact is "noise in chat" rather than "broken feature." Address if it becomes a frequent complaint.
+
+### 7g. Per-call permission UX (custom titles / descriptions)
+
+- **Status:** permission UI hardcoded to display `(name + kind)` only (`handlers.cljs:25–57`).
+- **What's missing:** spec allows agents to attach custom titles + descriptions per permission request. We drop them — user sees less context than the agent intended to send.
+- **Trivial fix:** ~5 lines in `handle-permission-request` to pass the description through.
+- **Bundle with:** ship alongside the 7c async-permission refactor; doing it standalone wastes the touch.
+
+### 7h. Backends to add
+
+Today's agents (`agents/registry.cljs`): Claude Code, Gemini CLI, OpenCode, Qwen, Goose, Kiro. The Zed ACP registry is growing — Codex CLI, GitHub Copilot CLI, etc. Adding a new backend is mostly a registry entry + per-agent quirks (model-method, init-mode, prompt format). Track requests in `extension-ideas.md` rather than here unless an agent has spec-level peculiarities.

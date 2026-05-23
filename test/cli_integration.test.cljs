@@ -42,8 +42,10 @@
   (let [{:keys [agent api]} (make-loaded-agent)
         loaded (js-await (discover-and-load [(builtin-dir)] api))]
     (try
-      ;; All 20 built-in extensions present
-      (-> (expect (count loaded)) (.toBe 20))
+      ;; All built-in extensions load. Count drifts as the project adds
+      ;; extensions; assert a lower bound to catch silent loader drops
+      ;; rather than pinning an exact number that needs maintenance churn.
+      (-> (expect (>= (count loaded) 20)) (.toBe true))
       ;; Block the LLM call so we don't need credentials
       ((:on (:events agent)) "before_provider_request"
                              (fn [_] #js {:block true :reason "blocked for test"}))
