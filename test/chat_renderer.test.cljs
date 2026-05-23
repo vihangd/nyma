@@ -141,6 +141,33 @@
                   (-> (expect (.includes text "src/foo.cljs")) (.toBe true))
                   (-> (expect (.includes text "3 lines")) (.toBe true)))))
 
+          (it "tool-start with very long MCP arg list never exceeds terminal width"
+              (fn []
+                ;; Regression: pi-tui crashes when render produces a line
+                ;; wider than the terminal. mcp__lean-ctx__ctx_multi_read
+                ;; with several full file paths used to overflow the
+                ;; per-arg budget computed inside format-one-line-args.
+                ;; truncate-line-to-width is the safety net.
+                (let [long-paths (str "/Users/me/projects/very/deep/repo/packages/foo/src/main/java/io/example/foo/Bar.java,"
+                                      "/Users/me/projects/very/deep/repo/packages/foo/src/main/java/io/example/foo/Baz.java,"
+                                      "/Users/me/projects/very/deep/repo/packages/foo/src/main/java/io/example/foo/Qux.java")
+                      msg {:role "tool-end"
+                           :tool-name "mcp__lean-ctx__ctx_multi_read"
+                           :args {:mode "signatures" :paths long-paths}
+                           :result "39 lines of output\nbla\nbla"
+                           :duration 100
+                           :id "1"}
+                      lines (render-message
+                             {:msg msg :width 80 :theme theme :md-cache nil})
+                      visible (strip-ansi (first lines))]
+                  ;; must produce a single line
+                  (-> (expect (count lines)) (.toBe 1))
+                  ;; visible width must fit in 80 cols
+                  (-> (expect (<= (count visible) 80)) (.toBe true))
+                  ;; must still convey it was the right tool
+                  (-> (expect (.includes visible "mcp__lean-ctx__ctx_multi_read"))
+                      (.toBe true)))))
+
           (it "shows grep pattern + path + match count"
               (fn []
                 (let [text (visible-text (render {:role "tool-end" :tool-name "grep"

@@ -64,6 +64,7 @@
    when not relevant."
   [theme]
   (let [state (atom {:model      "–"
+                     :provider   nil
                      :role       nil
                      :streaming  false
                      :turn-count 0})
@@ -76,15 +77,42 @@
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model role streaming turn-count]} @state
+                   (let [{:keys [model provider role streaming turn-count]} @state
                          role-str  (when (and (seq (str role))
                                               (not= (str role) "default"))
                                      (str (fg warning) "[" role "]" RESET " "))
+                         ;; Provider prefix: dim provider name + slash, then
+                         ;; the model id in primary color.
+                         ;;
+                         ;; Edge cases handled:
+                         ;;   - no provider captured → render bare model
+                         ;;   - provider == model (e.g. user typed
+                         ;;     `/model anthropic` and registry returned the
+                         ;;     name as modelId) → render bare model
+                         ;;   - model ALREADY carries `<provider>/` (raw
+                         ;;     fallback when registry can't resolve, leaves
+                         ;;     `config.model` as the literal user spec):
+                         ;;     strip the duplicated prefix and render the
+                         ;;     clean styled form, not `prov/prov/model`.
+                         model-piece-raw (str (or model "–"))
+                         already-prefixed? (and (seq (str provider))
+                                                (.startsWith model-piece-raw
+                                                             (str provider "/")))
+                         model-piece (if already-prefixed?
+                                       (.slice model-piece-raw
+                                               (inc (count (str provider))))
+                                       model-piece-raw)
+                         show-prov? (and (seq (str provider))
+                                         (not= (str provider) model-piece))
+                         provider-piece (when show-prov?
+                                          (str (fg muted) DIM provider RESET
+                                               (fg border) "/" RESET))
                          ;; Built-in left content.
                          core-left (str (fg muted) " nyma " RESET
                                         (fg border) "│" RESET
                                         " " (or role-str "")
-                                        (fg primary) (or model "–") RESET)
+                                        (or provider-piece "")
+                                        (fg primary) model-piece RESET)
                          ;; Built-in right content.
                          core-right (str " "
                                          (if streaming

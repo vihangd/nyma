@@ -16,6 +16,10 @@
    ;; starting at 2s. The AI SDK also respects retry-after / retry-after-ms
    ;; headers from the provider if present.
    :retry          {:enabled true :max-retries 5}
+   ;; Per-prompt cap on agentic tool-call → response cycles. Reaching
+   ;; this stops the AI SDK loop mid-task; bump it for projects where
+   ;; the agent legitimately needs more iterations.
+   :max-steps      100
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
    :transport              "auto"
@@ -37,6 +41,9 @@
    :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
            :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
            :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+           ;; Stronger reviewer for the `advisor` tool / `/advisor` cmd.
+           ;; Falls back to :deep, then current model, if unset by user.
+           :advisor {:provider "anthropic" :model "claude-opus-4-20250514"}
            :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
                      :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
                      :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}

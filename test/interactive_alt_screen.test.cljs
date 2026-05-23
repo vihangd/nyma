@@ -10,7 +10,7 @@
    Tests here pin the env-parsing predicate and the implication that
    alt-screen and scrollback-mode are mutually exclusive."
   (:require ["bun:test" :refer [describe it expect]]
-            ["./agent/modes/interactive.jsx" :refer [alt_screen_enabled_QMARK_
+            ["./agent/modes/interactive.mjs" :refer [alt_screen_enabled_QMARK_
                                                      effective_scrollback_on_QMARK_
                                                      pager_mode_enabled_QMARK_]]))
 

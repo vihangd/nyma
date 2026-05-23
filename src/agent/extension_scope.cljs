@@ -41,6 +41,16 @@
                                             (fn [name td] (.registerTool base-api (prefix name) td)))
                     :unregisterTool   (gate capabilities :tools
                                             (fn [name] (.unregisterTool base-api (prefix name))))
+                    ;; overrideTool: register a tool under its REAL
+                    ;; name (no namespace prefix), used to wrap native
+                    ;; tools with delegating execute fns. Powerful —
+                    ;; gated on :tools-override capability separately
+                    ;; from :tools so adding it requires manifest
+                    ;; opt-in.
+                    :overrideTool     (gate capabilities :tools-override
+                                            (fn [name td] (.registerTool base-api name td)))
+                    :unoverrideTool   (gate capabilities :tools-override
+                                            (fn [name] (.unregisterTool base-api name)))
                     :getActiveTools   (gate capabilities :tools (.-getActiveTools base-api))
                     :getAllTools       (gate capabilities :tools (.-getAllTools base-api))
                     :setActiveTools   (gate capabilities :tools (.-setActiveTools base-api))
@@ -109,6 +119,7 @@
                     :getModelInfo      (.-getModelInfo base-api)
                     :registerModelInfo (.-registerModelInfo base-api)
                     :estimateTokens    (.-estimateTokens base-api)
+                    :resolveModel      (gate capabilities :model (.-resolveModel base-api))
                     ;; Settings access (ungated — read-only)
                     :getSettings       (.-getSettings base-api)
                     ;; Emit to main agent event bus (gated — lets extensions

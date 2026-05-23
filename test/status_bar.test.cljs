@@ -246,3 +246,76 @@
                     (-> (expect (.includes text "nyma")) (.toBe true))
                     ;; Other working segment still renders.
                     (-> (expect (.includes text "OK1")) (.toBe true)))))))
+
+;;; ─── provider prefix ─────────────────────────────────────────────────────
+
+(describe "status-bar/provider-prefix"
+          (fn []
+            (it "renders provider/model when a provider was set"
+                (fn []
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "MiniMax-M2.5"
+                                        :provider "minimax"})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "minimax/MiniMax-M2.5")) (.toBe true))))))
+
+            (it "renders just the model when no provider was set"
+                (fn []
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "claude-sonnet-4-5"})
+                    (let [text (render-bar bar 200)]
+                      ;; No slash should appear in the model area
+                      (-> (expect (.includes text "claude-sonnet-4-5")) (.toBe true))
+                      (-> (expect (.includes text "/claude-sonnet-4-5")) (.toBe false))))))
+
+            (it "renders just the model when provider is empty string"
+                (fn []
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "claude-sonnet-4-5"
+                                        :provider ""})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "/claude-sonnet-4-5")) (.toBe false))))))
+
+            (it "skips redundant prefix when provider == model"
+                (fn []
+                  ;; Edge case: bare-string model spec where setModel
+                  ;; couldn't decompose provider/model. Don't render
+                  ;; "x/x" in that case.
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "anthropic"
+                                        :provider "anthropic"})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "anthropic/anthropic")) (.toBe false))))))))
+
+(describe "status-bar/provider-prefix edge cases"
+          (fn []
+            (it "model already prefixed with provider/ → strip duplicate, render once"
+                (fn []
+                  ;; Reproduces the registry-miss fallback where setModel left
+                  ;; the model as a raw `provider/model` string. Rendering must
+                  ;; collapse to `provider/model`, not `provider/provider/model`.
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "unknown/some-model"
+                                        :provider "unknown"})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "unknown/some-model")) (.toBe true))
+                      (-> (expect (.includes text "unknown/unknown/")) (.toBe false))))))
+
+            (it "ordinary clean case still renders provider/model"
+                (fn []
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "MiniMax-M2.5"
+                                        :provider "minimax"})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "minimax/MiniMax-M2.5")) (.toBe true))
+                      (-> (expect (.includes text "minimax/minimax/")) (.toBe false))))))
+
+            (it "model that just happens to contain the provider name (no slash) is unaffected"
+                (fn []
+                  ;; e.g. provider="minimax", model="minimax-m2.5-free" —
+                  ;; doesn't start with "minimax/" so leave it alone.
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "minimax-m2.5-free"
+                                        :provider "minimax"})
+                    (let [text (render-bar bar 200)]
+                      (-> (expect (.includes text "minimax/minimax-m2.5-free")) (.toBe true))))))))

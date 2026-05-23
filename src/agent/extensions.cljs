@@ -284,9 +284,36 @@
                                   ((:dispatch! (:store agent)) :model-changed {:model model})
                                 ;; Update config for the loop to pick up
                                   (set! (.-model (:config agent)) model)
+                                ;; Persist the user-friendly provider name on
+                                ;; the config so status-line consumers can
+                                ;; render `<provider>/<model>`. The AI SDK's
+                                ;; `model.provider` returns underlying-class
+                                ;; names like "openai.chat" (uninformative for
+                                ;; users using minimax / openrouter / etc.).
+                                ;; This way the registry-side label survives.
+                                  (set! (.-active-provider-name (:config agent))
+                                        (or provider ""))
                                 ;; Emit model_select event
                                   ((:emit (:events agent)) "model_select"
-                                                           {:model model :modelId (str model-spec)}))))
+                                                           {:model    model
+                                                            :modelId  (str model-spec)
+                                                            :provider (or provider "")}))))
+
+       ;; ── Side-effect-free model resolution ───────────────
+       ;; Used by extensions (e.g. advisor) that need to invoke a model
+       ;; OTHER than the active one without mutating agent state.
+       ;; Accepts either "provider/model" or separate (provider, model-id) args.
+         :resolveModel      (fn [provider-or-spec & [model-id]]
+                              (let [registry (:provider-registry agent)
+                                    [provider mid]
+                                    (if model-id
+                                      [(str provider-or-spec) (str model-id)]
+                                      (let [parts (.split (str provider-or-spec) "/")]
+                                        (if (> (count parts) 1)
+                                          [(first parts) (.join (.slice parts 1) "/")]
+                                          [nil (str provider-or-spec)])))]
+                                (when (and provider ((:get registry) provider))
+                                  ((:resolve registry) provider mid))))
 
        ;; ── Thinking level ──────────────────────────────────
          :getThinkingLevel  (fn [] @(:thinking-level agent))

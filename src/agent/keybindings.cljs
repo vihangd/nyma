@@ -28,14 +28,14 @@
   [shortcuts-atom commands-atom bindings]
   (doseq [[key-combo action] bindings]
     (swap! shortcuts-atom assoc key-combo
-      {:action action
-       :source "keybindings.json"
-       :handler (fn []
-                  (when (.startsWith (str action) "command:")
-                    (let [cmd-name (.slice (str action) 8)
-                          commands @commands-atom]
-                      (when-let [cmd (get commands cmd-name)]
-                        ((:handler cmd) [] nil)))))})))
+           {:action action
+            :source "keybindings.json"
+            :handler (fn []
+                       (when (.startsWith (str action) "command:")
+                         (let [cmd-name (.slice (str action) 8)
+                               commands @commands-atom]
+                           (when-let [cmd (get commands cmd-name)]
+                             ((:handler cmd) [] nil)))))})))
 
 (defn rebuild-registry!
   "Rebuild the keybinding-registry atom from user overrides.
@@ -51,9 +51,9 @@
                         bindings)
         registry  (kbr/create-registry overrides)]
     (reset! registry-atom registry)
-    (when (seq (:conflicts registry))
+    (when (and (seq (:conflicts registry)) (.-NYMA_DEBUG js/process.env))
       (doseq [{:keys [key action-ids]} (:conflicts registry)]
         (js/console.warn
-          (str "[nyma] keybinding conflict: " key
-               " → " (.join (clj->js action-ids) ", ")))))
+         (str "[nyma] keybinding conflict: " key
+              " → " (.join (clj->js action-ids) ", ")))))
     registry))

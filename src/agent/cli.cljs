@@ -60,7 +60,13 @@
 (defn- resolve-model-via-registry
   "Resolve a model through the agent's provider registry.
    Falls back to the provider name as a direct model ID.
-   Handles OAuth credential refresh for providers that need it."
+   Handles OAuth credential refresh for providers that need it.
+
+   Returns {:model <resolved-obj> :provider <name>} so the caller can
+   stash the user-friendly provider label on the agent config — without
+   that, the status line never sees a provider until the user does a
+   runtime /model swap (since the startup path doesn't go through
+   setModel)."
   [provider-registry values merged]
   (let [model-id  (or (:model values) (:model merged) "claude-sonnet-4-20250514")
         provider  (or (:provider values) (:provider merged) "anthropic")
@@ -76,7 +82,8 @@
                   "expires-at" (:expires-at creds)})
             (catch :default e
               (js/console.warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
-    ((:resolve provider-registry) provider model-id)))
+    {:model    ((:resolve provider-registry) provider model-id)
+     :provider provider}))
 
 (defn- resolve-tools
   "Returns an explicit tool restriction list, or nil if all builtins should be active.
@@ -148,12 +155,19 @@
         agent (create-agent
                {:model         nil
                 :system-prompt ((:build-system-prompt resources))
-                :max-steps     20
+                :max-steps     (or (:max-steps merged) 100)
                 :settings      settings})
-        model (try
-                (resolve-model-via-registry (:provider-registry agent) values merged)
-                (catch :default _e nil))
-        _     (when model (set! (.-model (:config agent)) model))
+        resolved (try
+                   (resolve-model-via-registry (:provider-registry agent) values merged)
+                   (catch :default _e nil))
+        model    (:model resolved)
+        provider (:provider resolved)
+        _ (when model
+            (set! (.-model (:config agent)) model)
+            ;; Persist the user-friendly provider label so the status
+            ;; line shows `<provider>/<model>` from the very first turn,
+            ;; not just after a runtime /model swap.
+            (set! (.-active-provider-name (:config agent)) (or provider "")))
         api (create-extension-api agent)]
 
     ;; Filter active tools if --tools flag was used
@@ -178,9 +192,12 @@
       ;; would otherwise see "No model configured" on their first message.
       (when (nil? (.-model (:config agent)))
         (try
-          (when-let [late-model (resolve-model-via-registry
-                                 (:provider-registry agent) values merged)]
-            (set! (.-model (:config agent)) late-model))
+          (when-let [late-resolved (resolve-model-via-registry
+                                    (:provider-registry agent) values merged)]
+            (when-let [m (:model late-resolved)]
+              (set! (.-model (:config agent)) m)
+              (set! (.-active-provider-name (:config agent))
+                    (or (:provider late-resolved) ""))))
           (catch :default e
             (js/console.warn (str "[nyma] " (.-message e))))))
 

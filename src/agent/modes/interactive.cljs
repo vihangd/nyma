@@ -52,6 +52,16 @@
         runtime (.-runtime-model (:state agent))]
     (str (or (.-modelId (or runtime m)) (or runtime m) "–"))))
 
+(defn- provider-name [agent]
+  "Return the user-friendly provider label captured at setModel time
+   (`anthropic`, `minimax`, `openrouter`, …). Empty string when nyma
+   was started with a bare model id (no `provider/` prefix) or when
+   the config is uninitialised. Status-bar consumers render
+   `<provider>/<model>` only when this is non-empty."
+  (let [config (:config agent)
+        v      (and config (.-active-provider-name config))]
+    (or v "")))
+
 (defn- make-editor-theme [theme]
   (let [ESC   (js/String.fromCharCode 27)
         RESET (str ESC "[0m")
@@ -124,6 +134,7 @@
         sync-status! (fn []
                        (.setState status-bar
                                   #js {:model      (model-id agent)
+                                       :provider   (provider-name agent)
                                        :role       (let [r (str (or (:active-role @(:state agent)) ":default"))]
                                                      (if (.startsWith r ":") (.slice r 1) r))
                                        :streaming  @streaming

@@ -39,6 +39,29 @@
 (defn- truncate-to [s max-len]
   (if (> (count s) max-len) (str (.slice s 0 max-len) "…") s))
 
+(defn- truncate-line-to-width
+  "Hard-truncate a line (which may contain ANSI escape codes) so its
+   *visible* width fits in `cols` columns. Falls back to no-op when
+   the line already fits.
+
+   pi-tui's renderer crashes when any rendered line exceeds the
+   terminal width — typically caused by long MCP tool calls whose
+   path arguments overflow the per-arg budget computed inside
+   format-one-line-args. This is the safety net that ensures we
+   never hand pi-tui an over-wide row, regardless of upstream
+   miscalculation."
+  [s cols]
+  (if (or (nil? s) (<= (ansi/string-width s) cols))
+    s
+    ;; Use Bun's wrapAnsi + take first line. wrap-ansi preserves ANSI
+    ;; codes correctly across the truncation boundary.
+    (let [wrapped (ansi/wrap-ansi s cols {:hard true :trim false :word-wrap false})
+          first-line (first (.split wrapped "\n"))]
+      ;; Append an ellipsis when there was content beyond cols. We
+      ;; conservatively use plain "…" rather than reapplying color —
+      ;; the trailing styling is already lost.
+      (str first-line "…"))))
+
 (defn- format-one-line-args
   "Compact one-line summary of the tool's input args (path, pattern, etc).
    `width-budget` is the column allowance for this string (defaults to
@@ -115,12 +138,30 @@
             ;; multi-line responses align flush with the body of line 1
             ;; (Claude Code's convention).
             safe     (when (seq rendered)
-                       (ansi/wrap-ansi rendered (- w 2) {:hard true :trim false :word-wrap true}))]
+                       (ansi/wrap-ansi rendered (- w 2) {:hard true :trim false :word-wrap true}))
+            ;; Reasoning block: dim, italic-ish via DIM, prefixed with "│ "
+            ;; (matches the standalone "thinking" role render).
+            reasoning-lines
+            (when (seq reasoning)
+              ;; Wrap raw text first (no styling), then apply muted color
+              ;; per line. Wrapping a pre-styled string strips the DIM/RESET
+              ;; from continuation lines, which is why the original
+              ;; rendering only dimmed the first line.
+              (let [budget  (max 10 (- w 4))
+                    wrapped (ansi/wrap-ansi (str reasoning) budget
+                                            {:hard true :trim false :word-wrap true})]
+                (mapv #(truncate-line-to-width
+                        (str "  " mc "│ " % RESET)
+                        (max 10 (dec w)))
+                      (.split wrapped "\n"))))]
         (let [lines (if (seq safe)
                       (vec (.split safe "\n"))
-                      [(str mc DIM "…" RESET)])]
-          (into [(str sc "● " RESET (first lines))]
-                (map #(str "  " %) (rest lines)))))
+                      [(str mc DIM "…" RESET)])
+              body  (into [(str sc "● " RESET (first lines))]
+                          (map #(str "  " %) (rest lines)))]
+          (if (seq reasoning-lines)
+            (into reasoning-lines body)
+            body)))
 
       ("tool-start" "tool-end")
       (let [tname    (:tool-name msg)
@@ -130,16 +171,21 @@
             icon     (if is-end "✓" "⚙")
             arg-str  (format-one-line-args tname args)
             res-str  (when is-end
-                       (format-one-line-result-for-tool tname (:result msg) args))]
-        [(str mc icon " " (or tname "?")
-              (when (seq arg-str) (str " " arg-str))
-              ;; Result + duration appear in dim with a · separator so the
-              ;; eye lands on the args first, summary second.
-              (when (and is-end (seq res-str))
-                (str " " DIM "· " res-str RESET))
-              (when (and is-end dur)
-                (str " " DIM (.toFixed (/ dur 1000) 1) "s" RESET))
-              RESET)])
+                       (format-one-line-result-for-tool tname (:result msg) args))
+            line     (str mc icon " " (or tname "?")
+                          (when (seq arg-str) (str " " arg-str))
+                          ;; Result + duration appear in dim with a · separator so the
+                          ;; eye lands on the args first, summary second.
+                          (when (and is-end (seq res-str))
+                            (str " " DIM "· " res-str RESET))
+                          (when (and is-end dur)
+                            (str " " DIM (.toFixed (/ dur 1000) 1) "s" RESET))
+                          RESET)]
+        ;; Final width-safety guard: pi-tui crashes if any line exceeds
+        ;; the terminal width. Long MCP arg lists (e.g. multi_read
+        ;; with several full paths) can blow past format-one-line-args'
+        ;; per-arg budget — truncate to (w - 1) here as a last resort.
+        [(truncate-line-to-width line (max 10 (dec w)))])
 
       "shell"
       (if (seq content)
