@@ -115,6 +115,10 @@
                                    (str provider "/default"))
                       model ((:resolve (:provider-registry agent)) provider model-id)]
                   (set! (.-model (:config agent)) model)
+                  ;; Mirror cli.cljs / extensions.cljs setModel: persist
+                  ;; the user-friendly provider label so the status line
+                  ;; reflects the post-OAuth model immediately.
+                  (set! (.-active-provider-name (:config agent)) (or provider ""))
                   (notify ctx (str "Model resolved: " model-id)))
                 (catch :default e
                   (notify ctx (str "Model resolution failed: " (.-message e)) "error"))))))
@@ -641,13 +645,19 @@
            (fn [_args ctx]
              (let [all-skills (:skills resources)
                    active     (:active-skills @(:state agent))
-                   skill-list (mapv (fn [[sname {:keys [markdown]}]]
+                   skill-list (mapv (fn [[sname skill]]
                                       {:name   sname
                                        :active (contains? active sname)
-                                       :desc   (skills/first-skill-line markdown)})
+                                       :desc   (or (:description skill)
+                                                   (skills/first-skill-line
+                                                    (or (:body skill) (:markdown skill))))})
                                     all-skills)]
-               (if (empty? skill-list)
+               (cond
+                 (empty? skill-list)
                  (notify ctx "No skills found. Place skill directories in ~/.nyma/skills/ or .nyma/skills/")
+
+                 ;; Interactive picker via custom overlay (TUI mode)
+                 (and ctx (.-ui ctx) (.-custom (.-ui ctx)))
                  (let [picker (skill-picker/create-picker
                                skill-list
                                (fn [chosen]
@@ -657,4 +667,17 @@
                                                 (notify ctx (str "Skill \"" chosen "\" activated"))))
                                        (.catch (fn [e]
                                                  (notify ctx (str "Failed: " (.-message e)) "error")))))))]
-                   (.custom (.-ui ctx) picker)))))}}))
+                   (.custom (.-ui ctx) picker))
+
+                 ;; Text fallback for gateway / non-TUI modes that don't
+                 ;; expose a custom-overlay channel. Same data, different
+                 ;; surface — user can /skill <name> from the listing.
+                 :else
+                 (let [body (->> skill-list
+                                 (map (fn [{:keys [name active desc]}]
+                                        (str (if active "● " "○ ")
+                                             name
+                                             (when (seq desc) (str " — " desc)))))
+                                 (str/join "\n"))]
+                   (notify ctx (str "Skills:\n" body
+                                    "\n\nUse /skill <name> to activate."))))))}}))
