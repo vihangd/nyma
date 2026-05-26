@@ -74,7 +74,7 @@
   "OpenCode agent definition from registry."
   (get registry/agents "opencode"))
 
-(def opencode-minimax-model "opencode-go/minimax-m2.5")
+(def opencode-minimax-model "opencode/big-pickle")
 
 ;; ── Async test functions (Squint requires defn ^:async, not fn ^:async) ─────
 
@@ -242,7 +242,7 @@
 ;; ── OpenCode test functions ──────────────────────────────────────────────────
 
 (defn ^:async opencode-connect-and-set-model
-  "Connect to opencode and switch to minimax-m2.5 via session/set_model.
+  "Connect to opencode and switch to big-pickle via session/set_model.
    Returns the connection map."
   [api]
   (let [conn (js-await (pool/get-or-create "opencode" opencode-def api))
@@ -307,9 +307,9 @@
                                        (it "stream-callback invoked with chunks during a real prompt" claude-test-stream-callback e2e-timeout)
                                        (it "disconnects cleanly and clears state" claude-test-disconnect e2e-timeout)))
 
-(describe "agent-shell e2e (opencode/minimax-m2.5)" (fn []
-                                                      (it "connects via pool and sets model to minimax-m2.5" opencode-test-connect e2e-timeout)
-                                                      (it "sends a prompt and receives a non-empty response" opencode-test-send-prompt e2e-timeout)
-                                                      (it "returns usage stats in the response" opencode-test-usage e2e-timeout)
-                                                      (it "stream-callback invoked with chunks during a real prompt" opencode-test-stream-callback e2e-timeout)
-                                                      (it "disconnects cleanly and clears state" opencode-test-disconnect e2e-timeout)))
+(describe "agent-shell e2e (opencode/big-pickle)" (fn []
+                                                    (it "connects via pool and sets model to big-pickle" opencode-test-connect e2e-timeout)
+                                                    (it "sends a prompt and receives a non-empty response" opencode-test-send-prompt e2e-timeout)
+                                                    (it "returns usage stats in the response" opencode-test-usage e2e-timeout)
+                                                    (it "stream-callback invoked with chunks during a real prompt" opencode-test-stream-callback e2e-timeout)
+                                                    (it "disconnects cleanly and clears state" opencode-test-disconnect e2e-timeout)))
