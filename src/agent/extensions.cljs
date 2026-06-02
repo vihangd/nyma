@@ -375,7 +375,15 @@
                                                :else       (or (.-modelId m) "unknown"))
                                     window   ((:context-window (:model-registry agent)) model-id)
                                     state    @(:state agent)
-                                    used     (te/estimate-messages-tokens (:messages state))
+                                    msgs-used (te/estimate-messages-tokens (:messages state))
+                                    ;; Add a fixed overhead for system prompt + tool schemas.
+                                    ;; These are sent on every request but not in state.messages,
+                                    ;; so without this adjustment token_suite underestimates
+                                    ;; how full the context is — causing it to miss the threshold
+                                    ;; and letting the context exceed the provider's actual limit.
+                                    ;; 6000 ≈ system-prompt (~1500) + 20 tool schemas (~4500).
+                                    overhead 6000
+                                    used     (+ msgs-used overhead)
                                     reserved (js/Math.floor (* window 0.3))]
                                 #js {:contextWindow   window
                                      :inputBudget     (- window reserved)

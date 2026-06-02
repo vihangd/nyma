@@ -1,0 +1,5 @@
+{
+  "namespace": "small-model",
+  "capabilities": ["events", "context", "model", "middleware", "tools", "tools-override", "flags", "commands", "state", "messages"],
+  "dependsOn": ["advisor"]
+}

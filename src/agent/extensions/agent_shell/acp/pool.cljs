@@ -222,11 +222,14 @@
                               (resolve)))]
             ;; Resolve when process exits
            (-> (.-exited handle) (.then (fn [_] (do-resolve))))
-            ;; Send session/close before closing stdin (fire-and-forget)
+            ;; Send session/close before closing stdin (fire-and-forget).
+            ;; Swallow both sync throws and async rejections — not every ACP
+            ;; server implements session/close (qwen returns "Method not found").
            (when-let [sid (and (:session-id entry) @(:session-id entry))]
              (try
-               (client/send-request entry (client/next-id entry) "session/close"
-                                    {:sessionId sid})
+               (-> (client/send-request entry (client/next-id entry) "session/close"
+                                        {:sessionId sid})
+                   (.catch (fn [_] nil)))
                (catch :default _ nil)))
             ;; Close stdin
            (when-let [stdin (:stdin entry)]

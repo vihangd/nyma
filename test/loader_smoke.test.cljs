@@ -43,7 +43,9 @@
     "spec-driven"
     "stats-dashboard"
     "token-suite"
-    "workspace-config"})
+    "workspace-config"
+    "small-model"
+    "local"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so
@@ -95,7 +97,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 25 expected namespaces load and none collide on 'index'"
+            (it "all 27 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)
