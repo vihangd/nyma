@@ -1,0 +1,6 @@
+{
+  "namespace": "headroom",
+  "capabilities": ["events", "commands"],
+  "dependsOn": [],
+  "dependencies": { "headroom-ai": "^0.22.4" }
+}
