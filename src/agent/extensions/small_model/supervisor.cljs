@@ -41,20 +41,15 @@
 
 ;; ── Consult-advisor bridge ────────────────────────────────────────
 ;;
-;; The advisor extension exports consult-advisor but we can't require it
-;; directly (extension isolation). Instead we reach for it through the
-;; tool the advisor registers — or, more robustly, we call the `advisor`
-;; tool itself (registered as "advisor" by the advisor extension, which
-;; dependsOn ensures has loaded).
+;; Uses api.getTool("advisor") — returns the full tool def including
+;; :execute. dependsOn ["advisor"] guarantees it's loaded before us.
 
 (defn ^:async call-advisor-tool
-  "Invoke the `advisor` tool via api.getState and the tool registry,
-   or fall back to api.sendUserMessage if unavailable."
+  "Invoke the `advisor` tool via getTool, or fall back if unavailable."
   [api focus-question]
   (try
-    (let [tools     (.getAllTools api)
-          adv-tool  (when tools (aget tools "advisor"))]
-      (if adv-tool
+    (let [adv-tool (when (.-getTool api) (.getTool api "advisor"))]
+      (if (and adv-tool (.-execute adv-tool))
         (let [result (js-await ((.-execute adv-tool)
                                 #js {:focus focus-question}))]
           (str result))

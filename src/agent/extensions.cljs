@@ -42,6 +42,7 @@
                               ((:unregister (:tool-registry agent)) name))
          :getActiveTools    (fn [] (clj->js (keys ((:get-active (:tool-registry agent))))))
          :getAllTools        (fn [] (clj->js (keys ((:all (:tool-registry agent))))))
+         :getTool           (fn [name] (get ((:all (:tool-registry agent))) name))
          :setActiveTools    (fn [names]
                               ((:set-active (:tool-registry agent)) (set (or names []))))
 
