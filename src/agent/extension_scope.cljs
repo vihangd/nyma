@@ -53,6 +53,7 @@
                                             (fn [name] (.unregisterTool base-api name)))
                     :getActiveTools   (gate capabilities :tools (.-getActiveTools base-api))
                     :getAllTools       (gate capabilities :tools (.-getAllTools base-api))
+                    :getTool          (gate capabilities :tools (.-getTool base-api))
                     :setActiveTools   (gate capabilities :tools (.-setActiveTools base-api))
                     ;; Commands
                     :registerCommand  (gate capabilities :commands
