@@ -8,9 +8,10 @@
    `agent.ui.think-tag-parser/split-think-blocks` parser.
 
    Recognized delta shapes:
-   - `delta.reasoning_content` (Moonshot K2-thinking, GLM)
+   - `delta.reasoning_content` (Moonshot K2-thinking, GLM, DeepSeek V4)
    - `delta.reasoning` as string (Moonshot K2.6, Groq GPT-OSS)
-   - `delta.reasoning_details[].text` / `.summary` (OpenRouter)")
+   - `delta.reasoning_details[].text` / `.summary` (OpenRouter)"
+  (:require [clojure.string :as str]))
 
 (defn- extract-reasoning [delta]
   (or (.-reasoning_content delta)
@@ -123,6 +124,72 @@
                       #js {:status     (.-status response)
                            :statusText (.-statusText response)
                            :headers    (.-headers response)})))))
+
+;;; ─── Request-side: lift <think> tags back to reasoning_content ──────
+;;;
+;;; DeepSeek V4 and Moonshot K2 thinking models require that any prior
+;;; assistant turn's chain-of-thought be replayed as a `reasoning_content`
+;;; field on the assistant message. We previously rewrote the streamed
+;;; reasoning into `<think>…</think>` blocks inside content, so here we
+;;; reverse that on the next request.
+
+(def ^:private think-block-re
+  (js/RegExp. "<think(?:ing)?>([\\s\\S]*?)<\\/think(?:ing)?>\\s*" "gi"))
+
+(def ^:private open-think-re
+  (js/RegExp. "<think(?:ing)?>" "i"))
+
+(defn extract-think-blocks
+  "Pulls reasoning out of content. Handles closed <think>…</think> blocks
+   AND a trailing unterminated <think>… (everything after the opener
+   becomes reasoning) — the latter happens when the model went
+   reasoning → tool_calls without intervening text and the stream
+   wrapper missed the close. Returns [reasoning-text content-cleaned]."
+  [s]
+  (let [parts (atom [])
+        clean (.replace (str s) think-block-re
+                        (fn [_match inner]
+                          (swap! parts conj inner)
+                          ""))
+        m     (.exec open-think-re clean)]
+    (if m
+      (let [idx (.-index m)
+            tag (aget m 0)
+            before (subs clean 0 idx)
+            after  (subs clean (+ idx (count tag)))]
+        (swap! parts conj after)
+        [(str/join "\n\n" @parts) before])
+      [(str/join "\n\n" @parts) clean])))
+
+(defn rewrite-assistant-msg
+  "Lift <think> tags out of an assistant message's content into a
+   `reasoning_content` field — required by DeepSeek-V4 / Moonshot K2
+   thinking models on replay. No-op for non-assistant messages or
+   assistant messages without <think> markers."
+  [msg]
+  (if (and (= (.-role msg) "assistant")
+           (string? (.-content msg))
+           (.includes (.-content msg) "<think"))
+    (let [[reasoning clean] (extract-think-blocks (.-content msg))]
+      (if (seq reasoning)
+        (doto (js/Object.assign #js {} msg)
+          (aset "content" clean)
+          (aset "reasoning_content" reasoning))
+        msg))
+    msg))
+
+(defn lift-think-request-rewriter
+  "Default request-rewriter for `make-fetch`: walks `messages[]` and
+   lifts <think> blocks from assistant turns back into reasoning_content."
+  [body-str _init]
+  (try
+    (let [body (js/JSON.parse body-str)]
+      (when (and (.-messages body) (.-length (.-messages body)))
+        (let [msgs (.-messages body)]
+          (dotimes [i (.-length msgs)]
+            (aset msgs i (rewrite-assistant-msg (aget msgs i))))))
+      (js/JSON.stringify body))
+    (catch :default _ body-str)))
 
 (defn make-fetch
   "Build a custom `fetch` that wraps responses through `wrap-response`.
