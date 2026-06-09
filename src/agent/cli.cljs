@@ -135,6 +135,10 @@
 Modes (default: interactive):
   -p, --print            Run a single prompt and print the result, then exit.
                          The prompt is the first positional argument.
+      --output-format <f> With -p: 'text' (default) or 'json' — a single
+                         claude-style result object {result, is_error,
+                         session_id, total_cost_usd, usage, duration_ms} for
+                         headless orchestrators (e.g. cw).
       --mode <mode>      Explicit mode: interactive | print | json | rpc.
 
 Model selection:
@@ -237,7 +241,8 @@ Examples:
                             :thinking     #js {:type "string"}
                             :session      #js {:type "string"}
                             :fork         #js {:type "string"}
-                            :no-session   #js {:type "boolean"}}
+                            :no-session   #js {:type "boolean"}
+                            :output-format #js {:type "string"}}
               :allowPositionals true})
 
         _ (when (:help values)
@@ -346,7 +351,11 @@ Examples:
         "interactive" (js-await (interactive/start agent session resources))
         "print"       (let [p (js-await (resolve-one-shot-prompt positionals))]
                         (when-not p (die-no-prompt! "-p"))
-                        (js-await (print-mode/start agent p)))
+                        ;; `-p --output-format json` → single claude-style result
+                        ;; object (for headless orchestrators); default → text.
+                        (if (= (:output-format values) "json")
+                          (js-await (print-mode/start-result agent p))
+                          (js-await (print-mode/start agent p))))
         "json"        (let [p (js-await (resolve-one-shot-prompt positionals))]
                         (when-not p (die-no-prompt! "--mode json"))
                         (js-await (print-mode/start-json agent p)))
