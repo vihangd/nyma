@@ -313,9 +313,19 @@
                                      :cachedTokens (.-cachedTokens usage)
                                      :turnCount    (or (:turn-count @state) 0)})))
 
+                      ;; agent_end stays SYNC fire-and-forget so slow external
+                      ;; handlers (Stop hooks, gateway sends) never block the
+                      ;; loop. Post-turn handlers that must enqueue a follow-up
+                      ;; before the drain use the awaited turn_finalize below.
                       (emit "agent_end" {:text         final-text
                                          :usage        usage
                                          :finishReason finish-reason})))))
+
+              ;; turn_finalize — awaited post-turn boundary. Fires after
+              ;; agent_end (normal + abort paths both reach here), BEFORE the
+              ;; follow-queue drain, so a handler (e.g. plan-mode's approval
+              ;; gate) can enqueue a follow-up that the drain then picks up.
+              (js-await ((:emit-async events) "turn_finalize" {}))
 
               ;; Process follow-up queue — outside retry loop, recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]

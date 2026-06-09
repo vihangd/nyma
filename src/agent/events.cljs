@@ -6,6 +6,12 @@
    "session_directory" "session_shutdown"
    "agent_start" "agent_end"
    "turn_start" "turn_end"
+   ;; Awaited post-turn boundary (emit-async). Fires after agent_end on the
+   ;; normal + abort exit paths, BEFORE the follow-queue drain, so a handler
+   ;; (e.g. plan-mode's approval gate) can enqueue a follow-up that the drain
+   ;; then picks up. Distinct from agent_end (sync, fire-and-forget) so slow
+   ;; external handlers like Stop hooks never block the loop.
+   "turn_finalize"
    "message_start" "message_update" "message_end"
    "tool_call" "tool_result"
    "tool_execution_start" "tool_execution_update" "tool_execution_end"

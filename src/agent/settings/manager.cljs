@@ -48,7 +48,45 @@
                      :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
                      :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
            :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                     :allowed-tools ["read" "bash" "glob" "grep" "edit" "write"]}}})
+                     :allowed-tools ["read" "bash" "glob" "grep" "edit" "write"]}
+           ;; --- Subagent roles (used by the `subagent` tool) ---
+           ;; Read-only by default: the evidence boundary for coding agents
+           ;; is single-threaded edits + isolated read-only exploration.
+           ;; A subagent role is just a role with :description + :system-prompt.
+           :scout      {:provider "anthropic" :model "claude-haiku-4-20250901"
+                        :allowed-tools ["read" "glob" "grep" "ls"]
+                        :description "Fast read-only codebase recon. Returns a compressed map/summary."
+                        :system-prompt "You are a scout. Investigate the codebase read-only and return a compressed, structured summary (files, symbols, where things live). Do not propose edits."}
+           :planner    {:provider "anthropic" :model "claude-opus-4-20250514"
+                        :allowed-tools ["read" "glob" "grep" "ls" "web_search" "web_fetch"]
+                        :description "Read-only implementation planner. Returns a numbered plan."
+                        :system-prompt "You are a planner. Analyze read-only and return a detailed numbered plan under a 'Plan:' header. Do not modify files."}
+           :reviewer   {:provider "anthropic" :model "claude-sonnet-4-20250514"
+                        :allowed-tools ["read" "glob" "grep" "ls"]
+                        :description "Read-only code reviewer. Returns findings, one per line."
+                        :system-prompt "You are a reviewer. Examine the code read-only and return concise findings (path:line — problem — fix). Do not modify files."}
+           :researcher {:provider "anthropic" :model "claude-sonnet-4-20250514"
+                        :allowed-tools ["read" "web_search" "web_fetch"]
+                        :description "Web/docs research. Returns sourced findings."
+                        :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}
+           ;; Editing subagent — DISABLED by default. Editing subagents
+           ;; fragment shared state; prefer keeping edits on the single
+           ;; main thread. Enable per-call only when truly independent.
+           :worker     {:provider "anthropic" :model "claude-sonnet-4-20250514"
+                        :allowed-tools ["read" "glob" "grep" "ls" "edit" "write" "bash"]
+                        :enabled false
+                        :description "Implementation worker with edit tools (opt-in)."
+                        :system-prompt "You are a worker. Implement the delegated task and return a concise summary of changes (files touched, what changed)."}}
+   ;; Subagent extension knobs.
+   :subagent       {:async-by-default false :max-depth 1}
+   ;; Native plan-mode knobs.
+   ;;  :auto-approve  — skip the approval gate (non-interactive / autonomous).
+   ;;  :planner-role  — role whose model is used for PLANNING turns
+   ;;                   ("opusplan": plan with the strong model, execute with the
+   ;;                   selected one). Default :advisor (the strong-model knob,
+   ;;                   shared with the advisor tool). Set to :plan to use the
+   ;;                   :plan role's own model, or false to disable the switch.
+   :plan-mode      {:auto-approve false :planner-role :advisor}})
 
 (defn detect-duplicate-keys
   "Scan a JSON source string for duplicate keys inside the same

@@ -1,0 +1,5 @@
+{
+  "namespace": "subagent",
+  "capabilities": ["tools", "commands", "state", "model", "ui", "messages", "events"],
+  "dependsOn": ["model-roles"]
+}

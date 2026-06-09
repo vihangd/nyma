@@ -1,13 +1,23 @@
 (ns agent.extensions.model-roles
   "Model roles: named presets (default, fast, deep, plan, commit) that map
    to provider/model pairs. Switch with /role <name>."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.extensions.model-roles.features.plan-mode :as plan-mode]))
 
 (def ^:private default-roles
   {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
    :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
    :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
-   :plan    {:provider "anthropic" :model "claude-opus-4-20250514"}
+   ;; :plan MUST carry its read-only restrictions here, not only in
+   ;; settings/manager defaults: settings :roles is shallow-merged, so a user
+   ;; who defines any custom roles REPLACES the manager defaults wholesale.
+   ;; get-roles merges these defaults UNDER settings.roles, so this is the
+   ;; floor that keeps plan mode read-only even when the user's roles map
+   ;; omits :plan. Without it, enter! would switch to a :plan role with no
+   ;; allowed-tools/permissions and plan mode could edit/write/bash.
+   :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
+             :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
+             :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
    :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}})
 
 (defn- js-obj->map
@@ -69,6 +79,7 @@
 
 (defn ^:export default [api]
   (let [handlers (atom [])
+        plan-deactivate (atom nil)
 
         ;; Subscribe to model_resolve — ensure config.model reflects the active role.
         ;; /role already calls .setModel which updates config.model; we return nil
@@ -178,9 +189,13 @@
                                (.notify (.-ui ctx)
                                         (str "Model Roles:\n" (format-role-list roles current)))))})
 
+    ;; Native plan mode (layered on the :plan role).
+    (reset! plan-deactivate (plan-mode/activate api))
+
     ;; Cleanup
     (fn []
       (doseq [[event handler] @handlers]
         (.off api event handler))
       (.unregisterCommand api "role")
-      (.unregisterCommand api "roles"))))
+      (.unregisterCommand api "roles")
+      (when @plan-deactivate (@plan-deactivate)))))

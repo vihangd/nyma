@@ -46,7 +46,8 @@
     "workspace-config"
     "small-model"
     "local"
-    "headroom"})
+    "headroom"
+    "subagent"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so
@@ -98,7 +99,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 28 expected namespaces load and none collide on 'index'"
+            (it "all 29 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)
