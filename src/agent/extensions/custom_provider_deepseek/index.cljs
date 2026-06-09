@@ -70,7 +70,8 @@
                    "Get a key at https://platform.deepseek.com/."))))
     (.chat (createOpenAI #js {:apiKey  key
                               :baseURL (resolve-base-url)
-                              :fetch   (rs/make-fetch)})
+                              :fetch   (rs/make-fetch
+                                        rs/lift-think-request-rewriter)})
            id)))
 
 (defn ^:export default [api]

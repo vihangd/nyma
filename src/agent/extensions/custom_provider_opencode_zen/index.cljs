@@ -1,7 +1,8 @@
 (ns agent.extensions.custom-provider-opencode-zen.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "opencode-zen")
 (def ^:private default-base-url "https://opencode.ai/zen/v1")
@@ -83,10 +84,19 @@
               (str "No OpenCode Zen credentials found. Set the OPENCODE_ZEN_API_KEY "
                    "env var or run /login opencode-zen to save a key. "
                    "Sign up at https://opencode.ai/auth"))))
-    (let [provider (createOpenAI #js {:apiKey key :baseURL (resolve-base-url)})]
-      (case (get protocol-by-id id :chat)
-        :responses (.responses provider id)
-        :chat      (.chat provider id)))))
+    (let [protocol (get protocol-by-id id :chat)
+          opts     #js {:apiKey  key
+                        :baseURL (resolve-base-url)}]
+      ;; Zen proxies some chat-protocol models (e.g. big-pickle → DeepSeek)
+      ;; that stream reasoning via `reasoning_content` and require it
+      ;; replayed on subsequent turns. The /responses path has native
+      ;; reasoning handling and doesn't need this shim.
+      (when (= protocol :chat)
+        (aset opts "fetch" (rs/make-fetch rs/lift-think-request-rewriter)))
+      (let [provider (createOpenAI opts)]
+        (case protocol
+          :responses (.responses provider id)
+          :chat      (.chat provider id))))))
 
 (defn ^:export default [api]
   (.registerProvider api provider-name

@@ -18,7 +18,6 @@
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [clojure.string :as str]
             [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "kimi")
@@ -68,67 +67,25 @@
       (read-credentials-file)))
 
 ;;; ─── Request rewrite ──────────────────────────────────────────────────
-
-(def ^:private think-block-re
-  (js/RegExp. "<think(?:ing)?>([\\s\\S]*?)<\\/think(?:ing)?>\\s*" "gi"))
-
-(def ^:private open-think-re
-  (js/RegExp. "<think(?:ing)?>" "i"))
-
-(defn- extract-think-blocks
-  "Pulls reasoning out of content. Handles closed <think>…</think> blocks
-   AND a trailing unterminated <think>… (everything after the opener
-   becomes reasoning) — the latter happens when the model went
-   reasoning → tool_calls without intervening text and the stream
-   wrapper missed the close. Returns [reasoning-text content-cleaned]."
-  [s]
-  (let [parts (atom [])
-        clean (.replace (str s) think-block-re
-                        (fn [_match inner]
-                          (swap! parts conj inner)
-                          ""))
-        m     (.exec open-think-re clean)]
-    (if m
-      (let [idx (.-index m)
-            tag (aget m 0)
-            before (subs clean 0 idx)
-            after  (subs clean (+ idx (count tag)))]
-        (swap! parts conj after)
-        [(str/join "\n\n" @parts) before])
-      [(str/join "\n\n" @parts) clean])))
-
-(defn- rewrite-assistant-msg
-  "Lift <think> tags out of assistant content into reasoning_content
-   (Moonshot's required field for thinking-mode replay)."
-  [msg]
-  (if (and (= (.-role msg) "assistant")
-           (string? (.-content msg))
-           (.includes (.-content msg) "<think"))
-    (let [[reasoning clean] (extract-think-blocks (.-content msg))]
-      (if (seq reasoning)
-        (doto (js/Object.assign #js {} msg)
-          (aset "content" clean)
-          (aset "reasoning_content" reasoning))
-        msg))
-    msg))
+;;; Lifting <think> back to reasoning_content lives in
+;;; `agent.utils.reasoning-stream`; here we only add Moonshot's
+;;; `chat_template_kwargs.thinking` / `preserve_thinking` injection.
 
 (defn- make-request-rewriter [model-id]
-  (fn [body-str _init]
-    (try
-      (let [body (js/JSON.parse body-str)]
-        (when (and (.-messages body) (.-length (.-messages body)))
-          (let [msgs (.-messages body)]
-            (dotimes [i (.-length msgs)]
-              (aset msgs i (rewrite-assistant-msg (aget msgs i))))))
-        (when (thinking-model? model-id)
-          (let [kwargs (or (.-chat_template_kwargs body) #js {})]
+  (fn [body-str init]
+    (let [lifted (rs/lift-think-request-rewriter body-str init)]
+      (if-not (thinking-model? model-id)
+        lifted
+        (try
+          (let [body   (js/JSON.parse lifted)
+                kwargs (or (.-chat_template_kwargs body) #js {})]
             (when (nil? (.-thinking kwargs))
               (aset kwargs "thinking" true))
             (aset body "chat_template_kwargs" kwargs)
             (when (nil? (.-preserve_thinking body))
-              (aset body "preserve_thinking" true))))
-        (js/JSON.stringify body))
-      (catch :default _ body-str))))
+              (aset body "preserve_thinking" true))
+            (js/JSON.stringify body))
+          (catch :default _ lifted))))))
 
 (defn- create-kimi-model [id]
   (let [key (resolve-api-key)]
