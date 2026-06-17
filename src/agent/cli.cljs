@@ -15,7 +15,8 @@
             [agent.extensions.model-roles.policy :as perm-policy]
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
-            [agent.modes.rpc :as rpc]))
+            [agent.modes.rpc :as rpc]
+            [agent.modes.pi-rpc :as pi-rpc]))
 
 (defn agent-stats
   "Snapshot of agent stats used by the session_end_summary / session_end events."
@@ -249,7 +250,12 @@ Examples:
                             :fork         #js {:type "string"}
                             :no-session   #js {:type "boolean"}
                             :output-format #js {:type "string"}
-                            :permission-mode #js {:type "string"}}
+                            :permission-mode #js {:type "string"}
+                            ;; Accepted for compat with the pi Emacs frontend's trust policy
+                            ;; (it always appends one of these). Declared so strict parseArgs
+                            ;; doesn't crash; pi-rpc keeps its ask-baseline regardless.
+                            :approve      #js {:type "boolean"}
+                            :no-approve   #js {:type "boolean"}}
               :allowPositionals true})
 
         _ (when (:help values)
@@ -387,6 +393,7 @@ Examples:
         "json"        (let [p (js-await (resolve-one-shot-prompt positionals))]
                         (when-not p (die-no-prompt! "--mode json"))
                         (js-await (print-mode/start-json agent p)))
-        "rpc"         (js-await (rpc/start agent))))))
+        "rpc"         (js-await (rpc/start agent))
+        "pi-rpc"      (js-await (pi-rpc/start agent))))))
 
 (when (.-main js/import.meta) (main))

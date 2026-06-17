@@ -84,6 +84,12 @@
       ((:dispatch! store) :message-added {:message {:role "user" :content user-message}})
       (swap! state update :messages conj {:role "user" :content user-message}))
 
+    ;; Fresh AbortController per run so an abort from a previous turn doesn't
+    ;; poison this one (the controller is single-use). Its signal is wired into
+    ;; st-config below so an interrupt actually stops the in-flight stream.
+    (when (:abort-controller agent)
+      (reset! (:abort-controller agent) (js/AbortController.)))
+
     (emit "agent_start" {})
 
     ;; Main loop — re-enters for follow-up messages
@@ -192,6 +198,7 @@
                              :system          effective-prompt
                              :messages        (clj->js messages)
                              :tools           (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
+                             :abortSignal     (when-let [c (:abort-controller agent)] (.-signal @c))
                              :maxRetries      5
                              :stopWhen        (stepCountIs (:max-steps config))
                              :providerOptions #js {}
