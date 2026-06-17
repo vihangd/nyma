@@ -53,6 +53,20 @@
           (let [short (last (str/split model-id #"/"))]
             (get profiles short))))))
 
+;; ── Edit-format routing (editStrategy) ───────────────────────────
+;; Weak models loop on the brittle exact `edit` (string-not-found). Per-model
+;; editStrategy steers which edit tools are surfaced (Aider/OpenCode pattern):
+;;   "whole"        → only whole-file `write` (most stable multi-turn)
+;;   "fuzzy"/"patch"→ `multi_edit` (fuzzy) + `write`; hide exact `edit`
+;;   "exact"/unset  → no edit-tool filtering
+(defn edit-tools-to-hide
+  "Edit-tool names to HIDE for a given editStrategy. Exposed for tests."
+  [edit-strategy]
+  (case (str edit-strategy)
+    "whole"          #{"edit" "multi_edit"}
+    ("fuzzy" "patch") #{"edit"}
+    #{}))
+
 ;; ── Activation ───────────────────────────────────────────────────
 
 (defn activate
@@ -81,14 +95,27 @@
                   (aset data "providerOptions" po)))))
           nil)
 
-        ;; tool_access_check — apply per-model allowedTools
+        ;; tool_access_check — apply per-model allowedTools AND editStrategy
+        ;; edit-tool routing. Both reduce the allowlist; the event merge
+        ;; intersects :allowed across handlers (most-restrictive wins), so this
+        ;; composes with model_roles' role/mode restriction.
         on-tool-access
-        (fn [_data _ctx]
+        (fn [data _ctx]
           (when-let [p (profile-for config api)]
             (let [allowed (or (:allowed-tools p) (get p "allowedTools")
-                              (:allowedTools p))]
-              (when (seq allowed)
-                #js {:allowed (clj->js (vec allowed))}))))]
+                              (:allowedTools p))
+                  edit-strat (or (:editStrategy p) (get p "editStrategy")
+                                 (:edit-strategy p))
+                  hide   (edit-tools-to-hide edit-strat)
+                  ;; candidate tool names from the event (the full active set)
+                  cands  (when-let [t (.-tools data)] (vec t))
+                  ;; base allowlist: explicit allowedTools if set, else all candidates
+                  base   (cond (seq allowed) (vec allowed)
+                               (seq hide)    cands
+                               :else         nil)
+                  final  (when base (vec (remove #(contains? hide (str %)) base)))]
+              (when final
+                #js {:allowed (clj->js final)}))))]
 
     (.on api "model_resolve" on-resolve)
     (swap! handlers conj ["model_resolve" on-resolve])

@@ -131,12 +131,12 @@
   (if-let [indents (:original-indent match-info)]
     (let [new-lines (.split new-str "\n")
           result (map-indexed
-                   (fn [i line]
-                     (let [indent (if (< i (count indents))
-                                    (nth indents i)
-                                    (if (seq indents) (last indents) ""))]
-                       (str indent (strip-leading-ws line))))
-                   new-lines)]
+                  (fn [i line]
+                    (let [indent (if (< i (count indents))
+                                   (nth indents i)
+                                   (if (seq indents) (last indents) ""))]
+                      (str indent (strip-leading-ws line))))
+                  new-lines)]
       (str/join "\n" result))
     new-str))
 
@@ -145,6 +145,43 @@
   [content offset]
   (let [prefix (subs content 0 (min offset (count content)))]
     (inc (count (re-seq #"\n" prefix)))))
+
+(defn- count-occurrences
+  "Count non-overlapping exact occurrences of `sub` in `content`."
+  [content sub]
+  (if (empty? sub)
+    0
+    (loop [from 0 n 0]
+      (let [idx (.indexOf content sub from)]
+        (if (neg? idx)
+          n
+          (recur (+ idx (count sub)) (inc n)))))))
+
+(defn- closest-candidate
+  "When nothing matched (even fuzzy), find the best *below-threshold* levenshtein
+  window so the error can show the model what's actually there. This turns a dead
+  'not found' into a one-turn self-correction. Returns {:text :similarity :line} or nil."
+  [content old-str]
+  (let [content-lines (.split content "\n")
+        old-lines (.split old-str "\n")
+        old-count (count old-lines)
+        total (.-length content-lines)]
+    (when (and (<= old-count 50) (<= total 10000) (pos? old-count))
+      (let [old-text (str/join "\n" old-lines)
+            best (atom nil)]
+        (loop [i 0]
+          (when (<= (+ i old-count) total)
+            (let [window (.slice content-lines i (+ i old-count))
+                  window-text (.join window "\n")
+                  sim (shared/levenshtein-similarity window-text old-text)]
+              (when (and (>= sim 0.5)
+                         (or (nil? @best) (> sim (:similarity @best))))
+                (let [start (.indexOf content window-text)]
+                  (reset! best {:text window-text
+                                :similarity sim
+                                :line (find-line-number content (if (>= start 0) start 0))}))))
+            (recur (inc i))))
+        @best))))
 
 ;; ── Multi-Edit Tool ───────────��────────────────────────────────
 
@@ -159,22 +196,37 @@
 
     ;; Apply edits sequentially
     (doseq [i (range total)]
-      (let [edit (nth edits i)
-            match (find-best-match @content-ref (:old edit) config)]
-        (if match
-          (let [replacement (if (= (:match-type match) :indent)
-                              (apply-indent (:new edit) match)
-                              (:new edit))
-                before (subs @content-ref 0 (:start match))
-                after (subs @content-ref (:end match))
-                line-num (find-line-number @content-ref (:start match))]
-            (reset! content-ref (str before replacement after))
-            (when (not= (:match-type match) :exact)
-              (swap! shared/suite-stats update-in [:diff-edit :fuzzy-matches] inc))
-            (swap! shared/suite-stats update-in [:diff-edit :hunks-applied] inc)
-            (swap! results conj {:applied true :match-type (:match-type match)
-                                 :line line-num :hunk (inc i)}))
-          (swap! results conj {:applied false :hunk (inc i)}))))
+      (let [edit    (nth edits i)
+            exact-n (count-occurrences @content-ref (:old edit))]
+        (cond
+          ;; Ambiguity guard: when old_string occurs more than once exactly,
+          ;; silently editing the first match risks corrupting the wrong site.
+          ;; Reject the hunk and ask for more disambiguating context.
+          (> exact-n 1)
+          (do (swap! shared/suite-stats update-in [:diff-edit :ambiguous] (fnil inc 0))
+              (swap! results conj {:applied false :hunk (inc i)
+                                   :reason :ambiguous :count exact-n}))
+
+          :else
+          (let [match (find-best-match @content-ref (:old edit) config)]
+            (if match
+              (let [replacement (if (= (:match-type match) :indent)
+                                  (apply-indent (:new edit) match)
+                                  (:new edit))
+                    before (subs @content-ref 0 (:start match))
+                    after (subs @content-ref (:end match))
+                    line-num (find-line-number @content-ref (:start match))]
+                (reset! content-ref (str before replacement after))
+                (when (not= (:match-type match) :exact)
+                  (swap! shared/suite-stats update-in [:diff-edit :fuzzy-matches] inc))
+                (swap! shared/suite-stats update-in [:diff-edit :hunks-applied] inc)
+                (swap! results conj {:applied true :match-type (:match-type match)
+                                     :line line-num :hunk (inc i)}))
+              (let [cand (closest-candidate @content-ref (:old edit))]
+                (when cand
+                  (swap! shared/suite-stats update-in [:diff-edit :repair-hints] (fnil inc 0)))
+                (swap! results conj (cond-> {:applied false :hunk (inc i) :reason :not-found}
+                                      cand (assoc :candidate cand)))))))))
 
     ;; Write back if any edits applied
     (let [applied-count (count (filter :applied @results))]
@@ -186,7 +238,7 @@
           (let [emit-fn (.-emit events)]
             (when (fn? emit-fn)
               (emit-fn "context:file-op"
-                #js {:type "edit" :path fpath :tool "multi_edit"})))))
+                       #js {:type "edit" :path fpath :tool "multi_edit"})))))
 
       ;; Track stats
       (swap! shared/suite-stats update-in [:diff-edit :calls] inc)
@@ -198,12 +250,25 @@
       ;; Build compact summary
       (let [match-types (frequencies (map :match-type (filter :applied @results)))
             type-summary (str/join ", "
-                           (map (fn [[t c]]
-                                  (str c " " (str t)))
-                                match-types))
+                                   (map (fn [[t c]]
+                                          (str c " " (str t)))
+                                        match-types))
             lines (map (fn [r]
-                         (if (:applied r)
+                         (cond
+                           (:applied r)
                            (str "  L" (:line r) ": hunk " (:hunk r) " applied (" (str (:match-type r)) ")")
+                           (= (:reason r) :ambiguous)
+                           (str "  hunk " (:hunk r) ": AMBIGUOUS — old_string matches " (:count r)
+                                " places; add more surrounding context so it's unique")
+                           (:candidate r)
+                           (let [c (:candidate r)
+                                 snippet (->> (.split (:text c) "\n")
+                                              (map #(str "    │ " %))
+                                              (str/join "\n"))]
+                             (str "  hunk " (:hunk r) ": old_string not found — closest text is at L"
+                                  (:line c) " (" (js/Math.round (* 100 (:similarity c))) "% similar);"
+                                  " copy it exactly (incl. whitespace) and retry:\n" snippet))
+                           :else
                            (str "  hunk " (:hunk r) ": old_string not found")))
                        @results)]
         (str (if (= applied-count total) "Applied" "Partially applied")
@@ -239,22 +304,22 @@
         de-cfg (:diff-edit config)
         multi-edit-tool
         (tool
-          #js {:description "Apply multiple search-and-replace edits to a file in one call. Supports fuzzy matching for whitespace and indentation differences."
-               :inputSchema (.object z
-                              #js {:path  (-> (.string z) (.describe "File path to edit"))
-                                   :edits (-> (.array z
-                                                (.object z
-                                                  #js {:old_string (.string z)
-                                                       :new_string (.string z)}))
-                                              (.describe "Array of {old_string, new_string} pairs to apply sequentially"))})
-               :execute (fn [args] (multi-edit-execute-fn api de-cfg args))})]
+         #js {:description "Apply multiple search-and-replace edits to a file in one call. Supports fuzzy matching for whitespace and indentation differences."
+              :inputSchema (.object z
+                                    #js {:path  (-> (.string z) (.describe "File path to edit"))
+                                         :edits (-> (.array z
+                                                            (.object z
+                                                                     #js {:old_string (.string z)
+                                                                          :new_string (.string z)}))
+                                                    (.describe "Array of {old_string, new_string} pairs to apply sequentially"))})
+              :execute (fn [args] (multi-edit-execute-fn api de-cfg args))})]
 
     (.registerTool api "multi_edit" multi-edit-tool)
 
     (when (:compress-results de-cfg)
       (.addMiddleware api
-        #js {:name "token-suite/diff-edit-compress"
-             :leave compress-leave}))
+                      #js {:name "token-suite/diff-edit-compress"
+                           :leave compress-leave}))
 
     ;; Return deactivator
     (fn []
