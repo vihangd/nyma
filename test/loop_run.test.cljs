@@ -27,6 +27,19 @@
     (-> (expect @started) (.toBe true))
     (-> (expect @ended) (.toBe true))))
 
+;; turn_finalize must fire even on the blocked path (so the plan-mode gate is
+;; never silently skipped) — AND carry error=true, because a block produced no
+;; real turn output, so the gate must NOT run its approval flow on it.
+(defn ^:async test-run-blocked-still-emits-turn-finalize []
+  (let [agent     (make-test-agent)
+        finalized (atom nil)]
+    ((:on (:events agent)) "turn_finalize" (fn [d] (reset! finalized (or d #js {}))))
+    ((:on (:events agent)) "before_provider_request"
+                           (fn [_] #js {:block true :reason "Test block"}))
+    (js-await (run agent "test"))
+    (-> (expect (some? @finalized)) (.toBe true))
+    (-> (expect (boolean (and @finalized (.-error @finalized)))) (.toBe true))))
+
 (defn ^:async test-run-blocked-stores-assistant-response []
   (let [agent (make-test-agent)]
     ((:on (:events agent)) "before_provider_request"
@@ -154,6 +167,7 @@
 (describe "agent.loop/run - blocked path" (fn []
                                             (it "appends user message to state" test-run-appends-user-message)
                                             (it "emits agent_start and agent_end events" test-run-emits-agent-start-end)
+                                            (it "still emits turn_finalize on the blocked path" test-run-blocked-still-emits-turn-finalize)
                                             (it "stores blocked assistant response" test-run-blocked-stores-assistant-response)
                                             (it "uses default block reason" test-run-blocked-default-reason)
                                             (it "emits agent_end with block text" test-run-emits-agent-end-with-block-text)

@@ -4,7 +4,8 @@
             ["zod" :as z]
             [agent.middleware :refer [create-pipeline tool-execution-interceptor
                                       before-hook-compat wrap-tools-with-middleware
-                                      normalize-tool-result tool-persistence-interceptor]]
+                                      normalize-tool-result tool-persistence-interceptor
+                                      resolve-ask permission-check-enter]]
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
             [agent.state :refer [create-agent-store]]
@@ -653,3 +654,97 @@
                                                   test-tool-complete-blocks-if-handler-returns-slow-promise)
                                               (it "emit-collect tool_complete resolves instantly when handler returns nil"
                                                   test-tool-complete-resolves-instantly-when-handler-returns-nil)))
+
+;; ── Phase 2: the `ask` permission keystone ──
+;; A fake interactive UI whose .select returns a scripted choice.
+(defn- fake-ui [choice]
+  #js {:available true
+       :select    (fn [_q _opts] (js/Promise.resolve choice))})
+
+;; settings stub recording allow-list persistence.
+(defn- ask-settings [persisted]
+  {:tool-allowed?      (fn [_t] false)
+   :append-allow-tool! (fn [t] (swap! persisted conj t))})
+
+(defn ^:async test-ask-no-ui-denies []
+  (let [ctx (js-await (resolve-ask nil {:tool-name "write" :cancelled false} nil "write" nil))]
+    ;; No interactive UI → ask must DENY, never silently allow.
+    (-> (expect (:cancelled ctx)) (.toBe true))))
+
+(defn ^:async test-ask-allow-once []
+  (let [persisted (atom [])
+        ctx (js-await (resolve-ask (ask-settings persisted)
+                                   {:tool-name "write" :cancelled false}
+                                   (fake-ui "Allow once") "write" nil))]
+    (-> (expect (boolean (:cancelled ctx))) (.toBe false))
+    (-> (expect (count @persisted)) (.toBe 0))))
+
+(defn ^:async test-ask-allow-always-persists []
+  (let [persisted (atom [])
+        ctx (js-await (resolve-ask (ask-settings persisted)
+                                   {:tool-name "write" :cancelled false}
+                                   (fake-ui "Allow always (this project)") "write" nil))]
+    (-> (expect (boolean (:cancelled ctx))) (.toBe false))
+    (-> (expect (vec @persisted)) (.toEqual ["write"]))))
+
+(defn ^:async test-ask-deny []
+  (let [ctx (js-await (resolve-ask nil {:tool-name "write" :cancelled false}
+                                   (fake-ui "Deny") "write" nil))]
+    (-> (expect (:cancelled ctx)) (.toBe true))))
+
+;; permission-check-enter: a handler returning {decision "ask"} prompts; no UI → deny.
+(defn ^:async test-gate-ask-no-ui-denies []
+  (let [events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "ask"}))
+        ctx    (js-await (permission-check-enter events nil
+                                                 {:tool-name "write" :args {} :cancelled false :agent nil}))]
+    (-> (expect (:cancelled ctx)) (.toBe true))))
+
+;; Precedence: an explicit deny hard-blocks regardless of order.
+(defn ^:async test-gate-precedence-deny-beats-allow []
+  (let [events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "allow"}) 10)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "deny"}) 0)
+        ctx    (js-await (permission-check-enter events nil
+                                                 {:tool-name "bash" :args {} :cancelled false :agent nil}))]
+    (-> (expect (:cancelled ctx)) (.toBe true))))
+
+;; An explicit allow (a handler that VETTED this call, e.g. bash_suite cleared a
+;; safe command) pre-empts a policy-level ask — so a vetted-safe call does NOT
+;; prompt. allow wins over ask regardless of order; ctx not cancelled.
+(defn ^:async test-gate-precedence-allow-preempts-ask []
+  (let [events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "ask"}) 10)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "allow"}) 0)
+        ctx    (js-await (permission-check-enter events nil
+                                                 {:tool-name "bash" :args {} :cancelled false :agent nil}))]
+    (-> (expect (boolean (:cancelled ctx))) (.toBe false))))
+
+;; Wiring test (the real acceptance test): the gate must reach the UI through
+;; (:agent ctx) → .extension-api → .ui → .select. A handler 'ask' with a
+;; real-shaped agent must actually PROMPT (not dead-end on deny).
+(defn ^:async test-gate-ask-reaches-real-agent-ui []
+  (let [called (atom false)
+        ui     #js {:available true
+                    :select (fn [_q _o] (reset! called true) (js/Promise.resolve "Allow once"))}
+        ;; Build the agent the way cli.cljs does — (set! (.-extension-api …)) —
+        ;; so the property munging matches the gate's (.-extension-api agent).
+        agent  (let [a #js {}] (set! (.-extension-api a) #js {:ui ui}) a)
+        events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "ask"}))
+        ctx    (js-await (permission-check-enter events nil
+                                                 {:tool-name "write" :args {} :cancelled false :agent agent}))]
+    ;; the prompt was actually shown via the real extraction chain, and Allow proceeded
+    (-> (expect @called) (.toBe true))
+    (-> (expect (boolean (:cancelled ctx))) (.toBe false))))
+
+(describe "permission gate — ask keystone (Phase 2)"
+          (fn []
+            (it "ask with no UI denies (never silent allow)" test-ask-no-ui-denies)
+            (it "ask → Allow once proceeds without persisting" test-ask-allow-once)
+            (it "ask → Allow always persists to project allow-list" test-ask-allow-always-persists)
+            (it "ask → Deny cancels" test-ask-deny)
+            (it "gate: handler 'ask' + no UI denies" test-gate-ask-no-ui-denies)
+            (it "gate: deny beats allow regardless of order" test-gate-precedence-deny-beats-allow)
+            (it "gate: explicit allow pre-empts policy ask" test-gate-precedence-allow-preempts-ask)
+            (it "gate: ask reaches the real agent→extension-api→ui→select chain" test-gate-ask-reaches-real-agent-ui)))

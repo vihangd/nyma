@@ -77,10 +77,10 @@
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model provider role streaming turn-count]} @state
-                         role-str  (when (and (seq (str role))
-                                              (not= (str role) "default"))
-                                     (str (fg warning) "[" role "]" RESET " "))
+                   (let [{:keys [model provider streaming turn-count]} @state
+                         ;; Role/mode is shown by the model_roles status SEGMENT
+                         ;; (color-coded), not inline here — see
+                         ;; model_roles/status_segment.cljs.
                          ;; Provider prefix: dim provider name + slash, then
                          ;; the model id in primary color.
                          ;;
@@ -110,7 +110,7 @@
                          ;; Built-in left content.
                          core-left (str (fg muted) " nyma " RESET
                                         (fg border) "│" RESET
-                                        " " (or role-str "")
+                                        " "
                                         (or provider-piece "")
                                         (fg primary) model-piece RESET)
                          ;; Built-in right content.

@@ -623,7 +623,7 @@
 ;; ═══════════════════════════════════════════════════════════════
 
 (describe "permissions:allow-always-project" (fn []
-                                               (it "needs-approval returns allow_always_project decision"
+                                               (it "needs-approval defers to the gate by asking (unvetted command)"
                                                    (fn []
                                                      (let [agent      (make-agent)
                                                            api        (make-api agent)
@@ -632,7 +632,7 @@
                                                            evt        #js {:tool "bash" :args #js {:command "unknown-custom-cmd"}}
                                                            p          ((:emit-collect (:events agent)) "permission_request" evt)]
                                                        (.then p (fn [result]
-                                                                  (-> (expect (get result "decision")) (.toBe "allow_always_project")))))))
+                                                                  (-> (expect (get result "decision")) (.toBe "ask")))))))
 
                                                (it "denylist still returns deny regardless"
                                                    (fn []

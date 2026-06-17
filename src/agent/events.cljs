@@ -53,6 +53,61 @@
   #{"inject-messages" "system-prompt-additions" "paths"
     "skillPaths" "promptPaths" "themePaths" "prompt-sections"})
 
+;; ── Precedence keys: rules pre-empt policy, order-independent (NOT last-writer) ──
+;; permission_request handlers each return {:decision ...}; several may fire for
+;; one tool. The merge resolves them by precedence, not handler order:
+;;   deny                 — an explicit deny hard-blocks (most authoritative).
+;;   allow_always_project — an explicit allow that also persists.
+;;   allow                — an explicit allow: a handler that VETTED this exact
+;;                          call (e.g. bash_suite cleared a safe command) — it
+;;                          pre-empts a policy-level ask.
+;;   ask                  — the weakest signal: "I have no rule for this, prompt
+;;                          the user" (the mode policy default). Yields to any
+;;                          explicit allow/deny above.
+;; A deny from any handler always wins; an explicit allow beats a bare ask.
+(def decision-order
+  "Permission-decision precedence, most-authoritative first. Shared by the
+   cross-handler merge AND model_roles' two-axis (mode+role) combine, so both
+   layers use ONE ordering: deny hard-blocks; an explicit allow beats a bare
+   ask; ask is the weakest 'no rule, prompt' signal."
+  ["deny" "allow_always_project" "allow" "ask"])
+
+(def ^:private precedence-keys
+  {"decision" decision-order})
+
+(defn precedence-pick
+  "Return whichever of a/b ranks earlier (higher precedence) in `order`.
+   An unknown value (index -1) always loses to a known one; nil yields the other."
+  [order a b]
+  (let [ia (.indexOf order (str a))
+        ib (.indexOf order (str b))]
+    (cond
+      (neg? ia) b
+      (neg? ib) a
+      (<= ia ib) a
+      :else b)))
+
+(defn combine-decision
+  "Combine two permission decisions by `decision-order` (most-restrictive/
+   most-authoritative wins). nil-safe: (combine nil x) → x. Use to resolve a
+   decision across independent axes (e.g. mode policy + role policy)."
+  [a b]
+  (precedence-pick decision-order a b))
+
+;; ── Intersection keys: allowlists combine by set-INTERSECTION (NOT last-writer) ──
+;; tool_access_check handlers each return {:allowed [...]}; several may fire
+;; (model_roles role/mode restriction + small_model per-profile/editStrategy
+;; restriction). Each is an allowlist, so the effective set is their
+;; INTERSECTION — most-restrictive-wins, order-independent. Last-writer would let
+;; one handler silently widen past another's restriction.
+(def ^:private intersection-keys #{"allowed"})
+
+(defn- intersect-allow
+  "Intersect two allowlists (vectors of tool-name strings), preserving a's order."
+  [a b]
+  (let [bs (set (map str b))]
+    (vec (filter #(contains? bs (str %)) a))))
+
 (defn- merge-results
   "Merge a sequence of handler return maps with semantic merging:
    - boolean keys → OR (any true wins)
@@ -75,6 +130,16 @@
                 (update a k (fn [existing]
                               (into (or existing [])
                                     (if (sequential? v) v [v]))))
+
+                (contains? precedence-keys ks)
+                (assoc a k (if (contains? a k)
+                             (precedence-pick (get precedence-keys ks) (get a k) v)
+                             v))
+
+                (contains? intersection-keys ks)
+                (assoc a k (if (contains? a k)
+                             (intersect-allow (get a k) v)
+                             v))
 
                 :else
                 (assoc a k v))))

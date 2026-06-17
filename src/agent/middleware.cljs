@@ -2,7 +2,8 @@
   (:require [agent.interceptors :as ic]
             [agent.extension-context :refer [create-extension-context]]
             [agent.tool-result-policy :as policy]
-            [agent.utils.ansi :refer [truncate-text]]))
+            [agent.utils.ansi :refer [truncate-text]]
+            [agent.utils.ui :refer [ui-prompt-ready?]]))
 
 (defn normalize-tool-result
   "Normalize tool results to string. Supports both plain string returns
@@ -253,33 +254,71 @@
     (#{"web_fetch" "web_search"} tool-name)   "network"
     :else                                      "other"))
 
+(defn- agent-ui
+  "The live interactive UI handle (or nil). Reached from the agent's extension
+   API so the permission gate can prompt the user directly."
+  [agent]
+  (when agent
+    (when-let [api (.-extension-api agent)] (.-ui api))))
+
+(defn ^:async resolve-ask
+  "An 'ask' decision: prompt the user ONCE (Allow / Allow always / Deny).
+   With no interactive UI (e.g. headless -p) an 'ask' resolves to DENY — never
+   a silent allow. Returns the updated ctx. Exposed for tests."
+  [settings ctx ui tool-name reason]
+  (if-not (ui-prompt-ready? ui)
+    (assoc ctx :cancelled true
+           :cancel-reason (or reason (str "Permission required for '" tool-name
+                                          "' but no interactive approval is available")))
+    (let [choice (js-await
+                  (.select ui (str "Allow '" tool-name "'?")
+                           (clj->js ["Allow once" "Allow always (this project)" "Deny"])))]
+      (cond
+        (and choice (.startsWith choice "Allow always"))
+        (do (when settings ((:append-allow-tool! settings) tool-name)) ctx)
+
+        (and choice (.startsWith choice "Allow")) ctx
+
+        :else
+        (assoc ctx :cancelled true
+               :cancel-reason (or reason "Permission denied"))))))
+
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
-   Handlers return {decision: 'allow'|'deny'|'allow_always_project', reason?: string}.
+   Handlers return {decision: 'allow'|'ask'|'deny'|'allow_always_project',
+   reason?: string}. When several handlers fire, the merged decision is the
+   most restrictive (deny > ask > allow), independent of order.
+
+   - deny                  → cancel.
+   - ask                   → prompt the user once; no UI → deny (never silent).
+   - allow_always_project  → run, and persist to .nyma/settings.json so future
+                             calls skip the prompt.
+   - anything else         → allow.
 
    If settings is provided and the tool is in the project/global allow-list,
-   the permission_request event is skipped entirely (no subscribers fire).
-
-   allow_always_project persists the decision to .nyma/settings.json so
-   future calls skip the prompt automatically."
+   the permission_request event is skipped entirely (no subscribers fire)."
   [events settings ctx]
   (let [tool-name (:tool-name ctx)
         args      (:args ctx)]
     ;; Fast-path: tool is in the persistent allow-list — skip the prompt
     (if (and settings ((:tool-allowed? settings) tool-name))
       ctx
-      (let [result (js-await
-                    ((:emit-collect events) "permission_request"
-                                            #js {:tool     tool-name
-                                                 :args     (clj->js args)
-                                                 :category (categorize-tool tool-name)
-                                                 :path     (or (get args :path) (get args "path"))}))]
+      (let [result   (js-await
+                      ((:emit-collect events) "permission_request"
+                                              #js {:tool     tool-name
+                                                   :args     (clj->js args)
+                                                   :category (categorize-tool tool-name)
+                                                   :path     (or (get args :path) (get args "path"))}))
+            decision (get result "decision")
+            reason   (get result "reason")]
         (cond
-          (= (get result "decision") "deny")
-          (assoc ctx :cancelled true
-                 :cancel-reason (or (get result "reason") "Permission denied"))
+          (= decision "deny")
+          (assoc ctx :cancelled true :cancel-reason (or reason "Permission denied"))
 
-          (= (get result "decision") "allow_always_project")
+          (= decision "ask")
+          (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason))
+
+          (= decision "allow_always_project")
           (do
             (when settings
               ((:append-allow-tool! settings) tool-name))

@@ -1,6 +1,42 @@
 (ns events-v2.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.events :refer [create-event-bus all-event-types]]))
+            [agent.events :refer [create-event-bus all-event-types combine-decision]]))
+
+;; combine-decision: most-authoritative wins (deny > allow_always > allow > ask),
+;; nil-safe. Used for both the cross-handler merge and model_roles' two-axis combine.
+(describe "events/combine-decision" (fn []
+                                      (it "deny beats everything" (fn []
+                                                                    (-> (expect (combine-decision "allow" "deny")) (.toBe "deny"))
+                                                                    (-> (expect (combine-decision "deny" "ask")) (.toBe "deny"))))
+                                      (it "explicit allow beats a bare ask" (fn []
+                                                                              (-> (expect (combine-decision "ask" "allow")) (.toBe "allow"))
+                                                                              (-> (expect (combine-decision "allow" "ask")) (.toBe "allow"))))
+                                      (it "allow_always outranks allow" (fn []
+                                                                          (-> (expect (combine-decision "allow" "allow_always_project")) (.toBe "allow_always_project"))))
+                                      (it "nil yields the other (and nil+nil → nil)" (fn []
+                                                                                       (-> (expect (combine-decision nil "deny")) (.toBe "deny"))
+                                                                                       (-> (expect (combine-decision "ask" nil)) (.toBe "ask"))
+                                                                                       (-> (expect (combine-decision nil nil)) (.toBeNil))))))
+
+;; tool_access_check :allowed combines by INTERSECTION across handlers
+;; (most-restrictive wins), not last-writer.
+(defn ^:async test-allowed-intersects []
+  (let [events (create-event-bus)]
+    ((:on events) "tool_access_check" (fn [_] #js {:allowed #js ["read" "edit" "write"]}) 10)
+    ((:on events) "tool_access_check" (fn [_] #js {:allowed #js ["read" "write" "bash"]}) 0)
+    (let [r (js-await ((:emit-collect events) "tool_access_check" #js {}))]
+      ;; intersection = read, write (order from first handler)
+      (-> (expect (vec (get r "allowed"))) (.toEqual #js ["read" "write"])))))
+
+(defn ^:async test-allowed-single-handler-passes []
+  (let [events (create-event-bus)]
+    ((:on events) "tool_access_check" (fn [_] #js {:allowed #js ["read"]}))
+    (let [r (js-await ((:emit-collect events) "tool_access_check" #js {}))]
+      (-> (expect (vec (get r "allowed"))) (.toEqual #js ["read"])))))
+
+(describe "events/tool_access_check allowed intersection" (fn []
+                                                            (it "intersects allowlists across handlers (most-restrictive)" test-allowed-intersects)
+                                                            (it "a single handler's allowlist passes through" test-allowed-single-handler-passes)))
 
 ;; ── emit-collect tests ───────────────────────────────────────
 

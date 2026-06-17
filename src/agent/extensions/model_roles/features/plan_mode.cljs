@@ -18,7 +18,8 @@
    defns called by sync wrappers; .-__state-atom compiles to .__state_atom."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [agent.utils.ui :refer [ui-prompt-ready?]]))
 
 (def ^:private plan-system-prompt
   "[PLAN MODE ACTIVE — read-only]
@@ -55,13 +56,32 @@ the user will approve the plan before execution begins.")
         model-id (or (:model cfg) (get cfg "model"))]
     (when (and provider model-id) (str provider "/" model-id))))
 
-(defn- restore-role-model!
-  "Re-apply the model for `role` via setModel. Needed because model_roles'
-   model_resolve handler SKIPS :default (its guard is (not= role default)),
-   so leaving plan mode back to :default would otherwise strand config.model
-   on the plan (opus) model."
+(defn default-model-spec
+  "The configured DEFAULT model spec: the startup base (cli stashes
+   :base-model-spec = -m / settings :model / fallback), falling back to the
+   :default role's own :model. NOT a hardcoded sonnet — so -m / settings :model
+   is honored. Exposed for tests."
+  [api]
+  (or (:base-model-spec (cur-state api))
+      (role-model-spec (settings api) :default)))
+
+(defn effective-model-spec
+  "The 'provider/model' spec a role resolves to: the CONFIGURED default for the
+   \"default\" role (so -m / settings :model is honored — model_resolve SKIPS
+   :default, so callers restoring it must compute this), else the role's own
+   model. The single resolver for /role, plan-exit restore, and the role list —
+   so the (= role \"default\") branch lives in ONE place. Exposed for /role + tests."
   [api role]
-  (when-let [spec (role-model-spec (settings api) role)]
+  (if (= (str role) "default")
+    (default-model-spec api)
+    (role-model-spec (settings api) role)))
+
+(defn- restore-role-model!
+  "Re-apply the model for `role` via setModel. Needed because model_resolve
+   SKIPS :default, so leaving plan mode back to :default would otherwise strand
+   config.model on the planner model."
+  [api role]
+  (when-let [spec (effective-model-spec api role)]
     (when (.-setModel api) (.setModel api spec))))
 
 (defn planner-spec
@@ -80,7 +100,7 @@ the user will approve the plan before execution begins.")
           (role-model-spec settings :deep)))))
 
 (defn- ui-available? [api]
-  (boolean (and (.-ui api) (.-available (.-ui api)) (.-select (.-ui api)))))
+  (ui-prompt-ready? (.-ui api)))
 
 (defn- notify [api msg level]
   (when (and (.-ui api) (.-notify (.-ui api)))
@@ -135,34 +155,39 @@ the user will approve the plan before execution begins.")
 ;; ---------------------------------------------------------------------------
 
 (defn enter!
-  "Engage plan mode: switch to the :plan role (engages read-only gating)
-   and remember the prior role so execute! can restore it."
+  "Engage plan mode: set the :permission-mode to 'plan' (read-only policy +
+   approval gate) and remember the prior MODE so execute!/cancel! can restore
+   it. The model role (:active-role) is left untouched — opusplan switches the
+   model during planning via on-plan-resolve (keyed on :plan-mode)."
   [api]
-  (let [s    (cur-state api)
-        prev (or (:active-role s) :default)]
+  (let [s         (cur-state api)
+        prev-mode (or (:permission-mode s) "default")]
     (swap! (state-atom api) assoc
-           :plan-prev-role (if (= prev :plan) :default prev)
-           :active-role    :plan
-           :plan-mode      true
-           :plan-executing false
+           :plan-prev-mode  (if (= prev-mode "plan") "default" prev-mode)
+           :permission-mode "plan"
+           :plan-mode       true
+           :plan-executing  false
            ;; fresh each plan session: re-enable the planner override even if a
            ;; prior session disabled it after an auth failure (flaw A).
            :plan-planner-unusable false
-           :plan-todos     [])
+           :plan-todos      [])
     (notify api "Plan mode ON — read-only. Draft a plan; approve before execution." "info")))
 
 (defn execute!
-  "Leave plan mode, restore the prior role + its model, and kick off
-   execution. Model is restored explicitly (model_resolve skips :default)."
+  "Leave plan mode, restore the prior permission mode, re-apply the model
+   role's model (opusplan left it on the planner), and kick off execution."
   [api]
-  (let [s     (cur-state api)
-        prev  (or (:plan-prev-role s) :default)
-        todos (:plan-todos s)]
+  (let [s         (cur-state api)
+        prev-mode (or (:plan-prev-mode s) "default")
+        role      (or (:active-role s) :default)
+        todos     (:plan-todos s)]
     (swap! (state-atom api) assoc
-           :plan-mode      false
-           :active-role    prev
-           :plan-executing (boolean (seq todos)))
-    (restore-role-model! api prev)
+           :plan-mode       false
+           :permission-mode prev-mode
+           :plan-executing  (boolean (seq todos)))
+    ;; restore the MODEL role's model (model_resolve skips :default, so the
+    ;; planner override would otherwise strand config.model on the planner).
+    (restore-role-model! api role)
     (notify api "Executing plan — full tool access restored." "info")
     (.sendUserMessage api
                       (if (seq todos)
@@ -171,13 +196,15 @@ the user will approve the plan before execution begins.")
                       #js {:deliverAs "followUp"})))
 
 (defn cancel!
-  "Leave plan mode without executing; restore prior role."
+  "Leave plan mode without executing; restore the prior permission mode + the
+   model role's model."
   [api]
-  (let [s    (cur-state api)
-        prev (or (:plan-prev-role s) :default)]
+  (let [s         (cur-state api)
+        prev-mode (or (:plan-prev-mode s) "default")
+        role      (or (:active-role s) :default)]
     (swap! (state-atom api) assoc
-           :plan-mode false :plan-executing false :active-role prev)
-    (restore-role-model! api prev)
+           :plan-mode false :plan-executing false :permission-mode prev-mode)
+    (restore-role-model! api role)
     (notify api "Plan mode OFF." "info")))
 
 ;; ---------------------------------------------------------------------------
@@ -207,29 +234,37 @@ the user will approve the plan before execution begins.")
    write artifact, run the approval gate. Runs on turn_finalize (not
    agent_end) so the loop awaits it and the follow-up it enqueues is drained
    in the same run — without blocking on unrelated agent_end handlers."
-  [api _data]
+  [api data]
   (let [s (cur-state api)]
     (when (:plan-mode s)
-      (let [text  (last-assistant-text (:messages s))
-            todos (extract-todos text)]
-        (when text
-          (swap! (state-atom api) assoc :plan-todos todos)
-          (write-artifact! text))
-        (cond
-          (auto-approve? api) (execute! api)
+      (if (and data (or (.-error data) (get data "error")))
+        ;; The planning turn errored (e.g. flaky provider). Don't auto-execute a
+        ;; non-existent plan — stay in plan mode and surface it so the gate is
+        ;; never silently skipped. The user can retry or /plan cancel.
+        (notify api "Plan turn failed — still in plan mode. Retry, or /plan cancel." "warn")
+        (let [text  (last-assistant-text (:messages s))
+              todos (extract-todos text)]
+          (when text
+            (swap! (state-atom api) assoc :plan-todos todos)
+            (write-artifact! text))
+          (cond
+            (auto-approve? api) (execute! api)
 
-          (ui-available? api)
-          (let [choice (js-await
-                        (.select (.-ui api) "Plan ready — what next?"
-                                 (clj->js ["Execute the plan" "Stay in plan mode" "Refine the plan"])))]
-            (cond
-              (and choice (str/starts-with? choice "Execute")) (execute! api)
-              (= choice "Refine the plan")
-              (let [refine (js-await (.input (.-ui api) "Refinement:" ""))]
-                (when (and refine (seq (.trim refine)))
-                  (.sendUserMessage api (.trim refine) #js {:deliverAs "followUp"})))
-              :else nil))
-          :else nil)))))
+            (ui-available? api)
+            (let [choice (js-await
+                          (.select (.-ui api) "Plan ready — what next?"
+                                   (clj->js ["Execute the plan" "Stay in plan mode" "Refine the plan"])))]
+              (cond
+                (and choice (str/starts-with? choice "Execute")) (execute! api)
+                (= choice "Refine the plan")
+                (let [refine (js-await (.input (.-ui api) "Refinement:" ""))]
+                  (when (and refine (seq (.trim refine)))
+                    (.sendUserMessage api (.trim refine) #js {:deliverAs "followUp"})))
+                :else nil))
+
+            ;; No UI and not auto-approve — notify instead of a silent no-op so
+            ;; the plan isn't left finished-but-invisible. Manual escape hatch.
+            :else (notify api "Plan ready — no UI to approve. Run /plan execute or /plan cancel." "info")))))))
 
 (defn step->text
   "Extract assistant text from a turn_end payload. turn_end emits the
@@ -306,9 +341,18 @@ the user will approve the plan before execution begins.")
         on-mres  (fn [data] (on-plan-resolve api data))
         on-perr  (fn [data] (on-plan-provider-error api data))
         plan-handler
-        (fn [_args _ctx]
-          (let [s (cur-state api)]
-            (if (:plan-mode s) (cancel! api) (enter! api))))]
+        ;; Bare toggle, plus explicit subcommands so the user can drive the
+        ;; transition manually when the auto-gate didn't fire (e.g. the turn
+        ;; errored, or there's no interactive UI): /plan execute | /plan cancel.
+        (fn [args _ctx]
+          (let [sub (.toLowerCase (str (or (first args) "")))
+                s   (cur-state api)]
+            (cond
+              (= sub "execute")
+              (if (:plan-mode s) (execute! api) (notify api "Not in plan mode." "info"))
+              (or (= sub "cancel") (= sub "stop"))
+              (if (:plan-mode s) (cancel! api) (notify api "Not in plan mode." "info"))
+              :else (if (:plan-mode s) (cancel! api) (enter! api)))))]
 
     (.on api "before_agent_start" on-bas)
     (.on api "turn_finalize" on-final)

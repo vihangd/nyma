@@ -97,7 +97,11 @@
                                  :active-executions   #{}
                                  :tool-calls          {}
                                  :active-skills       #{}
-                                 :active-role         :default})
+                                 ;; Two orthogonal axes: :active-role = MODEL role
+                                 ;; (drives the model); :permission-mode = permission
+                                 ;; mode (drives the approval policy + plan gate).
+                                 :active-role         :default
+                                 :permission-mode     "default"})
         ;; Event-sourced store shares the same atom as :state
         store             (create-agent-store @state state)]
     (let [agent {:events            events

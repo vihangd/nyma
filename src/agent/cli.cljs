@@ -12,6 +12,7 @@
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
+            [agent.extensions.model-roles.policy :as perm-policy]
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]))
@@ -96,7 +97,8 @@
             (catch :default e
               (js/console.warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
     {:model    ((:resolve provider-registry) provider model-id)
-     :provider provider}))
+     :provider provider
+     :model-id model-id}))
 
 (defn- resolve-tools
   "Returns an explicit tool restriction list, or nil if all builtins should be active.
@@ -140,6 +142,10 @@ Modes (default: interactive):
                          session_id, total_cost_usd, usage, duration_ms} for
                          headless orchestrators (e.g. cw).
       --mode <mode>      Explicit mode: interactive | print | json | rpc.
+      --permission-mode <m>  Initial permission mode: default | accept-edits |
+                         plan | full-auto. Interactive defaults to 'default'
+                         (asks before write/shell); headless defaults to
+                         'full-auto'. Switch at runtime with /mode.
 
 Model selection:
       --provider <name>  Provider id (anthropic, openai, google, or any
@@ -242,7 +248,8 @@ Examples:
                             :session      #js {:type "string"}
                             :fork         #js {:type "string"}
                             :no-session   #js {:type "boolean"}
-                            :output-format #js {:type "string"}}
+                            :output-format #js {:type "string"}
+                            :permission-mode #js {:type "string"}}
               :allowPositionals true})
 
         _ (when (:help values)
@@ -278,6 +285,12 @@ Examples:
             ;; line shows `<provider>/<model>` from the very first turn,
             ;; not just after a runtime /model swap.
             (set! (.-active-provider-name (:config agent)) (or provider "")))
+        ;; The configured DEFAULT model spec (-m / settings :model / fallback).
+        ;; The "default" role resolves to this — so /role default|reset and
+        ;; plan-exit restore the user's chosen model, not a hardcoded sonnet.
+        _ (when (and provider (:model-id resolved))
+            (swap! (:state agent) assoc :base-model-spec
+                   (str provider "/" (:model-id resolved))))
         api (create-extension-api agent)]
 
     ;; Filter active tools if --tools flag was used
@@ -286,6 +299,21 @@ Examples:
 
     ;; Attach session to agent so extensions can access it
     (reset! (:session agent) session)
+
+    ;; Initial permission mode (modes-as-roles). Interactive defaults to
+    ;; "default" (asks before write/shell/network — there's a UI to prompt).
+    ;; Headless print/json/rpc have NO UI, so an "ask" would dead-end on a
+    ;; deny; they default to "full-auto" (allow-all, preserving prior headless
+    ;; behavior so orchestrators keep working). --permission-mode overrides.
+    (let [headless? (contains? #{"print" "json" "rpc"} mode)
+          requested (:permission-mode values)
+          pm        (perm-policy/resolve-initial-mode requested headless?)]
+      ;; Warn on an invalid flag (resolve-initial-mode already fell back to the
+      ;; computed default so a typo'd headless flag still gets full-auto).
+      (when (and requested (not (perm-policy/mode? requested)))
+        (js/console.warn (str "[nyma] Unknown --permission-mode \"" requested
+                              "\"; using " pm ".")))
+      (swap! (:state agent) assoc :permission-mode pm))
 
     ;; Attach extension API to agent so UI can access it
     (set! (.-extension-api agent) api)

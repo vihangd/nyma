@@ -79,11 +79,14 @@
                  (do (swap! shared/suite-stats update-in [:permissions :remembered] inc)
                      #js {:decision "allow"})
 
-              ;; :needs-approval — persist to project settings for cross-session approval.
-              ;; The middleware fast-path then bypasses permission_request on future runs.
-              ;; security_analysis before_tool_call hooks still run — only the prompt is skipped.
-                 (do (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
-                     #js {:decision "allow_always_project"})))))
+              ;; :needs-approval — a command we have NOT vetted. Defer to the
+              ;; permission gate by asking the user (the permission-mode policy).
+              ;; The gate prompts (Allow / Allow always / Deny); "Allow always"
+              ;; persists so future runs skip via the middleware fast-path. (An
+              ;; allow VETTED above — :approved/:remembered — pre-empts this ask;
+              ;; full-auto mode's allow also pre-empts it, so headless still runs.)
+                 (do (swap! shared/suite-stats update-in [:permissions :needs-approval] (fnil inc 0))
+                     #js {:decision "ask"})))))
          90)
 
     ;; Return deactivator

@@ -2,12 +2,28 @@
   "Model roles: named presets (default, fast, deep, plan, commit) that map
    to provider/model pairs. Switch with /role <name>."
   (:require [clojure.string :as str]
+            [agent.events :as events]
+            [agent.extensions.model-roles.policy :as policy]
+            [agent.extensions.model-roles.status-segment :as status-seg]
             [agent.extensions.model-roles.features.plan-mode :as plan-mode]))
 
+;; Permission MODES are roles too (modes-as-roles): a role may carry a :policy
+;; mapping a tool CATEGORY (exec|write|read|network — from categorize-tool, the
+;; value arrives as data.category on permission_request) to a decision
+;; allow|ask|deny. The gate resolves a per-tool :permissions entry first, then
+;; the :policy by category. Roles without a :policy yield no decision (the gate
+;; defaults to allow) — so switching a MODEL role (fast/deep/…) or a read-only
+;; subagent role never silently denies. accept-edits/full-auto are model-LESS
+;; so they preserve whatever model is active (on-resolve skips setModel).
 (def ^:private default-roles
-  {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+  {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
+             :policy {"write" "ask" "exec" "ask" "network" "ask"}}
    :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
    :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+   ;; accept-edits: auto-approve edits, still ask before shell/network.
+   :accept-edits {:policy {"write" "allow" "exec" "ask" "network" "ask"}}
+   ;; full-auto: allow everything (Claude's bypass). No model → keep current.
+   :full-auto    {:policy {"read" "allow" "write" "allow" "exec" "allow" "network" "allow"}}
    ;; :plan MUST carry its read-only restrictions here, not only in
    ;; settings/manager defaults: settings :roles is shallow-merged, so a user
    ;; who defines any custom roles REPLACES the manager defaults wholesale.
@@ -19,6 +35,10 @@
              :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
              :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
    :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}})
+
+;; Permission-mode names + cycle order live in the policy ns (pure, testable).
+(def ^:private mode-cycle policy/mode-cycle)
+(def ^:private mode-set policy/mode-set)
 
 (defn- js-obj->map
   "Shallow-convert a plain JS object (from JSON.parse) to a CLJS map.
@@ -35,22 +55,26 @@
   (if (map? v) v (js-obj->map v)))
 
 (defn- get-roles
-  "Read roles map from settings, merged on top of built-in defaults.
-   User-defined roles override defaults; new role names are additive.
+  "Read roles from settings, merged onto the built-in defaults via
+   policy/build-roles: FIELD-level merge (a model-only override keeps the shipped
+   role's :allowed-tools/:permissions) + provider-aware inherit (a shipped role on
+   a non-default provider inherits the default model, so no cross-provider leak).
    Accepts both CLJS maps and plain JS objects (from JSON.parse)."
   [api]
   (let [settings   (when-let [get-fn (.-getSettings api)] (get-fn))
         raw-roles  (or (when settings (get settings "roles"))
                        (when settings (get settings :roles)))
-        ;; JSON.parse returns plain JS objects; (map? js-obj) is false in squint.
+        def-prov   (when settings (or (:provider settings) (get settings "provider")))
+        def-model  (when settings (or (:model settings) (get settings "model")))
         user-roles (cond
                      (map? raw-roles)    raw-roles
                      (some? raw-roles)   (js-obj->map raw-roles)
-                     :else               nil)]
-    (if user-roles
-      (merge default-roles
-             (into {} (map (fn [[k v]] [k (role-entry->clj v)]) user-roles)))
-      default-roles)))
+                     :else               nil)
+        user-norm  (when user-roles
+                     (into {} (map (fn [[k v]] [k (role-entry->clj v)]) user-roles)))]
+    (if-not user-norm
+      default-roles
+      (policy/build-roles default-roles user-norm def-prov def-model))))
 
 (defn- resolve-role-model
   "Given a role config {:provider :model}, resolve the model object via provider registry."
@@ -62,24 +86,72 @@
       (.setModel api (str provider "/" model-id)))))
 
 (defn- format-role-list
-  "Format roles map for display."
-  [roles active-role]
+  "Format roles map for display. `default-spec` (a 'provider/model' string) is
+   shown for the 'default' row so it reflects the CONFIGURED default (-m /
+   settings :model), not the role's hardcoded model."
+  [roles active-role & [default-spec]]
   (str/join "\n"
             (map (fn [[rname rconf]]
-                   (let [model-id (or (:model rconf) (get rconf "model") "?")
-                         provider (or (:provider rconf) (get rconf "provider") "?")
-                 ;; Squint: keywords ARE strings, so :default == "default".
+                   (let [;; Squint: keywords ARE strings, so :default == "default".
+                         model-piece
+                         (cond
+                           (and (= rname "default") default-spec) (str default-spec)
+                           (or (:model rconf) (get rconf "model"))
+                           (str (or (:provider rconf) (get rconf "provider") "?")
+                                "/" (or (:model rconf) (get rconf "model")))
+                           ;; model-less role (a permission mode) — no model pin.
+                           :else "(inherits model)")
                  ;; rname (map key) and active-role (state) are both strings.
                          marker   (if (= rname active-role) " ◀" "")]
                      (let [allowed (or (:allowed-tools rconf) (get rconf "allowed-tools"))
                            tools-hint (when (seq allowed) (str " [" (count allowed) " tools]"))]
-                       (str "  " rname " → " provider "/" model-id
+                       (str "  " rname " → " model-piece
                             (or tools-hint "") marker))))
                  roles)))
+
+;; ── permission modes (orthogonal to the model role) ──
+;; :permission-mode is a SECOND state slot, independent of :active-role (the
+;; model role). The mode drives the approval policy + plan gate; the role drives
+;; the model. Both show on the status line, so "fast + full-auto" coexist.
+(defn- current-mode
+  "The active permission mode string. enter!/execute!/cancel! always set
+   :permission-mode in lockstep with :plan-mode (enter! → \"plan\"), so the slot
+   alone is authoritative — no separate :plan-mode branch needed."
+  [api]
+  (str (or (:permission-mode (.getState api)) "default")))
+
+(defn- current-role
+  "The active MODEL role string."
+  [api]
+  (str (or (:active-role (.getState api)) "default")))
+
+(defn- next-mode [cur] (policy/next-mode cur))
+
+(defn- switch-mode!
+  "Switch the permission mode (NOT the model role). \"plan\" engages native plan
+   mode (enter!); any other mode leaves plan mode first (discarding the draft)
+   then sets :permission-mode. The model role is untouched."
+  [api mode ctx]
+  (let [state    (.getState api)
+        in-plan? (:plan-mode state)
+        ui       (.-ui ctx)]
+    (cond
+      (not (contains? mode-set mode))
+      (.notify ui (str "Unknown mode: \"" mode "\". Modes: " (str/join ", " mode-cycle)) "error")
+
+      (= mode "plan")
+      (if in-plan? (.notify ui "Already in plan mode." "info") (plan-mode/enter! api))
+
+      :else
+      (do
+        (when in-plan? (plan-mode/cancel! api))
+        (swap! (.-__state-atom api) assoc :permission-mode mode)
+        (.notify ui (str "Mode: " mode) "info")))))
 
 (defn ^:export default [api]
   (let [handlers (atom [])
         plan-deactivate (atom nil)
+        seg-deactivate  (atom nil)
 
         ;; Subscribe to model_resolve — ensure config.model reflects the active role.
         ;; /role already calls .setModel which updates config.model; we return nil
@@ -101,28 +173,43 @@
             ;; Return nil — loop falls back to config.model which setModel just set.
             nil))
 
-        ;; tool_access_check — restrict tools based on active role
+        ;; tool_access_check — restrict tools from BOTH axes: the permission
+        ;; mode (plan → read-only) AND the model role (commit → a subset). When
+        ;; both restrict, the allowed set is their intersection (most restrictive
+        ;; wins); when one restricts, use it; when neither, no restriction.
         on-tool-access
         (fn [_data]
           (let [state    (.getState api)
-                role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                role-cfg (get roles role)
-                allowed  (or (:allowed-tools role-cfg)
-                             (get role-cfg "allowed-tools"))]
-            (when (seq allowed)
+                mode-cfg (get roles (or (:permission-mode state) "default"))
+                role-cfg (get roles (or (:active-role state) :default))
+                ma       (or (:allowed-tools mode-cfg) (get mode-cfg "allowed-tools"))
+                ra       (or (:allowed-tools role-cfg) (get role-cfg "allowed-tools"))
+                ;; nil → no restriction; a vector (possibly EMPTY) → restrict to
+                ;; it. An empty intersection MUST be returned ({:allowed []} =
+                ;; zero tools), not dropped — else it resolves to "all tools".
+                allowed  (policy/combine-allowed-tools ma ra)]
+            (when (some? allowed)
               #js {:allowed (clj->js allowed)})))
 
-        ;; permission_request — deny/allow based on role permission map
+        ;; permission_request — resolve a decision from BOTH axes and COMBINE them
+        ;; by precedence (deny > allow > ask), so a permissive axis can't shadow a
+        ;; restrictive one: a role's per-tool deny survives even under full-auto,
+        ;; and plan's read-only deny survives a permissive role. (A plain `or`
+        ;; would let whichever axis answered first win.) resolve-decision checks
+        ;; per-tool :permissions first, then :policy by category; nil from both →
+        ;; the gate default (allow).
         on-permission
         (fn [data]
           (let [state    (.getState api)
-                role     (or (:active-role state) :default)
                 roles    (get-roles api)
-                role-cfg (get roles role)
-                perms    (or (:permissions role-cfg) (get role-cfg "permissions"))
-                tool     (str (.-tool data))]
-            (when-let [decision (get perms tool)]
+                mode-cfg (get roles (or (:permission-mode state) "default"))
+                role-cfg (get roles (or (:active-role state) :default))
+                tool     (str (.-tool data))
+                category (str (or (.-category data) (get data "category")))
+                mode-d   (policy/resolve-decision mode-cfg tool category)
+                role-d   (policy/resolve-decision role-cfg tool category)]
+            (when-let [decision (events/combine-decision mode-d role-d)]
               #js {:decision (str decision)})))]
 
     (.on api "model_resolve" on-resolve)
@@ -149,16 +236,18 @@
                                  ;; Squint: keywords are strings, so `current` is already the name.
                                  (let [msg (str "Active role: " current "\n\n"
                                                 "Available roles:\n"
-                                                (format-role-list roles current)
+                                                (format-role-list roles current (plan-mode/default-model-spec api))
                                                 "\n\nUsage: /role <name>")]
                                    (.notify (.-ui ctx) msg "info"))
 
-                 ;; "reset" — revert to default
-                                 (= role-name "reset")
-                                 (do
+                 ;; "reset" / "default" — revert to the CONFIGURED default model
+                 ;; (-m / settings :model), not the role's hardcoded model.
+                                 (or (= role-name "reset") (= role-name "default"))
+                                 (let [spec (plan-mode/default-model-spec api)]
                                    (.dispatch api "role-changed" {:role :default})
                                    (swap! (.-__state-atom api) assoc :active-role :default)
-                                   (.notify (.-ui ctx) "Role reset to default" "info"))
+                                   (when spec (.setModel api spec))
+                                   (.notify (.-ui ctx) (str "Role: default → " (or spec "default model")) "info"))
 
                  ;; Known role — switch (keywords are strings in squint, so
                  ;; role-name is already the lookup key).
@@ -187,10 +276,36 @@
                                    state   (.getState api)
                                    current (or (:active-role state) :default)]
                                (.notify (.-ui ctx)
-                                        (str "Model Roles:\n" (format-role-list roles current)))))})
+                                        (str "Model Roles:\n"
+                                             (format-role-list roles current (plan-mode/default-model-spec api))))))})
+
+    ;; /mode command — permission modes (modes-as-roles).
+    (.registerCommand api "mode"
+                      #js {:description "Switch permission mode: default | accept-edits | plan | full-auto | cycle"
+                           :handler
+                           (fn [args ctx]
+                             (let [arg (.toLowerCase (str (or (first args) "")))]
+                               (cond
+                                 (= arg "")
+                                 (.notify (.-ui ctx)
+                                          (str "Active mode: " (current-mode api)
+                                               "\nModes: " (str/join ", " mode-cycle)
+                                               "\nUsage: /mode <name> | /mode cycle")
+                                          "info")
+                                 (= arg "cycle")
+                                 (switch-mode! api (next-mode (current-mode api)) ctx)
+                                 :else
+                                 (switch-mode! api arg ctx))))})
 
     ;; Native plan mode (layered on the :plan role).
     (reset! plan-deactivate (plan-mode/activate api))
+
+    ;; Status-line segments: the model role (plain) + the permission mode
+    ;; (color-coded), shown together — replaces the core inline [role].
+    (reset! seg-deactivate
+            (status-seg/register! api
+                                  (fn [] (current-role api))
+                                  (fn [] (current-mode api))))
 
     ;; Cleanup
     (fn []
@@ -198,4 +313,6 @@
         (.off api event handler))
       (.unregisterCommand api "role")
       (.unregisterCommand api "roles")
-      (when @plan-deactivate (@plan-deactivate)))))
+      (.unregisterCommand api "mode")
+      (when @plan-deactivate (@plan-deactivate))
+      (when @seg-deactivate (@seg-deactivate)))))

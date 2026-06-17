@@ -38,9 +38,18 @@
                             :left-segments nil
                             :right-segments nil
                             :separator nil}
-   :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+   ;; A role may carry a permission :policy mapping a tool CATEGORY
+   ;; (exec|write|read|network) → allow|ask|deny. This is the permission-MODE
+   ;; axis (modes-as-roles): /mode switches the active role; the gate asks/denies
+   ;; per the policy. :default asks before writes/shell/network (the safe Claude
+   ;; default); accept-edits auto-approves edits; full-auto allows everything.
+   :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
+                     :policy {"write" "ask" "exec" "ask" "network" "ask"}}
            :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
            :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+           ;; Permission-mode roles (model-less → preserve the active model).
+           :accept-edits {:policy {"write" "allow" "exec" "ask" "network" "ask"}}
+           :full-auto    {:policy {"read" "allow" "write" "allow" "exec" "allow" "network" "allow"}}
            ;; Stronger reviewer for the `advisor` tool / `/advisor` cmd.
            ;; Falls back to :deep, then current model, if unset by user.
            :advisor {:provider "anthropic" :model "claude-opus-4-20250514"}

@@ -39,28 +39,79 @@
                                               marked (pm/mark-done todos "nothing done yet")]
                                           (-> (expect (some :completed marked)) (.toBeFalsy)))))))
 
+;; The "default" role/mode resolves to the CONFIGURED default model (the cli
+;; base spec = -m / settings :model), NOT the role's hardcoded sonnet — so -m
+;; survives /role default|reset and plan-exit.
+(describe "plan-mode:default-model-spec"
+          (fn []
+            (it "prefers the cli base-model-spec (-m / settings :model)"
+                (fn []
+                  (let [api #js {:getState    (fn [] {:base-model-spec "openai/gpt-5"})
+                                 :getSettings (fn [] {:roles {:default {:provider "anthropic"
+                                                                        :model "claude-sonnet-4-20250514"}}})}]
+                    (-> (expect (pm/default-model-spec api)) (.toBe "openai/gpt-5")))))
+
+            (it "falls back to the :default role's model when no base-spec (non-cli paths)"
+                (fn []
+                  (let [api #js {:getState    (fn [] {})
+                                 :getSettings (fn [] {:roles {:default {:provider "anthropic"
+                                                                        :model "claude-sonnet-4-20250514"}}})}]
+                    (-> (expect (pm/default-model-spec api)) (.toBe "anthropic/claude-sonnet-4-20250514")))))
+
+            ;; B6: effective-model-spec is the single resolver — "default" → base
+            ;; spec, any other role → that role's own model.
+            (it "effective-model-spec routes default → base-spec, else role model"
+                (fn []
+                  (let [api #js {:getState    (fn [] {:base-model-spec "openai/gpt-5"})
+                                 :getSettings (fn [] {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}})}]
+                    (-> (expect (pm/effective-model-spec api "default")) (.toBe "openai/gpt-5"))
+                    (-> (expect (pm/effective-model-spec api :deep)) (.toBe "anthropic/claude-opus-4-20250514")))))))
+
+;; Regression: execute! on the default role must restore the configured base
+;; model (honors -m), not the hardcoded sonnet.
+(describe "plan-mode:default-restore"
+          (fn []
+            (it "execute! on the default role restores the cli base model"
+                (fn []
+                  (let [st        (atom {:active-role :default :permission-mode "plan" :plan-mode true
+                                         :plan-prev-mode "default" :plan-todos []
+                                         :base-model-spec "openai/gpt-5"})
+                        set-calls (atom [])
+                        api #js {:__state_atom    st
+                                 :getState        (fn [] @st)
+                                 :getSettings     (fn [] {:roles {:default {:provider "anthropic"
+                                                                            :model "claude-sonnet-4-20250514"}}})
+                                 :setModel        (fn [m] (swap! set-calls conj m))
+                                 :sendUserMessage (fn [_t _o] nil)
+                                 :ui              #js {:available false :notify (fn [_ _] nil)}}]
+                    (pm/execute! api)
+                    (-> (expect (some #(= % "openai/gpt-5") @set-calls)) (.toBeTruthy))
+                    ;; the hardcoded sonnet must NOT be applied
+                    (-> (expect (some #(= % "anthropic/claude-sonnet-4-20250514") @set-calls)) (.toBeFalsy)))))))
+
 ;; Regression: leaving plan mode must restore the prior role's model.
 ;; model_roles' model_resolve SKIPS :default, so plan mode must compute
 ;; the spec itself — otherwise execution strands on the plan (opus) model.
 (describe "plan-mode:role-model-spec" (fn []
-  (it "produces a spec for :default (the bug — must NOT be nil)"
-    (fn []
-      (-> (expect (pm/role-model-spec defaults :default))
-          (.toBe "anthropic/claude-sonnet-4-20250514"))))
+                                        (it "produces a spec for :default (the bug — must NOT be nil)"
+                                            (fn []
+                                              (-> (expect (pm/role-model-spec defaults :default))
+                                                  (.toBe "anthropic/claude-sonnet-4-20250514"))))
 
-  (it "default restore differs from the plan (opus) model"
-    (fn []
-      (-> (expect (pm/role-model-spec defaults :default))
-          (.not.toBe (pm/role-model-spec defaults :plan)))))
+                                        (it "default restore differs from the plan (opus) model"
+                                            (fn []
+                                              (-> (expect (pm/role-model-spec defaults :default))
+                                                  (.not.toBe (pm/role-model-spec defaults :plan)))))
 
-  (it "tolerates string-keyed settings (user JSON)"
-    (fn []
-      (let [s #js {"roles" #js {"default" #js {"provider" "openai" "model" "gpt-5"}}}]
-        (-> (expect (pm/role-model-spec s "default")) (.toBe "openai/gpt-5")))))
+                                        (it "tolerates string-keyed settings (user JSON)"
+                                            (fn []
+                                              (let [s #js {"roles" #js {"default" #js {"provider" "openai" "model" "gpt-5"}}}]
+                                                (-> (expect (pm/role-model-spec s "default")) (.toBe "openai/gpt-5")))))
 
-  (it "returns nil for an unknown role"
-    (fn []
-      (-> (expect (pm/role-model-spec defaults :nope)) (.toBeNil))))))
+                                        (it "returns nil for an unknown role"
+                                            (fn []
+                                              (-> (expect (pm/role-model-spec defaults :nope)) (.toBeNil))))))
 
 ;; Isolation property the subagent relies on: a freshly created agent
 ;; (the shape used for a child) has no session attached and its tool set
@@ -110,37 +161,42 @@
 
 (describe "plan-mode:transitions"
           (fn []
-            (it "enter! engages the :plan role and remembers the prior role"
+            (it "enter! engages plan MODE (not the model role) and remembers prior mode"
                 (fn []
-                  (let [st (atom {:active-role :default :messages []})
+                  (let [st (atom {:active-role :deep :permission-mode "accept-edits" :messages []})
                         api (stub-api st (atom []))]
                     (pm/enter! api)
                     (-> (expect (:plan-mode @st)) (.toBe true))
-                    (-> (expect (:active-role @st)) (.toBe :plan))
-                    (-> (expect (:plan-prev-role @st)) (.toBe :default)))))
+                    (-> (expect (:permission-mode @st)) (.toBe "plan"))
+                    ;; model role untouched
+                    (-> (expect (:active-role @st)) (.toBe :deep))
+                    (-> (expect (:plan-prev-mode @st)) (.toBe "accept-edits")))))
 
-            (it "execute! restores the prior role and sends a follow-up"
+            (it "execute! restores the prior mode, keeps the role, sends a follow-up"
                 (fn []
-                  (let [st (atom {:active-role :plan :plan-mode true
-                                  :plan-prev-role :default
+                  (let [st (atom {:active-role :deep :permission-mode "plan" :plan-mode true
+                                  :plan-prev-mode "accept-edits"
                                   :plan-todos [{:step 1 :text "do x" :completed false}]})
                         sent (atom [])
                         api (stub-api st sent)]
                     (pm/execute! api)
                     (-> (expect (:plan-mode @st)) (.toBe false))
-                    (-> (expect (:active-role @st)) (.toBe :default))
+                    (-> (expect (:permission-mode @st)) (.toBe "accept-edits"))
+                    (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (:plan-executing @st)) (.toBe true))
                     (-> (expect (count @sent)) (.toBe 1))
                     (-> (expect (first @sent)) (.toContain "do x")))))
 
-            (it "cancel! leaves plan mode without executing"
+            (it "cancel! restores the prior mode without executing"
                 (fn []
-                  (let [st (atom {:active-role :plan :plan-mode true :plan-prev-role :default})
+                  (let [st (atom {:active-role :deep :permission-mode "plan" :plan-mode true
+                                  :plan-prev-mode "default"})
                         sent (atom [])
                         api (stub-api st sent)]
                     (pm/cancel! api)
                     (-> (expect (:plan-mode @st)) (.toBe false))
-                    (-> (expect (:active-role @st)) (.toBe :default))
+                    (-> (expect (:permission-mode @st)) (.toBe "default"))
+                    (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (count @sent)) (.toBe 0)))))))
 
 ;; ── /plan guard: only register /plan when no extension owns a *__plan ──
@@ -250,6 +306,100 @@
                         api (oc-api st oc-settings (atom []))
                         r  (pm/on-plan-provider-error api #js {:message "401 unauthorized"})]
                     (-> (expect r) (.toBeFalsy)))))))
+
+;; ── Phase 1: gate robustness — never silently skip ──
+(defn- notify-api [st sent notes]
+  (let [settings {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+                          :plan    {:provider "anthropic" :model "claude-opus-4-20250514"}}
+                  :plan-mode {:auto-approve false}}]
+    #js {:__state_atom    st
+         :getState        (fn [] @st)
+         :getSettings     (fn [] settings)
+         :setModel        (fn [_m] nil)
+         :sendUserMessage (fn [t _o] (swap! sent conj t))
+         :ui              #js {:available false
+                               :notify (fn [m _l] (swap! notes conj m))}}))
+
+(describe "plan-mode:gate-robustness"
+          (fn []
+            (it "a failed turn ({:error true}) notifies and does NOT execute"
+                (fn []
+                  (let [st    (atom {:plan-mode true :active-role :plan :plan-prev-role :default
+                                     :messages [{:role "assistant" :content "Plan:\n1. step"}]})
+                        sent  (atom [])
+                        notes (atom [])
+                        api   (notify-api st sent notes)]
+                    ;; on-turn-finalize is async (Squint awaits the condition) — return the promise
+                    (-> (pm/on-turn-finalize api #js {:error true})
+                        (.then (fn [_]
+                                 ;; stays in plan mode, no follow-up sent, surfaced via notify
+                                 (-> (expect (:plan-mode @st)) (.toBe true))
+                                 (-> (expect (count @sent)) (.toBe 0))
+                                 (-> (expect (some #(.includes % "failed") @notes)) (.toBeTruthy))))))))
+
+            (it "no UI + not auto-approve notifies instead of a silent no-op"
+                (fn []
+                  (let [st    (atom {:plan-mode true :active-role :plan :plan-prev-role :default
+                                     :messages [{:role "assistant" :content "Plan:\n1. do x"}]})
+                        sent  (atom [])
+                        notes (atom [])
+                        api   (notify-api st sent notes)]
+                    (-> (pm/on-turn-finalize api #js {:error false})
+                        (.then (fn [_]
+                                 ;; gate could not prompt → stays in plan mode, notified (not silent)
+                                 (-> (expect (:plan-mode @st)) (.toBe true))
+                                 (-> (expect (count @sent)) (.toBe 0))
+                                 (-> (expect (some #(.includes % "no UI") @notes)) (.toBeTruthy))))))))))
+
+;; ── Phase 1: manual /plan execute|cancel escape hatch ──
+(defn- cmd-api [st sent notes cmds]
+  (let [settings {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+                          :plan    {:provider "anthropic" :model "claude-opus-4-20250514"}}
+                  :plan-mode {:auto-approve false}}]
+    #js {:__state_atom      st
+         :getState          (fn [] @st)
+         :getSettings       (fn [] settings)
+         :setModel          (fn [_m] nil)
+         :sendUserMessage   (fn [t _o] (swap! sent conj t))
+         :ui                #js {:available false :notify (fn [m _l] (swap! notes conj m))}
+         :getCommands       (fn [] @cmds)
+         :registerCommand   (fn [n o] (swap! cmds assoc n o))
+         :unregisterCommand (fn [_n] nil)
+         :on                (fn [_e _h] nil)
+         :off               (fn [_e _h] nil)}))
+
+(describe "plan-mode:plan-subcommands"
+          (fn []
+            (it "/plan execute executes the plan when in plan mode"
+                (fn []
+                  (let [st   (atom {:plan-mode true :active-role :plan :plan-prev-role :default
+                                    :plan-todos [{:step 1 :text "do x" :completed false}]})
+                        sent (atom []) notes (atom []) cmds (atom {})
+                        api  (cmd-api st sent notes cmds)]
+                    (pm/activate api)
+                    ((.-handler (get @cmds "planmode")) #js ["execute"] nil)
+                    (-> (expect (:plan-mode @st)) (.toBe false))
+                    (-> (expect (count @sent)) (.toBe 1)))))
+
+            (it "/plan cancel leaves plan mode without executing"
+                (fn []
+                  (let [st   (atom {:plan-mode true :active-role :plan :plan-prev-role :default})
+                        sent (atom []) notes (atom []) cmds (atom {})
+                        api  (cmd-api st sent notes cmds)]
+                    (pm/activate api)
+                    ((.-handler (get @cmds "planmode")) #js ["cancel"] nil)
+                    (-> (expect (:plan-mode @st)) (.toBe false))
+                    (-> (expect (count @sent)) (.toBe 0)))))
+
+            (it "/plan execute when NOT in plan mode is a no-op + notifies"
+                (fn []
+                  (let [st   (atom {:plan-mode false :active-role :default})
+                        sent (atom []) notes (atom []) cmds (atom {})
+                        api  (cmd-api st sent notes cmds)]
+                    (pm/activate api)
+                    ((.-handler (get @cmds "planmode")) #js ["execute"] nil)
+                    (-> (expect (count @sent)) (.toBe 0))
+                    (-> (expect (some #(.includes % "Not in plan mode") @notes)) (.toBeTruthy)))))))
 
 ;; flaw D — priority ordering: the -10 handler is the last writer
 (describe "plan-mode:model-resolve-ordering"

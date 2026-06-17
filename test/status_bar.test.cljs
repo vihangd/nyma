@@ -110,39 +110,10 @@
                                           (.setState bar nil)
                                           (-> (expect (.includes (render-bar bar 80) "m1")) (.toBe true)))))))
 
-;;; ─── role display (regression: name-not-defined) ─────────────────────────
-
-(describe "status-bar/role" (fn []
-                              (it "hides role when default"
-                                  (fn []
-                                    (let [bar (create-status-bar theme)]
-                                      (.setState bar {:role "default"})
-                                      (-> (expect (.includes (render-bar bar 80) "[default]")) (.toBe false)))))
-
-                              (it "hides role when nil"
-                                  (fn []
-                                    (let [bar (create-status-bar theme)]
-                                      (.setState bar {:role nil})
-                                      (let [text (render-bar bar 80)]
-                                        (-> (expect (.includes text "[")) (.toBe false))))))
-
-                              (it "shows non-default role in brackets"
-                                  (fn []
-                                    (let [bar (create-status-bar theme)]
-                                      (.setState bar {:role "plan"})
-                                      (-> (expect (.includes (render-bar bar 80) "[plan]")) (.toBe true)))))
-
-                              (it "shows build role"
-                                  (fn []
-                                    (let [bar (create-status-bar theme)]
-                                      (.setState bar {:role "build"})
-                                      (-> (expect (.includes (render-bar bar 80) "[build]")) (.toBe true)))))
-
-                              (it "shows fast role"
-                                  (fn []
-                                    (let [bar (create-status-bar theme)]
-                                      (.setState bar {:role "fast"})
-                                      (-> (expect (.includes (render-bar bar 80) "[fast]")) (.toBe true)))))))
+;; Role/mode display moved OUT of the status-bar core into the model_roles
+;; status SEGMENT (color-coded) — see model_roles_modes.test render-role tests.
+;; The bar no longer renders an inline [role]; segments are appended by the
+;; extension at runtime.
 
 ;;; ─── width handling ───────────────────────────────────────────────────────
 

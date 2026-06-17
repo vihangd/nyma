@@ -204,130 +204,150 @@
               provider-result (js-await
                                (emit-collect "before_provider_request" st-config))]
 
-          ;; If before_provider_request blocked, skip LLM call
-          (if (get provider-result "block")
-            (let [block-msg (or (get provider-result "reason") "Blocked by extension")]
-              (if-let [store (:store agent)]
-                ((:dispatch! store) :message-added {:message {:role "assistant" :content block-msg}})
-                (swap! state update :messages conj {:role "assistant" :content block-msg}))
-              (emit "agent_end" {:text block-msg :usage nil}))
+          ;; Wrap the turn so turn_finalize ALWAYS fires — on the block path, the
+          ;; normal path, AND when the provider errors. turn-error captures a
+          ;; thrown provider error so the post-turn gate still runs before we
+          ;; re-surface it. Without this, a flaky planning turn skipped
+          ;; turn_finalize and left plan mode silently stuck ON.
+          (let [turn-error (atom nil)
+                ;; A block is NOT a real turn outcome (no plan/answer produced) —
+                ;; flag it so turn_finalize carries error=true and the plan gate
+                ;; skips (notifies) instead of running its approval flow on the
+                ;; block message. Distinct from turn-error: a block still takes
+                ;; the drain path, not the throw path.
+                blocked?   (boolean (get provider-result "block"))]
+           ;; If before_provider_request blocked, skip LLM call
+            (if (get provider-result "block")
+              (let [block-msg (or (get provider-result "reason") "Blocked by extension")]
+                (if-let [store (:store agent)]
+                  ((:dispatch! store) :message-added {:message {:role "assistant" :content block-msg}})
+                  (swap! state update :messages conj {:role "assistant" :content block-msg}))
+                (emit "agent_end" {:text block-msg :usage nil}))
 
             ;; Normal LLM call
-            (do
-              (emit "turn_start" {})
+              (try
+                (emit "turn_start" {})
 
               ;; G1/G2 — retry loop: stream_filter can abort and re-run up to 2 times
-              (loop [attempt 0]
-                (reset! (:retry-state agent) nil)
+                (loop [attempt 0]
+                  (reset! (:retry-state agent) nil)
 
                 ;; AI SDK call — with provider_error emit-collect fallback
-                (let [result
-                      (try
-                        (js-await (streamText st-config))
-                        (catch :default e
-                          (let [err-result (js-await
-                                            (emit-collect "provider_error"
-                                                          #js {:error   e
-                                                               :message (.-message e)
-                                                               :model   model-id
-                                                               :config  st-config}))]
-                            (if (get err-result "retry")
-                              (js-await (streamText st-config))
-                              (throw e)))))
-                      accumulated (atom "")
-                      aborted     (atom false)]
+                  (let [result
+                        (try
+                          (js-await (streamText st-config))
+                          (catch :default e
+                            (let [err-result (js-await
+                                              (emit-collect "provider_error"
+                                                            #js {:error   e
+                                                                 :message (.-message e)
+                                                                 :model   model-id
+                                                                 :config  st-config}))]
+                              (if (get err-result "retry")
+                                (js-await (streamText st-config))
+                                (throw e)))))
+                        accumulated (atom "")
+                        aborted     (atom false)]
 
                   ;; Stream events with stream_filter on text deltas
-                  (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
-                                    (.-fullStream result))]
-                    (loop []
-                      (let [chunk (js-await (.next iter))]
-                        (when (and (not (.-done chunk)) (not @aborted))
-                          (let [chunk-val (.-value chunk)
-                                evt-type  (event-type chunk-val)]
-                            (if (= evt-type "message_update")
-                              (do
-                                (swap! accumulated str (or (.-textDelta chunk-val) ""))
-                                (let [filter-result
-                                      (js-await
-                                       (emit-collect "stream_filter"
-                                                     #js {:delta @accumulated
-                                                          :chunk (or (.-textDelta chunk-val) "")
-                                                          :type  evt-type}))]
-                                  (when (get filter-result "abort")
-                                    (reset! aborted true)
-                                    (reset! (:retry-state agent)
-                                            {:reason (get filter-result "reason")
-                                             :inject (or (get filter-result "inject") [])})))
-                                (when-not @aborted (emit evt-type chunk-val)))
-                              (emit evt-type chunk-val)))
-                          (when-not @aborted (recur))))))
+                    (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
+                                      (.-fullStream result))]
+                      (loop []
+                        (let [chunk (js-await (.next iter))]
+                          (when (and (not (.-done chunk)) (not @aborted))
+                            (let [chunk-val (.-value chunk)
+                                  evt-type  (event-type chunk-val)]
+                              (if (= evt-type "message_update")
+                                (do
+                                  (swap! accumulated str (or (.-textDelta chunk-val) ""))
+                                  (let [filter-result
+                                        (js-await
+                                         (emit-collect "stream_filter"
+                                                       #js {:delta @accumulated
+                                                            :chunk (or (.-textDelta chunk-val) "")
+                                                            :type  evt-type}))]
+                                    (when (get filter-result "abort")
+                                      (reset! aborted true)
+                                      (reset! (:retry-state agent)
+                                              {:reason (get filter-result "reason")
+                                               :inject (or (get filter-result "inject") [])})))
+                                  (when-not @aborted (emit evt-type chunk-val)))
+                                (emit evt-type chunk-val)))
+                            (when-not @aborted (recur))))))
 
                   ;; Aborted → inject messages and retry (max 2 times)
-                  (if-let [retry @(:retry-state agent)]
-                    (do
-                      (reset! (:retry-state agent) nil)
-                      (doseq [msg (:inject retry)]
-                        (if-let [store (:store agent)]
-                          ((:dispatch! store) :message-added {:message msg})
-                          (swap! state update :messages conj msg)))
-                      (if (< attempt 2)
-                        (recur (inc attempt))
+                    (if-let [retry @(:retry-state agent)]
+                      (do
+                        (reset! (:retry-state agent) nil)
+                        (doseq [msg (:inject retry)]
+                          (if-let [store (:store agent)]
+                            ((:dispatch! store) :message-added {:message msg})
+                            (swap! state update :messages conj msg)))
+                        (if (< attempt 2)
+                          (recur (inc attempt))
                         ;; Max retries exceeded
-                        (emit "agent_end" {:text         @accumulated
-                                           :usage        nil
-                                           :finishReason "stream-filter-aborted"})))
+                          (emit "agent_end" {:text         @accumulated
+                                             :usage        nil
+                                             :finishReason "stream-filter-aborted"})))
 
                     ;; Normal completion — capture final state, track usage
-                    (let [final-text     (js-await (.-text result))
-                          usage          (js-await (.-totalUsage result))
-                          finish-reason  (try (js-await (.-finishReason result))
-                                              (catch :default _ "unknown"))
-                          store          (:store agent)]
+                      (let [final-text     (js-await (.-text result))
+                            usage          (js-await (.-totalUsage result))
+                            finish-reason  (try (js-await (.-finishReason result))
+                                                (catch :default _ "unknown"))
+                            store          (:store agent)]
 
                       ;; message_before_store — extensions can modify content before storage
-                      (let [store-result (js-await
-                                          (emit-collect "message_before_store"
-                                                        #js {:role    "assistant"
-                                                             :content final-text
-                                                             :model   model-id}))
-                            final-text   (or (get store-result "content") final-text)]
-                        (if store
-                          ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
-                          (swap! state update :messages conj {:role "assistant" :content final-text})))
+                        (let [store-result (js-await
+                                            (emit-collect "message_before_store"
+                                                          #js {:role    "assistant"
+                                                               :content final-text
+                                                               :model   model-id}))
+                              final-text   (or (get store-result "content") final-text)]
+                          (if store
+                            ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
+                            (swap! state update :messages conj {:role "assistant" :content final-text})))
 
                       ;; Dispatch usage to event-sourced store
-                      (when (and usage store)
-                        (let [input-tokens  (or (.-inputTokens usage) 0)
-                              output-tokens (or (.-outputTokens usage) 0)
-                              cost-model-id (str (:model (:config agent)))
-                              cost          (calculate-cost cost-model-id input-tokens output-tokens)]
-                          ((:dispatch! store) :usage-updated
-                                              {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
+                        (when (and usage store)
+                          (let [input-tokens  (or (.-inputTokens usage) 0)
+                                output-tokens (or (.-outputTokens usage) 0)
+                                cost-model-id (str (:model (:config agent)))
+                                cost          (calculate-cost cost-model-id input-tokens output-tokens)]
+                            ((:dispatch! store) :usage-updated
+                                                {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
                           ;; after_provider_request — inform extensions of usage/cache metrics
-                          (emit "after_provider_request"
-                                #js {:usage        #js {:inputTokens  input-tokens
-                                                        :outputTokens output-tokens
-                                                        :cost         cost}
-                                     :model        cost-model-id
-                                     :cachedTokens (.-cachedTokens usage)
-                                     :turnCount    (or (:turn-count @state) 0)})))
+                            (emit "after_provider_request"
+                                  #js {:usage        #js {:inputTokens  input-tokens
+                                                          :outputTokens output-tokens
+                                                          :cost         cost}
+                                       :model        cost-model-id
+                                       :cachedTokens (.-cachedTokens usage)
+                                       :turnCount    (or (:turn-count @state) 0)})))
 
                       ;; agent_end stays SYNC fire-and-forget so slow external
                       ;; handlers (Stop hooks, gateway sends) never block the
                       ;; loop. Post-turn handlers that must enqueue a follow-up
                       ;; before the drain use the awaited turn_finalize below.
-                      (emit "agent_end" {:text         final-text
-                                         :usage        usage
-                                         :finishReason finish-reason})))))
+                        (emit "agent_end" {:text         final-text
+                                           :usage        usage
+                                           :finishReason finish-reason})))))
+              ;; Capture a provider error so turn_finalize still runs below.
+                (catch :default e (reset! turn-error e))))
 
-              ;; turn_finalize — awaited post-turn boundary. Fires after
-              ;; agent_end (normal + abort paths both reach here), BEFORE the
-              ;; follow-queue drain, so a handler (e.g. plan-mode's approval
-              ;; gate) can enqueue a follow-up that the drain then picks up.
-              (js-await ((:emit-async events) "turn_finalize" {}))
+           ;; turn_finalize — awaited post-turn boundary. ALWAYS fires: block,
+           ;; normal, AND error paths all reach here (the try/catch above captures
+           ;; provider errors). Fires BEFORE the follow-queue drain so a handler
+           ;; (e.g. plan-mode's approval gate) can enqueue a follow-up that the
+           ;; drain then picks up. {:error bool} lets handlers skip side effects
+           ;; (e.g. auto-execute) when the turn failed.
+            (js-await ((:emit-async events) "turn_finalize"
+                                            #js {:error (or (boolean @turn-error) blocked?)}))
 
-              ;; Process follow-up queue — outside retry loop, recur → outer run-loop
+            (if @turn-error
+             ;; Surface the error after the gate had its chance (don't drain).
+              (throw @turn-error)
+             ;; Process follow-up queue — recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]
                 (dbg/debug "loop/follow-queue"
                            (str "drain content: " (.slice (str (:content next)) 0 200)
