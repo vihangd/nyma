@@ -305,8 +305,17 @@
                     ;; Normal completion — capture final state, track usage
                       (let [final-text     (js-await (.-text result))
                             usage          (js-await (.-totalUsage result))
-                            finish-reason  (try (js-await (.-finishReason result))
-                                                (catch :default _ "unknown"))
+                            ;; Normalize finishReason to a plain string here, at
+                            ;; the single emit point, so every agent_end consumer
+                            ;; (finalize_warn, spec_driven, …) sees a string.
+                            ;; custom_provider_claude_native emits it as
+                            ;; #js {:unified "stop" :raw "end_turn"}.
+                            finish-reason  (let [fr (try (js-await (.-finishReason result))
+                                                         (catch :default _ "unknown"))]
+                                             (cond
+                                               (string? fr) fr
+                                               (and (object? fr) (.-unified fr)) (str (.-unified fr))
+                                               :else (str fr)))
                             store          (:store agent)]
 
                       ;; message_before_store — extensions can modify content before storage

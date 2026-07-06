@@ -3,10 +3,12 @@
 
    model_roles maps name→model.  This maps model→tuning:
      settings[\"small-model\"][\"model-profiles\"][\"provider/model\"] = {
-       contextLimit     <number>
+       contextLimit     <number>   ; NOT consumed — no clean context-budget hook
+                                 ; exists without coupling into token_suite;
+                                 ; deferred (use token_suite / compaction instead)
        thinking         \"off\"|\"low\"|\"medium\"|\"high\"|\"xhigh\"
        temperature      <0..1>
-       resultCap        <chars>   ; overrides token-suite truncation cap
+       resultCap        <chars>   ; cap each tool result to N chars (self-contained)
        allowedTools     [\"read\",\"write\",...]  ; narrows the tool set
        editStrategy     \"patch\"|\"whole\"      ; Aider-style per-model format
      }
@@ -15,6 +17,7 @@
      model_resolve          — read active model, apply thinking level
      before_provider_request — inject temperature / providerOptions
      tool_access_check      — apply allowedTools allowlist
+     addMiddleware :leave   — cap tool results to resultCap chars
   "
   (:require [agent.extensions.small-model.shared :as shared]
             [clojure.string :as str]))
@@ -67,6 +70,21 @@
     ("fuzzy" "patch") #{"edit"}
     #{}))
 
+(defn cap-result
+  "Cap a tool result to ~`cap` chars, keeping a head AND tail slice so the end
+   of the output (where errors/results often land) survives — the same intent
+   as token_suite's line-based `truncate-head-tail`, but in chars to match the
+   per-model `resultCap` unit. Returns the result unchanged when cap is
+   unset/non-positive or it already fits."
+  [result cap]
+  (if (and (number? cap) (pos? cap) (string? result) (> (count result) cap))
+    (let [head (js/Math.floor (* cap 0.7))
+          tail (- cap head)]
+      (str (.slice result 0 head)
+           "\n…[" (- (count result) cap) " chars truncated by small-model profile]…\n"
+           (.slice result (- (count result) tail))))
+    result))
+
 ;; ── Activation ───────────────────────────────────────────────────
 
 (defn activate
@@ -115,7 +133,21 @@
                                :else         nil)
                   final  (when base (vec (remove #(contains? hide (str %)) base)))]
               (when final
-                #js {:allowed (clj->js final)}))))]
+                #js {:allowed (clj->js final)}))))
+
+        ;; addMiddleware :leave — cap each tool result to resultCap chars so a
+        ;; weak model's context isn't blown by one huge tool output. Profile
+        ;; value is read per-call so it tracks the active model.
+        result-cap-mw
+        #js {:name  "small-model/profiles-result-cap"
+             :leave (fn [ctx]
+                      (when-let [p (profile-for config api)]
+                        (let [cap (or (:result-cap p) (get p "resultCap"))
+                              r   (.-result ctx)
+                              capped (cap-result r cap)]
+                          (when (not= capped r)
+                            (aset ctx "result" capped))))
+                      ctx)}]
 
     (.on api "model_resolve" on-resolve)
     (swap! handlers conj ["model_resolve" on-resolve])
@@ -126,7 +158,10 @@
     (.on api "tool_access_check" on-tool-access)
     (swap! handlers conj ["tool_access_check" on-tool-access])
 
+    (.addMiddleware api result-cap-mw)
+
     ;; Cleanup
     (fn []
       (doseq [[event handler] @handlers]
-        (.off api event handler)))))
+        (.off api event handler))
+      (.removeMiddleware api "small-model/profiles-result-cap"))))

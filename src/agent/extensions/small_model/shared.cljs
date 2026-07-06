@@ -30,7 +30,17 @@
                      :every-n-turns   8
                      :max-interventions 3
                      :pre-commit      true}
-   :respond-tool    {:enabled false}})
+   :respond-tool    {:enabled false}
+
+   ;; Inject top-K task-relevant knowledge cards from .nyma/knowledge/*.md.
+   :knowledge-inject {:enabled      false
+                      :dir          "knowledge"
+                      :top-k        1
+                      :threshold    2.0
+                      :token-budget 800}
+   ;; Nudge the model when it stops with the task apparently unfinished.
+   :finalize-warn   {:enabled    false
+                     :max-nudges 2}})
 
 ;; ── Config loading ──────────────────────────────────────────────
 

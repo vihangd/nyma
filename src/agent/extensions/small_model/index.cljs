@@ -29,7 +29,9 @@
             [agent.extensions.small-model.thinking-budget :as thinking-budget]
             [agent.extensions.small-model.supervisor      :as supervisor]
             [agent.extensions.small-model.respond-tool    :as respond-tool]
-            [agent.extensions.small-model.context-relief  :as context-relief]))
+            [agent.extensions.small-model.context-relief  :as context-relief]
+            [agent.extensions.small-model.knowledge-inject :as knowledge-inject]
+            [agent.extensions.small-model.finalize-warn    :as finalize-warn]))
 
 (defn ^:export default [api]
   (let [settings (try (when (.-getSettings api) (.getSettings api))
@@ -82,6 +84,14 @@
       ;; ── Respond tool ─────────────────────────────────────────────
       (when (shared/enabled? config :respond-tool)
         (swap! cleanups conj (respond-tool/activate api config)))
+
+      ;; ── Knowledge injection ──────────────────────────────────────
+      (when (shared/enabled? config :knowledge-inject)
+        (swap! cleanups conj (knowledge-inject/activate api config state)))
+
+      ;; ── Finalize warn (premature-completion guard) ───────────────
+      (when (shared/enabled? config :finalize-warn)
+        (swap! cleanups conj (finalize-warn/activate api config state)))
 
       ;; ── Context relief ───────────────────────────────────────────
       ;; Always active when the extension is enabled — no sub-toggle needed.
