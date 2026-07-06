@@ -55,9 +55,43 @@
   "Squint compilation cache directory."
   (str (.. js/process -env -HOME) "/.nyma/cache"))
 
+;; Bump when the emitted cache format changes (e.g. import rewriting below) so
+;; stale cache files with the old format are ignored rather than reused.
+(def ^:private cache-version "v2")
+
 (defn- ensure-cache-dir []
   (when-not (fs/existsSync cache-dir)
     (fs/mkdirSync cache-dir #js {:recursive true})))
+
+(defn- builtin-spec? [s]
+  (or (.startsWith s "node:") (.startsWith s "bun:")
+      (.startsWith s "./") (.startsWith s "../") (.startsWith s "/")))
+
+(defn- resolve-spec
+  "Resolve a bare specifier to an absolute path. Tries the loader module's dir
+   first (where nyma's own deps like squint-cljs live regardless of cwd), then
+   cwd (where per-extension npm deps get installed). nil if unresolvable."
+  [spec]
+  (loop [bases [(.. js/import -meta -dir) (js/process.cwd)]]
+    (when (seq bases)
+      (or (try (js/Bun.resolveSync spec (first bases)) (catch :default _ nil))
+          (recur (rest bases))))))
+
+(defn absolutize-imports
+  "Rewrite bare npm import specifiers in compiled squint output to absolute
+   paths. Cache files live in ~/.nyma/cache — outside any node_modules tree — so
+   a bare 'squint-cljs/core.js' can't resolve from there; an absolute path can.
+   Builtins (node:/bun:) and already-relative/absolute paths are left alone;
+   unresolvable specifiers are left as-is (no worse than before)."
+  [compiled]
+  (.replace compiled
+            (js/RegExp. "from\\s+(['\"])([^'\"]+)\\1" "g")
+            (fn [match q spec]
+              (if (builtin-spec? spec)
+                match
+                (if-let [abs (resolve-spec spec)]
+                  (str "from " q abs q)
+                  match)))))
 
 (defn ^:async load-squint-extension
   "Compile a .cljs extension file with squint and evaluate it.
@@ -65,13 +99,15 @@
   [file-path]
   (let [source     (js-await (.readFile fsp file-path "utf8"))
         hash       (.toString (js/Bun.hash source) 16)
-        cache-path (str cache-dir "/" hash ".mjs")]
+        cache-path (str cache-dir "/" hash "-" cache-version ".mjs")]
     ;; Check cache
     (when-not (fs/existsSync cache-path)
-      ;; Compile and cache
-      (let [compiled (compileString source
-                                    #js {:context       "expr"
-                                         :elide-imports false})]
+      ;; Compile, rewrite bare imports to absolute (cache dir is outside any
+      ;; node_modules tree), and cache.
+      (let [compiled (-> (compileString source
+                                        #js {:context       "expr"
+                                             :elide-imports false})
+                         (absolutize-imports))]
         (ensure-cache-dir)
         (js-await (js/Bun.write cache-path compiled))))
     ;; Import from cache (or freshly written)
