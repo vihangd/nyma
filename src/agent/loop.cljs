@@ -197,6 +197,11 @@
               st-config #js {:model           active-model
                              :system          effective-prompt
                              :messages        (clj->js messages)
+                             ;; AI SDK v7 rejects role:"system" entries inside
+                             ;; `messages` by default. nyma's cache/context
+                             ;; extensions inject trusted system messages for
+                             ;; prompt-cache control, so opt back in.
+                             :allowSystemInMessages true
                              :tools           (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
                              :abortSignal     (when-let [c (:abort-controller agent)] (.-signal @c))
                              :maxRetries      5

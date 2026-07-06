@@ -3,6 +3,6 @@
   "capabilities": ["events", "context", "tools", "middleware", "commands", "exec", "flags"],
   "dependsOn": [],
   "dependencies": {
-    "shell-quote": "^1.8.1"
+    "shell-quote": "^1.9.0"
   }
 }
