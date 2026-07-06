@@ -1,5 +1,6 @@
 (ns agent.commands.builtins
   (:require [agent.sessions.compaction :refer [compact]]
+            [agent.sessions.manager :refer [session->seed-messages]]
             [agent.sessions.listing :refer [list-sessions]]
             [agent.commands.share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
@@ -514,9 +515,19 @@
                                                sess (nth sessions idx)
                                                sm   @(:session agent)]
                                            ((:switch-file sm) (:path sess))
-                                           ((:dispatch! (:store agent)) :messages-cleared {})
-                                           (doseq [msg ((:build-context sm))]
-                                             ((:dispatch! (:store agent)) :message-added {:message msg}))
+                                           ;; Replay is not a new turn — suppress JSONL re-append.
+                                           ;; try/finally so a throw mid-replay can't leave the
+                                           ;; flag stuck true (which would silently disable all
+                                           ;; future persistence). Seed via the shared transform
+                                           ;; so tool_call/tool_result/compaction are handled
+                                           ;; identically to the startup resume path.
+                                           (swap! (:state agent) assoc :replaying-session? true)
+                                           (try
+                                             ((:dispatch! (:store agent)) :messages-cleared {})
+                                             (doseq [msg (session->seed-messages ((:build-context sm)))]
+                                               ((:dispatch! (:store agent)) :message-added {:message msg}))
+                                             (finally
+                                               (swap! (:state agent) assoc :replaying-session? false)))
                                            ((:emit (:events agent)) "session_start"
                                                                     {:reason "resume" :previousSessionFile (:path sess)})
                                            (notify ctx (str "Resumed: " (:name sess))))))))))))}
@@ -535,9 +546,16 @@
                           :else
                           (let [sm @(:session agent)]
                             ((:switch-file sm) file-path)
-                            ((:dispatch! (:store agent)) :messages-cleared {})
-                            (doseq [msg ((:build-context sm))]
-                              ((:dispatch! (:store agent)) :message-added {:message msg}))
+                            ;; Replay is not a new turn — suppress JSONL re-append.
+                            ;; try/finally guards the flag; shared seed transform
+                            ;; drops tool_call/tool_result and folds compaction.
+                            (swap! (:state agent) assoc :replaying-session? true)
+                            (try
+                              ((:dispatch! (:store agent)) :messages-cleared {})
+                              (doseq [msg (session->seed-messages ((:build-context sm)))]
+                                ((:dispatch! (:store agent)) :message-added {:message msg}))
+                              (finally
+                                (swap! (:state agent) assoc :replaying-session? false)))
                             ((:emit (:events agent)) "session_start"
                                                      {:reason "resume" :previousSessionFile file-path})
                             (notify ctx (str "Imported session from " file-path))))))}

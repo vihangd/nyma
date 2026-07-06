@@ -349,8 +349,9 @@
                                            (it "leave stage appends to session"
                                                (fn []
                                                  (let [appended (atom nil)
-                                                       session  {:append (fn [entry] (reset! appended entry))}
-                                                       ic       (tool-persistence-interceptor session)
+                                                       session  {:append (fn [entry] (reset! appended entry))
+                                                                 :get-file-path (fn [] "/tmp/s.jsonl")}
+                                                       ic       (tool-persistence-interceptor (atom {:session (atom session)}))
                                                        ctx      {:tool-name "read" :args {:path "/x"} :result "content" :cancelled false}
                                                        result   ((:leave ic) ctx)]
                                                    (-> (expect (some? @appended)) (.toBe true))
@@ -360,18 +361,29 @@
                                            (it "does not persist cancelled context"
                                                (fn []
                                                  (let [appended (atom nil)
-                                                       session  {:append (fn [entry] (reset! appended entry))}
-                                                       ic       (tool-persistence-interceptor session)
+                                                       session  {:append (fn [entry] (reset! appended entry))
+                                                                 :get-file-path (fn [] "/tmp/s.jsonl")}
+                                                       ic       (tool-persistence-interceptor (atom {:session (atom session)}))
                                                        ctx      {:tool-name "read" :args {} :result "x" :cancelled true}]
                                                    ((:leave ic) ctx)
                                                    (-> (expect @appended) (.toBeNull)))))
 
                                            (it "handles nil session gracefully"
                                                (fn []
-                                                 (let [ic  (tool-persistence-interceptor nil)
+                                                 (let [ic  (tool-persistence-interceptor (atom {:session (atom nil)}))
                                                        ctx {:tool-name "read" :args {} :result "x" :cancelled false}]
         ;; Should not throw
-                                                   ((:leave ic) ctx))))))
+                                                   ((:leave ic) ctx))))
+
+                                           (it "skips append for an ephemeral (nil path) session"
+                                               (fn []
+                                                 (let [appended (atom nil)
+                                                       session  {:append (fn [entry] (reset! appended entry))
+                                                                 :get-file-path (fn [] nil)}
+                                                       ic       (tool-persistence-interceptor (atom {:session (atom session)}))
+                                                       ctx      {:tool-name "read" :args {} :result "x" :cancelled false}]
+                                                   ((:leave ic) ctx)
+                                                   (-> (expect @appended) (.toBeNull)))))))
 
 ;; ── display metadata propagation ──────────────────────────
 

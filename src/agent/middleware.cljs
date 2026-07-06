@@ -389,7 +389,8 @@
    atom for injecting extension context, and a settings manager for
    allow-list persistence."
   [events & [store agent-ref settings]]
-  (let [chain          (atom [(tool-tracking-interceptor events store)])
+  (let [chain          (atom (cond-> [(tool-tracking-interceptor events store)]
+                               agent-ref (conj (tool-persistence-interceptor agent-ref))))
         ;; Approval pipeline — empty by default (approve everything).
         ;; Gateway adapters register check-fns here; :tui never touches this.
         approval-checks (atom [])]
@@ -463,14 +464,18 @@
 
 (defn tool-persistence-interceptor
   "Interceptor that persists tool call results to the session JSONL.
-   This enables branch summarization to know which files were read/modified."
-  [session]
+   This enables branch summarization to know which files were read/modified.
+   Reads the session lazily off agent-ref because the session is attached
+   after the pipeline is constructed (cli.cljs)."
+  [agent-ref]
   {:name  :tool-persistence
    :leave (fn [ctx]
-            (when (and session (not (:cancelled ctx)))
-              ((:append session)
-               {:role     "tool_call"
-                :content  (str (:result ctx))
-                :metadata {:tool-name (:tool-name ctx)
-                           :args      (:args ctx)}}))
+            (let [session   (some-> @agent-ref :session deref)
+                  file-path (when session ((:get-file-path session)))]
+              (when (and session file-path (not (:cancelled ctx)))
+                ((:append session)
+                 {:role     "tool_call"
+                  :content  (str (:result ctx))
+                  :metadata {:tool-name (:tool-name ctx)
+                             :args      (:args ctx)}})))
             ctx)})

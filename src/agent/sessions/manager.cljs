@@ -13,6 +13,32 @@
 (defn- entry->core-message [entry]
   (select-keys entry [:role :content]))
 
+(defn session->seed-messages
+  "Map a session's build-context entries into LLM-context messages for resume
+   (used by both startup --continue/--resume and the runtime /resume + /import
+   commands). Rules:
+     - user / assistant  → kept as-is
+     - compaction / branch-summary → the summary REPLACES all prior context
+       (it already summarizes everything before it), folded into a synthetic
+       user message. This is what prevents re-expanding a compacted session
+       back to its full pre-compaction length on resume.
+     - tool_call / tool_result → dropped (they never live in `state :messages`
+       and would break the provider message shape).
+   Pure for testability."
+  [entries]
+  (reduce
+   (fn [acc m]
+     (let [role (:role m)]
+       (cond
+         (or (= role "user") (= role "assistant")) (conj acc m)
+         (or (= role "compaction") (= role "branch-summary"))
+         ;; Reset to the summary — discard everything it folded in.
+         [{:role "user" :content (str "[Earlier conversation summary]\n"
+                                      (:content m))}]
+         :else acc)))
+   []
+   entries))
+
 (defn- build-index
   "Build an in-memory index from entries: id → {:idx n, :parent-id pid, :role r}"
   [entries]

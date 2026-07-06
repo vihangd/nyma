@@ -25,9 +25,9 @@
         pipeline (:middleware agent)
         log      (atom [])
         _        ((:add pipeline)
-                   {:name :logger
-                    :enter (fn [ctx] (swap! log conj (str "call:" (:tool-name ctx))) ctx)
-                    :leave (fn [ctx] (swap! log conj (str "done:" (:tool-name ctx))) ctx)})
+                  {:name :logger
+                   :enter (fn [ctx] (swap! log conj (str "call:" (:tool-name ctx))) ctx)
+                   :leave (fn [ctx] (swap! log conj (str "done:" (:tool-name ctx))) ctx)})
         tool     (mock-tool (fn [args] (str "result:" (:x args))))
         tools    (wrap-tools-with-middleware {"test" tool} pipeline (:events agent))
         result   (js-await ((.-execute (get tools "test")) {:x "hello"}))]
@@ -39,9 +39,9 @@
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
         pipeline (:middleware agent)
         _        ((:add pipeline)
-                   {:name :transform
-                    :enter (fn [ctx]
-                             (update-in ctx [:args :value] (fn [v] (* v 2))))})
+                  {:name :transform
+                   :enter (fn [ctx]
+                            (update-in ctx [:args :value] (fn [v] (* v 2))))})
         tool     (mock-tool (fn [args] (str "got:" (:value args))))
         tools    (wrap-tools-with-middleware {"calc" tool} pipeline (:events agent))
         result   (js-await ((.-execute (get tools "calc")) {:value 5}))]
@@ -51,11 +51,11 @@
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
         pipeline (:middleware agent)
         _        ((:add pipeline)
-                   {:name :blocker
-                    :enter (fn [ctx]
-                             (if (= (:tool-name ctx) "dangerous")
-                               (assoc ctx :cancelled true)
-                               ctx))})
+                  {:name :blocker
+                   :enter (fn [ctx]
+                            (if (= (:tool-name ctx) "dangerous")
+                              (assoc ctx :cancelled true)
+                              ctx))})
         safe     (mock-tool (fn [_] "safe-result"))
         danger   (mock-tool (fn [_] "danger-result"))
         tools    (wrap-tools-with-middleware {"safe" safe "dangerous" danger}
@@ -70,7 +70,7 @@
         events   (:events agent)
         captured (atom nil)
         _        ((:on events) "before_tool_call"
-                   (fn [ctx] (reset! captured (.-name ctx))))
+                               (fn [ctx] (reset! captured (.-name ctx))))
         pipeline (:middleware agent)
         tool     (mock-tool (fn [_] "ok"))
         tools    (wrap-tools-with-middleware {"my-tool" tool} pipeline events)
@@ -81,8 +81,8 @@
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
         pipeline (:middleware agent)
         _        ((:add pipeline)
-                   {:name :postprocess
-                    :leave (fn [ctx] (update ctx :result str " [processed]"))})
+                  {:name :postprocess
+                   :leave (fn [ctx] (update ctx :result str " [processed]"))})
         tool     (mock-tool (fn [_] "raw"))
         tools    (wrap-tools-with-middleware {"t" tool} pipeline (:events agent))
         result   (js-await ((.-execute (get tools "t")) {}))]
@@ -92,23 +92,23 @@
   (let [agent    (create-agent {:model "mock" :system-prompt "test"})
         pipeline (:middleware agent)
         _        ((:add pipeline)
-                   {:name :add-timestamp
-                    :enter (fn [ctx] (assoc-in ctx [:args :ts] 12345))})
+                  {:name :add-timestamp
+                   :enter (fn [ctx] (assoc-in ctx [:args :ts] 12345))})
         _        ((:add pipeline)
-                   {:name :add-source
-                    :enter (fn [ctx] (assoc-in ctx [:args :source] "test"))})
+                  {:name :add-source
+                   :enter (fn [ctx] (assoc-in ctx [:args :source] "test"))})
         tool     (mock-tool (fn [args] (str (:ts args) "-" (:source args))))
         tools    (wrap-tools-with-middleware {"t" tool} pipeline (:events agent))
         result   (js-await ((.-execute (get tools "t")) {}))]
     (-> (expect result) (.toBe "12345-test"))))
 
 (describe "integration: tool pipeline" (fn []
-  (it "full pipeline with agent" test-full-pipeline-with-agent)
-  (it "middleware transforms args" test-pipeline-arg-transform)
-  (it "middleware can cancel specific tools" test-pipeline-cancellation-via-middleware)
-  (it "event bridge forwards before_tool_call" test-pipeline-with-event-bridge)
-  (it "leave stage transforms result" test-pipeline-leave-transforms-result)
-  (it "multiple middleware compose correctly" test-multiple-middleware-compose)))
+                                         (it "full pipeline with agent" test-full-pipeline-with-agent)
+                                         (it "middleware transforms args" test-pipeline-arg-transform)
+                                         (it "middleware can cancel specific tools" test-pipeline-cancellation-via-middleware)
+                                         (it "event bridge forwards before_tool_call" test-pipeline-with-event-bridge)
+                                         (it "leave stage transforms result" test-pipeline-leave-transforms-result)
+                                         (it "multiple middleware compose correctly" test-multiple-middleware-compose)))
 
 ;; --- Real AI SDK tools through full pipeline + JS conversion ---
 ;; These tests exercise the EXACT production path that caused two bugs:
@@ -197,9 +197,10 @@
 (defn ^:async test-persistence-interceptor-appends-result []
   (let [events   (create-event-bus)
         appended (atom [])
-        session  {:append (fn [entry] (swap! appended conj entry))}
+        session  {:append (fn [entry] (swap! appended conj entry))
+                  :get-file-path (fn [] "/tmp/s.jsonl")}
         pipeline (create-pipeline events)
-        _        ((:add pipeline) (tool-persistence-interceptor session))
+        _        ((:add pipeline) (tool-persistence-interceptor (atom {:session (atom session)})))
         t        (mock-tool (fn [_] "file contents"))
         ctx      (js-await ((:execute pipeline) "read" t {:path "/foo.txt"}))]
     ;; Leave stage should have appended the result
@@ -213,9 +214,10 @@
 (defn ^:async test-persistence-interceptor-skips-cancelled []
   (let [events   (create-event-bus)
         appended (atom [])
-        session  {:append (fn [entry] (swap! appended conj entry))}
+        session  {:append (fn [entry] (swap! appended conj entry))
+                  :get-file-path (fn [] "/tmp/s.jsonl")}
         pipeline (create-pipeline events)
-        _        ((:add pipeline) (tool-persistence-interceptor session))
+        _        ((:add pipeline) (tool-persistence-interceptor (atom {:session (atom session)})))
         _        ((:add pipeline) {:name :blocker
                                    :enter (fn [ctx] (assoc ctx :cancelled true))})
         t        (mock-tool (fn [_] "should not persist"))
@@ -223,14 +225,14 @@
     (-> (expect (count @appended)) (.toBe 0))))
 
 (describe "integration: real AI SDK tools through full pipeline" (fn []
-  (it "real tools survive agent pipeline wrapping" test-real-tools-through-agent-pipeline)
-  (it "real tools survive reduce-kv for streamText" test-real-tools-survive-reduce-kv-for-streamtext)
-  (it "builtin tools survive registry → middleware → reduce-kv" test-builtin-tools-through-registry-and-middleware)
-  (it "asSchema(inputSchema) produces valid JSON Schema" test-asschema-regression)))
+                                                                   (it "real tools survive agent pipeline wrapping" test-real-tools-through-agent-pipeline)
+                                                                   (it "real tools survive reduce-kv for streamText" test-real-tools-survive-reduce-kv-for-streamtext)
+                                                                   (it "builtin tools survive registry → middleware → reduce-kv" test-builtin-tools-through-registry-and-middleware)
+                                                                   (it "asSchema(inputSchema) produces valid JSON Schema" test-asschema-regression)))
 
 (describe "integration: tool-persistence-interceptor" (fn []
-  (it "appends tool call result to session" test-persistence-interceptor-appends-result)
-  (it "skips persistence when cancelled" test-persistence-interceptor-skips-cancelled)))
+                                                        (it "appends tool call result to session" test-persistence-interceptor-appends-result)
+                                                        (it "skips persistence when cancelled" test-persistence-interceptor-skips-cancelled)))
 
 ;; ── Extension tool contract validation ──────────────────────────
 
@@ -259,5 +261,5 @@
     (deact-sc) (deact-de) (deact-cf) (deact-sx)))
 
 (describe "extension tool contract validation" (fn []
-  (it "all extension-registered tools pass asSchema validation"
-      test-extension-registered-tools-pass-schema-validation)))
+                                                 (it "all extension-registered tools pass asSchema validation"
+                                                     test-extension-registered-tools-pass-schema-validation)))

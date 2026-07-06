@@ -1,10 +1,14 @@
 (ns agent.cli
   (:require [clojure.string :as str]
             ["node:util" :refer [parseArgs]]
+            ["node:fs" :as fs]
+            ["node:path" :as npath]
+            ["node:readline" :as readline]
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
-            [agent.sessions.manager :refer [create-session-manager]]
+            [agent.sessions.manager :refer [create-session-manager session->seed-messages]]
+            [agent.sessions.listing :refer [list-sessions]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
@@ -154,8 +158,12 @@ Model selection:
   -m, --model <id>       Model id. Default: claude-sonnet-4-20250514.
 
 Session:
+  -c, --continue         Resume the most recent session.
+  -r, --resume           Pick a past session to resume (numbered prompt).
+      --fork <path>      Branch a copy of an existing session into a new file.
       --session <path>   Use a specific session file (jsonl).
       --no-session       Don't read or write any session file.
+                         (Default: a fresh session file per launch.)
 
 Tools:
       --tools <list>     Comma-separated allowlist of built-in tools.
@@ -218,19 +226,100 @@ Examples:
                ": no prompt — pass a positional or pipe text on stdin.\n"))
   (js/process.exit 2))
 
-(defn- resolve-session
-  "Pick a session file. Explicit --session always wins. Otherwise:
+(defn- new-session-path [sessions-dir]
+  (str sessions-dir "/" (js/Date.now) ".jsonl"))
+
+(defn pick-session
+  "Select a session from a mtime-desc `list-sessions` vector by 1-based numeric
+   `input`. Blank/nil → most recent (first). Out-of-range/non-numeric → nil.
+   Pure so it can be unit-tested without TUI I/O."
+  [sessions input]
+  (let [t (some-> input str str/trim)]
+    (cond
+      (empty? sessions)        nil
+      (or (nil? t) (= t ""))   (first sessions)
+      :else (let [n (js/parseInt t 10)]
+              (when (and (js/Number.isInteger n) (>= n 1) (<= n (count sessions)))
+                (nth sessions (dec n)))))))
+
+(defn- ^:async prompt-line
+  "Ask one line on stderr (so it doesn't pollute stdout), resolve the answer."
+  [question]
+  (js/Promise.
+   (fn [resolve _reject]
+     ;; terminal:false — don't toggle stdin raw-mode, so the TUI inits cleanly
+     ;; on stdin after we close this one-shot prompt.
+     (let [rl (.createInterface readline #js {:input    (.-stdin js/process)
+                                              :output   (.-stderr js/process)
+                                              :terminal false})]
+       (.question rl question (fn [ans] (.close rl) (resolve ans)))))))
+
+(defn- ^:async pick-resume-path
+  "Print a numbered session list on stderr, read a choice, return the path
+   (or nil when there are no sessions)."
+  [sessions-dir]
+  (let [sessions (list-sessions sessions-dir)]
+    (when (seq sessions)
+      (.write (.-stderr js/process) "Resume which session?\n")
+      (doseq [[i s] (map-indexed vector sessions)]
+        (.write (.-stderr js/process)
+                (str "  " (inc i) ". " (:name s) "  (" (:entry-count s) " msgs)\n")))
+      (let [ans (js-await (prompt-line "Number [blank = most recent]: "))]
+        (:path (pick-session sessions ans))))))
+
+(defn- ^:async resolve-session
+  "Pick a session file and return its manager. Precedence:
+   - --session <path>     → that path (always wins)
    - --no-session         → ephemeral (nil path)
-   - print/json one-shots → ephemeral by default; persisting would
-                            pollute the interactive default session
-                            with every scripted invocation
-   - interactive          → ~/.nyma/sessions/default.jsonl"
-  [values mode]
+   - print/json one-shots → ephemeral (scripted invocations shouldn't persist)
+   - --fork <path>        → copy the source JSONL into a fresh file, use the copy
+   - --continue / -c      → most recent session in sessions-dir (interactive only)
+   - --resume  / -r       → numbered pre-TUI picker over sessions-dir (interactive)
+   - interactive default  → a fresh ~/.nyma/sessions/<ts>.jsonl per launch"
+  [values mode sessions-dir]
   (let [one-shot?    (contains? #{"print" "json"} mode)
-        session-path (or (:session values)
-                         (when-not (or (:no-session values) one-shot?)
-                           (str (.. js/process -env -HOME) "/.nyma/sessions/default.jsonl")))]
-    (create-session-manager session-path)))
+        interactive? (= mode "interactive")
+        path
+        (cond
+          (:session values)    (:session values)
+          (:no-session values) nil
+          one-shot?            nil
+          (:fork values)
+          (let [src (:fork values)
+                dst (new-session-path sessions-dir)]
+            (if (fs/existsSync src)
+              (do (fs/mkdirSync sessions-dir #js {:recursive true})
+                  (fs/copyFileSync src dst))
+              (.write (.-stderr js/process)
+                      (str "warning: --fork source not found: " src "; starting fresh\n")))
+            dst)
+          (and (:resume values) interactive?)
+          (or (js-await (pick-resume-path sessions-dir))
+              (new-session-path sessions-dir))
+          (and (:continue values) interactive?)
+          (or (:path (first (list-sessions sessions-dir)))
+              (new-session-path sessions-dir))
+          interactive?         (new-session-path sessions-dir)
+          :else                nil)]
+    (when path
+      (fs/mkdirSync (npath/dirname path) #js {:recursive true}))
+    (create-session-manager path)))
+
+(defn attach-session-persistence!
+  "Mirror new user/assistant turns into the session JSONL as they're added to
+   the store. No-op for ephemeral (nil file path) sessions. Returns nothing."
+  [agent session]
+  (when (and session ((:get-file-path session)))
+    ((:subscribe (:store agent))
+     (fn [event-type state]
+       ;; Skip replays (/resume, /import seed via :message-added too) — those
+       ;; messages are already on disk; re-appending would double the file.
+       (when (and (= event-type :message-added)
+                  (not (:replaying-session? state)))
+         (let [msg  (last (:messages state))
+               role (:role msg)]
+           (when (contains? #{"user" "assistant"} role)
+             ((:append session) (select-keys msg [:role :content])))))))))
 
 (defn ^:async main []
   (let [{:keys [values positionals]}
@@ -271,7 +360,7 @@ Examples:
         resources (-> (js-await (discover))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
-        session   (resolve-session values mode)
+        session   (js-await (resolve-session values mode sessions-dir))
 
         active-tools (resolve-tools values merged)
         ;; Create agent first, then resolve model via its provider registry
@@ -305,6 +394,23 @@ Examples:
 
     ;; Attach session to agent so extensions can access it
     (reset! (:session agent) session)
+
+    ;; Resume: load the session file, seed state :messages so the model sees
+    ;; prior turns, THEN attach the persistence subscriber (seeding writes the
+    ;; atom directly — not via dispatch! — so it never re-appends to the JSONL).
+    (when (and session ((:get-file-path session)))
+      ((:load session))
+      (let [seeded (session->seed-messages ((:build-context session)))]
+        (when (seq seeded)
+          (swap! (:state agent) assoc :messages seeded)
+          ((:emit (:events agent)) "session_start"
+                                   {:reason (cond (:fork values)     "fork"
+                                                  (:continue values) "continue"
+                                                  (:resume values)   "resume"
+                                                  :else              "default")
+                                    :sessionFile ((:get-file-path session))
+                                    :messageCount (count seeded)}))))
+    (attach-session-persistence! agent session)
 
     ;; Initial permission mode (modes-as-roles). Interactive defaults to
     ;; "default" (asks before write/shell/network — there's a UI to prompt).
