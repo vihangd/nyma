@@ -110,7 +110,16 @@
                      (tools/make-workspace-symbols-tool manager cwd))
 
       (.registerTool api "get_diagnostics"
-                     (tools/make-get-diagnostics-tool manager cwd live-diags)))
+                     (tools/make-get-diagnostics-tool manager cwd live-diags))
+
+      (.registerTool api "rename_symbol"
+                     (tools/make-rename-tool manager cwd))
+
+      (.registerTool api "code_action"
+                     (tools/make-code-action-tool manager cwd live-diags))
+
+      (.registerTool api "organize_imports"
+                     (tools/make-organize-imports-tool manager cwd)))
 
     ;; ── Shutdown cleanup ──────────────────────────────────────────
 
@@ -127,5 +136,8 @@
       (.unregisterTool api "document_symbols")
       (.unregisterTool api "workspace_symbols")
       (.unregisterTool api "get_diagnostics")
+      (.unregisterTool api "rename_symbol")
+      (.unregisterTool api "code_action")
+      (.unregisterTool api "organize_imports")
       (mgr/stop-all! manager)
       (diags/clear!))))

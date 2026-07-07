@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [agent.extensions.lsp-suite.lsp_formatters :as fmt]
             [agent.extensions.lsp-suite.lsp_manager :as mgr]
-            [agent.extensions.lsp-suite.lsp_client :as lsp-client]))
+            [agent.extensions.lsp-suite.lsp_client :as lsp-client]
+            [agent.extensions.lsp-suite.lsp-edits :as edits]))
 
 ;; ── Shared helpers ────────────────────────────────────────────────
 
@@ -261,3 +262,176 @@
             :formatResult (fn [r] (str (count (str/split-lines (str r))) " diagnostic(s)"))}
        :execute
        (fn [args] (get-diagnostics-execute manager cwd args diag-registry))})
+
+;; ── rename_symbol ─────────────────────────────────────────────────
+
+(defn- rel [cwd p] (node-path/relative cwd p))
+
+(defn- summarize-apply [cwd verb result]
+  (let [files   (:files result)
+        skipped (:skipped result)]
+    (str (if (seq files)
+           (str "✅ " verb " — edited " (count files) " file(s):\n"
+                (str/join "\n" (map #(str "  " (rel cwd %)) files)))
+           (str verb ": no changes applied."))
+         (when (seq skipped)
+           (str "\n(skipped: " (str/join ", " skipped) ")")))))
+
+(defn ^:async rename-execute [manager cwd args]
+  (let [file (.-file args) line (.-line args) col (.-col args)
+        new-name (.-newName args)
+        fabs (abs-path file cwd)]
+    (js-await (mgr/ensure-open! manager fabs))
+    (let [client (js-await (mgr/get-client-for! manager fabs))]
+      (if-not client
+        (no-server-msg file)
+        (try
+          (let [params #js {:textDocument #js {:uri (fmt/path->uri fabs)}
+                            :position     #js {:line (->0 line) :character (->0 col)}
+                            :newName      new-name}
+                wsedit (js-await (lsp-client/request! client "textDocument/rename" params))]
+            (if-not wsedit
+              "No rename edits returned — the symbol may not be renameable here."
+              (summarize-apply cwd (str "Renamed to '" new-name "'")
+                               (js-await (edits/apply-workspace-edit manager wsedit)))))
+          (catch :default e
+            (str "Rename error: " (.-message e))))))))
+
+(defn make-rename-tool [manager cwd]
+  #js {:description
+       "Rename the symbol at a file position across the whole project (LSP rename). Applies the edits to disk. Line and col are 1-based."
+       :parameters
+       #js {:type "object"
+            :properties
+            #js {:file    #js {:type "string"  :description "File path"}
+                 :line    #js {:type "integer" :description "Line number (1-based)"}
+                 :col     #js {:type "integer" :description "Column number (1-based)"}
+                 :newName #js {:type "string"  :description "New symbol name"}}
+            :required #js ["file" "line" "col" "newName"]}
+       :display
+       #js {:icon "✎"
+            :formatArgs (fn [_n a] (str (.-file a) ":" (.-line a) " → " (.-newName a)))}
+       :execute
+       (fn [args] (rename-execute manager cwd args))})
+
+;; ── code_action ───────────────────────────────────────────────────
+
+(defn- action-kind [a] (or (.-kind a) ""))
+
+(defn- list-actions [actions]
+  (->> (into [] actions)
+       (map-indexed (fn [i a]
+                      (str (inc i) ". " (.-title a)
+                           (let [k (action-kind a)] (when (seq k) (str "  [" k "]"))))))
+       (str/join "\n")))
+
+(defn- title-match? [action want]
+  (let [t (str/lower-case (str (.-title action)))
+        w (str/lower-case (str want))]
+    (or (= t w) (.includes t w))))
+
+(defn ^:async apply-one-action [manager client cwd actions want]
+  (let [match (first (filter #(title-match? % want) (into [] actions)))]
+    (if-not match
+      (str "No code action matching \"" want "\". Available:\n" (list-actions actions))
+      ;; Resolve the edit if the server deferred it (edit absent).
+      (let [resolved (if (.-edit match)
+                       match
+                       (try (js-await (lsp-client/request! client "codeAction/resolve" match))
+                            (catch :default _ match)))
+            edit (.-edit resolved)
+            cmd  (.-command resolved)
+            base (if edit
+                   (summarize-apply cwd (str "Applied '" (.-title match) "'")
+                                    (js-await (edits/apply-workspace-edit manager edit)))
+                   (str "Applied '" (.-title match) "' (no text edit)."))]
+        ;; Some fixes are command-driven (e.g. add-missing-import); execute it.
+        (if cmd
+          (do (try (js-await (lsp-client/request! client "workspace/executeCommand"
+                                                  #js {:command (.-command cmd)
+                                                       :arguments (or (.-arguments cmd) #js [])}))
+                   (catch :default _ nil))
+              (str base "\n(ran command: " (.-title match) ")"))
+          base)))))
+
+(defn ^:async code-action-execute [manager cwd args diag-registry]
+  (let [file (.-file args) line (.-line args)
+        end-line (or (.-endLine args) line)
+        want (.-apply args)
+        fabs (abs-path file cwd)]
+    (js-await (mgr/ensure-open! manager fabs))
+    (let [client (js-await (mgr/get-client-for! manager fabs))]
+      (if-not client
+        (no-server-msg file)
+        (try
+          (let [uri (fmt/path->uri fabs)
+                all-diags (if diag-registry (diag-registry) #js [])
+                ctx-diags (vec (filter #(= (.-uri %) uri) (into [] all-diags)))
+                params #js {:textDocument #js {:uri uri}
+                            :range   #js {:start #js {:line (->0 line) :character 0}
+                                          :end   #js {:line (->0 end-line) :character 100000}}
+                            :context #js {:diagnostics (clj->js ctx-diags)}}
+                actions (js-await (lsp-client/request! client "textDocument/codeAction" params))]
+            (if (or (nil? actions) (zero? (.-length actions)))
+              "No code actions available at this location."
+              (if want
+                (js-await (apply-one-action manager client cwd actions want))
+                (str "Available code actions (call again with apply=\"<title>\"):\n"
+                     (list-actions actions)))))
+          (catch :default e
+            (str "Code action error: " (.-message e))))))))
+
+(defn make-code-action-tool [manager cwd diag-registry]
+  #js {:description
+       "List or apply LSP code actions (quick-fixes, refactors) at a file location. Omit `apply` to LIST available actions; pass apply=\"<title substring>\" to apply one (edits written to disk). Lines are 1-based."
+       :parameters
+       #js {:type "object"
+            :properties
+            #js {:file    #js {:type "string"  :description "File path"}
+                 :line    #js {:type "integer" :description "Line number (1-based)"}
+                 :endLine #js {:type "integer" :description "End line for a range (optional; defaults to line)"}
+                 :apply   #js {:type "string"  :description "Title (or substring) of the action to apply. Omit to list."}}
+            :required #js ["file" "line"]}
+       :display
+       #js {:icon "🛠"
+            :formatArgs (fn [_n a] (str (.-file a) ":" (.-line a)
+                                        (when (.-apply a) (str " apply=" (.-apply a)))))}
+       :execute
+       (fn [args] (code-action-execute manager cwd args diag-registry))})
+
+;; ── organize_imports ──────────────────────────────────────────────
+
+(defn ^:async organize-imports-execute [manager cwd args]
+  (let [file (.-file args)
+        fabs (abs-path file cwd)]
+    (js-await (mgr/ensure-open! manager fabs))
+    (let [client (js-await (mgr/get-client-for! manager fabs))]
+      (if-not client
+        (no-server-msg file)
+        (try
+          (let [uri (fmt/path->uri fabs)
+                params #js {:textDocument #js {:uri uri}
+                            :range   #js {:start #js {:line 0 :character 0}
+                                          :end   #js {:line 0 :character 0}}
+                            :context #js {:diagnostics #js []
+                                          :only #js ["source.organizeImports"]}}
+                actions (js-await (lsp-client/request! client "textDocument/codeAction" params))]
+            (if (or (nil? actions) (zero? (.-length actions)))
+              "This server does not offer organize-imports for this file."
+              (js-await (apply-one-action manager client cwd actions
+                                          (.-title (aget actions 0))))))
+          (catch :default e
+            (str "Organize imports error: " (.-message e))))))))
+
+(defn make-organize-imports-tool [manager cwd]
+  #js {:description
+       "Organize/sort imports in a file via the LSP source.organizeImports action. Applies the edit to disk."
+       :parameters
+       #js {:type "object"
+            :properties #js {:file #js {:type "string" :description "File path"}}
+            :required #js ["file"]}
+       :display
+       #js {:icon "🧹"
+            :formatArgs (fn [_n a] (.-file a))}
+       :execute
+       (fn [args] (organize-imports-execute manager cwd args))})
