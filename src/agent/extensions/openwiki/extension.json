@@ -1,0 +1,5 @@
+{
+  "namespace": "openwiki",
+  "capabilities": ["events", "commands", "tools", "flags", "state", "ui"],
+  "dependsOn": []
+}

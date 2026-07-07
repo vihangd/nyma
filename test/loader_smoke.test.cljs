@@ -47,7 +47,8 @@
     "small-model"
     "local"
     "headroom"
-    "subagent"})
+    "subagent"
+    "openwiki"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so
