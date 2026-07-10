@@ -1,0 +1,5 @@
+{
+  "namespace": "memory",
+  "capabilities": ["events", "tools", "state"],
+  "dependsOn": []
+}

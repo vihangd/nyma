@@ -48,7 +48,10 @@
     "local"
     "headroom"
     "subagent"
-    "openwiki"})
+    "openwiki"
+    "memory"
+    "todos"
+    "add-dir"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so

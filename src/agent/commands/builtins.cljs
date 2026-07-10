@@ -1,6 +1,7 @@
 (ns agent.commands.builtins
   (:require [agent.sessions.compaction :refer [compact]]
             [agent.sessions.manager :refer [session->seed-messages]]
+            [agent.ui.theme-catalog :as theme-catalog]
             [agent.sessions.listing :refer [list-sessions]]
             [agent.commands.share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
@@ -255,6 +256,29 @@
            :handler (fn [_args _ctx]
                       ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
                       (js/process.exit 0))}
+
+          "theme"
+          {:description "Switch the color theme (applies on next launch). Usage: /theme [name]"
+           :handler
+           (fn [args ctx]
+             (let [names  (theme-catalog/all-theme-names nil)
+                   notify (fn [m l] (when-let [ui (.-ui ctx)] (when (.-notify ui) (.notify ui m l))))
+                   apply! (fn [name]
+                            (theme-catalog/set-theme-name! name)
+                            (notify (str "Theme set to '" name "' — restart nyma to apply.") "info"))]
+               (cond
+                 (seq args)
+                 (let [name (str (first args))]
+                   (if (some #(= % name) names)
+                     (apply! name)
+                     (notify (str "Unknown theme '" name "'. Available: " (clojure.string/join ", " names)) "error")))
+
+                 (and (.-ui ctx) (.-select (.-ui ctx)))
+                 (-> (.select (.-ui ctx) "Theme (applies next launch):" (clj->js (vec names)))
+                     (.then (fn [choice] (when choice (apply! (str choice))))))
+
+                 :else
+                 (notify (str "Themes: " (clojure.string/join ", " names) "\nUsage: /theme <name>") "info"))))}
 
           "bash"
           ;; Discovery wrapper over editor bash mode — the `/bash ls`

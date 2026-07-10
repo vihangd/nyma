@@ -1,0 +1,5 @@
+{
+  "namespace": "add-dir",
+  "capabilities": ["events", "commands", "state"],
+  "dependsOn": []
+}

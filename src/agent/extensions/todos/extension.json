@@ -1,0 +1,5 @@
+{
+  "namespace": "todos",
+  "capabilities": ["events", "tools", "ui", "state"],
+  "dependsOn": []
+}
