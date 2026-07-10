@@ -6,17 +6,23 @@
             [agent.utils.ui :refer [ui-prompt-ready?]]))
 
 (defn normalize-tool-result
-  "Normalize tool results to string. Supports both plain string returns
-   and pi-compatible {content: [{type: 'text', text: '...'}], details: {...}} format."
+  "Normalize tool results to a STRING (transcript/UI value). Supports plain
+   strings and pi-compatible {content: [{type:'text',text}], details} format.
+   Multimodal tools return {content:[file/image parts], summary}: `:summary`
+   wins so the string is short and non-text parts never stringify to
+   `[object Object]` or a giant base64 blob (the image reaches the model via
+   the tool's toModelOutput, not this string)."
   [result]
   (cond
     (string? result) result
+    (and (some? result) (not (string? result)) (.-summary result))
+    (str (.-summary result))
     (and (some? result) (not (string? result)) (.-content result))
     (let [parts (.-content result)]
       (.join
        (.map parts
              (fn [item]
-               (if (= (.-type item) "text") (.-text item) (str item))))
+               (if (= (.-type item) "text") (.-text item) (str (.-type item) " content"))))
        "\n"))
     :else (str result)))
 
@@ -75,7 +81,10 @@
           content-parts (when (and (some? raw-result) (not (string? raw-result))
                                    (.-content raw-result))
                           (.-content raw-result))]
-      (cond-> (assoc ctx :result result)
+      (cond-> (assoc ctx :result result
+                     ;; Preserve the raw structured result so a multimodal tool's
+                     ;; toModelOutput receives real bytes (wrap-tools-with-middleware).
+                     :raw-result raw-result)
         details       (assoc :result-details details)
         is-error      (assoc :result-is-error true)
         content-parts (assoc :result-content-parts content-parts)))))
@@ -458,7 +467,17 @@
                               #js {:execute
                                    (fn [args]
                                      (let [result-promise ((:execute pipeline) tool-name t args)]
-                                       (.then result-promise (fn [ctx] (:result ctx)))))})))
+                                       (.then result-promise
+                                              (fn [ctx]
+                                                ;; Return the STRUCTURED raw result only when the tool
+                                                ;; both declares toModelOutput AND actually produced
+                                                ;; content parts (an image). Text tools — including
+                                                ;; MCP text tools that carry a generic toModelOutput,
+                                                ;; and pi-compat {content:[text]} tools without one —
+                                                ;; keep the policy-truncated :result string.
+                                                (if (and (.-toModelOutput t) (:result-content-parts ctx))
+                                                  (:raw-result ctx)
+                                                  (:result ctx))))))})))
    {}
    tools))
 

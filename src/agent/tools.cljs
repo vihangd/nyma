@@ -5,6 +5,7 @@
             ["node:path" :as path]
             ["turndown" :as turndown-mod]
             ["linkedom" :refer [parseHTML]]
+            [agent.multimodal :as mm]
             [agent.utils.ansi :refer [truncate-text]]))
 
 (defn ^:async read-execute [{:keys [path range]}]
@@ -866,10 +867,42 @@
                                                   (.describe "Provider override. auto (default if Perplexity key set): try Perplexity, fall back to Jina DeepSearch. perplexity: Perplexity Sonar Pro only. jina: Jina DeepSearch only."))})
         :execute deep-research-execute}))
 
+;;; ─── view_image (multimodal) ───────────────────────────────
+
+(def ^:private max-image-bytes (* 10 1024 1024))   ; sanity cap
+
+(defn ^:async view-image-execute [{:keys [path]}]
+  (cond
+    (not (fs/existsSync path))
+    (str "view_image: file not found: " path)
+    ;; Size-cap BEFORE reading, so a huge/wrong file can't OOM the process.
+    (> (.-size (fs/statSync path)) max-image-bytes)
+    (str "view_image: " path " is ~" (js/Math.round (/ (.-size (fs/statSync path)) 1048576))
+         " MB — too large; render/screenshot at a smaller scale.")
+    :else
+    (let [buf   (js-await (.arrayBuffer (js/Bun.file path)))
+          bytes (.-byteLength buf)
+          u8    (js/Uint8Array. buf)
+          ;; Extension first, then magic-byte sniff (extension-less screenshots).
+          mt    (or (mm/media-type-for path) (mm/sniff-media-type u8))]
+      (if (nil? mt)
+        (str "view_image: not a recognized image (png/jpg/webp/gif): " path)
+        (mm/image-result (.toString (js/Buffer.from buf) "base64") mt
+                         (str "image " path " (" (js/Math.round (/ bytes 1024)) " KB, " mt ")"))))))
+
+(def view-image-tool
+  (tool
+   #js {:description
+        "View an image file (PNG/JPG/WebP/GIF) so you can SEE it — a screenshot or a rendered document/slide. Use to VERIFY visual output (does it look right?); for editing prefer structured/text reads. The provider auto-downscales; look sparingly."
+        :inputSchema (.object z #js {:path (-> (.string z) (.describe "Path to the image file"))})
+        :execute view-image-execute
+        :toModelOutput mm/tool-model-output}))
+
 ;;; ─── builtin tools map ─────────────────────────────────────
 
 (def builtin-tools
   {"read"       read-tool
+   "view_image" view-image-tool
    "write"      write-tool
    "edit"       edit-tool
    "bash"       bash-tool

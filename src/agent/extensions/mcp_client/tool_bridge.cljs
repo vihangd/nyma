@@ -18,6 +18,7 @@
    needed in either direction)."
   (:require ["ai" :refer [tool jsonSchema]]
             [clojure.string :as str]
+            [agent.multimodal :as mm]
             [agent.extensions.mcp-client.client :as client]
             [agent.extensions.mcp-client.manager :as mgr]))
 
@@ -26,31 +27,45 @@
   [server-name tool-name]
   (str "mcp__" server-name "__" tool-name))
 
-(defn- flatten-content
-  "Reduce MCP result.content (array of {:type :text :raw}) to a
-   single string. Most servers emit one text block; some emit
-   several. We join with newlines and ignore non-text blocks for
-   now (resources / images would need additional plumbing)."
+(defn split-content
+  "Reduce MCP result.content into {:text <joined text> :images [file-parts]}.
+   Text blocks join with newlines; image blocks become nyma AI-SDK file parts
+   so the model can SEE them.
+
+   client/call-tool! surfaces each item as {:type :text :raw <js content item>};
+   an image item's base64 + type live on the RAW JS object (`.-data`/`.-mimeType`),
+   NOT as :data/:mimeType keys — read them off :raw."
   [content-vec]
-  (->> (or content-vec [])
-       (filter (fn [item] (= "text" (:type item))))
-       (map :text)
-       (filter some?)
-       (str/join "\n")))
+  (let [items (or content-vec [])]
+    {:text   (->> items (filter #(= "text" (:type %))) (map :text) (filter some?) (str/join "\n"))
+     :images (->> items
+                  (filter #(= "image" (:type %)))
+                  (keep (fn [it]
+                          (let [r (:raw it)]
+                            (when (and r (.-data r))
+                              (mm/file-part (.-data r)
+                                            (or (.-mimeType r) (.-mediaType r) "image/png"))))))
+                  vec)}))
 
 (defn- build-execute-fn
-  "Build an :execute function for the AI SDK tool wrapper.
-   Captures the client + server tool name and converts the
-   result to a string."
+  "Build an :execute function for the AI SDK tool wrapper. Returns a plain
+   string for text-only results, or the multimodal convention shape
+   {content:[parts] summary} when the server returned image content (so the
+   model receives the image via the tool's toModelOutput)."
   [cli tool-name]
   (^:async fn [args]
     (let [r (js-await (client/call-tool!
                        cli
                        {:tool-name tool-name
                         :arguments (clj->js args)}))
-          text (flatten-content (:content r))]
-      (if (:is-error? r)
-        (str "[ERROR] " text)
+          {:keys [text images]} (split-content (:content r))
+          text (if (:is-error? r) (str "[ERROR] " text) text)]
+      (if (seq images)
+        #js {:content (clj->js (vec (concat (when (seq text) [(mm/text-part text)]) images)))
+             :summary (if (seq text) text (str (count images) " image(s)"))
+             ;; carry the error flag so middleware/UI see it (text path already
+             ;; prefixes "[ERROR] "; the object path must set it explicitly).
+             :isError (boolean (:is-error? r))}
         text))))
 
 (defn- build-tool-def
@@ -67,7 +82,10 @@
     (tool
      #js {:description desc
           :inputSchema (jsonSchema input-schema)
-          :execute (build-execute-fn cli (:name mcp-tool))})))
+          :execute (build-execute-fn cli (:name mcp-tool))
+          ;; Lets image-returning MCP tools (e.g. OfficeCLI render) surface the
+          ;; image to the model; text results take the text branch unchanged.
+          :toModelOutput mm/tool-model-output})))
 
 (defn register-all!
   "Walk the manager's running clients, register each of their tools

@@ -331,11 +331,13 @@
                                                                           #js {:type "text" :text "line2"}]}]
                                             (-> (expect (normalize-tool-result result)) (.toBe "line1\nline2")))))
 
-                                    (it "stringifies non-text content items"
+                                    (it "labels non-text content items (never [object Object])"
                                         (fn []
                                           (let [result #js {:content #js [#js {:type "image" :url "x.png"}]}]
-        ;; Non-text items are coerced via str, producing [object Object]
-                                            (-> (expect (normalize-tool-result result)) (.toBe "[object Object]")))))
+        ;; Multimodal change: non-text parts become a "<type> content" label,
+        ;; not str-coerced to [object Object]; the image reaches the model via
+        ;; the tool's toModelOutput, not this string.
+                                            (-> (expect (normalize-tool-result result)) (.toBe "image content")))))
 
                                     (it "coerces number to string"
                                         (fn [] (-> (expect (normalize-tool-result 42)) (.toBe "42"))))
