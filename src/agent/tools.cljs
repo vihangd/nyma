@@ -39,35 +39,64 @@
                                     :content (.string z)})
         :execute write-execute}))
 
-(defn ^:async edit-execute [{:keys [path old_string new_string]}]
+(defn count-occurrences
+  "Count non-overlapping literal occurrences of `s` in `content`."
+  [content s]
+  (if (empty? s)
+    0
+    (loop [idx 0 n 0]
+      (let [i (.indexOf content s idx)]
+        (if (neg? i) n (recur (+ i (count s)) (inc n)))))))
+
+(defn ^:async edit-execute [{:keys [path old_string new_string replace_all]}]
   (let [content (js-await (.text (js/Bun.file path)))
-        updated (.replace content old_string new_string)]
-    (when (= updated content)
-      (throw (js/Error. "old_string not found in file")))
-    (js-await (js/Bun.write path updated))
-    "Edit applied successfully"))
+        n       (count-occurrences content old_string)]
+    (cond
+      (zero? n)
+      (throw (js/Error. "old_string not found in file"))
+
+      (and (> n 1) (not replace_all))
+      (throw (js/Error. (str "old_string matches " n " times in " path
+                             " — provide a larger unique snippet, or pass replace_all: true")))
+
+      :else
+      (let [updated (.replaceAll content old_string new_string)]
+        (js-await (js/Bun.write path updated))
+        (if (> n 1)
+          (str "Edit applied (" n " replacements)")
+          "Edit applied successfully")))))
 
 (def edit-tool
   (tool
-   #js {:description "Replace exact text in a file"
+   #js {:description "Replace exact text in a file. old_string must match exactly once — pass replace_all to replace every occurrence."
         :inputSchema  (.object z
-                               #js {:path       (.string z)
-                                    :old_string (.string z)
-                                    :new_string (.string z)})
+                               #js {:path        (.string z)
+                                    :old_string  (.string z)
+                                    :new_string  (.string z)
+                                    :replace_all (-> (.boolean z) (.optional)
+                                                     (.describe "Replace all occurrences instead of requiring a unique match"))})
         :execute edit-execute}))
 
-(defn ^:async bash-execute [{:keys [command timeout]}]
-  (let [proc   (js/Bun.spawn #js ["sh" "-c" command]
-                             #js {:timeout (or timeout 30000)
-                                  :stdout  "pipe"
-                                  :stderr  "pipe"})
-        stdout (js-await (.text (js/Response. (.-stdout proc))))
-        stderr (js-await (.text (js/Response. (.-stderr proc))))
-        code   (js-await (.-exited proc))]
+(defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
+  (let [proc     (js/Bun.spawn #js ["sh" "-c" command]
+                               #js {:timeout (or timeout 30000)
+                                    :stdout  "pipe"
+                                    :stderr  "pipe"})
+        signal   (when ext-ctx (aget ext-ctx "abortSignal"))
+        on-abort (fn [] (.kill proc))
+        _        (when signal
+                   (if (.-aborted signal)
+                     (on-abort)
+                     (.addEventListener signal "abort" on-abort #js {:once true})))
+        stdout   (js-await (.text (js/Response. (.-stdout proc))))
+        stderr   (js-await (.text (js/Response. (.-stderr proc))))
+        code     (js-await (.-exited proc))]
+    (when signal (.removeEventListener signal "abort" on-abort))
     (js/JSON.stringify
      #js {:stdout   stdout
           :stderr   stderr
-          :exitCode code})))
+          :exitCode code
+          :aborted  (boolean (and signal (.-aborted signal)))})))
 
 (def bash-tool
   (tool

@@ -51,9 +51,11 @@
           ;; Enrich extension context with tool execution info
           _          (when ext-ctx
                        (aset ext-ctx "toolCallId" (:exec-id ctx))
+                       ;; :abort-controller is the agent's atom (fresh
+                       ;; controller per run) — deref at execution time.
                        (aset ext-ctx "abortSignal"
                              (when-let [ctrl (:abort-controller ctx)]
-                               (.-signal ctrl)))
+                               (.-signal @ctrl)))
                        (aset ext-ctx "onUpdate"
                              (fn [data]
                                (when events
@@ -469,14 +471,25 @@
                                      (let [result-promise ((:execute pipeline) tool-name t args)]
                                        (.then result-promise
                                               (fn [ctx]
-                                                ;; Return the STRUCTURED raw result only when the tool
-                                                ;; both declares toModelOutput AND actually produced
-                                                ;; content parts (an image). Text tools — including
-                                                ;; MCP text tools that carry a generic toModelOutput,
-                                                ;; and pi-compat {content:[text]} tools without one —
-                                                ;; keep the policy-truncated :result string.
-                                                (if (and (.-toModelOutput t) (:result-content-parts ctx))
+                                                (cond
+                                                  ;; A tool (or interceptor) throw is captured into
+                                                  ;; :error by the interceptor chain and never
+                                                  ;; re-raised — without this branch the model would
+                                                  ;; see an empty result instead of the failure.
+                                                  (and (:error ctx) (nil? (:result ctx)))
+                                                  (str "Error: " (or (some-> (:error ctx) .-message)
+                                                                     (str (:error ctx))))
+
+                                                  ;; Return the STRUCTURED raw result only when the tool
+                                                  ;; both declares toModelOutput AND actually produced
+                                                  ;; content parts (an image). Text tools — including
+                                                  ;; MCP text tools that carry a generic toModelOutput,
+                                                  ;; and pi-compat {content:[text]} tools without one —
+                                                  ;; keep the policy-truncated :result string.
+                                                  (and (.-toModelOutput t) (:result-content-parts ctx))
                                                   (:raw-result ctx)
+
+                                                  :else
                                                   (:result ctx))))))})))
    {}
    tools))

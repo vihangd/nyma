@@ -50,7 +50,7 @@
 (defn- model-id [agent]
   (let [config  (:config agent)
         m       (.-model config)
-        runtime (.-runtime-model (:state agent))]
+        runtime (:runtime-model @(:state agent))]
     (str (or (.-modelId (or runtime m)) (or runtime m) "–"))))
 
 (defn- provider-name [agent]
@@ -60,7 +60,7 @@
    the config is uninitialised. Status-bar consumers render
    `<provider>/<model>` only when this is non-empty."
   (let [config (:config agent)
-        v      (and config (.-active-provider-name config))]
+        v      (and config (aget config "active-provider-name"))]
     (or v "")))
 
 (defn- make-editor-theme [theme]
@@ -382,6 +382,16 @@
 
       ;; Initial status render
       (sync-status!)
+
+      ;; Global Esc → abort the in-flight run (stream + tools listening on
+      ;; the run's AbortSignal). Only while a submit is active so pickers and
+      ;; the editor keep their own Esc behavior when idle.
+      (.addInputListener tui
+                         (fn [data]
+                           (when (and (matchesKey data "escape") @submit-lock)
+                             (when-let [ctrl-atom (:abort-controller agent)]
+                               (.abort @ctrl-atom "user-interrupt")))
+                           nil))
 
       ;; Global Ctrl+C → graceful exit
       (.addInputListener tui

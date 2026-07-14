@@ -98,12 +98,51 @@
         (-> (expect (.-message e)) (.toBe "old_string not found in file"))))
     (cleanup tmp-dir)))
 
+(defn ^:async test-bash-abort []
+  (let [ctrl    (js/AbortController.)
+        ext-ctx #js {:abortSignal (.-signal ctrl)}
+        start   (js/Date.now)
+        _       (js/setTimeout (fn [] (.abort ctrl "test")) 100)
+        result  (js-await (bash-execute {:command "sleep 5"} ext-ctx))
+        parsed  (js/JSON.parse result)]
+    ;; Killed well before the 5s sleep completes
+    (-> (expect (< (- (js/Date.now) start) 3000)) (.toBe true))
+    (-> (expect (.-aborted parsed)) (.toBe true))))
+
+(defn ^:async test-edit-ambiguous-throws []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "aaa bbb aaa")
+    (try
+      (js-await (edit-execute {:path tmp-file
+                               :old_string "aaa"
+                               :new_string "x"}))
+      (-> (expect true) (.toBe false))
+      (catch :default e
+        (-> (expect (.-message e)) (.toContain "matches 2 times"))))
+    ;; File untouched
+    (-> (expect (.readFileSync fs tmp-file "utf8")) (.toBe "aaa bbb aaa"))
+    (cleanup tmp-dir)))
+
+(defn ^:async test-edit-replace-all []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "aaa bbb aaa")
+    (let [result (js-await (edit-execute {:path tmp-file
+                                          :old_string "aaa"
+                                          :new_string "z"
+                                          :replace_all true}))]
+      (-> (expect result) (.toContain "2 replacements"))
+      (-> (expect (.readFileSync fs tmp-file "utf8")) (.toBe "z bbb z")))
+    (cleanup tmp-dir)))
+
 (describe "agent.tools - bash"
           (fn []
             (it "returns stdout from echo command" test-bash-stdout)
             (it "returns exit code 0 on success" test-bash-exit-0)
             (it "returns non-zero exit code on failure" test-bash-exit-nonzero)
-            (it "captures stderr" test-bash-stderr)))
+            (it "captures stderr" test-bash-stderr)
+            (it "kills the child when abortSignal fires" test-bash-abort)))
 
 (describe "agent.tools - read"
           (fn []
@@ -118,7 +157,9 @@
 (describe "agent.tools - edit"
           (fn []
             (it "replaces exact text" test-edit-replace)
-            (it "throws when old_string not found" test-edit-throws)))
+            (it "throws when old_string not found" test-edit-throws)
+            (it "throws when old_string is ambiguous" test-edit-ambiguous-throws)
+            (it "replaces all occurrences with replace_all" test-edit-replace-all)))
 
 ;; --- Tool definition structure tests ---
 

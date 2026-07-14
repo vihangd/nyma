@@ -176,8 +176,20 @@
         ctx      (js-await ((:execute pipeline) "blocked" tool {}))]
     (-> (expect (:result ctx)) (.toContain "async block"))))
 
+(defn ^:async test-wrap-throwing-tool-surfaces-error []
+  ;; A tool whose execute throws must yield the error message to the model —
+  ;; the interceptor chain captures the throw into :error without re-raising,
+  ;; so the wrapped execute would otherwise resolve to nil (empty result).
+  (let [events   (create-event-bus)
+        pipeline (create-pipeline events)
+        tools    {"boom" (mock-tool (fn [_] (throw (js/Error. "disk on fire"))))}
+        wrapped  (wrap-tools-with-middleware tools pipeline events)
+        result   (js-await ((.-execute (get wrapped "boom")) {}))]
+    (-> (expect (str result)) (.toContain "disk on fire"))))
+
 (describe "wrap-tools-with-middleware" (fn []
-                                         (it "wraps tools to use pipeline" test-wrap-tools-with-middleware)))
+                                         (it "wraps tools to use pipeline" test-wrap-tools-with-middleware)
+                                         (it "surfaces a thrown tool error to the model" test-wrap-throwing-tool-surfaces-error)))
 
 (describe "before-hook-compat async" (fn []
                                        (it "awaits async handlers before checking cancelled" test-before-hook-compat-async-cancellation)))
