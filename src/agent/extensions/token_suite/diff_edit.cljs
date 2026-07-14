@@ -279,7 +279,7 @@
 ;; ── Compression Middleware ────────────���────────────────────────
 
 (defn- compress-leave [ctx]
-  (let [tool-name (or (.-tool-name ctx) (aget ctx "tool-name") "")
+  (let [tool-name (or (aget ctx "tool-name") "")
         result (or (.-result ctx) (aget ctx "result") "")
         args (or (.-args ctx) (aget ctx "args") #js {})]
     (cond

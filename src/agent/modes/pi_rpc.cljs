@@ -73,11 +73,11 @@
 (defn- model-obj [agent]
   (let [cfg  (:config agent)
         mid  (or (.-model cfg) "")
-        prov (or (.-active-provider-name cfg) "")
+        prov (or (aget cfg "active-provider-name") "")
         cw   (try ((:context-window (:model-registry agent)) mid) (catch :default _ nil))]
     {:id mid :name mid :provider prov :api prov
      :contextWindow (or cw 100000)
-     :maxTokens (or (.-max-tokens cfg) (.-maxTokens cfg) 8192)}))
+     :maxTokens (or (aget cfg "max-tokens") (.-maxTokens cfg) 8192)}))
 
 (defn- session-of [agent]
   (some-> (:session agent) deref))
@@ -344,7 +344,7 @@
         (do (when-let [m (.-modelId cmd)]
               (set! (.-model (:config agent)) m))
             (when-let [p (.-provider cmd)]
-              (set! (.-active-provider-name (:config agent)) p))
+              (aset (:config agent) "active-provider-name" p))
             (write-response! cmd (model-obj agent)))
 
         "set_thinking_level"

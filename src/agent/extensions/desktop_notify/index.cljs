@@ -20,10 +20,10 @@
       (try
         (let [raw    (fs/readFileSync settings-path "utf8")
               parsed (js/JSON.parse raw)
-              section (.-desktop-notify parsed)]
+              section (aget parsed "desktop-notify")]
           (if section
             {:enabled      (if (some? (.-enabled section)) (.-enabled section) true)
-             :threshold-ms (or (.-threshold-ms section) default-threshold)}
+             :threshold-ms (or (aget section "threshold-ms") default-threshold)}
             {:enabled true :threshold-ms default-threshold}))
         (catch :default _ {:enabled true :threshold-ms default-threshold}))
       {:enabled true :threshold-ms default-threshold})))

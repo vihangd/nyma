@@ -100,7 +100,7 @@
         tool-checker
         #js {:name  "small-model/quality-monitor"
              :leave (fn [ctx]
-                      (let [tool-name (str (.-tool-name ctx))
+                      (let [tool-name (str (aget ctx "tool-name"))
                             args      (.-args ctx)
                             sig       (shared/tool-call-sig tool-name args)
                             prev-sigs (:all-tool-sigs @state)

@@ -57,7 +57,7 @@
          :tool_name       (tool-names/cc-name nyma-tool-name)
          :tool_input      (clj->js args)
          :tool_use_id     (or (when event-data (.-execId event-data))
-                              (when event-data (.-exec-id event-data))
+                              (when event-data (aget event-data "exec-id"))
                               "")}))
 
 (defn- merged->effects

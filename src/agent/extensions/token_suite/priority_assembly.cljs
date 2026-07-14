@@ -10,7 +10,7 @@
 
 (defn- is-edit-call? [msg]
   (let [tool-name (or (.-toolName msg)
-                      (when-let [m (.-metadata msg)] (.-tool-name m))
+                      (when-let [m (.-metadata msg)] (aget m "tool-name"))
                       "")]
     (contains? #{"edit" "write" "multi_edit"} tool-name)))
 

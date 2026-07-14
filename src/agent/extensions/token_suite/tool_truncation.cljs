@@ -9,7 +9,7 @@
       #js {:name  "token-suite/tool-truncation"
            :leave (fn [ctx]
                     (let [result    (.-result ctx)
-                          tool-name (.-tool-name ctx)]
+                          tool-name (aget ctx "tool-name")]
                       (if (and (string? result)
                                (> (count result) (:max-chars tc)))
                         (let [;; Check for error content — never truncate errors

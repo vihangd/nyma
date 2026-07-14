@@ -111,7 +111,7 @@
     (.addMiddleware api
                     #js {:name  "bash-suite/output-handling"
                          :leave (fn [ctx]
-                                  (let [tool-name (.-tool-name ctx)]
+                                  (let [tool-name (aget ctx "tool-name")]
                                     (if (and (:enabled oh-cfg)
                                              (shared/is-bash-tool? tool-name))
                                       (let [result    (.-result ctx)

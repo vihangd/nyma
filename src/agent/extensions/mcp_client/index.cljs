@@ -126,10 +126,10 @@
               mcp    (aget parsed "mcp")]
           (merge defaults
                  (when mcp
-                   {:show-detail-segment (boolean (.-show-detail-segment mcp))
-                    :max-restarts        (or (.-max-restarts mcp) (:max-restarts defaults))
-                    :startup-timeout-ms  (or (.-startup-timeout-ms mcp) (:startup-timeout-ms defaults))
-                    :call-timeout-ms     (or (.-call-timeout-ms mcp) (:call-timeout-ms defaults))
+                   {:show-detail-segment (boolean (aget mcp "show-detail-segment"))
+                    :max-restarts        (or (aget mcp "max-restarts") (:max-restarts defaults))
+                    :startup-timeout-ms  (or (aget mcp "startup-timeout-ms") (:startup-timeout-ms defaults))
+                    :call-timeout-ms     (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
                     :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
                     :hidden-tools        (parse-hidden-tools (aget mcp "hidden-tools"))
                     :tool-overrides      (override/parse-overrides (aget mcp "tool-overrides"))})))

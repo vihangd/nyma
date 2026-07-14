@@ -74,8 +74,8 @@
 
 (defn- js-obj->entry [o]
   {:name        (or (.-name o) (get o "name"))
-   :base-url    (or (.-baseUrl o) (.-base-url o) (get o "baseUrl"))
-   :api-key-env (or (.-apiKeyEnv o) (.-api-key-env o) (get o "apiKeyEnv") "")
+   :base-url    (or (.-baseUrl o) (aget o "base-url") (get o "baseUrl"))
+   :api-key-env (or (.-apiKeyEnv o) (aget o "api-key-env") (get o "apiKeyEnv") "")
    :models      (or (.-models o) (get o "models") [])})
 
 (defn- normalize-entry [e]

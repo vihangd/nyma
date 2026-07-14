@@ -26,7 +26,7 @@
   [cmd]
   (or (:forward-to cmd)
       (when (some? cmd)
-        (try (.-forward-to cmd) (catch :default _ nil)))))
+        (try (aget cmd "forward-to") (catch :default _ nil)))))
 
 (defn- agent-forwarded? [cmd]
   (= "agent-shell" (forward-to cmd)))

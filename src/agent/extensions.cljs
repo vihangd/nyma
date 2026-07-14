@@ -218,22 +218,22 @@
                               (let [;; Convert JS config to CLJ via JSON round-trip
                                     cfg-raw (js/JSON.parse (js/JSON.stringify config))
                                   ;; Extract functions that survive JSON (they won't — handle separately)
-                                    create-fn (or (.-createModel config) (.-create-model config))
+                                    create-fn (or (.-createModel config) (aget config "create-model"))
                                     oauth-obj (.-oauth config)
                                     stream-fn (.-streamFn config)
                                   ;; Build CLJ config from JSON-safe fields
                                     cfg {:create-model  create-fn
-                                         :base-url      (or (.-baseUrl cfg-raw) (.-base-url cfg-raw))
-                                         :api-key-env   (or (.-apiKeyEnv cfg-raw) (.-api-key-env cfg-raw))
+                                         :base-url      (or (.-baseUrl cfg-raw) (aget cfg-raw "base-url"))
+                                         :api-key-env   (or (.-apiKeyEnv cfg-raw) (aget cfg-raw "api-key-env"))
                                          :api           (.-api cfg-raw)
                                          :stream-fn     stream-fn
                                          :oauth         (when oauth-obj
                                                           {:name          (.-name oauth-obj)
                                                            :login         (.-login oauth-obj)
                                                            :refresh-token (or (.-refreshToken oauth-obj)
-                                                                              (.-refresh-token oauth-obj))
+                                                                              (aget oauth-obj "refresh-token"))
                                                            :get-api-key   (or (.-getApiKey oauth-obj)
-                                                                              (.-get-api-key oauth-obj))})}
+                                                                              (aget oauth-obj "get-api-key"))})}
                                   ;; Extract model list
                                     models-arr (.-models config)
                                     models (when models-arr
@@ -241,9 +241,9 @@
                                                          {:id             (.-id m)
                                                           :name           (.-name m)
                                                           :context-window (or (.-contextWindow m)
-                                                                              (.-context-window m)
+                                                                              (aget m "context-window")
                                                                               100000)
-                                                          :max-tokens     (or (.-maxTokens m) (.-max-tokens m))
+                                                          :max-tokens     (or (.-maxTokens m) (aget m "max-tokens"))
                                                           :reasoning      (.-reasoning m)
                                                           :input          (when (.-input m) (vec (.-input m)))
                                                           :cost           (when (.-cost m)
@@ -292,7 +292,7 @@
                                 ;; names like "openai.chat" (uninformative for
                                 ;; users using minimax / openrouter / etc.).
                                 ;; This way the registry-side label survives.
-                                  (set! (.-active-provider-name (:config agent))
+                                  (aset (:config agent) "active-provider-name"
                                         (or provider ""))
                                 ;; Emit model_select event
                                   ((:emit (:events agent)) "model_select"

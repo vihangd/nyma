@@ -5,7 +5,7 @@
 ;; Minimal fake agent sufficient for the no-run command handlers.
 (defn- make-agent []
   (let [cfg #js {:model "claude-test"}]
-    (set! (.-active-provider-name cfg) "anthropic")
+    (aset cfg "active-provider-name" "anthropic")
     {:config         cfg
      :model-registry {:context-window (fn [_] 200000)}
      :thinking-level (atom "off")

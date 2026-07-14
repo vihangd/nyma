@@ -60,7 +60,7 @@
                                            :reason "reload"}))]
     ;; 4. Rebuild system prompt
     (when-let [build-fn (:build-system-prompt new-resources)]
-      (set! (.-system-prompt (:config agent)) (build-fn)))
+      (aset (:config agent) "system-prompt" (build-fn)))
     ;; 5. Reload extensions
     (when (and extensions-atom (.-extension-api agent))
       (let [loaded (js-await (discover-and-load
@@ -120,7 +120,7 @@
                   ;; Mirror cli.cljs / extensions.cljs setModel: persist
                   ;; the user-friendly provider label so the status line
                   ;; reflects the post-OAuth model immediately.
-                  (set! (.-active-provider-name (:config agent)) (or provider ""))
+                  (aset (:config agent) "active-provider-name" (or provider ""))
                   (notify ctx (str "Model resolved: " model-id)))
                 (catch :default e
                   (notify ctx (str "Model resolution failed: " (.-message e)) "error"))))))
@@ -188,7 +188,7 @@
                                           (= "agent-shell"
                                              (or (:forward-to cmd)
                                                  (when (some? cmd)
-                                                   (try (.-forward-to cmd)
+                                                   (try (aget cmd "forward-to")
                                                         (catch :default _ nil))))))
                             split       (group-by (fn [[_ cmd]] (agent-fwd? cmd)) cmds)
                             nyma-cmds   (get split false [])
@@ -289,7 +289,7 @@
           {:description "Run a shell command through bash_suite (alias: !cmd in the editor)"
            :handler (fn [args ctx]
                       (let [command (str/join " " args)
-                            append  (.-append-message ctx)]
+                            append  (aget ctx "append-message")]
                         (cond
                           (empty? command)
                           (notify ctx "Usage: /bash <command> — or type !cmd directly in the editor" "info")
@@ -328,7 +328,7 @@
           {:description "Evaluate a Babashka expression (alias: $expr in the editor)"
            :handler (fn [args ctx]
                       (let [expr   (str/join " " args)
-                            append (.-append-message ctx)]
+                            append (aget ctx "append-message")]
                         (cond
                           (empty? expr)
                           (notify ctx "Usage: /bb <expr> — or type $expr directly in the editor" "info")

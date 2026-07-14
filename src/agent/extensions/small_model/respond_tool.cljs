@@ -73,7 +73,7 @@
         respond-interceptor
         #js {:name  "small-model/respond-tool"
              :leave (fn [ctx]
-                      (when (= (str (.-tool-name ctx)) respond-tool-name)
+                      (when (= (str (aget ctx "tool-name")) respond-tool-name)
                         ;; Capture the message and flag for next turn's block.
                         (reset! pending (str (.-result ctx)))
                         ;; Set an empty result so the tool-call doesn't show

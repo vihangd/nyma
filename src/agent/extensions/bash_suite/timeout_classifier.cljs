@@ -22,7 +22,7 @@
                     #js {:name  "bash-suite/timeout-classifier"
                          :enter (fn [ctx]
                                   (when (and (:enabled cfg)
-                                             (shared/is-bash-tool? (.-tool-name ctx)))
+                                             (shared/is-bash-tool? (aget ctx "tool-name")))
                                     (let [args     (.-args ctx)
                                           cmd      (or (.-command args) "")
                                           existing (.-timeout args)]

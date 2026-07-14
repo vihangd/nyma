@@ -51,7 +51,7 @@
   [{:keys [api hooks-atom cwd]}]
   (let [handler
         (^:async fn [data]
-          (let [is-error? (boolean (or (.-isError data) (.-is-error data)))
+          (let [is-error? (boolean (or (.-isError data) (aget data "is-error")))
                 tool-name (str (or (.-toolName data) (.-name data) ""))
                 disc      (tool-names/cc-name tool-name)
                 stdin     (payload data is-error?)

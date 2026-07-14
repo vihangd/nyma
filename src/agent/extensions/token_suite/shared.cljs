@@ -149,7 +149,7 @@
       (try
         (let [raw (fs/readFileSync settings-path "utf8")
               parsed (js/JSON.parse raw)
-              suite  (.-token-suite parsed)]
+              suite  (aget parsed "token-suite")]
           (if suite
             (merge-with merge default-config (js/JSON.parse (js/JSON.stringify suite)))
             default-config))

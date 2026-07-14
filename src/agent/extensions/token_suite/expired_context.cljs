@@ -70,7 +70,7 @@
                 ;; Track tool_call metadata
                 (when (= role "tool_call")
                   (let [tname (or (.-toolName msg)
-                                  (when-let [m (.-metadata msg)] (.-tool-name m))
+                                  (when-let [m (.-metadata msg)] (aget m "tool-name"))
                                   "")]
                     (when (= tname "read")
                       (let [fpath (or (when-let [m (.-metadata msg)]

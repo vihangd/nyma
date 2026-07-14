@@ -379,7 +379,7 @@ Examples:
             ;; Persist the user-friendly provider label so the status
             ;; line shows `<provider>/<model>` from the very first turn,
             ;; not just after a runtime /model swap.
-            (set! (.-active-provider-name (:config agent)) (or provider "")))
+            (aset (:config agent) "active-provider-name" (or provider "")))
         ;; The configured DEFAULT model spec (-m / settings :model / fallback).
         ;; The "default" role resolves to this — so /role default|reset and
         ;; plan-exit restore the user's chosen model, not a hardcoded sonnet.
@@ -446,7 +446,7 @@ Examples:
                                     (:provider-registry agent) values merged)]
             (when-let [m (:model late-resolved)]
               (set! (.-model (:config agent)) m)
-              (set! (.-active-provider-name (:config agent))
+              (aset (:config agent) "active-provider-name"
                     (or (:provider late-resolved) ""))))
           (catch :default e
             (js/console.warn (str "[nyma] " (.-message e))))))

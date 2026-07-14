@@ -12,7 +12,7 @@
       (let [prev (aget messages j)]
         (if (= (shared/msg-role prev) "tool_call")
           (or (.-toolName prev)
-              (when-let [m (.-metadata prev)] (.-tool-name m))
+              (when-let [m (.-metadata prev)] (aget m "tool-name"))
               "unknown")
           (recur (dec j)))))))
 

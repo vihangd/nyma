@@ -1,5 +1,5 @@
 {
   "namespace": "local",
-  "capabilities": ["providers"],
+  "capabilities": ["providers", "tools"],
   "dependsOn": []
 }

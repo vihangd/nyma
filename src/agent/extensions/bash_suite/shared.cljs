@@ -94,7 +94,7 @@
       (try
         (let [raw (fs/readFileSync settings-path "utf8")
               parsed (js/JSON.parse raw)
-              suite  (.-bash-suite parsed)]
+              suite  (aget parsed "bash-suite")]
           (if suite
             ;; js->clj doesn't exist in Squint; parse via JSON round-trip
             (let [suite-clj (js/JSON.parse (js/JSON.stringify suite))]

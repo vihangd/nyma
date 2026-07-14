@@ -65,7 +65,7 @@ with every section below present.
                                                 (when (object? m) (.-metadata m)))
                                        tname (when meta
                                                (or (when (map? meta) (:tool-name meta))
-                                                   (when (object? meta) (.-tool-name meta))))]
+                                                   (when (object? meta) (aget meta "tool-name"))))]
                                    (str "[Tool Call]: " (or tname "unknown")))
                     "tool_result" (str "[Tool Result]: "
                                        (if (> (count content) limit)
@@ -111,7 +111,7 @@ with every section below present.
                          (when (object? msg) (.-metadata msg)))
                 tool-name (when meta
                             (or (when (map? meta) (:tool-name meta))
-                                (when (object? meta) (.-tool-name meta))))
+                                (when (object? meta) (aget meta "tool-name"))))
                 args (when meta
                        (or (when (map? meta) (:args meta))
                            (when (object? meta) (.-args meta))))
@@ -270,23 +270,23 @@ with every section below present.
     (.on api "before_compact"
          (fn [evt-ctx _ctx]
            (let [;; Use enriched payload fields when available, fall back to full context
-                 to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+                 to-summarize (or (aget evt-ctx "messages-to-summarize") (.-context evt-ctx))
                  messages (if (sequential? to-summarize) to-summarize
                               (when (and to-summarize (.-length to-summarize))
                                 (vec (map (fn [i] (aget to-summarize i))
                                           (range (.-length to-summarize))))))
               ;; Read previous summary for iterative updates
-                 previous-summary (or (.-previous-summary evt-ctx)
+                 previous-summary (or (aget evt-ctx "previous-summary")
                                       (->> messages
                                            (filter #(= (shared/msg-role %) "compaction"))
                                            last
                                            shared/msg-content))
               ;; Use pre-extracted file lists when available, else extract
-                 current-files-read (or (when-let [fr (.-files-read evt-ctx)]
+                 current-files-read (or (when-let [fr (aget evt-ctx "files-read")]
                                           (vec fr))
                                         (when (seq messages)
                                           (compaction/extract-files-read messages)))
-                 current-files-modified (or (when-let [fm (.-files-modified evt-ctx)]
+                 current-files-modified (or (when-let [fm (aget evt-ctx "files-modified")]
                                               (vec fm))
                                             (when (seq messages)
                                               (compaction/extract-files-modified messages)))
@@ -322,7 +322,7 @@ with every section below present.
            (^:async fn [evt-ctx ctx]
           ;; Only run if Hook C already set a summary (we enhance it)
              (when-let [extraction-summary (.-summary evt-ctx)]
-               (let [to-summarize (or (.-messages-to-summarize evt-ctx) (.-context evt-ctx))
+               (let [to-summarize (or (aget evt-ctx "messages-to-summarize") (.-context evt-ctx))
                      messages (if (sequential? to-summarize) to-summarize
                                   (when (and to-summarize (.-length to-summarize))
                                     (vec (map (fn [i] (aget to-summarize i))
@@ -341,7 +341,7 @@ with every section below present.
                  (when (and model (seq messages))
                    (try
                      (let [conversation-text (serialize-for-summary messages 2000)
-                           previous-summary (.-previous-summary evt-ctx)
+                           previous-summary (aget evt-ctx "previous-summary")
                            prompt (str structured-prompt "\n\n"
                                        (when previous-summary
                                          (str "<previous-summary>\n" previous-summary

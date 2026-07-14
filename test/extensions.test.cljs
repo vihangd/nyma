@@ -401,14 +401,14 @@
                   (let [{:keys [agent api]} (make-api)]
                     (register-fake-provider! agent "minimax")
                     (.setModel api "minimax/MiniMax-M2.5")
-                    (-> (expect (.-active-provider-name (:config agent)))
+                    (-> (expect (aget (:config agent) "active-provider-name"))
                         (.toBe "minimax")))))
 
             (it "writes empty string when bare-model id is passed"
                 (fn []
                   (let [{:keys [agent api]} (make-api)]
                     (.setModel api "claude-sonnet-4-5")
-                    (-> (expect (.-active-provider-name (:config agent)))
+                    (-> (expect (aget (:config agent) "active-provider-name"))
                         (.toBe "")))))
 
             (it "overwrites previous provider on subsequent calls"
@@ -420,7 +420,7 @@
                     (.setModel api "openrouter/qwen/qwen3-coder:free")
                     ;; Note: openrouter/qwen/qwen3-coder:free splits at the
                     ;; FIRST slash so provider="openrouter", model="qwen/qwen3-coder:free"
-                    (-> (expect (.-active-provider-name (:config agent)))
+                    (-> (expect (aget (:config agent) "active-provider-name"))
                         (.toBe "openrouter")))))
 
             (it "model_select event includes :provider field"

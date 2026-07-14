@@ -114,7 +114,7 @@
                 (fn []
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool_name "bash" :args #js {:command "npm install"}}]
+                        ctx #js {:tool-name "bash" :args #js {:command "npm install"}}]
                     ((.-enter @registered) ctx)
                     (-> (expect (.-timeout (.-args ctx))) (.toBe 300000)))))
 
@@ -122,7 +122,7 @@
                 (fn []
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool_name "bash" :args #js {:command "ls -la"}}]
+                        ctx #js {:tool-name "bash" :args #js {:command "ls -la"}}]
                     ((.-enter @registered) ctx)
                     (-> (expect (.-timeout (.-args ctx))) (.toBeUndefined)))))
 
@@ -130,7 +130,7 @@
                 (fn []
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool_name "bash" :args #js {:command "npm install" :timeout 5000}}]
+                        ctx #js {:tool-name "bash" :args #js {:command "npm install" :timeout 5000}}]
                     ((.-enter @registered) ctx)
                     (-> (expect (.-timeout (.-args ctx))) (.toBe 5000)))))
 
@@ -138,6 +138,6 @@
                 (fn []
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool_name "read" :args #js {:path "/tmp/foo"}}]
+                        ctx #js {:tool-name "read" :args #js {:path "/tmp/foo"}}]
                     ((.-enter @registered) ctx)
                     (-> (expect (.-timeout (.-args ctx))) (.toBeUndefined)))))))

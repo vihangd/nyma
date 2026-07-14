@@ -173,7 +173,7 @@
     (.addMiddleware api
       #js {:name  "bash-suite/background-jobs"
            :enter (fn [ctx]
-                    (let [tool-name (.-tool-name ctx)]
+                    (let [tool-name (aget ctx "tool-name")]
                       (if (and (:enabled bg-cfg)
                                (shared/is-bash-tool? tool-name)
                                (not (.-cancelled ctx)))

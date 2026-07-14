@@ -226,7 +226,7 @@
             ;; Allow user to point a native at a different server/tool
             (swap! merged assoc k
                    {:server    (or (.-server v) "lean-ctx")
-                    :mcp-tool  (.-mcp-tool v)
+                    :mcp-tool  (aget v "mcp-tool")
                     ;; No custom translator/schema support yet —
                     ;; overrides that need them should be added to
                     ;; default-overrides

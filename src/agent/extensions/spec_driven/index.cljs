@@ -136,10 +136,10 @@
               spec   (aget parsed "spec")]
           (if (nil? spec)
             defaults
-            {:default-shape    (or (.-default-shape spec)
+            {:default-shape    (or (aget spec "default-shape")
                                    (aget spec "default-shape")
                                    default-default-shape)
-             :shape-precedence (let [p (or (.-shape-precedence spec)
+             :shape-precedence (let [p (or (aget spec "shape-precedence")
                                            (aget spec "shape-precedence"))]
                                  (if (and p (.isArray js/Array p))
                                    ;; Sanity-bound: keep only known shape names.

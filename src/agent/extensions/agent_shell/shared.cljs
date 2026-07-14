@@ -85,7 +85,7 @@
       (try
         (let [raw     (fs/readFileSync settings-path "utf8")
               parsed  (js/JSON.parse raw)
-              section (.-agent-shell parsed)]
+              section (aget parsed "agent-shell")]
           (if section
             (merge default-config (js->clj* section))
             default-config))

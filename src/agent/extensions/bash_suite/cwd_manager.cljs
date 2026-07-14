@@ -47,7 +47,7 @@
     (.addMiddleware api
       #js {:name  "bash-suite/cwd-manager"
            :enter (fn [ctx]
-                    (let [tool-name (.-tool-name ctx)]
+                    (let [tool-name (aget ctx "tool-name")]
                       (if (and (:enabled cwd-cfg)
                                (shared/is-bash-tool? tool-name))
                         (let [args    (.-args ctx)
@@ -72,7 +72,7 @@
                             ctx))
                         ctx)))
            :leave (fn [ctx]
-                    (let [tool-name (.-tool-name ctx)]
+                    (let [tool-name (aget ctx "tool-name")]
                       (when (and (:enabled cwd-cfg)
                                  (:track-cd cwd-cfg)
                                  (shared/is-bash-tool? tool-name)
