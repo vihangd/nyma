@@ -396,3 +396,15 @@ The `agent_shell` extension implements ACP (Agent Client Protocol — Zed's JSON
 ### 7h. Backends to add
 
 Today's agents (`agents/registry.cljs`): Claude Code, Gemini CLI, OpenCode, Qwen, Goose, Kiro. The Zed ACP registry is growing — Codex CLI, GitHub Copilot CLI, etc. Adding a new backend is mostly a registry entry + per-agent quirks (model-method, init-mode, prompt format). Track requests in `extension-ideas.md` rather than here unless an agent has spec-level peculiarities.
+
+## 2026-07-15 sweep — deferred SOTA items
+
+From the full audit + SOTA research round (bugs and quick wins landed; these did not):
+
+- **Compaction PreCompact event** — let extensions preserve state across compaction; re-inject memory/AGENTS.md after.
+- **Sandbox extension** — route bash through `@anthropic-ai/sandbox-runtime` or Gondolin micro-VM with egress allowlist; enables safe full-auto with fewer prompts.
+- **MCP hardening** — tool-description pinning (poisoning detection), per-tool permissions, instruction-pattern flagging on untrusted results.
+- **Goal loop `/goal`** — run until a written condition passes, small-model grader per turn (small_model ext is the natural grader).
+- **Permission modal consuming tool_metadata** — the safety table is still written-but-unread (T11/1d).
+- **Extension enable/disable mechanism** — manifests have no honored `enabled`; only NYMA_NO_BUILTIN_EXT global.
+- **Live /theme re-render** — watch-theme exists; widgets bake theme at construction.
