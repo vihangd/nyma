@@ -144,6 +144,11 @@
    Falls back to original order on cycles. Public for direct testing."
   [entries]
   (let [ns-set  (set (map :namespace entries))
+        _       (doseq [[ns-str es] (group-by :namespace entries)]
+                  (when (> (count es) 1)
+                    (d/warn (str "[nyma] Duplicate extension namespace \"" ns-str "\" — "
+                                 (.join (clj->js (mapv :path es)) " vs ")
+                                 " (only one will load)"))))
         by-ns   (into {} (map (fn [e] [(:namespace e) e]) entries))
         ;; Filter deps to only known namespaces
         deps-of (fn [e] (filterv #(contains? ns-set %) (or (:deps e) [])))
@@ -188,11 +193,18 @@
             (let [full-path (path/join dir entry)]
               (when (or (cljs-extension? entry) (ts-js-extension? entry))
                 ;; Multi-file extension filtering:
-                ;; If the file's directory contains extension.json, only load the
-                ;; entry point (index.*). Skip helper/support files like shared.mjs.
+                ;; If the file's directory — or ANY ancestor up to the scan
+                ;; root — contains extension.json, only load that extension's
+                ;; entry point (index.*). Without the ancestor walk, helper
+                ;; files in subdirs (e.g. agent_shell/features/handoff.mjs)
+                ;; are scanned as single-file extensions whose derived
+                ;; namespace can silently collide with a real extension.
                 (let [dir-of-file    (path/dirname full-path)
-                      has-manifest?  (fs/existsSync
-                                      (path/join dir-of-file "extension.json"))]
+                      has-manifest?  (loop [d dir-of-file]
+                                       (cond
+                                         (fs/existsSync (path/join d "extension.json")) true
+                                         (or (= d dir) (= d (path/dirname d))) false
+                                         :else (recur (path/dirname d))))]
                   (when (or (not has-manifest?)    ;; single-file ext: always load
                             (entry-point? entry))  ;; multi-file ext: only load index
                     (try

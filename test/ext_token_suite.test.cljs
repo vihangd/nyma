@@ -126,6 +126,35 @@
     (js-await (run agent "test"))
     (-> (expect true) (.toBe true))))
 
+(defn ^:async test-mask-keeps-error-results []
+  ;; 12 old tool_results (keep-recent 10): the oldest two are maskable, but
+  ;; one is an error result — it must survive verbatim (failure evidence).
+  (let [handler (atom nil)
+        api     #js {:on (fn [evt h _prio]
+                           (when (= evt "context_assembly") (reset! handler h)))
+                     :estimateTokens (fn [s] (count (str s)))}
+        _       (observation-mask/activate api)
+        msgs    (concat
+                 [{:role "tool_result" :content "Error: disk on fire"}
+                  {:role "tool_result" :content "old ok result 1 with lots of text"}
+                  {:role "tool_result" :content "old ok result 2 with lots of text"}]
+                 (map (fn [i] {:role "tool_result" :content (str "recent " i)}) (range 10)))
+        arr     (clj->js (vec msgs))
+        event   #js {:messages arr}]
+    (@handler event nil)
+    (-> (expect (.-content (aget arr 0))) (.toBe "Error: disk on fire"))
+    ;; The oldest non-error results got masked instead
+    (-> (expect (.-content (aget arr 1))) (.toContain "[tool_result:"))))
+
+(describe "ext-observation-mask error preservation" (fn []
+                                                      (it "error-result? detects Error: prefix and non-zero exitCode"
+                                                          (fn []
+                                                            (-> (expect (observation-mask/error-result? "Error: nope")) (.toBe true))
+                                                            (-> (expect (observation-mask/error-result? "{\"stdout\":\"\",\"exitCode\":1}")) (.toBe true))
+                                                            (-> (expect (observation-mask/error-result? "{\"stdout\":\"ok\",\"exitCode\":0}")) (.toBe false))
+                                                            (-> (expect (observation-mask/error-result? "all fine")) (.toBe false))))
+                                                      (it "old error results survive masking" test-mask-keeps-error-results)))
+
 (describe "ext-observation-mask" (fn []
                                    (it "masks old tool_results keeping recent ones" test-mask-keeps-recent)
                                    (it "never modifies user or assistant messages" test-mask-preserves-user-assistant)

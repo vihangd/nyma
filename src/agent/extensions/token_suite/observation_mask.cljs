@@ -33,60 +33,81 @@
         (swap! facts conj (str match-count " matches"))))
     @facts))
 
+(defn error-result?
+  "True when a tool_result carries failure evidence. SOTA on tool-result
+   pruning: models need error results to self-correct — masking them makes
+   the agent repeat the failing action. Detects the middleware's standard
+   \"Error: …\" surface and bash envelopes with a non-zero exitCode."
+  [content]
+  (let [s (str content)]
+    (or (.startsWith s "Error:")
+        (and (.startsWith s "{")
+             (try (let [parsed (js/JSON.parse s)
+                        code   (aget parsed "exitCode")]
+                    (and (some? code) (not= code 0)))
+                  (catch :default _ false))))))
+
 (defn activate [api]
   (let [config      (shared/load-config)
         keep-recent (get-in config [:observation-mask :keep-recent] 10)
+        keep-errors (get-in config [:observation-mask :keep-errors] true)
         turn-stats  (atom {:masked 0 :tokens-saved 0})]
 
     ;; context_assembly — priority 90 (runs first)
     (.on api "context_assembly"
-      (fn [event _ctx]
-        (let [messages (.-messages event)
-              total    (.-length messages)
+         (fn [event _ctx]
+           (let [messages (.-messages event)
+                 total    (.-length messages)
               ;; Collect indices of tool_result messages
-              result-indices
-              (loop [i 0 acc []]
-                (if (>= i total) acc
-                  (let [msg (aget messages i)
-                        role (shared/msg-role msg)]
-                    (recur (inc i)
-                           (if (= role "tool_result") (conj acc i) acc)))))
-              mask-count (max 0 (- (count result-indices) keep-recent))
-              to-mask    (set (take mask-count result-indices))]
+                 result-indices
+                 (loop [i 0 acc []]
+                   (if (>= i total) acc
+                       (let [msg (aget messages i)
+                             role (shared/msg-role msg)]
+                         (recur (inc i)
+                                (if (= role "tool_result") (conj acc i) acc)))))
+                 ;; Error results are exempt from masking (keep-errors):
+                 ;; failure evidence must stay verbatim for self-correction.
+                 maskable   (if keep-errors
+                              (filterv #(not (error-result? (shared/msg-content (aget messages %))))
+                                       result-indices)
+                              result-indices)
+                 mask-count (max 0 (- (count result-indices) keep-recent))
+                 to-mask    (set (take mask-count maskable))]
 
           ;; Mutate in place
-          (doseq [i to-mask]
-            (let [msg       (aget messages i)
-                  content   (shared/msg-content msg)
-                  tool-name (extract-tool-name msg i messages)
-                  lines     (shared/count-lines content)
-                  chars     (shared/count-chars content)
-                  old-tokens (.estimateTokens api content)
-                  facts      (extract-key-facts content tool-name)
-                  facts-str  (when (seq facts) (str " | " (str/join ", " facts)))
-                  placeholder (str "[tool_result: " tool-name
-                                   " — " lines " lines, " chars " chars"
-                                   facts-str "]")
-                  new-tokens (.estimateTokens api placeholder)]
-              (aset msg "content" placeholder)
-              (swap! turn-stats update :masked inc)
-              (swap! turn-stats update :tokens-saved + (- old-tokens new-tokens))))
+             (doseq [i to-mask]
+               (let [msg       (aget messages i)
+                     content   (shared/msg-content msg)
+                     tool-name (extract-tool-name msg i messages)
+                     lines     (shared/count-lines content)
+                     chars     (shared/count-chars content)
+                     old-tokens (.estimateTokens api content)
+                     facts      (extract-key-facts content tool-name)
+                     facts-str  (when (seq facts) (str " | " (str/join ", " facts)))
+                     placeholder (str "[tool_result: " tool-name
+                                      " — " lines " lines, " chars " chars"
+                                      facts-str "]")
+                     new-tokens (.estimateTokens api placeholder)]
+                 (aset msg "content" placeholder)
+                 (swap! turn-stats update :masked inc)
+                 (swap! turn-stats update :tokens-saved + (- old-tokens new-tokens))))
 
           ;; Return nil — mutations visible to subsequent handlers
-          nil))
-      90)
+             nil))
+         90)
 
     ;; after_provider_request — stats
     (.on api "after_provider_request"
-      (fn [_event _ctx]
-        (let [{:keys [masked tokens-saved]} @turn-stats]
-          (when (pos? masked)
-            (swap! shared/suite-stats update :observation-mask
-              (fn [s] (-> s
-                          (update :turns inc)
-                          (update :messages-masked + masked)
-                          (update :tokens-saved + tokens-saved)))))
-          (reset! turn-stats {:masked 0 :tokens-saved 0}))))
+         (fn [_event _ctx]
+           (let [{:keys [masked tokens-saved]} @turn-stats]
+             (when (pos? masked)
+               (swap! shared/suite-stats update :observation-mask
+                      (fn [s] (-> s
+                                  (update :turns inc)
+                                  (update :messages-masked + masked)
+                                  (update :tokens-saved + tokens-saved)))))
+             (reset! turn-stats {:masked 0 :tokens-saved 0}))))
 
     ;; Return deactivate
     (fn [] nil)))

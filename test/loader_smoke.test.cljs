@@ -51,7 +51,10 @@
     "openwiki"
     "memory"
     "todos"
-    "add-dir"})
+    "add-dir"
+    "verify-gate"
+    "checkpoints"
+    "handoff"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so

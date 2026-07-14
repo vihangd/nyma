@@ -1,0 +1,5 @@
+{
+  "namespace": "handoff",
+  "capabilities": ["events", "commands", "state", "model"],
+  "dependsOn": []
+}

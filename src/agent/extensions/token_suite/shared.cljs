@@ -21,7 +21,7 @@
 
 ;; ── Default configuration ────────────────────────────────────
 (def default-config
-  {:observation-mask {:keep-recent 10}
+  {:observation-mask {:keep-recent 10 :keep-errors true}
    :kv-cache         {:enabled true
                       :min-system-tokens 500
                       :cache-messages true

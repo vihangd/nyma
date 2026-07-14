@@ -1,0 +1,5 @@
+{
+  "namespace": "verify-gate",
+  "capabilities": ["events", "messages"],
+  "dependsOn": []
+}
