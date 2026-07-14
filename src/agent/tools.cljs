@@ -8,23 +8,42 @@
             [agent.multimodal :as mm]
             [agent.utils.ansi :refer [truncate-text]]))
 
+(def read-default-line-cap 2000)
+
+(defn- number-lines
+  "cat -n style: right-aligned 1-based line number, tab, content."
+  [lines start]
+  (.join (.map lines (fn [line i]
+                       (str (.padStart (str (+ start i)) 6) "\t" line)))
+         "\n"))
+
 (defn ^:async read-execute [{:keys [path range]}]
-  (let [content (js-await (.text (js/Bun.file path)))]
-    (if range
-      (let [lines (.split content "\n")]
-        (.join (.slice lines (dec (first range)) (second range)) "\n"))
-      content)))
+  (when-not (fs/existsSync path)
+    (throw (js/Error. (str "File not found: " path))))
+  (let [content (js-await (.text (js/Bun.file path)))
+        lines   (.split content "\n")
+        total   (.-length lines)
+        [start end] (if range
+                      [(first range) (second range)]
+                      [1 (min total read-default-line-cap)])
+        slice   (.slice lines (dec start) end)
+        body    (number-lines slice start)]
+    (if (< end total)
+      (str body "\n… [" (- total end) " more lines — read with range [" (inc end) ", " total "]]")
+      body)))
 
 (def read-tool
   (tool
-   #js {:description "Read file contents"
+   #js {:description (str "Read file contents with line numbers (cat -n format: `   N\\tcontent`). "
+                          "Returns the first " read-default-line-cap " lines unless a range is given. "
+                          "When using edit, old_string must be the raw file text — never include the line-number prefix.")
         :inputSchema  (.object z
                                #js {:path  (-> (.string z)
                                                (.describe "File path to read"))
                                     :range (-> (.array z (.number z))
                                                (.length 2)
                                                (.optional)
-                                               (.describe "Line range [start, end]"))})
+                                               (.describe "Line range [start, end], 1-based inclusive"))})
         :execute read-execute}))
 
 (defn ^:async write-execute [{:keys [path content]}]

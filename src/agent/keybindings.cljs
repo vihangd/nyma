@@ -1,5 +1,6 @@
 (ns agent.keybindings
-  (:require ["node:path" :as path]
+  (:require [agent.debug :as d]
+            ["node:path" :as path]
             ["node:fs" :as fs]
             ["node:os" :as os]
             [agent.keybinding-registry :as kbr]))
@@ -17,7 +18,7 @@
             entries (js/Object.entries raw)]
         (into {} (map (fn [e] [(aget e 0) (aget e 1)]) entries)))
       (catch :default e
-        (js/console.warn "[nyma] Failed to parse keybindings.json:" (.-message e))
+        (d/warn "[nyma] Failed to parse keybindings.json:" (.-message e))
         {}))
     {}))
 
@@ -53,7 +54,7 @@
     (reset! registry-atom registry)
     (when (and (seq (:conflicts registry)) (.-NYMA_DEBUG js/process.env))
       (doseq [{:keys [key action-ids]} (:conflicts registry)]
-        (js/console.warn
+        (d/warn
          (str "[nyma] keybinding conflict: " key
               " → " (.join (clj->js action-ids) ", ")))))
     registry))

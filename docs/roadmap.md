@@ -10,20 +10,12 @@ Last updated: 2026-04-20 (after LSP suite + submit-guard fixes).
 
 Every item in this section is **fully implemented and tested** — the module exists, the unit tests pass, the public API is documented. What's missing is the callsite edit that flips over from the legacy path to the new one. Each is low risk because the old path still works.
 
-### 1a. Chord keybinding resolver → `app.cljs` global input handler
+### 1a. Chord keybinding resolver — REMOVED (2026-07)
 
-- **What's ready:** `src/agent/keybinding_resolver.cljs` with `resolve-key` (typed single-key) and `resolve-key-with-chord` (multi-keystroke with `pending` state). Full coverage in `test/keybinding_resolver.test.cljs` (21 tests including the escape-meta regression and every chord path).
-- **What's wired:** nothing in production. `src/agent/ui/app.cljs:436` still calls `kbr/matches?` in a cond of single-action checks.
-- **Why we stopped:** no binding in `default-actions` uses a chord yet, so rewiring would be infrastructure-for-infrastructure's-sake. We'd rather wait until there's a real use case.
-- **When to do it:**
-  - We want a second keystroke binding like `ctrl+k ctrl+s`, OR
-  - We hit another `matches?`-based bug that a typed result (`:match` / `:unbound` / `:none`) would have caught.
-- **Rough plan:**
-  1. Add a `pending-chord` atom to the App component's state.
-  2. Replace the cond of `matches?` calls in the global `useInput` with a single `(resolve-key-with-chord reg input key @pending-chord)` dispatch.
-  3. On `:chord-started`, reset! the atom to `(:pending result)`; on anything else, reset to nil.
-  4. Render a chord indicator in the status line when `@pending-chord` is non-nil (cc-kit does this).
-- **Files to touch:** `src/agent/ui/app.cljs` around line 432-455, possibly a new status-line segment for the chord indicator.
+`src/agent/keybinding_resolver.cljs` and `ui/diff_renderer.cljs` (plus their tests) were deleted:
+both became unreachable after the Ink→pi-tui migration removed `src/agent/ui/app.cljs` (their
+only intended consumer). If chord bindings become a real need, resurrect from git history or
+build on pi-tui's own `matchesKey`.
 
 ### 1b. CommandRegistry aliases / hidden / enabled in `builtins.cljs`
 
@@ -161,7 +153,7 @@ A second audit (this one covering cc-kit's `packages/tools/`, `packages/ui/`, an
 | Finding | Already landed as |
 |---|---|
 | **T1** Tool result truncation | `tools.cljs:275` (`truncate-text`) + `bash_suite/output_handling.cljs` (middle-truncation + retrieve-full) |
-| **T2** AbortSignal plumbing | `core.cljs:40` abort-controller + `middleware.cljs:34` enrichment + `app.cljs:437` Esc binding (caveat: verify bash_suite consumes it) |
+| **T2** AbortSignal plumbing | `core.cljs:40` abort-controller + `middleware.cljs:34` enrichment + Esc abort landed in `modes/interactive.cljs` (2026-07) + core `bash` kills its child on the run's abortSignal |
 | **T9** DiffView parser | Nyma's `ui/diff_renderer.cljs` parses a different custom format (`+123\| content`); cc-kit's unified-diff parser only helps if we start rendering `git diff` output directly — different feature, not a missing borrow |
 | **T12** REPL layout | `app.cljs` already uses flex layout equivalently |
 | **T15** Pure-function input logic tests | Phase 9 — `picker_math`, `picker_input` |

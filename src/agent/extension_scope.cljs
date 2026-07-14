@@ -1,5 +1,6 @@
 (ns agent.extension-scope
-  (:require [agent.permissions :refer [check]]
+  (:require [agent.debug :as d]
+            [agent.permissions :refer [check]]
             [agent.extension-state :refer [create-state-api]]))
 
 (defn- gate
@@ -25,7 +26,7 @@
                                              (handler data ctx)
                                              (catch :default e
                                                (try
-                                                 (js/console.warn
+                                                 (d/warn
                                                   (str "[" ns-str "] Error in " event " handler: " (.-message e)))
                                                  (catch :default _ nil))
                                                nil)))]

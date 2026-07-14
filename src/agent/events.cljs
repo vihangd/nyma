@@ -1,4 +1,5 @@
-(ns agent.events)
+(ns agent.events
+  (:require [agent.debug :as d]))
 
 (def all-event-types
   ["session_start" "session_end" "session_before_switch" "session_switch"
@@ -165,7 +166,7 @@
           (when (and result (.-then result))
             (js-await result)))
         (catch :default e
-          (js/console.error
+          (d/error
            (str "[nyma] Async handler error on '" event "':") e))))))
 
 (defn ^:async run-handlers-collect
@@ -184,7 +185,7 @@
           (when (and (some? result) (not (.-then result)))
             (swap! results conj result)))
         (catch :default e
-          (js/console.error
+          (d/error
            (str "[nyma] Collect handler error on '" event "':") e))))
     (merge-results @results)))
 
@@ -209,7 +210,7 @@
                  (try
                    (handler data)
                    (catch :default e
-                     (js/console.error
+                     (d/error
                       (str "[nyma] Extension handler error on '" event "':") e))))))
 
      :emit-async (fn [event data]

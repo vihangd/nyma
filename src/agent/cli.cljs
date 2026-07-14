@@ -1,5 +1,6 @@
 (ns agent.cli
-  (:require [clojure.string :as str]
+  (:require [agent.debug :as d]
+            [clojure.string :as str]
             ["node:util" :refer [parseArgs]]
             ["node:fs" :as fs]
             ["node:path" :as npath]
@@ -100,7 +101,7 @@
                   "refresh"    (:refresh creds)
                   "expires-at" (:expires-at creds)})
             (catch :default e
-              (js/console.warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
+              (d/warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
     {:model    ((:resolve provider-registry) provider model-id)
      :provider provider
      :model-id model-id}))
@@ -423,7 +424,7 @@ Examples:
       ;; Warn on an invalid flag (resolve-initial-mode already fell back to the
       ;; computed default so a typo'd headless flag still gets full-auto).
       (when (and requested (not (perm-policy/mode? requested)))
-        (js/console.warn (str "[nyma] Unknown --permission-mode \"" requested
+        (d/warn (str "[nyma] Unknown --permission-mode \"" requested
                               "\"; using " pm ".")))
       (swap! (:state agent) assoc :permission-mode pm))
 
@@ -449,7 +450,7 @@ Examples:
               (aset (:config agent) "active-provider-name"
                     (or (:provider late-resolved) ""))))
           (catch :default e
-            (js/console.warn (str "[nyma] " (.-message e))))))
+            (d/warn (str "[nyma] " (.-message e))))))
 
       ;; Resolve --ext-* CLI flags against registered extension flags
       (resolve-ext-flags agent)

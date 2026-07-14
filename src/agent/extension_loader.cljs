@@ -1,5 +1,6 @@
 (ns agent.extension-loader
-  (:require ["squint-cljs" :refer [compileString]]
+  (:require [agent.debug :as d]
+            ["squint-cljs" :refer [compileString]]
             ["node:path" :as path]
             ["node:fs/promises" :as fsp]
             ["node:fs" :as fs]
@@ -34,7 +35,7 @@
     (let [pkg-names (js/Object.keys deps)
           missing   (vec (filter #(not (dep-resolvable? %)) pkg-names))]
       (when (seq missing)
-        (js/console.log
+        (d/info
          (str "[nyma] Installing missing extension deps: "
               (.join (clj->js missing) ", ")))
         (if (fs/existsSync (path/join (js/process.cwd) "package.json"))
@@ -44,10 +45,10 @@
                            :cwd (js/process.cwd)})
                 exit-code (js-await (.-exited proc))]
             (when (not= exit-code 0)
-              (js/console.error
+              (d/error
                (str "[nyma] Failed to install: "
                     (.join (clj->js missing) ", ")))))
-          (js/console.warn
+          (d/warn
            "[nyma] No package.json in CWD — cannot auto-install extension deps. "
            (str "Missing: " (.join (clj->js missing) ", "))))))))
 
@@ -126,7 +127,7 @@
   (cond
     (cljs-extension? file-path)  (js-await (load-squint-extension file-path))
     (ts-js-extension? file-path) (js-await (load-ts-extension file-path))
-    :else (js/console.warn (str "Unknown extension type: " file-path))))
+    :else (d/warn (str "Unknown extension type: " file-path))))
 
 (defn ^:async load-manifest
   "Load an optional extension.json manifest from the same directory."
@@ -169,7 +170,7 @@
       (if (= (count @result) (count entries))
         (mapv #(get by-ns %) @result)
         (do
-          (js/console.warn "[nyma] Extension dependency cycle detected, loading in scan order")
+          (d/warn "[nyma] Extension dependency cycle detected, loading in scan order")
           entries)))))
 
 (defn ^:async discover-and-load
@@ -204,31 +205,41 @@
                                {:path full-path :entry entry :namespace ns-str
                                 :manifest manifest :deps deps}))
                       (catch :default e
-                        (js/console.error
+                        (d/error
                          (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))))
     ;; Pass 2: Topological sort
     (let [sorted     (topo-sort @scan-results)
-          extensions (atom [])]
-      ;; Pass 3: Load in sorted order
-      (doseq [{:keys [path entry namespace manifest]} sorted]
-        (try
-          ;; Resolve npm dependencies before loading
-          (when manifest
-            (js-await (resolve-dependencies manifest)))
-          (let [ext-fn (js-await (load-extension path))
-                caps   (parse-capabilities
-                        (when manifest (.-capabilities manifest)))
-                scoped (create-scoped-api api namespace caps)]
-            (when ext-fn
-              (let [result (js-await (ext-fn scoped))]
-                (swap! extensions conj
-                       {:path       path
-                        :namespace  namespace
-                        :type       (if (cljs-extension? entry) :squint :ts)
-                        :deactivate (when (fn? result) result)}))))
-          (catch :default e
-            (js/console.error
-             (str "[nyma] Failed to load extension (" path "):") e))))
+          extensions (atom [])
+          failed     (atom #{})]
+      ;; Pass 3: Load in sorted order; skip anything whose dependency failed
+      ;; (loading against a half-initialized dependency is worse than not
+      ;; loading at all).
+      (doseq [{:keys [path entry namespace manifest deps]} sorted]
+        (if-let [bad (first (filter @failed (or deps [])))]
+          (do (swap! failed conj namespace)
+              (d/error
+               (str "[nyma] Skipping extension " namespace
+                    " — its dependency " bad " failed to load")))
+          (try
+            ;; Resolve npm dependencies before loading
+            (when manifest
+              (js-await (resolve-dependencies manifest)))
+            (let [ext-fn (js-await (load-extension path))
+                  caps   (parse-capabilities
+                          (when manifest (.-capabilities manifest))
+                          namespace)
+                  scoped (create-scoped-api api namespace caps)]
+              (when ext-fn
+                (let [result (js-await (ext-fn scoped))]
+                  (swap! extensions conj
+                         {:path       path
+                          :namespace  namespace
+                          :type       (if (cljs-extension? entry) :squint :ts)
+                          :deactivate (when (fn? result) result)}))))
+            (catch :default e
+              (swap! failed conj namespace)
+              (d/error
+               (str "[nyma] Failed to load extension (" path "):") e)))))
       @extensions)))
 
 (defn filter-by-mode
@@ -260,7 +271,7 @@
       (try
         (deactivate)
         (catch :default e
-          (js/console.error
+          (d/error
            (str "[nyma] Extension deactivate error (" path "):") e))))))
 
 (defn ^:async reload-extension
@@ -269,7 +280,7 @@
   (when (:deactivate ext-info)
     (try ((:deactivate ext-info))
          (catch :default e
-           (js/console.error (str "[nyma] Extension deactivate error during reload:") e))))
+           (d/error (str "[nyma] Extension deactivate error during reload:") e))))
   (try
     (let [manifest (js-await (load-manifest (:path ext-info)))
           _        (when manifest (js-await (resolve-dependencies manifest)))
@@ -277,13 +288,14 @@
           ns-str   (or (and manifest (.-namespace manifest))
                        (:namespace ext-info))
           caps     (parse-capabilities
-                    (when manifest (.-capabilities manifest)))
+                    (when manifest (.-capabilities manifest))
+                    ns-str)
           scoped   (create-scoped-api api ns-str caps)]
       (when ext-fn
         (let [result (js-await (ext-fn scoped))]
           (assoc ext-info :deactivate (when (fn? result) result)))))
     (catch :default e
-      (js/console.error (str "[nyma] Extension reload error (" (:path ext-info) "):") e)
+      (d/error (str "[nyma] Extension reload error (" (:path ext-info) "):") e)
       ext-info)))
 
 (defn ^:async reload-all

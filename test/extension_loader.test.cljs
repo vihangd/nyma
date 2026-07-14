@@ -3,6 +3,7 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
+            [agent.debug :as d]
             [agent.extension-loader :refer [deactivate-all discover-and-load
                                             reload-extension reload-all topo-sort]]
             [agent.core :refer [create-agent]]
@@ -50,12 +51,11 @@
 
             (it "error in deactivate is logged"
                 (fn []
-                  (let [logged (atom nil)
-                        orig   js/console.error]
-                    (set! js/console.error (fn [& args] (reset! logged args)))
+                  (let [logged (atom nil)]
+                    (d/configure-logger! (fn [line] (reset! logged line)))
                     (deactivate-all
                      [{:path "bad-ext.ts" :deactivate (fn [] (throw (js/Error. "boom")))}])
-                    (set! js/console.error orig)
+                    (d/reset-logger!)
                     (-> (expect @logged) (.toBeTruthy)))))
 
             (it "handles empty extension list"

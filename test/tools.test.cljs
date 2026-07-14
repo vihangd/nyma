@@ -47,7 +47,7 @@
         tmp-file (.join path tmp-dir "test.txt")]
     (.writeFileSync fs tmp-file "hello world")
     (let [result (js-await (read-execute {:path tmp-file}))]
-      (-> (expect result) (.toBe "hello world")))
+      (-> (expect result) (.toBe "     1\thello world")))
     (cleanup tmp-dir)))
 
 (defn ^:async test-read-range []
@@ -55,7 +55,27 @@
         tmp-file (.join path tmp-dir "lines.txt")]
     (.writeFileSync fs tmp-file "line1\nline2\nline3\nline4")
     (let [result (js-await (read-execute {:path tmp-file :range [2 3]}))]
-      (-> (expect result) (.toBe "line2\nline3")))
+      (-> (expect result) (.toBe "     2\tline2\n     3\tline3\n… [1 more lines — read with range [4, 4]]")))
+    (cleanup tmp-dir)))
+
+(defn ^:async test-read-missing-file []
+  (try
+    (js-await (read-execute {:path "/nonexistent/nope.txt"}))
+    (-> (expect true) (.toBe false))
+    (catch :default e
+      (-> (expect (.-message e)) (.toContain "File not found")))))
+
+(defn ^:async test-read-line-cap []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "big.txt")
+        lines    (.join (.map (js/Array.from #js {:length 2500} (fn [_ i] i))
+                              (fn [i] (str "row-" i)))
+                        "\n")]
+    (.writeFileSync fs tmp-file lines)
+    (let [result (js-await (read-execute {:path tmp-file}))]
+      (-> (expect result) (.toContain "row-1999"))
+      (-> (expect result) (.-not) (.toContain "row-2000\n"))
+      (-> (expect result) (.toContain "more lines")))
     (cleanup tmp-dir)))
 
 (defn ^:async test-write-content []
@@ -147,7 +167,9 @@
 (describe "agent.tools - read"
           (fn []
             (it "reads entire file" test-read-entire)
-            (it "reads line range" test-read-range)))
+            (it "reads line range" test-read-range)
+            (it "throws friendly error on missing file" test-read-missing-file)
+            (it "caps output at the default line limit" test-read-line-cap)))
 
 (describe "agent.tools - write"
           (fn []
