@@ -129,6 +129,28 @@
     (-> (expect (< (- (js/Date.now) start) 3000)) (.toBe true))
     (-> (expect (.-aborted parsed)) (.toBe true))))
 
+(defn ^:async test-edit-dollar-literal []
+  ;; $&, $$, $' are GetSubstitution metachars — must be written literally.
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "echo hello")
+    (js-await (edit-execute {:path tmp-file
+                             :old_string "hello"
+                             :new_string "cost: $& and $$ and $'"}))
+    (-> (expect (.readFileSync fs tmp-file "utf8")) (.toBe "echo cost: $& and $$ and $'"))
+    (cleanup tmp-dir)))
+
+(defn ^:async test-edit-noop-throws []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "same text")
+    (try
+      (js-await (edit-execute {:path tmp-file :old_string "same" :new_string "same"}))
+      (-> (expect true) (.toBe false))
+      (catch :default e
+        (-> (expect (.-message e)) (.toContain "identical"))))
+    (cleanup tmp-dir)))
+
 (defn ^:async test-edit-ambiguous-throws []
   (let [tmp-dir  (make-tmp-dir)
         tmp-file (.join path tmp-dir "edit.txt")]
@@ -181,7 +203,9 @@
             (it "replaces exact text" test-edit-replace)
             (it "throws when old_string not found" test-edit-throws)
             (it "throws when old_string is ambiguous" test-edit-ambiguous-throws)
-            (it "replaces all occurrences with replace_all" test-edit-replace-all)))
+            (it "replaces all occurrences with replace_all" test-edit-replace-all)
+            (it "writes $-sequences literally" test-edit-dollar-literal)
+            (it "throws when old_string equals new_string" test-edit-noop-throws)))
 
 ;; --- Tool definition structure tests ---
 

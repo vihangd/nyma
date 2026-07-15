@@ -4,6 +4,7 @@
             ["node:path" :as path]
             ["node:os" :as os]
             [clojure.string :as str]
+            [agent.tool-metadata :as tool-metadata]
             [agent.token-estimation :as te]
             [agent.debug :as d]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]))
@@ -67,11 +68,11 @@
        vec))
 
 (defn extract-files-modified
-  "Extract file paths from tool_call entries for 'write' and 'edit' tools."
+  "Extract file paths from tool_call entries of file-editing tools."
   [messages]
   (->> messages
        (filter #(and (= (:role %) "tool_call")
-                     (contains? #{"write" "edit"} (get-in % [:metadata :tool-name]))))
+                     (tool-metadata/file-editing? (get-in % [:metadata :tool-name]))))
        (map #(get-in % [:metadata :args :path]))
        (filter some?)
        distinct

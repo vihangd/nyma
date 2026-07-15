@@ -118,7 +118,7 @@
   (let [current-model #js {:fake true :modelId "current-model"}
         api #js {:getState     (fn [] {:messages [{:role "user" :content "hi"}]})
                  :resolveModel (fn [_ _] (throw (js/Error. "No credentials")))
-                 :__state_atom (atom {:config {:model current-model}})
+                 :__state_atom (atom {:model current-model})
                  :getSettings  (fn [] {})}
         captured (atom nil)
         gen (fn [cfg]

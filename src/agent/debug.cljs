@@ -160,7 +160,17 @@
   ([level tag msg extras]
    (when (or (contains? #{"warn" "error"} level)
              (enabled? tag))
-     (@sink (format-line tag level msg extras)))))
+     (let [line (format-line tag level msg extras)]
+       (@sink line)
+       ;; warn/error must reach a human, not just ~/.nyma/debug.log —
+       ;; otherwise a failed extension load is invisible and the user
+       ;; believes it's active. Mirror to stderr while the sink is still
+       ;; the default file sink; custom sinks (tests, TUI reroutes) own
+       ;; their routing. NYMA_QUIET=1 suppresses the mirror.
+       (when (and (contains? #{"warn" "error"} level)
+                  (identical? @sink default-file-sink)
+                  (not (some-> js/process.env (aget "NYMA_QUIET"))))
+         (default-stderr-sink line))))))
 
 (defn debug
   "Shortcut for (log \"debug\" tag msg extras). Gated on enabled?."

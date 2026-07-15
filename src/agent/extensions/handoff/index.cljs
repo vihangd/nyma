@@ -7,9 +7,13 @@
             ["node:path" :as path]
             [agent.extensions.handoff.shared :as shared]))
 
-(defn- current-model [api]
+(defn- current-model
+  "Active model from the agent STATE atom — :runtime-model when /model
+   switched it, else the startup :model. (There is no :config in state;
+   config lives on the agent map.)"
+  [api]
   (when-let [a (aget api "__state_atom")]
-    (try (:model (:config @a)) (catch :default _ nil))))
+    (try (or (:runtime-model @a) (:model @a)) (catch :default _ nil))))
 
 (defn ^:async generate-brief!
   "Generate + write the brief. gen-fn injectable for tests."
@@ -32,10 +36,15 @@
         "Handoff: no active model to generate the brief with."))))
 
 (defn ^:export activate [api]
-  (let [on-before-start
+  (let [;; Set once this session writes a brief: the brief is FOR the next
+        ;; session — injecting it back into the session that wrote it would
+        ;; claim false provenance and steer the model to re-run Next steps.
+        wrote-here? (atom false)
+
+        on-before-start
         (fn [_data _ctx]
           (let [f (shared/handoff-path)]
-            (when (fs/existsSync f)
+            (when (and (not @wrote-here?) (fs/existsSync f))
               #js {:system-prompt-additions
                    #js [(shared/injection-block (fs/readFileSync f "utf8"))]})))]
 
@@ -53,6 +62,7 @@
                                      (do (fs/unlinkSync f) (notify "Handoff brief cleared." "info"))
                                      (notify "No handoff brief to clear." "warning")))
                                  (do (notify "Generating handoff brief…" "info")
+                                     (reset! wrote-here? true)
                                      (-> (generate-brief! api generateText)
                                          (.then (fn [msg] (notify msg "info")))
                                          (.catch (fn [e] (notify (str "Handoff failed: " (.-message e)) "error"))))))))})

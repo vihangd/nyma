@@ -32,7 +32,7 @@
 
                                       (it "generates via the injected gen-fn and reports the path"
                                           (^:async fn []
-                                            (let [state (atom {:config {:model #js {:modelId "test-model"}}})
+                                            (let [state (atom {:model #js {:modelId "test-model"}})
                                                   api   #js {:getState (fn [] {:messages [{:role "user" :content "hello"}]})
                                                              :__state_atom state}
                                                   seen  (atom nil)

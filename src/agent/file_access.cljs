@@ -47,7 +47,7 @@
           (let [tool-name (or (.-name data) (.-toolName data))
                 args      (.-args data)
                 path-arg  (when args (or (.-path args) (aget args "path")))]
-            (when (and path-arg (#{"read" "write" "edit" "glob" "grep"} tool-name))
+            (when (and path-arg (#{"read" "write" "edit" "multi_edit" "glob" "grep"} tool-name))
               (let [result (check-access path-arg patterns)]
                 (when-not (:allowed result)
                   #js {:block true :reason (:reason result)})))))

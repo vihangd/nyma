@@ -15,6 +15,7 @@ dramatic gains where checks are strong.
 { "verify": { "cmd": "bun test", "max-attempts": 2, "timeout-ms": 120000 } }
 ```
 
-Off unless `cmd` is set. `max-attempts` caps the fix loop so a stubbornly red suite can't spin
-forever; after the cap the turn ends normally with the red output visible. The follow-up
-explicitly forbids weakening tests to pass the gate.
+Off unless `cmd` is set. The gate runs after *every* edited turn — including the final fix attempt.
+`max-attempts` only caps how many fix follow-ups are sent; once reached, a still-red run produces a
+report-only follow-up ("do not edit further — summarize the failures") instead of another fix loop.
+The follow-up explicitly forbids weakening tests to pass the gate.

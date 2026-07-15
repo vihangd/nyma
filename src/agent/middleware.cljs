@@ -1,5 +1,6 @@
 (ns agent.middleware
-  (:require [agent.interceptors :as ic]
+  (:require [agent.tool-metadata :as tool-metadata]
+            [agent.interceptors :as ic]
             [agent.extension-context :refer [create-extension-context]]
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
@@ -193,6 +194,7 @@
                                                         :args       (clj->js (:args ctx))
                                                         :result     (:result ctx)
                                                         :duration   duration
+                                                        :cancelled  (boolean (:cancelled ctx))
                                                         :isError    (boolean (:result-is-error ctx))
                                                         :details    (:result-details ctx)})))
         ctx        (if-let [mod-result (get complete-result "result")]
@@ -260,7 +262,7 @@
   [tool-name]
   (cond
     (#{"bash"} tool-name)                     "exec"
-    (#{"write" "edit"} tool-name)             "write"
+    (tool-metadata/file-editing? tool-name)   "write"
     (#{"read" "glob" "grep" "ls"} tool-name)  "read"
     (#{"web_fetch" "web_search"} tool-name)   "network"
     :else                                      "other"))

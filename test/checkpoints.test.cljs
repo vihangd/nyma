@@ -58,14 +58,40 @@
                                                               :unregisterCommand (fn [name] (swap! commands dissoc name))}
                                                 _        (cp/activate api)
                                                 f        (tmp-file "original")]
-          ;; Agent edits the file this turn
+          ;; Agent edits the file this turn: capture → execute → confirm
                                             ((get @handlers "before_tool_call")
                                              #js {:toolName "edit" :args #js {:path f}} nil)
                                             (fs/writeFileSync f "mutated")
+                                            ((get @handlers "tool_complete")
+                                             #js {:toolName "edit" :args #js {:path f}
+                                                  :cancelled false :isError false} nil)
                                             ((get @handlers "turn_finalize") #js {} nil)
           ;; /rewind restores
                                             (let [rewind (.-handler (get @commands "rewind"))
                                                   notes  (atom [])]
                                               (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}})
                                               (-> (expect (fs/readFileSync f "utf8")) (.toBe "original"))
-                                              (-> (expect (first @notes)) (.toContain "Rewound"))))))))
+                                              (-> (expect (first @notes)) (.toContain "Rewound"))))))
+
+                                    (it "a denied edit creates no phantom rewind point"
+                                        (fn []
+                                          (let [handlers (atom {})
+                                                commands (atom {})
+                                                api      #js {:on  (fn [evt h] (swap! handlers assoc evt h))
+                                                              :off (fn [evt _] (swap! handlers dissoc evt))
+                                                              :registerCommand   (fn [name spec] (swap! commands assoc name spec))
+                                                              :unregisterCommand (fn [name] (swap! commands dissoc name))}
+                                                _        (cp/activate api)
+                                                f        (tmp-file "untouched")]
+          ;; before_tool_call fires, but the call was DENIED: tool_complete
+          ;; arrives cancelled — no promotion.
+                                            ((get @handlers "before_tool_call")
+                                             #js {:toolName "edit" :args #js {:path f}} nil)
+                                            ((get @handlers "tool_complete")
+                                             #js {:toolName "edit" :args #js {:path f}
+                                                  :cancelled true :isError false} nil)
+                                            ((get @handlers "turn_finalize") #js {} nil)
+                                            (let [rewind (.-handler (get @commands "rewind"))
+                                                  notes  (atom [])]
+                                              (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}})
+                                              (-> (expect (first @notes)) (.toContain "Nothing to rewind"))))))))

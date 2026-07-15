@@ -5,9 +5,9 @@
    can say no — a test suite, a typecheck — before the agent declares done.
    The gate runs a configured quality command after any turn that edited
    files; a failure is fed back as a follow-up so the agent fixes it before
-   stopping.")
+   stopping."
+  (:require [agent.tool-metadata :as tool-metadata]))
 
-(def edit-tools #{"write" "edit" "multi_edit"})
 
 (def default-config
   {:cmd nil :max-attempts 2 :timeout-ms 120000})
@@ -25,7 +25,7 @@
                (aget v "timeout-ms")   (assoc :timeout-ms (aget v "timeout-ms")))))))
 
 (defn edit-tool? [tool-name]
-  (contains? edit-tools (str tool-name)))
+  (tool-metadata/file-editing? tool-name))
 
 (defn tail-lines
   "Last n lines of s — failures live at the end of test output."

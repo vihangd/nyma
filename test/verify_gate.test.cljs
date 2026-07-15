@@ -78,13 +78,16 @@
                                        (js-await (fire handlers "turn_finalize" #js {:error false}))
                                        (-> (expect (count @sent)) (.toBe 0)))))
 
-                               (it "gives up after max-attempts"
+                               (it "verifies the final fix and reports instead of looping at the cap"
                                    (^:async fn []
                                      (let [sent (atom [])
-                                           {:keys [api handlers]} (make-api "exit 1" sent)]
+                                           {:keys [api handlers]} (make-api "echo STILLRED; exit 1" sent)]
                                        (vg/activate api)
                                        (dotimes [_ 3]
                                          (fire handlers "tool_complete" #js {:toolName "edit" :isError false})
                                          (js-await (fire handlers "turn_finalize" #js {:error false})))
-                                       ;; max-attempts 2 → only 2 follow-ups, third turn passes through
-                                       (-> (expect (count @sent)) (.toBe 2)))))))
+                                       ;; max-attempts 2 → 2 fix follow-ups, then the capped turn STILL
+                                       ;; runs the gate and sends a report-only follow-up.
+                                       (-> (expect (count @sent)) (.toBe 3))
+                                       (-> (expect (:text (nth @sent 2))) (.toContain "Do NOT edit further"))
+                                       (-> (expect (:text (nth @sent 2))) (.toContain "STILLRED")))))))

@@ -36,8 +36,12 @@
                                                            hits  (atom [])]
                                                        (doseq [f (cljs-files "src/agent")]
                                                          (let [content (fs/readFileSync f "utf8")]
-                                                           (doseq [[i line] (map-indexed vector (str/split content "\n"))]
-                                                             (when-not (str/includes? (str/trim line) ";")
+                                                           (doseq [[i raw-line] (map-indexed vector (str/split content "\n"))]
+                                                             ;; Scan the code BEFORE any comment — skipping whole lines that
+                                                             ;; merely contain ';' let `(.-foo-bar x) ;; note` escape the lint.
+                                                             ;; (A ';' inside a string still cuts the scan short — acceptable:
+                                                             ;; false negatives only on lines mixing both, never false hits.)
+                                                             (let [line (first (str/split raw-line ";"))]
                                                                (loop []
                                                                  (when-let [m (.exec rx line)]
                                                                    (when-not (contains? allowed (aget m 1))

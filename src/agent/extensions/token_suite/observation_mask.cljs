@@ -66,14 +66,16 @@
                              role (shared/msg-role msg)]
                          (recur (inc i)
                                 (if (= role "tool_result") (conj acc i) acc)))))
-                 ;; Error results are exempt from masking (keep-errors):
-                 ;; failure evidence must stay verbatim for self-correction.
-                 maskable   (if keep-errors
-                              (filterv #(not (error-result? (shared/msg-content (aget messages %))))
-                                       result-indices)
-                              result-indices)
-                 mask-count (max 0 (- (count result-indices) keep-recent))
-                 to-mask    (set (take mask-count maskable))]
+                 ;; Only results OLDER than the keep-recent window are ever
+                 ;; candidates — the recency guarantee holds regardless of
+                 ;; how many exempt errors exist. Within that old window,
+                 ;; error results are exempt (keep-errors): failure evidence
+                 ;; must stay verbatim for self-correction.
+                 old-indices (vec (drop-last keep-recent result-indices))
+                 to-mask     (set (if keep-errors
+                                    (filterv #(not (error-result? (shared/msg-content (aget messages %))))
+                                             old-indices)
+                                    old-indices))]
 
           ;; Mutate in place
              (doseq [i to-mask]

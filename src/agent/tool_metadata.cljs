@@ -59,6 +59,13 @@
                  :modes        #{:tui}
                  :cost         :free
                  :timeout-ms   10000}
+   ;; Registered by token_suite's diff_edit module, but classified here so
+   ;; file-editing? consumers agree on it whether or not the extension loads.
+   "multi_edit" {:destructive? true :requires-confirmation? true :category :file
+                 :capabilities #{:filesystem :write}
+                 :modes        #{:tui}
+                 :cost         :free
+                 :timeout-ms   10000}
    "bash"       {:destructive? true :requires-confirmation? true
                  :category :shell :long-running? true
                  :capabilities #{:filesystem :execution :shell}
@@ -207,6 +214,16 @@
   "True if the tool declares the given capability keyword."
   [tool-name cap]
   (contains? (capabilities tool-name) cap))
+
+(defn file-editing?
+  "True if the tool mutates files (:filesystem + :write capabilities).
+   THE shared predicate for 'did this tool edit a file' — checkpoints,
+   verify-gate, compaction summaries, etc. Hand-rolled #{\"write\" \"edit\"}
+   sets drift (compaction missed multi_edit for months); consume this
+   instead, and register metadata for new editing tools."
+  [tool-name]
+  (let [caps (capabilities (str tool-name))]
+    (and (contains? caps :filesystem) (contains? caps :write))))
 
 (defn allowed-in-mode?
   "True if the tool is allowed in the given runtime mode.

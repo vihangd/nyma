@@ -30,16 +30,27 @@
                      @edited?
                      (not (.-error event)))
             (reset! edited? false)
-            (if (>= @attempts (:max-attempts cfg))
-              (reset! attempts 0)  ;; give up quietly; the user sees the red output
-              (let [{:keys [exit-code output]}
-                    (js-await (run-cmd (:cmd cfg) (:timeout-ms cfg)))]
-                (if (zero? exit-code)
-                  (reset! attempts 0)
+            ;; ALWAYS run the gate when files changed — the attempt cap only
+            ;; gates whether another fix follow-up is SENT, so the fix made
+            ;; in response to the final follow-up is still verified.
+            (let [{:keys [exit-code output]}
+                  (js-await (run-cmd (:cmd cfg) (:timeout-ms cfg)))]
+              (if (zero? exit-code)
+                (reset! attempts 0)
+                (if (< @attempts (:max-attempts cfg))
                   (do (swap! attempts inc)
                       ((.-sendUserMessage api)
                        (shared/failure-message (:cmd cfg) exit-code output
                                                @attempts (:max-attempts cfg))
+                       #js {:deliverAs "followUp"}))
+                  ;; Cap reached and still red: stop the loop, but don't lie
+                  ;; by staying silent — report without asking for edits.
+                  (do (reset! attempts 0)
+                      ((.-sendUserMessage api)
+                       (str "Verification still failing after the attempt cap (`" (:cmd cfg)
+                            "` exited " exit-code "). Do NOT edit further — summarize the "
+                            "remaining failures for the user:\n\n```\n"
+                            (shared/tail-lines output 40) "\n```")
                        #js {:deliverAs "followUp"})))))))]
 
     (when (:cmd cfg)

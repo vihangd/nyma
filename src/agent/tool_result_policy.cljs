@@ -42,7 +42,11 @@
    "glob"       {:max-string-length 4000}
    "grep"       {:max-string-length 8000}
    "web_search" {:max-string-length 8000}
-   "read"       {:max-string-length 12000}
+   ;; read is line-capped at the tool itself (2000 numbered lines, ~7 chars of
+   ;; prefix per line), so the byte cap here is a backstop for pathological
+   ;; single-line files, not the primary limit — 12000 would truncate EVERY
+   ;; default read and eat the "read with range …" continuation hint.
+   "read"       {:max-string-length 200000}
    "think"      {:max-string-length 4000}})
 
 ;;; ─── Extension-contributed policies ─────────────────────

@@ -58,9 +58,12 @@
                 (fn []
                   (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 12000))))
 
-            (it "read cap is 12000"
+            (it "read cap is a large backstop (read is line-capped at the tool)"
                 (fn []
-                  (-> (expect (:max-string-length (policy-for "read"))) (.toBe 12000))))
+                  ;; Must comfortably exceed 2000 numbered lines (~7 chars of
+                  ;; prefix each) or every default read loses its tail + the
+                  ;; "read with range" continuation hint.
+                  (-> (expect (:max-string-length (policy-for "read"))) (.toBe 200000))))
 
             (it "web_search cap is 8000"
                 (fn []

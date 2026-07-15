@@ -5,29 +5,57 @@
    state (content, or :absent if it didn't exist). Checkpoints group by turn;
    /rewind restores the newest group (repeat to go further back). Session-
    scoped and in-memory — a trust net for accept-edits/full-auto, not a VCS."
-  (:require ["node:fs" :as fs]))
-
-(def edit-tools #{"write" "edit" "multi_edit"})
+  (:require ["node:fs" :as fs]
+            [agent.tool-metadata :as tool-metadata]))
 
 (def max-snapshot-bytes (* 2 1024 1024))
 
 (defn edit-tool? [tool-name]
-  (contains? edit-tools (str tool-name)))
+  (tool-metadata/file-editing? tool-name))
+
+(def max-turn-groups
+  "Rewind depth cap — snapshots hold file contents in memory, so old groups
+   are pruned (rewinding 20+ turns back is not a real workflow)."
+  20)
+
+(defn- read-state
+  "Current state of `path`: content string, :absent, or nil (too big to hold)."
+  [path]
+  (if (fs/existsSync path)
+    (let [size (.-size (fs/statSync path))]
+      (when (<= size max-snapshot-bytes)
+        (fs/readFileSync path "utf8")))
+    :absent))
+
+(defn capture-pending!
+  "Capture `path`'s pre-execution state into pending* ({path state}) — first
+   capture per path wins. Pending states only become rewind points via
+   promote! after the tool actually ran."
+  [pending* path]
+  (when (and path (not (contains? @pending* path)))
+    (when-let [state (read-state path)]
+      (swap! pending* assoc path state))))
+
+(defn promote!
+  "Move `path`'s pending pre-state into the rewind group for `turn`, pruning
+   groups beyond max-turn-groups. First promotion per path per turn wins
+   (that IS the pre-turn state)."
+  [pending* checkpoints* turn path]
+  (when-let [state (get @pending* path)]
+    (when-not (get-in @checkpoints* [turn path])
+      (swap! checkpoints* assoc-in [turn path] state)
+      (let [ks (sort-by js/Number (keys @checkpoints*))]
+        (when (> (count ks) max-turn-groups)
+          (swap! checkpoints* dissoc (first ks)))))))
 
 (defn snapshot!
-  "Record `path`'s current state into the group for `turn` — first snapshot
-   per path per turn wins (that IS the pre-turn state). checkpoints* is an
-   atom of {turn {path content-or-:absent}}."
+  "Record `path`'s current state directly into the group for `turn` — first
+   snapshot per path per turn wins. (Direct form used by tests; the extension
+   goes through capture-pending!/promote! so denied calls never checkpoint.)"
   [checkpoints* turn path]
   (when (and path (not (get-in @checkpoints* [turn path])))
-    (let [state (if (fs/existsSync path)
-                  (let [size (.-size (fs/statSync path))]
-                    (when (<= size max-snapshot-bytes)
-                      (fs/readFileSync path "utf8")))
-                  :absent)]
-      ;; nil state = file too big to snapshot — skip rather than hold it.
-      (when (some? state)
-        (swap! checkpoints* assoc-in [turn path] state)))))
+    (when-let [state (read-state path)]
+      (swap! checkpoints* assoc-in [turn path] state))))
 
 (defn restore!
   "Restore every file in the newest turn group; returns [turn paths] or nil

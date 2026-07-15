@@ -71,6 +71,9 @@
   (let [content (js-await (.text (js/Bun.file path)))
         n       (count-occurrences content old_string)]
     (cond
+      (= old_string new_string)
+      (throw (js/Error. "old_string and new_string are identical — no change to apply"))
+
       (zero? n)
       (throw (js/Error. "old_string not found in file"))
 
@@ -79,7 +82,10 @@
                              " — provide a larger unique snippet, or pass replace_all: true")))
 
       :else
-      (let [updated (.replaceAll content old_string new_string)]
+      ;; Function replacement: with a string replacement, replaceAll runs
+      ;; GetSubstitution — $&, $$, $`, $' in new_string would silently write
+      ;; corrupted content instead of the literal text.
+      (let [updated (.replaceAll content old_string (fn [] new_string))]
         (js-await (js/Bun.write path updated))
         (if (> n 1)
           (str "Edit applied (" n " replacements)")
