@@ -7,7 +7,8 @@
    The 'messages' key is last-writer-wins in context_assembly results
    (events.cljs merge semantics) — returning {:messages compressed} wins.
   "
-  (:require ["headroom-ai" :refer [compress]]
+  (:require [agent.debug :as d]
+            ["headroom-ai" :refer [compress]]
             [agent.extensions.headroom.shared :as shared]
             [clojure.string :as str]))
 
@@ -43,7 +44,7 @@
           (when-not @proxy-available?
             (when-not @warn-once
               (reset! warn-once true)
-              (js/console.warn "[headroom] proxy not reachable — compression skipped"))
+              (d/warn "[headroom] proxy not reachable — compression skipped"))
             nil)
 
           (when @proxy-available?
@@ -73,7 +74,7 @@
                     (swap! stats update :errors inc)
                     (when-not @warn-once
                       (reset! warn-once true)
-                      (js/console.warn "[headroom] compress error:" (.-message e)))
+                      (d/warn "[headroom] compress error:" (.-message e)))
                     nil))))))]
 
     (.on api "context_assembly" handler 10)

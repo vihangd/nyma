@@ -61,9 +61,9 @@
                              (fn [data]
                                (when events
                                  ((:emit events) "tool_execution_update"
-                                                 {:tool-name (:tool-name ctx)
-                                                  :exec-id   (:exec-id ctx)
-                                                  :data      data}))))
+                                                 #js {:toolName (:tool-name ctx)
+                                                      :execId   (:exec-id ctx)
+                                                      :data     data}))))
                        ;; G18 — expose active model ID string so tools can adapt behaviour.
                        ;; :model in config is either a resolved provider model object
                        ;; (with a .-modelId property) or a plain string (legacy / tests).
@@ -175,10 +175,10 @@
           icon          (.-icon display)
           verbosity     (.-verbosity display)]
       (cond-> {}
-        custom-args (assoc :custom-one-line-args custom-args)
-        status-text (assoc :custom-status-text status-text)
-        icon        (assoc :custom-icon icon)
-        verbosity   (assoc :custom-verbosity verbosity)))))
+        custom-args (assoc :customOneLineArgs custom-args)
+        status-text (assoc :customStatusText status-text)
+        icon        (assoc :customIcon icon)
+        verbosity   (assoc :customVerbosity verbosity)))))
 
 (defn ^:async tool-tracking-leave
   "Leave phase: tool_result (modify), tool_complete (structured), tool_execution_end (UI)."
@@ -213,18 +213,23 @@
         custom-result (when display
                         (safe-call (.-formatResult display) result-str))]
     (when events
+      ;; #js camelCase — the ONE event-payload convention for tool_* events
+      ;; (matches tool_complete/tool_result/before_tool_call). Kebab CLJS maps
+      ;; here left 5 extensions reading `.-toolName` silently dead.
       ((:emit events) "tool_execution_end"
-                      (cond-> {:tool-name       (:tool-name ctx)
-                               :exec-id         (:exec-id ctx)
-                               :duration        duration
-                               :result          result-str
-                               :result-envelope (:result-envelope ctx)
-                               :details         (:result-details ctx)
-                               :is-error        (:result-is-error ctx)
-                               :content-parts   (:result-content-parts ctx)}
-                        custom-result (assoc :custom-one-line-result custom-result)
-                        (and display (.-icon display)) (assoc :custom-icon (.-icon display))
-                        (and display (.-verbosity display)) (assoc :custom-verbosity (.-verbosity display)))))
+                      (clj->js
+                       (cond-> {:toolName       (:tool-name ctx)
+                                :execId         (:exec-id ctx)
+                                :args           (:args ctx)
+                                :duration       duration
+                                :result         result-str
+                                :resultEnvelope (:result-envelope ctx)
+                                :details        (:result-details ctx)
+                                :isError        (:result-is-error ctx)
+                                :contentParts   (:result-content-parts ctx)}
+                         custom-result (assoc :customOneLineResult custom-result)
+                         (and display (.-icon display)) (assoc :customIcon (.-icon display))
+                         (and display (.-verbosity display)) (assoc :customVerbosity (.-verbosity display))))))
     (when store
       ((:dispatch! store) :tool-execution-ended
                           {:exec-id (:exec-id ctx) :duration duration})
@@ -244,9 +249,10 @@
                   display-fields (extract-display-fields (:tool ctx) (:args ctx))]
               (when events
                 ((:emit events) "tool_execution_start"
-                                (merge {:tool-name (:tool-name ctx) :exec-id exec-id :args (:args ctx)
-                                        :label (when-let [t (:tool ctx)] (.-label t))}
-                                       display-fields)))
+                                (clj->js
+                                 (merge {:toolName (:tool-name ctx) :execId exec-id :args (:args ctx)
+                                         :label (when-let [t (:tool ctx)] (.-label t))}
+                                        display-fields))))
               (when store
                 ((:dispatch! store) :tool-execution-started
                                     {:tool-name (:tool-name ctx) :exec-id exec-id})

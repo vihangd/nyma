@@ -25,9 +25,9 @@
         captured (atom nil)]
     ((:on events) "tool_execution_start" (fn [data] (reset! captured data)))
     (js-await ((.-execute (get wrapped "test")) {:input "hello"}))
-    (-> (expect (get @captured :tool-name)) (.toBe "test"))
+    (-> (expect (get @captured :toolName)) (.toBe "test"))
     (-> (expect (get @captured :args)) (.toBeTruthy))
-    (-> (expect (get @captured :exec-id)) (.toBeTruthy))))
+    (-> (expect (get @captured :execId)) (.toBeTruthy))))
 
 (defn ^:async test-end-event-has-result-and-duration []
   (let [events   (create-event-bus)
@@ -41,7 +41,7 @@
         captured (atom nil)]
     ((:on events) "tool_execution_end" (fn [data] (reset! captured data)))
     (js-await ((.-execute (get wrapped "test")) {:input "x"}))
-    (-> (expect (get @captured :tool-name)) (.toBe "test"))
+    (-> (expect (get @captured :toolName)) (.toBe "test"))
     (-> (expect (get @captured :result)) (.toBe "the-result"))
     (-> (expect (get @captured :duration)) (.toBeGreaterThanOrEqual 0))))
 

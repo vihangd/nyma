@@ -415,7 +415,7 @@
              (fn [_] "ok")
              {:formatArgs (fn [args] (str "custom:" (.-url args)))})]
       (js-await ((:execute pipeline) "scraper" t {:url "https://example.com"})))
-    (-> (expect (get @captured :custom-one-line-args)) (.toBe "custom:https://example.com"))))
+    (-> (expect (get @captured :customOneLineArgs)) (.toBe "custom:https://example.com"))))
 
 (defn ^:async test-display-formatResult-propagated []
   (let [events   (create-event-bus)
@@ -428,7 +428,7 @@
              (fn [_] "line1\nline2\nline3")
              {:formatResult (fn [r] (str (count (.split r "\n")) " pages"))})]
       (js-await ((:execute pipeline) "scraper" t {:url "x"})))
-    (-> (expect (get @captured :custom-one-line-result)) (.toBe "3 pages"))))
+    (-> (expect (get @captured :customOneLineResult)) (.toBe "3 pages"))))
 
 (defn ^:async test-display-icon-and-verbosity-propagated []
   (let [events   (create-event-bus)
@@ -442,10 +442,10 @@
              (fn [_] "ok")
              {:icon "🌐" :verbosity "one-line"})]
       (js-await ((:execute pipeline) "scraper" t {:url "x"})))
-    (-> (expect (get @start-captured :custom-icon)) (.toBe "🌐"))
-    (-> (expect (get @start-captured :custom-verbosity)) (.toBe "one-line"))
-    (-> (expect (get @end-captured :custom-icon)) (.toBe "🌐"))
-    (-> (expect (get @end-captured :custom-verbosity)) (.toBe "one-line"))))
+    (-> (expect (get @start-captured :customIcon)) (.toBe "🌐"))
+    (-> (expect (get @start-captured :customVerbosity)) (.toBe "one-line"))
+    (-> (expect (get @end-captured :customIcon)) (.toBe "🌐"))
+    (-> (expect (get @end-captured :customVerbosity)) (.toBe "one-line"))))
 
 (defn ^:async test-display-formatter-error-does-not-crash []
   (let [events   (create-event-bus)
@@ -459,7 +459,7 @@
              {:formatArgs (fn [_] (throw (js/Error. "boom")))})]
       (js-await ((:execute pipeline) "scraper" t {:url "x"})))
     ;; Should not have custom args (formatter threw), but should not crash
-    (-> (expect (get @captured :custom-one-line-args)) (.toBeUndefined))))
+    (-> (expect (get @captured :customOneLineArgs)) (.toBeUndefined))))
 
 (defn ^:async test-no-display-field-works-normally []
   (let [events   (create-event-bus)
@@ -471,8 +471,8 @@
     (let [t (mock-tool (fn [_] "ok"))]
       (js-await ((:execute pipeline) "read" t {:path "/tmp"})))
     ;; No custom fields when tool has no .display
-    (-> (expect (get @captured :custom-one-line-args)) (.toBeUndefined))
-    (-> (expect (get @captured :custom-icon)) (.toBeUndefined))))
+    (-> (expect (get @captured :customOneLineArgs)) (.toBeUndefined))
+    (-> (expect (get @captured :customIcon)) (.toBeUndefined))))
 
 (describe "display metadata propagation" (fn []
                                            (it "propagates formatArgs to tool_execution_start" test-display-formatArgs-propagated)

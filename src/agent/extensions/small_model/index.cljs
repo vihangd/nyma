@@ -21,7 +21,8 @@
      respond-tool     — synthetic respond() tool forces structured output mode;
                         prevents bare-text responses on small models (Forge pattern)
   "
-  (:require [agent.extensions.small-model.shared          :as shared]
+  (:require [agent.debug :as d]
+            [agent.extensions.small-model.shared          :as shared]
             [agent.extensions.small-model.quality-monitor :as qm]
             [agent.extensions.small-model.profiles        :as profiles]
             [agent.extensions.small-model.evidence        :as evidence]
@@ -103,4 +104,4 @@
         (when (fn? cleanup)
           (try (cleanup)
                (catch :default e
-                 (js/console.warn "[small-model] cleanup error:" (.-message e)))))))))
+                 (d/warn "[small-model] cleanup error:" (.-message e)))))))))

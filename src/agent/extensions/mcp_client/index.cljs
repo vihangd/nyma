@@ -13,7 +13,8 @@
       the hook bridge).
 
    Returns a deactivator that unregisters everything."
-  (:require ["node:fs" :as fs]
+  (:require [agent.debug :as d]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shell-shared]
@@ -209,7 +210,7 @@
         ;; activation line beats silent failure.
         configured-count  (count (or @shell-shared/mcp-servers []))
         _ (when (.-NYMA_DEBUG js/process.env)
-            (js/console.log
+            (d/info
              (str "[mcp-client] active — " configured-count
                   " server(s) configured"
                   (when (pos? configured-count)
@@ -282,7 +283,7 @@
                       (.setActiveTools api (clj->js new-active))
                       (reset! hidden-tools-set to-hide)))
                   (catch :default e
-                    (js/console.warn "[mcp-client] start-all error:"
+                    (d/warn "[mcp-client] start-all error:"
                                      (or (.-message e) (str e)))))))))
 
         ;; session_shutdown: tools off, then stop all.
@@ -301,7 +302,7 @@
                 (.setActiveTools api (clj->js restored))
                 (reset! shadowed-natives #{})))
             (catch :default e
-              (js/console.warn "[mcp-client] shutdown(shadow-restore):"
+              (d/warn "[mcp-client] shutdown(shadow-restore):"
                                (or (.-message e) (str e)))))
           ;; Step 2: best-effort restore hidden-tools.
           (try
@@ -311,7 +312,7 @@
                 (.setActiveTools api (clj->js restored))
                 (reset! hidden-tools-set #{})))
             (catch :default e
-              (js/console.warn "[mcp-client] shutdown(hidden-restore):"
+              (d/warn "[mcp-client] shutdown(hidden-restore):"
                                (or (.-message e) (str e)))))
           ;; Step 3: best-effort tool overrides + bridge unregister.
           (try
@@ -323,14 +324,14 @@
             (bridge/unregister-all! api @registered-tools)
             (reset! registered-tools [])
             (catch :default e
-              (js/console.warn "[mcp-client] shutdown(unregister):"
+              (d/warn "[mcp-client] shutdown(unregister):"
                                (or (.-message e) (str e)))))
           ;; Step 4: ALWAYS stop the subprocesses — this is the
           ;; non-skippable kill that prevents orphans.
           (try
             (js-await (mgr/stop-all! @manager-ref))
             (catch :default e
-              (js/console.warn "[mcp-client] shutdown(stop-all):"
+              (d/warn "[mcp-client] shutdown(stop-all):"
                                (or (.-message e) (str e))))))]
 
     ;; Subscribe on the MAIN event bus (api.on, not api.events.on).

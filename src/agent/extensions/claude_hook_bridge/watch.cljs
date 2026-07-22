@@ -6,7 +6,8 @@
 
    Debounced at ~100ms because most editors emit several rapid
    change events on save (truncate + write)."
-  (:require ["node:fs" :as fs]
+  (:require [agent.debug :as d]
+            ["node:fs" :as fs]
             [agent.extensions.claude-hook-bridge.config :as config]))
 
 (def ^:private debounce-ms 100)
@@ -42,7 +43,7 @@
                                (reset! pending nil)
                                (try (on-reload)
                                     (catch :default e
-                                      (js/console.warn
+                                      (d/warn
                                        "[hook-bridge] reload failed:"
                                        (or (.-message e) (str e))))))
                              debounce-ms)))

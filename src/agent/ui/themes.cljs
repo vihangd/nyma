@@ -1,5 +1,6 @@
 (ns agent.ui.themes
-  (:require ["node:fs" :as fs]
+  (:require [agent.debug :as d]
+            ["node:fs" :as fs]
             ["node:fs/promises" :as fsp]))
 
 (def default-dark
@@ -49,5 +50,5 @@
                   (fn [_ _]
                     (-> (load-theme path)
                         (.then on-change)
-                        (.catch js/console.error))))]
+                        (.catch d/error))))]
     (fn [] (.close watcher))))

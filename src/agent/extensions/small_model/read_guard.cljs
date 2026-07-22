@@ -13,7 +13,8 @@
 
    Override pattern from: src/agent/extensions/mcp_client/tool_override.cljs
    (stub first → capture __original → real wrapper via second overrideTool)
-  ")
+  "
+  (:require [agent.debug :as d]))
 
 ;; ── Helpers ──────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@
         max-lines (or (:max-lines rg-cfg) 60)]
 
     (when-not (.-overrideTool api)
-      (js/console.warn "[small-model/read-guard] overrideTool not available — ensure 'tools-override' capability is declared."))
+      (d/warn "[small-model/read-guard] overrideTool not available — ensure 'tools-override' capability is declared."))
 
     (if-not (.-overrideTool api)
       (fn [])  ; no-op cleanup

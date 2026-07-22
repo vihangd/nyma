@@ -2,7 +2,8 @@
   "In-process Claude Agent SDK runner for nyma.
    Registers :claude-sdk using @anthropic-ai/claude-agent-sdk (bundled binary).
    conn-map shape matches the ACP path so all UI plumbing works unchanged."
-  (:require [agent.extensions.agent-shell.shared :as shared]
+  (:require [agent.debug :as d]
+            [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.agents.registry :as registry]
             [agent.extensions.agent-shell.acp.pool :as pool]))
 
@@ -163,7 +164,7 @@
   (let [sdk-mod (try
                   (js-await (js/import "@anthropic-ai/claude-agent-sdk"))
                   (catch :default e
-                    (js/console.warn "[agent-runner-claude-sdk] SDK unavailable:" (.-message e))
+                    (d/warn "[agent-runner-claude-sdk] SDK unavailable:" (.-message e))
                     nil))]
     (when sdk-mod
       (let [create-fn  (fn [agent-key agent-def api]
@@ -173,7 +174,7 @@
                         "claude-sdk"
                         (assoc claude-sdk-def :create-fn create-fn))]
         (when-not registered
-          (js/console.warn "[agent-runner-claude-sdk] Failed to register claude-sdk agent"))
+          (d/warn "[agent-runner-claude-sdk] Failed to register claude-sdk agent"))
         (fn []
           (when (= @shared/active-agent "claude-sdk")
             (pool/disconnect "claude-sdk"))

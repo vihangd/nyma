@@ -38,7 +38,8 @@
    `effort`) are preserved on the skill record but not yet acted upon.
 
    Reference: https://agentskills.io/specification"
-  (:require ["node:path" :as path]
+  (:require [agent.debug :as d]
+            ["node:path" :as path]
             ["node:fs" :as fs]
             [clojure.string :as str]
             [agent.extension-loader :refer [load-extension]]
@@ -143,7 +144,7 @@
                           (fs/existsSync (path/join skill-dir "tools.cljs")))]
         (when (and fm-name (not= fm-name dir-name)
                    (.-NYMA_DEBUG js/process.env))
-          (js/console.warn
+          (d/warn
            (str "[skills] frontmatter name '" fm-name
                 "' does not match directory '" dir-name
                 "' at " skill-dir)))

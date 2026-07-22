@@ -1,5 +1,6 @@
 (ns agent.extensions.custom-provider-claude-native.stream
-  "Anthropic SSE → LanguageModelV3StreamPart transformer.")
+  "Anthropic SSE → LanguageModelV3StreamPart transformer."
+  (:require [agent.debug :as d]))
 
 ;; ── Stop-reason mapping ─────────────────────────────────────
 
@@ -172,7 +173,7 @@
         (try
           (handle-event! (js/JSON.parse json-str) ctrl state)
           (catch :default e
-            (js/console.warn "[claude-native/stream] SSE parse error:" (.-message e))))))))
+            (d/warn "[claude-native/stream] SSE parse error:" (.-message e))))))))
 
 ;; ── Public: pipe SSE body → ReadableStream controller ────────
 

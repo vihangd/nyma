@@ -39,48 +39,48 @@
    the renderer can show a specialized header."
   [prev data verbosity max-lines]
   (let [msg (cond-> {:role      "tool-start"
-                     :tool-name (get data :tool-name)
+                     :tool-name (get data :toolName)
                      :args      (get data :args)
-                     :exec-id   (get data :exec-id)
+                     :exec-id   (get data :execId)
                      :id        (new-id)
-                     :verbosity (or (get data :custom-verbosity) verbosity)
+                     :verbosity (or (get data :customVerbosity) verbosity)
                      :max-lines max-lines}
-              (get data :custom-one-line-args)  (assoc :custom-one-line-args (get data :custom-one-line-args))
-              (get data :custom-status-text)    (assoc :custom-status-text (get data :custom-status-text))
-              (get data :custom-icon)           (assoc :custom-icon (get data :custom-icon)))]
+              (get data :customOneLineArgs)  (assoc :custom-one-line-args (get data :customOneLineArgs))
+              (get data :customStatusText)    (assoc :custom-status-text (get data :customStatusText))
+              (get data :customIcon)           (assoc :custom-icon (get data :customIcon)))]
     (conj (vec prev) msg)))
 
 (defn apply-tool-end
   "Replace the matching `tool-start` with a `tool-end` built from a
    `tool_execution_end` event payload.
 
-   Critically: the end event payload emitted by middleware does NOT carry
-   :args. We copy :args over from the start message we're about to
-   replace so downstream consumers — notably `group-messages` and
-   `tool-group-label` — can still render a meaningful label (e.g. the
-   glob pattern or read path) instead of the literal '?' fallback.
+   The end payload now carries :args too, but we still prefer the :args
+   copied from the start message we're about to replace so downstream
+   consumers — notably `group-messages` and `tool-group-label` — render
+   a meaningful label (e.g. the glob pattern or read path) even if a
+   future emit drops it.
 
    When no matching start exists (can happen if the tool registered
    lifecycle events out of order), the end message is appended without
    :args."
   [prev data verbosity max-lines]
   (let [prev-v     (vec prev)
-        exec-id    (get data :exec-id)
+        exec-id    (get data :execId)
         idx        (find-tool-start-idx prev-v exec-id)
         start-msg  (when idx (nth prev-v idx))
         start-args (when start-msg (:args start-msg))
         start-id   (when start-msg (:id start-msg))
         end-msg    (cond-> {:role      "tool-end"
-                            :tool-name (get data :tool-name)
+                            :tool-name (get data :toolName)
                             :duration  (get data :duration)
                             :result    (get data :result)
                             :exec-id   exec-id
-                            :verbosity (or (get data :custom-verbosity) verbosity)
+                            :verbosity (or (get data :customVerbosity) verbosity)
                             :max-lines max-lines}
                      start-id                           (assoc :id start-id)
                      start-args                         (assoc :args start-args)
-                     (get data :custom-one-line-result) (assoc :custom-one-line-result (get data :custom-one-line-result))
-                     (get data :custom-icon)            (assoc :custom-icon (get data :custom-icon)))]
+                     (get data :customOneLineResult) (assoc :custom-one-line-result (get data :customOneLineResult))
+                     (get data :customIcon)            (assoc :custom-icon (get data :customIcon)))]
     (if (some? idx)
       (assoc prev-v idx end-msg)
       (conj prev-v end-msg))))
@@ -92,7 +92,7 @@
    after the end event flushes the start message)."
   [prev data]
   (let [prev-v (vec prev)
-        idx    (find-tool-start-idx prev-v (get data :exec-id))]
+        idx    (find-tool-start-idx prev-v (get data :execId))]
     (if (some? idx)
       (assoc-in prev-v [idx :custom-status-text] (str (get data :data)))
       prev-v)))

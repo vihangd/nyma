@@ -12,7 +12,8 @@
    settings file changes, the atom is atomically updated. No
    subscriber churn — old handler closures keep working with the new
    config on their next call."
-  (:require ["node:os" :as os]
+  (:require [agent.debug :as d]
+            ["node:os" :as os]
             [agent.extensions.claude-hook-bridge.config :as config]
             [agent.extensions.claude-hook-bridge.watch :as watch]
             [agent.extensions.claude-hook-bridge.audit :as audit]
@@ -82,7 +83,7 @@
     ;; Visible startup line — only when NYMA_DEBUG=1, otherwise silent.
     (when (and (.-NYMA_DEBUG js/process.env)
                (or (seq @hooks-atom) (:disable-all-source loaded)))
-      (js/console.log
+      (d/info
        (str "[hook-bridge] active — "
             (count (:sources-loaded loaded)) " source(s), "
             (count @hooks-atom) " event(s) configured"
@@ -114,13 +115,13 @@
                             (audit/reset-seen!)  ;; re-audit edited scripts
                             (diag/reset!)        ;; old unseen matchers are no longer config
                             (when (seq (:sources-loaded fresh))
-                              (js/console.log
+                              (d/info
                                (str "[hook-bridge] reloaded "
                                     (count (:sources-loaded fresh))
                                     " source(s); "
                                     (count @hooks-atom) " event(s) configured"))))
                           (catch :default e
-                            (js/console.warn
+                            (d/warn
                              "[hook-bridge] reload error:"
                              (or (.-message e) (str e))))))
           stop-watch  (watch/start-watcher

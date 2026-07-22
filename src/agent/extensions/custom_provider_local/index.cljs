@@ -23,7 +23,8 @@
    Usage:  nyma --model ollama/qwen2.5-coder
            nyma --model lmstudio/devstral-small
   "
-  (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+  (:require [agent.debug :as d]
+            ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.extensions.custom-provider-local.toolcall-adapter :as adapter]
@@ -150,7 +151,7 @@
         (register-entry! api entry)
         (swap! registered conj (:name entry))
         (catch :default e
-          (js/console.warn "[local-provider] failed to register"
+          (d/warn "[local-provider] failed to register"
                            (:name entry) "-" (.-message e)))))
 
     ;; Cleanup

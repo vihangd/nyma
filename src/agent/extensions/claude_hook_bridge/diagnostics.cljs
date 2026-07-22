@@ -11,7 +11,8 @@
    Hot reload calls reset! so unseen matchers from the OLD config
    don't bleed into the report after the user fixes a typo and
    saves."
-  (:require [clojure.string :as str]
+  (:require [agent.debug :as d]
+            [clojure.string :as str]
             [agent.extensions.token-suite.shared :as ts-shared]))
 
 ;; Internally we key by a `${event}::${matcher}` string, not a
@@ -81,12 +82,12 @@
                     (remove (fn [[ev m]] (contains? seen-set (key-of ev m))))
                     vec)]
     (when (and (seq unseen) (.-NYMA_DEBUG js/process.env))
-      (js/console.warn
+      (d/warn
        (str "[hook-bridge] " (count unseen)
             " configured matcher(s) never fired this session:"))
       (doseq [[event matcher] unseen]
         (let [hint (did-you-mean matcher)]
-          (js/console.warn
+          (d/warn
            (str "  " event " matcher " (pr-str matcher)
                 (when hint (str " (did you mean " (pr-str hint) "?)")))))))
     unseen))

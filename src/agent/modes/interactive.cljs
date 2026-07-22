@@ -236,8 +236,11 @@
                 (and (.startsWith trimmed "/") (not @submit-lock))
                 (do (reset! submit-lock true)
                     (.addToHistory editor trimmed)
-                    (run-command! agent trimmed update-messages!)
-                    (reset! submit-lock false))
+                    ;; Async command handlers return a promise — hold the lock
+                    ;; until it settles or a second submit races the command.
+                    (-> (js/Promise.resolve (run-command! agent trimmed update-messages!))
+                        (.catch (fn [e] (add-error! e)))
+                        (.finally (fn [] (reset! submit-lock false)))))
 
                 ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
                 (and (not @submit-lock)

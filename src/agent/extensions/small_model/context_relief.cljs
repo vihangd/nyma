@@ -15,7 +15,8 @@
    error — if the pruned context is still too large the error surfaces
    normally rather than looping.
   "
-  (:require [clojure.string :as str]))
+  (:require [agent.debug :as d]
+            [clojure.string :as str]))
 
 ;; ── Error detection ───────────────────────────────────────────────
 
@@ -68,7 +69,7 @@
                       pruned  (prune-messages (vec msgs) 2 20)]
                   (when (< (count pruned) (count msgs))
                     (swap! state-atom assoc :messages pruned)
-                    (js/console.warn
+                    (d/warn
                      (str "[small-model/context-relief] Pruned "
                           (- (count msgs) (count pruned))
                           " messages to recover from context-length error. Retrying."))

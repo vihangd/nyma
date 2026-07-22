@@ -163,26 +163,26 @@
          ["tool_execution_start"
           (fn [data]
             (write-event! {:type "tool_execution_start"
-                           :toolCallId (:exec-id data)
-                           :toolName (:tool-name data)
+                           :toolCallId (:execId data)
+                           :toolName (:toolName data)
                            :args (or (:args data) {})}))]
 
          ["tool_execution_update"
           (fn [data]
             (write-event! {:type "tool_execution_update"
-                           :toolCallId (:exec-id data)
-                           :toolName (:tool-name data)
+                           :toolCallId (:execId data)
+                           :toolName (:toolName data)
                            :partialResult {:content [{:type "text" :text (str (:result data))}]
                                            :details {}}}))]
 
          ["tool_execution_end"
           (fn [data]
             (write-event! {:type "tool_execution_end"
-                           :toolCallId (:exec-id data)
-                           :toolName (:tool-name data)
+                           :toolCallId (:execId data)
+                           :toolName (:toolName data)
                            :result {:content [{:type "text" :text (str (:result data))}]
                                     :details (or (:details data) {})}
-                           :isError (boolean (:is-error data))}))]
+                           :isError (boolean (:isError data))}))]
 
          ["before_compact"
           (fn [_]

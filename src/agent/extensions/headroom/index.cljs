@@ -13,7 +13,8 @@
    Enable:  .nyma/settings.json → {\"headroom\": {\"enabled\": true}}
    Off by default — graceful no-op when disabled or proxy unreachable.
   "
-  (:require [agent.extensions.headroom.shared  :as shared]
+  (:require [agent.debug :as d]
+            [agent.extensions.headroom.shared  :as shared]
             [agent.extensions.headroom.compress :as comp-mod]))
 
 (defn- format-stats []
@@ -43,7 +44,7 @@
             (.then (fn [ok?]
                      (reset! proxy-available? ok?)
                      (when-not ok?
-                       (js/console.warn
+                       (d/warn
                         (str "[headroom] proxy not reachable at "
                              (or (:proxy-url config) "http://localhost:8787")
                              " — compression disabled. "
