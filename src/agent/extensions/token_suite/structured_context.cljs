@@ -80,11 +80,11 @@
                                   (let [content (safe-read fpath)]
                                     (when content
                                       (swap! results conj
-                                        {:path (path/relative cwd fpath)
-                                         :abs-path fpath
-                                         :dir (path/relative cwd subdir)
-                                         :content content
-                                         :format (if (.endsWith fpath ".md") "md" "text")}))))))
+                                             {:path (path/relative cwd fpath)
+                                              :abs-path fpath
+                                              :dir (path/relative cwd subdir)
+                                              :content content
+                                              :format (if (.endsWith fpath ".md") "md" "text")}))))))
                             ;; Recurse
                             (walk subdir (inc depth)))))))
                   (catch :default _e nil))))]
@@ -221,70 +221,76 @@
 
     ;; Hot context injection via prompt-sections (before_agent_start, priority 45)
     (.on api "before_agent_start"
-      (fn [_event _ctx]
-        (let [hot-files (:hot @discovered)]
-          (when (seq hot-files)
-            (let [hot-text (str/join "\n\n---\n\n"
-                             (map (fn [f]
-                                    (str "### " (:path f) "\n\n" (:content f)))
-                                  hot-files))
-                  total-tokens (reduce + 0 (map :tokens hot-files))]
-              (swap! shared/suite-stats assoc-in [:structured-context :hot-tokens] total-tokens)
-              #js {:prompt-sections
-                   #js [#js {:content (str "## Project Context\n\n" hot-text)
-                             :priority 60}]}))))
-      45)
+         (fn [_event _ctx]
+           (let [hot-files (:hot @discovered)]
+             (when (seq hot-files)
+               (let [hot-text (str/join "\n\n---\n\n"
+                                        (map (fn [f]
+                                               (str "### " (:path f) "\n\n" (:content f)))
+                                             hot-files))
+                     total-tokens (reduce + 0 (map :tokens hot-files))]
+                 (swap! shared/suite-stats assoc-in [:structured-context :hot-tokens] total-tokens)
+                 #js {:prompt-sections
+                      #js [#js {:content (str "## Project Context\n\n" hot-text)
+                                :priority 60}]}))))
+         45)
 
     ;; Track accessed directories via tool_execution_end
     (.on api "tool_execution_end"
-      (fn [event _ctx]
-        (let [tool (or (.-toolName event) "")
-              args (.-args event)
-              fpath (when args (or (.-path args) ""))]
-          (when (and (seq fpath)
-                     (contains? #{"read" "edit" "write" "multi_edit" "glob" "grep"} tool))
-            (swap! accessed-dirs conj (path/dirname fpath)))))
-      0)
+         (fn [event _ctx]
+           (let [tool (or (.-toolName event) "")
+                 args (.-args event)
+                 fpath (when args (or (.-path args) ""))]
+             (when (and (seq fpath)
+                        (contains? #{"read" "edit" "write" "multi_edit" "glob" "grep"} tool))
+            ;; glob/grep pass a DIRECTORY as :path — dirname would record its
+            ;; parent, and warm-dir matching (accessed at-or-below warm dir)
+            ;; never matches a parent. File tools still take dirname.
+               (swap! accessed-dirs conj
+                      (if (contains? #{"glob" "grep"} tool)
+                        fpath
+                        (path/dirname fpath))))))
+         0)
 
     ;; Warm context injection (before_agent_start, priority 40)
     (.on api "before_agent_start"
-      (fn [_event _ctx]
-        (let [warm-map (:warm @discovered)
-              new-dirs (remove @injected-dirs (keys warm-map))
+         (fn [_event _ctx]
+           (let [warm-map (:warm @discovered)
+                 new-dirs (remove @injected-dirs (keys warm-map))
               ;; Find dirs that match any accessed directory
-              matching (filter
-                         (fn [dir]
-                           (some (fn [accessed]
-                                   (or (= accessed dir)
-                                       (str/starts-with? accessed dir)))
-                                 @accessed-dirs))
-                         new-dirs)]
-          (when (seq matching)
-            (let [files (mapcat warm-map matching)
-                  total-tokens (reduce + 0 (map :tokens files))]
-              (when (<= (+ @warm-tokens-used total-tokens) warm-budget)
-                (swap! warm-tokens-used + total-tokens)
-                (swap! injected-dirs into matching)
-                (swap! shared/suite-stats update-in [:structured-context :warm-tokens]
-                       + total-tokens)
-                #js {:inject-messages
-                     (to-array
-                       (map (fn [f]
-                              #js {:role "system"
-                                   :content (str "[Context: " (:path f) "]\n" (:content f))})
-                            files))})))))
-      40)
+                 matching (filter
+                           (fn [dir]
+                             (some (fn [accessed]
+                                     (or (= accessed dir)
+                                         (str/starts-with? accessed dir)))
+                                   @accessed-dirs))
+                           new-dirs)]
+             (when (seq matching)
+               (let [files (mapcat warm-map matching)
+                     total-tokens (reduce + 0 (map :tokens files))]
+                 (when (<= (+ @warm-tokens-used total-tokens) warm-budget)
+                   (swap! warm-tokens-used + total-tokens)
+                   (swap! injected-dirs into matching)
+                   (swap! shared/suite-stats update-in [:structured-context :warm-tokens]
+                          + total-tokens)
+                   #js {:inject-messages
+                        (to-array
+                         (map (fn [f]
+                                #js {:role "system"
+                                     :content (str "[Context: " (:path f) "]\n" (:content f))})
+                              files))})))))
+         40)
 
     ;; Register context_files tool
     (.registerTool api "context_files"
-      (tool
-        #js {:description "List or read project context files (CLAUDE.md, CONTEXT.md, .cursorrules, etc.). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
-             :inputSchema (.object z
-                            #js {:action (-> (.enum z #js ["list" "read"])
-                                             (.describe "list = show all files; read = get content"))
-                                 :path   (-> (.string z) (.optional)
-                                             (.describe "File path (required for read action)"))})
-             :execute (fn [args] (context-files-execute-fn discovered cwd args))}))
+                   (tool
+                    #js {:description "List or read project context files (CLAUDE.md, CONTEXT.md, .cursorrules, etc.). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
+                         :inputSchema (.object z
+                                               #js {:action (-> (.enum z #js ["list" "read"])
+                                                                (.describe "list = show all files; read = get content"))
+                                                    :path   (-> (.string z) (.optional)
+                                                                (.describe "File path (required for read action)"))})
+                         :execute (fn [args] (context-files-execute-fn discovered cwd args))}))
 
     ;; Return deactivator
     (fn []

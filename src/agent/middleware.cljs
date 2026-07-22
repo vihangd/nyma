@@ -213,23 +213,23 @@
         custom-result (when display
                         (safe-call (.-formatResult display) result-str))]
     (when events
-      ;; #js camelCase — the ONE event-payload convention for tool_* events
-      ;; (matches tool_complete/tool_result/before_tool_call). Kebab CLJS maps
-      ;; here left 5 extensions reading `.-toolName` silently dead.
+      ;; camelCase keys — the ONE event-payload convention for tool_* events
+      ;; (matches tool_complete/tool_result/before_tool_call). Kebab keys here
+      ;; left 5 extensions reading `.-toolName` silently dead. Squint map
+      ;; literals are already plain JS objects — no clj->js needed.
       ((:emit events) "tool_execution_end"
-                      (clj->js
-                       (cond-> {:toolName       (:tool-name ctx)
-                                :execId         (:exec-id ctx)
-                                :args           (:args ctx)
-                                :duration       duration
-                                :result         result-str
-                                :resultEnvelope (:result-envelope ctx)
-                                :details        (:result-details ctx)
-                                :isError        (:result-is-error ctx)
-                                :contentParts   (:result-content-parts ctx)}
-                         custom-result (assoc :customOneLineResult custom-result)
-                         (and display (.-icon display)) (assoc :customIcon (.-icon display))
-                         (and display (.-verbosity display)) (assoc :customVerbosity (.-verbosity display))))))
+                      (cond-> {:toolName       (:tool-name ctx)
+                               :execId         (:exec-id ctx)
+                               :args           (:args ctx)
+                               :duration       duration
+                               :result         result-str
+                               :resultEnvelope (:result-envelope ctx)
+                               :details        (:result-details ctx)
+                               :isError        (:result-is-error ctx)
+                               :contentParts   (:result-content-parts ctx)}
+                        custom-result (assoc :customOneLineResult custom-result)
+                        (and display (.-icon display)) (assoc :customIcon (.-icon display))
+                        (and display (.-verbosity display)) (assoc :customVerbosity (.-verbosity display)))))
     (when store
       ((:dispatch! store) :tool-execution-ended
                           {:exec-id (:exec-id ctx) :duration duration})
@@ -248,11 +248,12 @@
                   start-time (js/Date.now)
                   display-fields (extract-display-fields (:tool ctx) (:args ctx))]
               (when events
+                ;; merge of squint maps is already a plain JS object with
+                ;; camelCase keys — no clj->js.
                 ((:emit events) "tool_execution_start"
-                                (clj->js
-                                 (merge {:toolName (:tool-name ctx) :execId exec-id :args (:args ctx)
-                                         :label (when-let [t (:tool ctx)] (.-label t))}
-                                        display-fields))))
+                                (merge {:toolName (:tool-name ctx) :execId exec-id :args (:args ctx)
+                                        :label (when-let [t (:tool ctx)] (.-label t))}
+                                       display-fields)))
               (when store
                 ((:dispatch! store) :tool-execution-started
                                     {:tool-name (:tool-name ctx) :exec-id exec-id})

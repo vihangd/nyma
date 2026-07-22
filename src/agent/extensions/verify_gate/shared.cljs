@@ -33,11 +33,13 @@
   [paths]
   (filterv (fn [p]
              (let [s (str p)]
-               (or (re-find #"(?i)(^|/)tests?(/|\.|_|-)" s)
+               (or (re-find #"(?i)(^|/)(tests?|__tests__)(/|\.|_|-)" s)
                    (.includes s ".test.")
                    (.includes s "_test.")
                    (.includes s ".spec.")
-                   (.includes s "settings.json"))))
+                   ;; Only the settings file that holds the verify config —
+                   ;; flagging every settings.json (.vscode/…) is noise.
+                   (.includes s ".nyma/settings.json"))))
            (vec paths)))
 
 (defn tail-lines

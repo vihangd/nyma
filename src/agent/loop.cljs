@@ -343,7 +343,11 @@
                                                           :outputTokens output-tokens
                                                           :cost         cost}
                                        :model        cost-model-id
-                                       :cachedTokens (.-cachedTokens usage)
+                                       ;; AI SDK v7 reports cache reads under
+                                       ;; usage.inputTokenDetails.cacheReadTokens
+                                       ;; (there is no top-level cachedTokens).
+                                       :cachedTokens (or (some-> usage .-inputTokenDetails .-cacheReadTokens)
+                                                         (.-cachedTokens usage))
                                        :turnCount    (or (:turn-count @state) 0)})))
 
                       ;; agent_end stays SYNC fire-and-forget so slow external

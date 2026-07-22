@@ -27,10 +27,10 @@
                       _        (b/activate api)
                       ctx      #js {:abort (fn [] (reset! aborted true))}]
                   ((get @handlers "before_agent_start") #js {} ctx)
-                  ((get @handlers "after_provider_request")
+                  ((get @handlers "turn_end")
                    #js {:usage #js {:inputTokens 80 :outputTokens 10}} ctx)
                   (-> (expect @aborted) (.toBe false))
-                  ((get @handlers "after_provider_request")
+                  ((get @handlers "turn_end")
                    #js {:usage #js {:inputTokens 80 :outputTokens 10}} ctx)
                   (-> (expect @aborted) (.toBe true)))))
 
@@ -43,7 +43,7 @@
                                     :off (fn [evt _] (swap! handlers dissoc evt))}
                       _        (b/activate api)
                       ctx      #js {:abort (fn [] (swap! aborted inc))}
-                      use!     (fn [n] ((get @handlers "after_provider_request")
+                      use!     (fn [n] ((get @handlers "turn_end")
                                         #js {:usage #js {:inputTokens n :outputTokens 0}} ctx))]
                   ((get @handlers "before_agent_start") #js {} ctx)
                   (use! 90)

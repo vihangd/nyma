@@ -26,8 +26,12 @@
           (when (and (shared/edit-tool? (.-toolName event))
                      (not (.-isError event)))
             (reset! edited? true)
-            (when-let [path (some-> (.-args event) (aget "path"))]
-              (swap! edited-paths conj (str path)))))
+            ;; Track paths only DURING the fix loop (after a gate failure) —
+            ;; pre-failure edits are the user's requested work; flagging them
+            ;; would accuse e.g. "write tests for X" of tampering.
+            (when (pos? @attempts)
+              (when-let [path (some-> (.-args event) (aget "path"))]
+                (swap! edited-paths conj (str path))))))
 
         on-finalize
         (^:async fn [event _ctx]
@@ -46,11 +50,11 @@
                   ;; satisfied instead of the request. If the gate turned
                   ;; green after the agent edited test files mid-fix-loop,
                   ;; tell the user to review those edits.
-                  (when (and (pos? @attempts)
-                             (seq (shared/tampered-paths @edited-paths)))
-                    (d/warn "verify-gate"
-                            (str "gate passed after edits to graded checks — review: "
-                                 (.join (clj->js (vec (shared/tampered-paths @edited-paths))) ", "))))
+                  (when (pos? @attempts)
+                    (when-let [tampered (seq (shared/tampered-paths @edited-paths))]
+                      (d/warn "verify-gate"
+                              (str "gate passed after edits to graded checks — review: "
+                                   (.join (clj->js (vec tampered)) ", ")))))
                   (reset! edited-paths #{})
                   (reset! attempts 0))
                 (if (< @attempts (:max-attempts cfg))
@@ -61,7 +65,10 @@
                        #js {:deliverAs "followUp"}))
                   ;; Cap reached and still red: stop the loop, but don't lie
                   ;; by staying silent — report without asking for edits.
+                  ;; Episode over: clear the fix-loop path ledger too, or its
+                  ;; stale paths leak into the NEXT episode's tamper warning.
                   (do (reset! attempts 0)
+                      (reset! edited-paths #{})
                       ((.-sendUserMessage api)
                        (str "Verification still failing after the attempt cap (`" (:cmd cfg)
                             "` exited " exit-code "). Do NOT edit further — summarize the "

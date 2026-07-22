@@ -10,6 +10,7 @@ the in-flight run is aborted so a runaway loop can't burn tokens unattended (com
 { "budget": { "turn-tokens": 150000, "session-tokens": 2000000 } }
 ```
 
-Off unless a cap is set. The turn counter resets on each run; the session counter never resets.
-Exceeding either logs a warning and aborts via the run's AbortController — partial work is kept,
-the agent just stops.
+Off unless a cap is set. Usage accumulates per step (`turn_end` fires on every streamText step),
+so exceeding a cap aborts the run **between tool steps** — partial work is kept, the agent just
+stops. The turn counter resets on each run; the session counter never resets (after the session
+cap trips, each new submit is aborted at its first step boundary).

@@ -172,7 +172,9 @@
             (write-event! {:type "tool_execution_update"
                            :toolCallId (:execId data)
                            :toolName (:toolName data)
-                           :partialResult {:content [{:type "text" :text (str (:result data))}]
+                           ;; update payload carries the streaming chunk under
+                           ;; :data (middleware onUpdate), not :result
+                           :partialResult {:content [{:type "text" :text (str (or (:data data) ""))}]
                                            :details {}}}))]
 
          ["tool_execution_end"

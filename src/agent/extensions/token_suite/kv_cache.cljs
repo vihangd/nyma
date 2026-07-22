@@ -117,6 +117,10 @@
   (let [config            (shared/load-config)
         kv-config         (:kv-cache config)
         prev-hash         (atom nil)
+        ;; Did the LAST provider request get cache breakpoints on a prefix
+        ;; that was ALSO stable vs the previous request? Only then is a
+        ;; zero-cache-read response a real miss worth surfacing.
+        expected-hit?     (atom false)
         extra-providers   (or (:extra-providers kv-config) {})
         cache-messages?   (boolean (:cache-messages kv-config))
         every-turns       (or (:checkpoint-every-turns kv-config) 4)
@@ -138,8 +142,8 @@
                           (> (.estimateTokens api system) (:min-system-tokens kv-config)))
                  (let [{:keys [stable dynamic]} (split-at-stable-boundary system)
                        hash         (js/Bun.hash stable)
-                       _same-as-prev (= hash @prev-hash)
                        pkey         (provider-key provider)]
+                   (reset! expected-hit? (= hash @prev-hash))
                    (reset! prev-hash hash)
                    (aset config-obj "system"
                          #js [#js {:role "system"
@@ -158,24 +162,28 @@
          100)
 
     ;; after_provider_request — track cache metrics + surface misses.
-    ;; A miss after turn 1 means the stable prefix broke (mutating system
-    ;; content, reordered tools) — silent misses quietly multiply cost
-    ;; (pi ships this as showCacheMissNotices).
+    ;; Only a request where WE annotated a stable-vs-previous prefix should
+    ;; have hit the cache; anything else (non-caching provider, first turn,
+    ;; changed prefix) misses by design and stays quiet — otherwise the
+    ;; notice fires every turn and trains users to ignore it (pi ships the
+    ;; real signal as showCacheMissNotices).
     (.on api "after_provider_request"
          (fn [event _ctx]
            (let [cached (.-cachedTokens event)
                  turn   (or (.-turnCount event) 0)
-                 miss?  (and (> turn 1) (or (nil? cached) (zero? cached)))]
+                 miss?  (and @expected-hit? (or (nil? cached) (zero? cached)))]
+             (reset! expected-hit? false)
              (when miss?
                (d/info "kv-cache" (str "cache miss on turn " turn
-                                       " — stable prefix likely broken")))
+                                       " — stable prefix annotated but not served")))
              (swap! shared/suite-stats update :kv-cache
                     (fn [s] (-> s
                                 (update :turns inc)
                                 (update :cached-tokens + (or cached 0))
-                                (update :cache-misses (fnil + 0) (if miss? 1 0))
+                                (update :cache-misses + (if miss? 1 0))
                                 (update :cache-hits + (if (and cached (pos? cached)) 1 0))))))))
 
     ;; Return deactivate
     (fn []
-      (reset! prev-hash nil))))
+      (reset! prev-hash nil)
+      (reset! expected-hit? false))))

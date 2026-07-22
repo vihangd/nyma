@@ -209,6 +209,13 @@
         ;; loaded. Mirrors the hook-bridge convention — a visible
         ;; activation line beats silent failure.
         configured-count  (count (or @shell-shared/mcp-servers []))
+        ;; A present-but-unparsed .mcp.json is indistinguishable from success
+        ;; without this: 0 servers load and nothing says why (d/warn reaches
+        ;; stderr; the d/info activation line below is debug-gated).
+        _ (when (and (zero? configured-count)
+                     (try (fs/existsSync (path/join (js/process.cwd) ".mcp.json"))
+                          (catch :default _ false)))
+            (d/warn "[mcp-client] .mcp.json present but 0 servers configured — check its syntax"))
         _ (when (.-NYMA_DEBUG js/process.env)
             (d/info
              (str "[mcp-client] active — " configured-count
@@ -284,7 +291,7 @@
                       (reset! hidden-tools-set to-hide)))
                   (catch :default e
                     (d/warn "[mcp-client] start-all error:"
-                                     (or (.-message e) (str e)))))))))
+                            (or (.-message e) (str e)))))))))
 
         ;; session_shutdown: tools off, then stop all.
         ;;
@@ -303,7 +310,7 @@
                 (reset! shadowed-natives #{})))
             (catch :default e
               (d/warn "[mcp-client] shutdown(shadow-restore):"
-                               (or (.-message e) (str e)))))
+                      (or (.-message e) (str e)))))
           ;; Step 2: best-effort restore hidden-tools.
           (try
             (when (seq @hidden-tools-set)
@@ -313,7 +320,7 @@
                 (reset! hidden-tools-set #{})))
             (catch :default e
               (d/warn "[mcp-client] shutdown(hidden-restore):"
-                               (or (.-message e) (str e)))))
+                      (or (.-message e) (str e)))))
           ;; Step 3: best-effort tool overrides + bridge unregister.
           (try
             (let [a @applied-overrides]
@@ -325,14 +332,14 @@
             (reset! registered-tools [])
             (catch :default e
               (d/warn "[mcp-client] shutdown(unregister):"
-                               (or (.-message e) (str e)))))
+                      (or (.-message e) (str e)))))
           ;; Step 4: ALWAYS stop the subprocesses — this is the
           ;; non-skippable kill that prevents orphans.
           (try
             (js-await (mgr/stop-all! @manager-ref))
             (catch :default e
               (d/warn "[mcp-client] shutdown(stop-all):"
-                               (or (.-message e) (str e))))))]
+                      (or (.-message e) (str e))))))]
 
     ;; Subscribe on the MAIN event bus (api.on, not api.events.on).
     ;; session_ready: vanilla CLI launch — primary entry point.

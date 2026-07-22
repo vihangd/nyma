@@ -68,7 +68,10 @@
         exec-id    (get data :execId)
         idx        (find-tool-start-idx prev-v exec-id)
         start-msg  (when idx (nth prev-v idx))
-        start-args (when start-msg (:args start-msg))
+        ;; Prefer the start message's args; fall back to the end payload's —
+        ;; covers out-of-order lifecycle events (end with no matching start).
+        start-args (or (when start-msg (:args start-msg))
+                       (get data :args))
         start-id   (when start-msg (:id start-msg))
         end-msg    (cond-> {:role      "tool-end"
                             :tool-name (get data :toolName)
