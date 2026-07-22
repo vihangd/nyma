@@ -31,6 +31,16 @@
                                        (-> (expect (shared/edit-tool? "read")) (.toBe false))
                                        (-> (expect (shared/edit-tool? nil)) (.toBe false))))
 
+                                 (it "tampered-paths flags test files and settings, not source"
+                                     (fn []
+                                       (let [flagged (shared/tampered-paths
+                                                      #{"src/agent/tools.cljs"
+                                                        "test/tools.test.cljs"
+                                                        "spec/foo.spec.ts"
+                                                        ".nyma/settings.json"})]
+                                         (-> (expect (count flagged)) (.toBe 3))
+                                         (-> (expect (.includes (clj->js flagged) "src/agent/tools.cljs")) (.toBe false)))))
+
                                  (it "failure-message tails long output"
                                      (fn []
                                        (let [long-out (.join (.map (js/Array.from #js {:length 100} (fn [_ i] i))

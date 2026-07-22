@@ -33,6 +33,7 @@
          "Observation Masking:  " (:messages-masked om) " messages masked, ~"
          (:tokens-saved om) " tokens saved\n"
          "KV Cache:            " (:cache-hits kv) " cache hits, "
+         (or (:cache-misses kv) 0) " misses, "
          (:cached-tokens kv) " cached tokens\n"
          "Expired Context:     " (:stale-replaced ec) " stale reads pruned, ~"
          (:tokens-saved ec) " tokens saved\n"

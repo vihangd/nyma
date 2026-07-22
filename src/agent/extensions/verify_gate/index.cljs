@@ -3,7 +3,8 @@
    configured quality command; on failure, inject the output as a follow-up
    so the agent fixes it before stopping. Off unless settings#verify.cmd is
    set. Attempts are capped so a stubbornly red suite can't loop forever."
-  (:require [agent.extensions.verify-gate.shared :as shared]))
+  (:require [agent.debug :as d]
+            [agent.extensions.verify-gate.shared :as shared]))
 
 (defn ^:async run-cmd [cmd timeout-ms]
   (let [proc   (js/Bun.spawn #js ["sh" "-c" cmd]
@@ -16,13 +17,17 @@
 (defn ^:export activate [api]
   (let [cfg      (shared/config (try (.getSettings api) (catch :default _ nil)))
         edited?  (atom false)
+        ;; Paths edited during the fix loop — for the graded-check tamper warning.
+        edited-paths (atom #{})
         attempts (atom 0)
 
         on-complete
         (fn [event _ctx]
           (when (and (shared/edit-tool? (.-toolName event))
                      (not (.-isError event)))
-            (reset! edited? true)))
+            (reset! edited? true)
+            (when-let [path (some-> (.-args event) (aget "path"))]
+              (swap! edited-paths conj (str path)))))
 
         on-finalize
         (^:async fn [event _ctx]
@@ -36,7 +41,18 @@
             (let [{:keys [exit-code output]}
                   (js-await (run-cmd (:cmd cfg) (:timeout-ms cfg)))]
               (if (zero? exit-code)
-                (reset! attempts 0)
+                (do
+                  ;; "Building to the Test" (2026): in-loop verifiers get
+                  ;; satisfied instead of the request. If the gate turned
+                  ;; green after the agent edited test files mid-fix-loop,
+                  ;; tell the user to review those edits.
+                  (when (and (pos? @attempts)
+                             (seq (shared/tampered-paths @edited-paths)))
+                    (d/warn "verify-gate"
+                            (str "gate passed after edits to graded checks — review: "
+                                 (.join (clj->js (vec (shared/tampered-paths @edited-paths))) ", "))))
+                  (reset! edited-paths #{})
+                  (reset! attempts 0))
                 (if (< @attempts (:max-attempts cfg))
                   (do (swap! attempts inc)
                       ((.-sendUserMessage api)

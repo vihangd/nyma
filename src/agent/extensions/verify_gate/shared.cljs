@@ -8,7 +8,6 @@
    stopping."
   (:require [agent.tool-metadata :as tool-metadata]))
 
-
 (def default-config
   {:cmd nil :max-attempts 2 :timeout-ms 120000})
 
@@ -26,6 +25,20 @@
 
 (defn edit-tool? [tool-name]
   (tool-metadata/file-editing? tool-name))
+
+(defn tampered-paths
+  "Paths from `paths` that look like graded checks (test files or the
+   settings holding the verify config). A green gate after editing these
+   deserves human review — verifiers get satisfied instead of the request."
+  [paths]
+  (filterv (fn [p]
+             (let [s (str p)]
+               (or (re-find #"(?i)(^|/)tests?(/|\.|_|-)" s)
+                   (.includes s ".test.")
+                   (.includes s "_test.")
+                   (.includes s ".spec.")
+                   (.includes s "settings.json"))))
+           (vec paths)))
 
 (defn tail-lines
   "Last n lines of s — failures live at the end of test output."

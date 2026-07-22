@@ -5,7 +5,7 @@
 ;; ── Stats tracking ───────────────────────────────────────────
 (def suite-stats
   (atom {:observation-mask {:turns 0 :messages-masked 0 :tokens-saved 0}
-         :kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
+         :kv-cache         {:turns 0 :cache-hits 0 :cache-misses 0 :cached-tokens 0}
          :expired-context  {:turns 0 :stale-replaced 0 :tokens-saved 0}
          :tool-truncation  {:calls 0 :chars-saved 0}
          :repo-map         {:files 0 :symbols 0 :last-index-ms 0}

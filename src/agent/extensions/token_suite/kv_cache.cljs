@@ -23,7 +23,8 @@
      slot 2: last stable assistant turn (anchor)
      slot 3: N-back checkpoint
      slot 4: reserved for future (tool-block caching)"
-  (:require [agent.extensions.token-suite.shared :as shared]))
+  (:require [agent.debug :as d]
+            [agent.extensions.token-suite.shared :as shared]))
 
 (defn- split-at-stable-boundary
   "Split system prompt into stable (cacheable) and dynamic sections.
@@ -156,14 +157,23 @@
            nil)
          100)
 
-    ;; after_provider_request — track cache metrics
+    ;; after_provider_request — track cache metrics + surface misses.
+    ;; A miss after turn 1 means the stable prefix broke (mutating system
+    ;; content, reordered tools) — silent misses quietly multiply cost
+    ;; (pi ships this as showCacheMissNotices).
     (.on api "after_provider_request"
          (fn [event _ctx]
-           (let [cached (.-cachedTokens event)]
+           (let [cached (.-cachedTokens event)
+                 turn   (or (.-turnCount event) 0)
+                 miss?  (and (> turn 1) (or (nil? cached) (zero? cached)))]
+             (when miss?
+               (d/info "kv-cache" (str "cache miss on turn " turn
+                                       " — stable prefix likely broken")))
              (swap! shared/suite-stats update :kv-cache
                     (fn [s] (-> s
                                 (update :turns inc)
                                 (update :cached-tokens + (or cached 0))
+                                (update :cache-misses (fnil + 0) (if miss? 1 0))
                                 (update :cache-hits + (if (and cached (pos? cached)) 1 0))))))))
 
     ;; Return deactivate

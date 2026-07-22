@@ -54,7 +54,8 @@
     "add-dir"
     "verify-gate"
     "checkpoints"
-    "handoff"})
+    "handoff"
+    "budget"})
 
 (defn- builtin-dir []
   ;; This test file compiles to dist/loader_smoke.test.mjs, so

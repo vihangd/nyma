@@ -408,3 +408,13 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 - **Permission modal consuming tool_metadata** — the safety table is still written-but-unread (T11/1d).
 - **Extension enable/disable mechanism** — manifests have no honored `enabled`; only NYMA_NO_BUILTIN_EXT global.
 - **Live /theme re-render** — watch-theme exists; widgets bake theme at construction.
+
+## 2026-07-22 round-2 audit — deferred
+
+- **Provider factory** — ~700 lines duplicated across 8 OpenAI-compat providers (`read-credentials-file` copied 7×); a shared `openai-compat-provider` factory would collapse each to ~15 lines.
+- **Session storage** — JSONL grows unbounded (sync append per tool result), JSONL⊕SQLite double-write with no consistency guard, no multi-instance locking (`--fork/--resume` makes races real).
+- **Submit-path dedup** — bash/eval branches in interactive.cljs are ~25 near-identical lines each; extract a side-channel dispatcher.
+- **UX** — streaming token counter; collapsible thinking blocks (think_tag_parser parses, renderer has no fold state).
+- **ACP (§7)** — all prior gaps re-confirmed open; plus acp_* events emit mixed #js/clj->js shapes (latent interop variant, consumer audit needed).
+- **Server-side compaction** — Anthropic `compact-2026-01-12` beta is now the recommended path; needs raw-header injection (consider a pi-style `before_provider_headers` extension hook).
+- **Cache-friendly deferred tool loading** — register MCP/rare tools after the cached prefix (validated by Codex tool-search default-on).
