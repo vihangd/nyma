@@ -418,3 +418,18 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 - **ACP (§7)** — all prior gaps re-confirmed open; plus acp_* events emit mixed #js/clj->js shapes (latent interop variant, consumer audit needed).
 - **Server-side compaction** — Anthropic `compact-2026-01-12` beta is now the recommended path; needs raw-header injection (consider a pi-style `before_provider_headers` extension hook).
 - **Cache-friendly deferred tool loading** — register MCP/rare tools after the cached prefix (validated by Codex tool-search default-on).
+
+## 2026-07-22 review leftovers (structural, not quick fixes)
+
+- **expired_context / smart_compaction hook D are structurally dead** even after the event fix:
+  their context_assembly walks look for role tool_call/tool_result messages, but state :messages
+  never contains those roles (sessions/manager.cljs:25 invariant) — needs either tool results in
+  assembled context or reading from the session store. Also expired_context keys staleness off
+  turn_end (per STEP) vs assistant-message counting — two numbering schemes that never align.
+- **emit-js! boundary helper** — event-shape stragglers remain (session_before_switch/
+  session_switch/session_before_fork kebab; acp_* mixed #js/clj->js; emit-collect collection-keys
+  mix kebab and camel). One helper + a payload-shape lint would make the convention structural.
+- **Settings-section config reader** — 4th copy landed (budget); extract a shared
+  `(section-config settings "name" defaults)` helper; note openwiki's boolean `some?` variant.
+- **Budget ledger unification** — budget keeps its own token totals; consider deriving from the
+  store's :usage-updated totals (getContextUsage) so caps and /stats agree.
