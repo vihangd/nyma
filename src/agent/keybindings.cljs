@@ -26,17 +26,25 @@
   "Merge loaded keybindings into the agent's :shortcuts atom.
    Action format: 'command:name' dispatches the /name command.
    Each binding is stored as {:action string :source \"keybindings.json\"}."
-  [shortcuts-atom commands-atom bindings]
-  (doseq [[key-combo action] bindings]
-    (swap! shortcuts-atom assoc key-combo
-           {:action action
-            :source "keybindings.json"
-            :handler (fn []
-                       (when (.startsWith (str action) "command:")
-                         (let [cmd-name (.slice (str action) 8)
-                               commands @commands-atom]
-                           (when-let [cmd (get commands cmd-name)]
-                             ((:handler cmd) [] nil)))))})))
+  ([shortcuts-atom commands-atom bindings]
+   (apply-keybindings shortcuts-atom commands-atom bindings nil))
+  ([shortcuts-atom commands-atom bindings agent]
+   (doseq [[key-combo action] bindings]
+     (swap! shortcuts-atom assoc key-combo
+            {:action action
+             :source "keybindings.json"
+             :handler (fn []
+                        (when (.startsWith (str action) "command:")
+                          (let [cmd-name (.slice (str action) 8)
+                                commands @commands-atom]
+                            (when-let [cmd (get commands cmd-name)]
+                              ;; Real ctx, not nil — handlers that notify or
+                              ;; show overlays otherwise silently no-op when
+                              ;; triggered from a keybinding.
+                              ((:handler cmd) []
+                               #js {:ui    (when agent
+                                             (when-let [ext (.-extension-api agent)] (.-ui ext)))
+                                    :agent agent})))))}))))
 
 (defn rebuild-registry!
   "Rebuild the keybinding-registry atom from user overrides.

@@ -3,7 +3,7 @@
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.sessions.listing :refer [list-sessions]]
-            [agent.commands.share :refer [messages->html messages->markdown]]
+            [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
             [agent.extension-loader :refer [deactivate-all discover-and-load]]
             [agent.resources.loader :refer [discover]]
@@ -462,7 +462,7 @@
                             last-asst (last (filter #(= (:role %) "assistant") msgs))]
                         (if-not last-asst
                           (notify ctx "No assistant message to copy" "error")
-                          (let [text     (:content last-asst)
+                          (let [text     (share/content->text (:content last-asst))
                                 platform (.-platform js/process)
                                 cmd      (case platform
                                            "darwin" "pbcopy"
@@ -473,7 +473,11 @@
                             (.write (.-stdin proc) text)
                             (.end (.-stdin proc))
                             (.then (.-exited proc)
-                                   (fn [_] (notify ctx "Copied to clipboard")))))))}
+                                   (fn [code]
+                                     (if (zero? code)
+                                       (notify ctx "Copied to clipboard")
+                                       (notify ctx (str "Clipboard command failed (" cmd
+                                                        " exited " code ")") "error"))))))))}
 
           "hotkeys"
           {:description "Show keyboard shortcuts"

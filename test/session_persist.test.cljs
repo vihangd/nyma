@@ -3,9 +3,9 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
-            [agent.cli :refer [attach-session-persistence! pick-session]]
+            [agent.cli :refer [pick-session]]
             [agent.state :refer [create-agent-store]]
-            [agent.sessions.manager :refer [create-session-manager]]))
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]))
 
 (def ^:private test-dir (atom nil))
 

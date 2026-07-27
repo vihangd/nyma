@@ -1,7 +1,5 @@
 (ns agent.commands.share
-  (:require [clojure.string :as str]
-            ["node:path" :as path]
-            ["node:fs" :as fs]))
+  (:require [clojure.string :as str]))
 
 (defn- escape-html
   "Escape a string for safe insertion into HTML content."
@@ -12,21 +10,40 @@
       (.replace ">" "&gt;")
       (.replace "\"" "&quot;")))
 
+(defn content->text
+  "Flatten message :content to a string. Assistant turns that called tools
+   carry a VECTOR of content blocks — stringifying that yields
+   `[object Object],…`. Extract text blocks; label the rest by type."
+  [content]
+  (cond
+    (string? content) content
+    (or (vector? content) (js/Array.isArray content))
+    (->> content
+         (map (fn [b]
+                (cond
+                  (string? b) b
+                  (some? (or (:text b) (aget b "text"))) (str (or (:text b) (aget b "text")))
+                  :else (str "[" (or (:type b) (aget b "type") "content") "]"))))
+         (str/join "
+"))
+    (nil? content) ""
+    :else (str content)))
+
 (defn messages->markdown
   "Convert messages to a Markdown document."
   [messages session-name]
   (let [header (str "# Session: " session-name "\n\n"
                     "_Exported from NYMA_\n\n---\n\n")]
     (str header
-      (str/join "\n\n---\n\n"
-        (map (fn [msg]
-               (let [role (or (:role msg) "unknown")
-                     content (or (:content msg) "")]
-                 (str "## " (.toUpperCase (.charAt role 0)) (.slice role 1) "\n\n"
-                   (if (or (= role "tool_call") (= role "tool_result"))
-                     (str "```\n" content "\n```")
-                     content))))
-          messages)))))
+         (str/join "\n\n---\n\n"
+                   (map (fn [msg]
+                          (let [role (or (:role msg) "unknown")
+                                content (content->text (:content msg))]
+                            (str "## " (.toUpperCase (.charAt role 0)) (.slice role 1) "\n\n"
+                                 (if (or (= role "tool_call") (= role "tool_result"))
+                                   (str "```\n" content "\n```")
+                                   content))))
+                        messages)))))
 
 (defn messages->html
   "Convert messages to a self-contained HTML page with dark theme."
@@ -34,21 +51,21 @@
   (let [safe-name (escape-html session-name)
         msg-html
         (str/join "\n"
-          (map (fn [msg]
-                 (let [role (or (:role msg) "unknown")
-                       content (or (:content msg) "")
-                       escaped (escape-html content)
-                       role-class (case role
-                                    "user"      "msg-user"
-                                    "assistant" "msg-assistant"
-                                    "msg-other")]
-                   (str "<div class=\"message " role-class "\">"
-                     "<div class=\"role\">" role "</div>"
-                     (if (or (= role "tool_call") (= role "tool_result"))
-                       (str "<pre><code>" escaped "</code></pre>")
-                       (str "<div class=\"content\">" escaped "</div>"))
-                     "</div>")))
-            messages))]
+                  (map (fn [msg]
+                         (let [role (or (:role msg) "unknown")
+                               content (content->text (:content msg))
+                               escaped (escape-html content)
+                               role-class (case role
+                                            "user"      "msg-user"
+                                            "assistant" "msg-assistant"
+                                            "msg-other")]
+                           (str "<div class=\"message " role-class "\">"
+                                "<div class=\"role\">" role "</div>"
+                                (if (or (= role "tool_call") (= role "tool_result"))
+                                  (str "<pre><code>" escaped "</code></pre>")
+                                  (str "<div class=\"content\">" escaped "</div>"))
+                                "</div>")))
+                       messages))]
     (str "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -78,48 +95,3 @@
 " msg-html "
 </body>
 </html>")))
-
-(defn ^:async share-to-file
-  "Write session messages to a local file.
-   Format is :html or :md. Returns the output file path."
-  [messages session-name format output-dir]
-  (let [ext     (case format :html ".html" :md ".md" ".html")
-        content (case format
-                  :html (messages->html messages session-name)
-                  :md   (messages->markdown messages session-name)
-                  (messages->html messages session-name))
-        ;; Sanitize session name for filename
-        safe-name (-> session-name
-                      (.replace (js/RegExp. "[^a-zA-Z0-9_-]" "g") "_")
-                      (.slice 0 50))
-        file-name (str safe-name "-" (js/Date.now) ext)
-        out-path  (path/join output-dir file-name)]
-    ;; Ensure output directory exists
-    (when-not (fs/existsSync output-dir)
-      (fs/mkdirSync output-dir #js {:recursive true}))
-    (js-await (js/Bun.write out-path content))
-    out-path))
-
-(defn ^:async share-handler
-  "Handle the /share command. Exports session to local file."
-  [agent session args _ctx]
-  (let [format-arg (first args)
-        format     (case format-arg
-                     "md"   :md
-                     "html" :html
-                     nil    :html
-                     :html)
-        messages   ((:build-context session))
-        name-str   (or (:session-file agent) "session")
-        ;; Extract just the filename without extension
-        base-name  (-> (path/basename name-str) (.replace ".jsonl" ""))
-        output-dir (path/join (or (.cwd js/process) ".") ".nyma" "exports")
-        result     (js-await (share-to-file messages base-name format output-dir))]
-    (js/console.log (str "[nyma] Session exported to: " result))
-    result))
-
-(defn create-share-command
-  "Create the /share command for session export."
-  [agent session]
-  {:description "Export session (/share [html|md])"
-   :handler     (fn [args ctx] (share-handler agent session args ctx))})

@@ -2,7 +2,11 @@
 
 ;; Model pricing: [input-rate-per-1M-tokens, output-rate-per-1M-tokens] in USD
 (def token-costs
-  (atom {"claude-sonnet-4-20250514"     [3.0 15.0]
+  (atom {"claude-opus-5"                 [5.0 25.0]
+         "claude-opus-4-8"              [15.0 75.0]
+         "claude-sonnet-5"              [3.0 15.0]
+         "claude-haiku-4-5-20251001"    [1.0 5.0]
+         "claude-sonnet-4-20250514"     [3.0 15.0]
          "claude-opus-4-20250514"       [15.0 75.0]
          "claude-haiku-3-20240307"      [0.25 1.25]
          "gpt-4o"                       [2.5 10.0]

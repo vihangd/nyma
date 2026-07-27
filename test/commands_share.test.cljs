@@ -1,7 +1,7 @@
 (ns commands-share.test
   "Tests for messages->markdown and messages->html — pure conversion functions."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.commands.share :refer [messages->markdown messages->html]]))
+            [agent.commands.share :as share :refer [messages->markdown messages->html]]))
 
 (def ^:private msgs
   [{:role "user"      :content "Hello"}
@@ -106,3 +106,23 @@
                                  (fn []
                                    (let [html (messages->html [{:role "assistant" :content nil}] "s")]
                                      (-> (expect (string? html)) (.toBe true)))))))
+
+(describe "content->text" (fn []
+  (it "passes strings through"
+      (fn []
+        (-> (expect (share/content->text "plain")) (.toBe "plain"))))
+
+  (it "flattens block vectors to text (no [object Object])"
+      (fn []
+        (let [blocks [{:type "text" :text "hello"}
+                      {:type "tool-call" :toolName "read"}
+                      {:type "text" :text "world"}]
+              out    (share/content->text blocks)]
+          (-> (expect out) (.toContain "hello"))
+          (-> (expect out) (.toContain "world"))
+          (-> (expect out) (.toContain "[tool-call]"))
+          (-> (expect out) (.-not) (.toContain "object Object")))))
+
+  (it "nil → empty string"
+      (fn []
+        (-> (expect (share/content->text nil)) (.toBe ""))))))

@@ -16,8 +16,11 @@
        :transcript_path ""
        :cwd             (js/process.cwd)
        :hook_event_name "Stop"
-       :stop_reason     (str (or (.-stopReason data) "end_turn"))
-       :output_tokens   (or (.-outputTokens data) 0)})
+       ;; agent_end carries {:text :usage :finishReason} — there is no
+       ;; top-level stopReason/outputTokens (the old reads always yielded
+       ;; "end_turn" / 0).
+       :stop_reason     (str (or (.-finishReason data) "end_turn"))
+       :output_tokens   (or (some-> (.-usage data) .-outputTokens) 0)})
 
 (defn- stop-failure-payload [data]
   (let [m (.-message data)
@@ -33,9 +36,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-
-        stop-handler
+  (let [stop-handler
         (fn [data]
           (dispatch/dispatch
            {:hooks-map     @hooks-atom

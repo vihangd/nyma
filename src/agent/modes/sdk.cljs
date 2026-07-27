@@ -2,7 +2,7 @@
   (:require [agent.core :refer [create-agent]]
             [agent.loop :refer [run steer follow-up]]
             [agent.resources.loader :refer [discover]]
-            [agent.sessions.manager :refer [create-session-manager]]
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load]]
@@ -43,6 +43,12 @@
                                              :require-capabilities
                                              :exclude-capabilities
                                              :modes])))]
+
+    ;; Attach the session so extensions/commands (@(:session agent)) see it,
+    ;; and mirror turns to the JSONL — without this, embedder and gateway
+    ;; conversations were never persisted despite the docstring.
+    (reset! (:session agent) session)
+    (attach-session-persistence! agent session)
 
     ;; Load extensions
     (js-await (discover-and-load
@@ -86,7 +92,10 @@
        (let [s @(:state agent)]
          (if (seq (:active-executions s)) :tool-running :idle)))
 
+     ;; (name event) like :on-many — core emits string event names, so a
+     ;; keyword subscriber would otherwise silently never fire.
      :on    (fn [event handler]
-              ((:on (:events agent)) event handler)
-              (fn [] ((:off (:events agent)) event handler)))
+              (let [ev (name event)]
+                ((:on (:events agent)) ev handler)
+                (fn [] ((:off (:events agent)) ev handler))))
      :state (fn [] @(:state agent))}))

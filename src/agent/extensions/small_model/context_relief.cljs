@@ -55,8 +55,13 @@
 (defn activate
   "Wire provider_error context-relief hook. Returns a cleanup fn."
   [api _config]
-  (let [fired    (atom false)  ; only prune once per session to avoid loops
+  (let [fired    (atom false)  ; latched during a failure burst to avoid loops
         handlers (atom [])
+
+        ;; Re-arm after a turn completes cleanly — a session can hit the
+        ;; context limit more than once, and a permanent latch left later
+        ;; overflows unrelieved.
+        on-end   (fn [_data _ctx] (reset! fired false))
 
         on-error
         (fn [data _ctx]
@@ -77,7 +82,9 @@
                     #js {:retry true}))))))]
 
     (.on api "provider_error" on-error)
+    (.on api "agent_end" on-end)
     (swap! handlers conj ["provider_error" on-error])
+    (swap! handlers conj ["agent_end" on-end])
 
     (fn []
       (doseq [[event handler] @handlers]

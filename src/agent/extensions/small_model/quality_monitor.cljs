@@ -128,6 +128,11 @@
                           ;; Clean call — reset relevant counters
                           :else
                           (do (swap! counters assoc :hallucinated 0 :repeat 0)
+                              ;; Coarse expiry: an unbounded sig set grows for
+                              ;; the whole session AND flags a legitimately
+                              ;; repeated call hours later as a loop.
+                              (when (> (count (:all-tool-sigs @state)) 200)
+                                (swap! state assoc :all-tool-sigs #{}))
                               (swap! state update :all-tool-sigs conj sig)))
                         ctx))}
 

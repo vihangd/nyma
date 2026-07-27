@@ -166,9 +166,13 @@ When multiple independent tool calls are needed, make them in parallel.
        (let [entries (fs/readdirSync dir)]
          (reduce
           (fn [m file]
-            (when (.endsWith file ".json")
+            ;; `if`, not `when`: a nil return for a non-.json entry
+            ;; (.DS_Store, README, subdir) would become the accumulator and
+            ;; silently wipe every theme collected so far.
+            (if (.endsWith file ".json")
               (let [name (subs file 0 (- (count file) 5))]
-                (assoc m name {:path (path/join dir file)}))))
+                (assoc m name {:path (path/join dir file)}))
+              m))
           acc
           entries))
        acc))

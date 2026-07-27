@@ -189,3 +189,20 @@
     (aset mgr ISessionStore_session_get_tree (fn [_] (get-tree-fn)))
     (aset mgr ISessionStore_session_leaf_id (fn [_] (leaf-id-fn)))
     mgr))
+
+(defn attach-session-persistence!
+  "Mirror new user/assistant turns into the session JSONL as they're added to
+   the store. No-op for ephemeral (nil file path) sessions. Returns nothing.
+   Shared by cli (interactive/print) and modes.sdk (embedders + gateway)."
+  [agent session]
+  (when (and session ((:get-file-path session)))
+    ((:subscribe (:store agent))
+     (fn [event-type state]
+       ;; Skip replays (/resume, /import seed via :message-added too) — those
+       ;; messages are already on disk; re-appending would double the file.
+       (when (and (= event-type :message-added)
+                  (not (:replaying-session? state)))
+         (let [msg  (last (:messages state))
+               role (:role msg)]
+           (when (contains? #{"user" "assistant"} role)
+             ((:append session) (select-keys msg [:role :content])))))))))

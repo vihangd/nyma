@@ -2,7 +2,11 @@
 
 ;; Built-in model context windows
 (def ^:private default-models
-  {"claude-sonnet-4-20250514" {:context-window 200000}
+  {"claude-opus-5"            {:context-window 1000000}
+   "claude-opus-4-8"          {:context-window 200000}
+   "claude-sonnet-5"          {:context-window 200000}
+   "claude-haiku-4-5-20251001" {:context-window 200000}
+   "claude-sonnet-4-20250514" {:context-window 200000}
    "claude-opus-4-20250514"   {:context-window 200000}
    "claude-haiku-4-20250901"  {:context-window 200000}
    "gpt-4o"                   {:context-window 128000}

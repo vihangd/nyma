@@ -22,7 +22,13 @@
          ;; Compose all reducers into a single atomic swap
          (when (seq rs)
            (swap! state (fn [s] (reduce (fn [acc r] (r acc data)) s rs))))
-         (swap! history conj {:type event-type :data data :timestamp (js/Date.now)})
+         ;; Ring-capped: history stores full event payloads (tool args AND
+         ;; results) and nothing in production reads it yet — uncapped it is
+         ;; a session-length memory leak. 500 entries keeps the debug/replay
+         ;; value without pinning every tool result forever.
+         (swap! history (fn [h]
+                          (let [h' (conj h {:type event-type :data data :timestamp (js/Date.now)})]
+                            (if (> (count h') 500) (vec (drop (- (count h') 500) h')) h'))))
          (let [current @state]
            (doseq [s @subs]
              (s event-type current)))))
@@ -58,16 +64,16 @@
                              (update state :active-executions (fnil disj #{}) (:exec-id data)))
    :tool-call-started      (fn [state data]
                              (update state :tool-calls (fnil assoc {})
-                               (:exec-id data)
-                               {:tool-name  (:tool-name data)
-                                :args       (:args data)
-                                :status     "running"
-                                :start-time (:start-time data)}))
+                                     (:exec-id data)
+                                     {:tool-name  (:tool-name data)
+                                      :args       (:args data)
+                                      :status     "running"
+                                      :start-time (:start-time data)}))
    :tool-call-ended        (fn [state data]
                              (update-in state [:tool-calls (:exec-id data)]
-                               merge {:status   "done"
-                                      :duration (:duration data)
-                                      :result   (:result data)}))})
+                                        merge {:status   "done"
+                                               :duration (:duration data)
+                                               :result   (:result data)}))})
 
 (defn create-agent-store
   "Create a state store pre-loaded with agent core reducers.

@@ -8,7 +8,7 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
-            [agent.sessions.manager :refer [create-session-manager session->seed-messages]]
+            [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
             [agent.sessions.listing :refer [list-sessions]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
@@ -306,22 +306,6 @@ Examples:
       (fs/mkdirSync (npath/dirname path) #js {:recursive true}))
     (create-session-manager path)))
 
-(defn attach-session-persistence!
-  "Mirror new user/assistant turns into the session JSONL as they're added to
-   the store. No-op for ephemeral (nil file path) sessions. Returns nothing."
-  [agent session]
-  (when (and session ((:get-file-path session)))
-    ((:subscribe (:store agent))
-     (fn [event-type state]
-       ;; Skip replays (/resume, /import seed via :message-added too) — those
-       ;; messages are already on disk; re-appending would double the file.
-       (when (and (= event-type :message-added)
-                  (not (:replaying-session? state)))
-         (let [msg  (last (:messages state))
-               role (:role msg)]
-           (when (contains? #{"user" "assistant"} role)
-             ((:append session) (select-keys msg [:role :content])))))))))
-
 (defn ^:async main []
   (let [{:keys [values positionals]}
         (parseArgs
@@ -464,7 +448,7 @@ Examples:
       ;; Load user keybindings and rebuild the action-id registry
       (let [bindings (load-keybindings)]
         (when (seq bindings)
-          (apply-keybindings (:shortcuts agent) (:commands agent) bindings))
+          (apply-keybindings (:shortcuts agent) (:commands agent) bindings agent))
         (rebuild-registry! (:keybinding-registry agent) bindings))
 
       ;; Emit session_ready — all extensions loaded, session attached, model resolved

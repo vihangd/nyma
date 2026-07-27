@@ -18,14 +18,14 @@
                   (-> (expect (some? entry)) (.toBe true))
                   (-> (expect (fn? (:create-model entry))) (.toBe true)))))
 
-          (it "registers 4 Claude models"
+          (it "registers 6 Claude models"
               (fn []
                 (let [agent  (create-agent {:model "test" :system-prompt "test"})
                       api    (create-extension-api agent)
                       _      ((.-default claude-ext) api)
                       entry  ((:get (:provider-registry agent)) "claude-native")
                       models (:models entry)]
-                  (-> (expect (count models)) (.toBe 4)))))
+                  (-> (expect (count models)) (.toBe 6)))))
 
           (it "registers expected model IDs"
               (fn []
