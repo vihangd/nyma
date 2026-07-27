@@ -417,7 +417,7 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 - **UX** — streaming token counter; collapsible thinking blocks (think_tag_parser parses, renderer has no fold state).
 - **ACP (§7)** — all prior gaps re-confirmed open; plus acp_* events emit mixed #js/clj->js shapes (latent interop variant, consumer audit needed).
 - **Server-side compaction** — Anthropic `compact-2026-01-12` beta is now the recommended path; needs raw-header injection (consider a pi-style `before_provider_headers` extension hook).
-- **Cache-friendly deferred tool loading** — register MCP/rare tools after the cached prefix (validated by Codex tool-search default-on).
+- **Cache-friendly deferred tool loading** — register MCP/rare tools after the cached prefix (validated by Codex tool-search default-on). UPDATE 2026-07-27: Anthropic's `mid-conversation-tool-changes-2026-07-01` beta makes this cache-safe first-party — prototype against it.
 
 ## 2026-07-22 review leftovers (structural, not quick fixes)
 
