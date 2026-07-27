@@ -34,10 +34,10 @@
         (-> (expect (get stream-event-types "tool-result"))
             (.toBe "tool_result"))))
 
-    (it "maps finish-step to turn_end"
+    (it "does NOT map finish-step (onStepFinish owns turn_end — a mapping here made it fire twice per step)"
       (fn []
         (-> (expect (get stream-event-types "finish-step"))
-            (.toBe "turn_end"))))
+            (.toBeUndefined))))
 
     (it "maps finish to agent_end"
       (fn []
@@ -59,9 +59,9 @@
         (-> (expect (get stream-event-types "reasoning-end"))
             (.toBe "reasoning_end"))))
 
-    (it "contains exactly 10 mappings"
+    (it "contains exactly 9 mappings"
       (fn []
-        (-> (expect (count stream-event-types)) (.toBe 10))))))
+        (-> (expect (count stream-event-types)) (.toBe 9))))))
 
 ;; --- steer / follow-up queue functions ---
 

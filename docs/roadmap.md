@@ -433,3 +433,8 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
   `(section-config settings "name" defaults)` helper; note openwiki's boolean `some?` variant.
 - **Budget ledger unification** — budget keeps its own token totals; consider deriving from the
   store's :usage-updated totals (getContextUsage) so caps and /stats agree.
+
+- **Budget via stopWhen** — budget currently aborts via AbortController, indistinguishable from
+  Esc-cancel downstream; a loop hook letting extensions contribute stopWhen predicates would give
+  clean finishes (finishReason set, turn_finalize normal). Note: /tokens "misses" now counts only
+  annotated-prefix-not-served misses (changed semantics, intentional).

@@ -2,7 +2,8 @@
   "File checkpoints + /rewind: snapshot a file's pre-turn state before any
    editing tool touches it; /rewind restores the newest turn's files (repeat
    to go further back). Session-scoped, in-memory."
-  (:require [agent.extensions.checkpoints.shared :as shared]))
+  (:require [agent.extensions.checkpoints.shared :as shared]
+            [agent.tool-metadata :as tool-metadata]))
 
 (defn ^:export activate [api]
   (let [checkpoints* (atom {})
@@ -19,7 +20,7 @@
         on-before-tool
         (fn [event _ctx]
           (when (shared/edit-tool? (.-toolName event))
-            (when-let [path (some-> (.-args event) (aget "path"))]
+            (when-let [path (tool-metadata/tool-path (.-args event))]
               (shared/capture-pending! pending* path)))
           nil)
 
@@ -28,7 +29,7 @@
           (when (and (shared/edit-tool? (.-toolName event))
                      (not (.-cancelled event))
                      (not (.-isError event)))
-            (when-let [path (some-> (.-args event) (aget "path"))]
+            (when-let [path (tool-metadata/tool-path (.-args event))]
               (shared/promote! pending* checkpoints* @turn* path)))
           nil)
 

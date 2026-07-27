@@ -10,7 +10,8 @@
    Servers are made available to nyma's main LLM via the
    mcp-client extension (registered as `mcp__<server>__<tool>`),
    and forwarded to ACP subprocess agents at session/new."
-  (:require ["node:fs" :as fs]
+  (:require [agent.debug :as d]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
             [clojure.string :as str]
@@ -23,14 +24,20 @@
 ;;; ─── Config reading ────────────────────────────────────────────
 
 (defn- read-mcp-json
-  "Read and parse an .mcp.json file. Returns the mcpServers object or nil."
+  "Read and parse an .mcp.json file. Returns the mcpServers object or nil.
+   Parse failures WARN with the exact path — a present-but-broken config
+   silently yielding 0 servers is indistinguishable from success otherwise."
   [file-path]
   (try
     (when (fs/existsSync file-path)
       (let [raw    (fs/readFileSync file-path "utf8")
             parsed (js/JSON.parse raw)]
         (.-mcpServers parsed)))
-    (catch :default _e nil)))
+    (catch :default e
+      (d/warn "[mcp-discovery]"
+              (str "failed to parse " file-path ": " (.-message e)
+                   " — its servers will NOT load"))
+      nil)))
 
 (defn- expand-env
   "Expand ${ENV_VAR} placeholders in a string using process.env."

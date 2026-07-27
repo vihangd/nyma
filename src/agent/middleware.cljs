@@ -249,7 +249,9 @@
                   display-fields (extract-display-fields (:tool ctx) (:args ctx))]
               (when events
                 ;; merge of squint maps is already a plain JS object with
-                ;; camelCase keys — no clj->js.
+                ;; camelCase keys — no clj->js. NOTE: :args ALIASES the live
+                ;; args object the tool will execute with — handlers must
+                ;; treat event payloads as read-only.
                 ((:emit events) "tool_execution_start"
                                 (merge {:toolName (:tool-name ctx) :execId exec-id :args (:args ctx)
                                         :label (when-let [t (:tool ctx)] (.-label t))}

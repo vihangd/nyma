@@ -117,73 +117,92 @@
   (let [config            (shared/load-config)
         kv-config         (:kv-cache config)
         prev-hash         (atom nil)
-        ;; Did the LAST provider request get cache breakpoints on a prefix
-        ;; that was ALSO stable vs the previous request? Only then is a
-        ;; zero-cache-read response a real miss worth surfacing.
+        ;; Did the LAST provider request place breakpoints the cache should
+        ;; serve — a Layer-1 prefix stable vs the previous request, or Layer-2
+        ;; message breakpoints on a request that ALSO annotated previously?
+        ;; Only then is a zero-cache-read response a real miss worth surfacing.
         expected-hit?     (atom false)
+        ;; Did the previous request place ANY breakpoints (either layer)?
+        prev-annotated?   (atom false)
         extra-providers   (or (:extra-providers kv-config) {})
         cache-messages?   (boolean (:cache-messages kv-config))
         every-turns       (or (:checkpoint-every-turns kv-config) 4)
-        max-msg-breaks    (or (:max-message-breakpoints kv-config) 2)]
+        max-msg-breaks    (or (:max-message-breakpoints kv-config) 2)
+
+        on-before
+        (fn [config-obj _ctx]
+          ;; Reset FIRST: a stale true must not survive a request that skips
+          ;; annotation (provider switch, shrunk system prompt) or a blocked
+          ;; request whose after_provider_request never fired.
+          (reset! expected-hit? false)
+          (let [model     (.-model config-obj)
+                model-id  (str (or (when model (.-modelId model)) model ""))
+                provider  (shared/detect-cache-provider model-id extra-providers)
+                system    (.-system config-obj)
+                annotated (atom false)]
+
+            (when (and provider (:enabled kv-config))
+
+              ;; Layer 1: system prompt split (only when string + above threshold)
+              (when (and (string? system)
+                         (> (.estimateTokens api system) (:min-system-tokens kv-config)))
+                (let [{:keys [stable dynamic]} (split-at-stable-boundary system)
+                      hash         (js/Bun.hash stable)
+                      pkey         (provider-key provider)]
+                  (when (= hash @prev-hash) (reset! expected-hit? true))
+                  (reset! prev-hash hash)
+                  (reset! annotated true)
+                  (aset config-obj "system"
+                        #js [#js {:role "system"
+                                  :content stable
+                                  :providerOptions
+                                  (doto #js {}
+                                    (aset pkey #js {:cacheControl #js {:type "ephemeral"}}))}
+                             #js {:role "system" :content dynamic}])))
+
+              ;; Layer 2: message-level breakpoints (anchor + N-back checkpoint).
+              ;; Breakpoints on consecutive requests should also serve reads —
+              ;; without this, Layer-2-only configs pay cache-write premiums
+              ;; forever with zero reads and no miss ever surfaces.
+              (when cache-messages?
+                (when (pos? (annotate-messages! config-obj provider every-turns max-msg-breaks))
+                  (when @prev-annotated? (reset! expected-hit? true))
+                  (reset! annotated true))))
+
+            (reset! prev-annotated? @annotated))
+
+          ;; Mutations in place — no return value
+          nil)
+
+        on-after
+        (fn [event _ctx]
+          (let [cached (.-cachedTokens event)
+                turn   (or (.-turnCount event) 0)
+                miss?  (and @expected-hit? (or (nil? cached) (zero? cached)))]
+            (reset! expected-hit? false)
+            (when miss?
+              (d/info "kv-cache" (str "cache miss on turn " turn
+                                      " — breakpoints annotated but not served")))
+            (swap! shared/suite-stats update :kv-cache
+                   (fn [s] (-> s
+                               (update :turns inc)
+                               (update :cached-tokens + (or cached 0))
+                               (update :cache-misses (fnil + 0) (if miss? 1 0))
+                               (update :cache-hits + (if (and cached (pos? cached)) 1 0)))))))]
 
     ;; before_provider_request — priority 100 (runs last so we see the
     ;; final form of messages from any earlier mutators).
-    (.on api "before_provider_request"
-         (fn [config-obj _ctx]
-           (let [model    (.-model config-obj)
-                 model-id (str (or (when model (.-modelId model)) model ""))
-                 provider (shared/detect-cache-provider model-id extra-providers)
-                 system   (.-system config-obj)]
+    (.on api "before_provider_request" on-before 100)
 
-             (when (and provider (:enabled kv-config))
+    ;; after_provider_request — track cache metrics + surface misses. Only a
+    ;; request where WE placed breakpoints the cache should serve counts as a
+    ;; miss; everything else misses by design and stays quiet — a per-turn
+    ;; false alarm trains users to ignore the one notice that matters.
+    (.on api "after_provider_request" on-after)
 
-               ;; Layer 1: system prompt split (only when string + above threshold)
-               (when (and (string? system)
-                          (> (.estimateTokens api system) (:min-system-tokens kv-config)))
-                 (let [{:keys [stable dynamic]} (split-at-stable-boundary system)
-                       hash         (js/Bun.hash stable)
-                       pkey         (provider-key provider)]
-                   (reset! expected-hit? (= hash @prev-hash))
-                   (reset! prev-hash hash)
-                   (aset config-obj "system"
-                         #js [#js {:role "system"
-                                   :content stable
-                                   :providerOptions
-                                   (doto #js {}
-                                     (aset pkey #js {:cacheControl #js {:type "ephemeral"}}))}
-                              #js {:role "system" :content dynamic}])))
-
-               ;; Layer 2: message-level breakpoints (anchor + N-back checkpoint)
-               (when cache-messages?
-                 (annotate-messages! config-obj provider every-turns max-msg-breaks))))
-
-           ;; Mutations in place — no return value
-           nil)
-         100)
-
-    ;; after_provider_request — track cache metrics + surface misses.
-    ;; Only a request where WE annotated a stable-vs-previous prefix should
-    ;; have hit the cache; anything else (non-caching provider, first turn,
-    ;; changed prefix) misses by design and stays quiet — otherwise the
-    ;; notice fires every turn and trains users to ignore it (pi ships the
-    ;; real signal as showCacheMissNotices).
-    (.on api "after_provider_request"
-         (fn [event _ctx]
-           (let [cached (.-cachedTokens event)
-                 turn   (or (.-turnCount event) 0)
-                 miss?  (and @expected-hit? (or (nil? cached) (zero? cached)))]
-             (reset! expected-hit? false)
-             (when miss?
-               (d/info "kv-cache" (str "cache miss on turn " turn
-                                       " — stable prefix annotated but not served")))
-             (swap! shared/suite-stats update :kv-cache
-                    (fn [s] (-> s
-                                (update :turns inc)
-                                (update :cached-tokens + (or cached 0))
-                                (update :cache-misses + (if miss? 1 0))
-                                (update :cache-hits + (if (and cached (pos? cached)) 1 0))))))))
-
-    ;; Return deactivate
+    ;; Deactivate: unregister the handlers. (Resetting the closure atoms was
+    ;; dead code — a fresh activate creates fresh atoms — while a leaked
+    ;; handler double-annotates prompts and double-counts stats on reload.)
     (fn []
-      (reset! prev-hash nil)
-      (reset! expected-hit? false))))
+      (.off api "before_provider_request" on-before)
+      (.off api "after_provider_request" on-after))))

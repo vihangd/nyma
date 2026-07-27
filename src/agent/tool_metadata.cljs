@@ -215,6 +215,15 @@
   [tool-name cap]
   (contains? (capabilities tool-name) cap))
 
+(defn tool-path
+  "Extract the file-path argument from a tool event's args (JS object or
+   squint map). THE shared extractor — checkpoints, verify-gate, and
+   token_suite each hand-rolled this; when a tool names its arg differently
+   (file_path from an MCP bridge), update here, not N copies."
+  [args]
+  (when args
+    (or (aget args "path") (aget args "file_path") (aget args "filePath"))))
+
 (defn file-editing?
   "True if the tool mutates files (:filesystem + :write capabilities).
    THE shared predicate for 'did this tool edit a file' — checkpoints,

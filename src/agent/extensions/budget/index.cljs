@@ -32,12 +32,12 @@
             nil))]
 
     ;; Single gate: registration and the returned deactivator can't disagree.
-    (if (shared/enabled? cfg)
-      (do (.on api "before_agent_start" on-start)
-          (.on api "turn_end" on-step)
-          (fn []
-            (.off api "before_agent_start" on-start)
-            (.off api "turn_end" on-step)))
-      (fn []))))
+    ;; nil (not an empty fn) is the loader's "nothing to clean up" convention.
+    (when (shared/enabled? cfg)
+      (.on api "before_agent_start" on-start)
+      (.on api "turn_end" on-step)
+      (fn []
+        (.off api "before_agent_start" on-start)
+        (.off api "turn_end" on-step)))))
 
 (def ^:export default activate)

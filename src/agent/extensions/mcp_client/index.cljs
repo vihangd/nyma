@@ -209,13 +209,6 @@
         ;; loaded. Mirrors the hook-bridge convention — a visible
         ;; activation line beats silent failure.
         configured-count  (count (or @shell-shared/mcp-servers []))
-        ;; A present-but-unparsed .mcp.json is indistinguishable from success
-        ;; without this: 0 servers load and nothing says why (d/warn reaches
-        ;; stderr; the d/info activation line below is debug-gated).
-        _ (when (and (zero? configured-count)
-                     (try (fs/existsSync (path/join (js/process.cwd) ".mcp.json"))
-                          (catch :default _ false)))
-            (d/warn "[mcp-client] .mcp.json present but 0 servers configured — check its syntax"))
         _ (when (.-NYMA_DEBUG js/process.env)
             (d/info
              (str "[mcp-client] active — " configured-count

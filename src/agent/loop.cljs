@@ -17,7 +17,10 @@
    "reasoning-end"   "reasoning_end"
    "tool-call"       "tool_call"
    "tool-result"     "tool_result"
-   "finish-step"     "turn_end"
+   ;; NOTE: "finish-step" is deliberately unmapped — onStepFinish already
+   ;; emits "turn_end" with the richer StepResult; mapping the stream chunk
+   ;; too made turn_end fire TWICE per step (budget double-counted usage and
+   ;; aborted at half its cap, per-turn counters ran 2x).
    "finish"          "agent_end"})
 
 (defn- event-type [chunk]
@@ -186,6 +189,12 @@
                          messages)
               effective-prompt (or (get send-result "system") effective-prompt)
 
+              ;; Per-step usage sum: on abort the SDK resolves totalUsage as
+              ;; null-usage (finish part never fires), which would record ZERO
+              ;; tokens for exactly the runaway run a budget abort killed —
+              ;; fall back to the sum of completed steps.
+              step-usage (atom {:input 0 :output 0})
+
               ;; Build mutable streamText config
               ;; maxRetries: number of RETRIES on transient errors (429, 503,
               ;; "high load"). AI SDK default is 2 (3 attempts total) which is
@@ -209,6 +218,11 @@
                              :providerOptions #js {}
                              :onError         (fn [e] (throw (.-error e)))
                              :onStepFinish    (fn [step]
+                                                (when-let [u (.-usage step)]
+                                                  (swap! step-usage
+                                                         (fn [t] (-> t
+                                                                     (update :input + (or (.-inputTokens u) 0))
+                                                                     (update :output + (or (.-outputTokens u) 0))))))
                                                 (emit "turn_end" step)
                                                 (inject-steer-messages! agent))}
 
@@ -304,7 +318,14 @@
 
                     ;; Normal completion — capture final state, track usage
                       (let [final-text     (js-await (.-text result))
-                            usage          (js-await (.-totalUsage result))
+                            usage          (let [u (js-await (.-totalUsage result))]
+                                             ;; Aborted runs resolve null-usage; the
+                                             ;; per-step sum is the truth then.
+                                             (if (and (nil? (.-inputTokens u))
+                                                      (pos? (+ (:input @step-usage) (:output @step-usage))))
+                                               #js {:inputTokens  (:input @step-usage)
+                                                    :outputTokens (:output @step-usage)}
+                                               u))
                             ;; Normalize finishReason to a plain string here, at
                             ;; the single emit point, so every agent_end consumer
                             ;; (finalize_warn, spec_driven, …) sees a string.

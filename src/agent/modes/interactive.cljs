@@ -236,17 +236,13 @@
                 (and (.startsWith trimmed "/") (not @submit-lock))
                 (do (reset! submit-lock true)
                     (.addToHistory editor trimmed)
-                    ;; Async handlers return a promise — hold the lock until it
-                    ;; settles. The try guards SYNCHRONOUS throws: they escape
-                    ;; before .catch/.finally attach and would leave the lock
-                    ;; stuck true, bricking every subsequent submit.
-                    (try
-                      (-> (js/Promise.resolve (run-command! agent trimmed update-messages!))
-                          (.catch (fn [e] (add-error! e)))
-                          (.finally (fn [] (reset! submit-lock false))))
-                      (catch :default e
-                        (add-error! e)
-                        (reset! submit-lock false))))
+                    ;; run-command! inside .then so SYNCHRONOUS throws are
+                    ;; absorbed into the same rejection path as async ones —
+                    ;; one .catch/.finally, one lock reset, nothing to drift.
+                    (-> (.then (js/Promise.resolve)
+                               (fn [] (run-command! agent trimmed update-messages!)))
+                        (.catch (fn [e] (add-error! e)))
+                        (.finally (fn [] (reset! submit-lock false)))))
 
                 ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
                 (and (not @submit-lock)
