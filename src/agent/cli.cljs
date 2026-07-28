@@ -15,6 +15,7 @@
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
+            [agent.providers.registry :as registry-utils]
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
             [agent.extensions.model-roles.policy :as perm-policy]
@@ -87,8 +88,7 @@
         cli-provider (:provider values)
         [provider model-id]
         (if (and (not cli-provider) (str/includes? raw-model "/"))
-          (let [slash (.indexOf raw-model "/")]
-            [(.slice raw-model 0 slash) (.slice raw-model (inc slash))])
+          (registry-utils/split-model-spec raw-model)
           [(or cli-provider (:provider merged) "anthropic") raw-model])
         p-config  ((:get provider-registry) provider)]
     ;; Auto-refresh OAuth credentials if needed

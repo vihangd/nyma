@@ -111,3 +111,16 @@
                    (if-let [p (get @providers provider-name)]
                      ((:create-model p) model-id)
                      (throw (js/Error. (str "Unknown provider: " provider-name)))))}))
+
+(defn split-model-spec
+  "Split \"provider/model-id\" on the FIRST slash only — HuggingFace-style
+   model ids (org/model, e.g. poolside/Laguna-S-2.1-NVFP4) contain slashes of
+   their own. Returns [provider model-id], or [nil spec] when no slash.
+   Shared by the CLI --model path and the runtime setModel path so the two
+   parsers can't drift."
+  [spec]
+  (let [s     (str spec)
+        slash (.indexOf s "/")]
+    (if (neg? slash)
+      [nil s]
+      [(.slice s 0 slash) (.slice s (inc slash))])))

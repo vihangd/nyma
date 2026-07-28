@@ -404,6 +404,18 @@
                     (-> (expect (aget (:config agent) "active-provider-name"))
                         (.toBe "minimax")))))
 
+            (it "keeps slashes inside HuggingFace-style model ids (first-slash split)"
+                (fn []
+                  (let [{:keys [agent api]} (make-api)]
+                    (register-fake-provider! agent "vllm")
+                    (.setModel api "vllm/poolside/Laguna-S-2.1-NVFP4")
+                    (-> (expect (aget (:config agent) "active-provider-name"))
+                        (.toBe "vllm"))
+                    ;; The resolved model must carry the FULL org/model id —
+                    ;; the old split-on-every-slash kept only "poolside".
+                    (-> (expect (.-modelId (.-model (:config agent))))
+                        (.toBe "poolside/Laguna-S-2.1-NVFP4")))))
+
             (it "writes empty string when bare-model id is passed"
                 (fn []
                   (let [{:keys [agent api]} (make-api)]

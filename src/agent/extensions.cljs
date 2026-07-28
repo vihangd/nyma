@@ -2,7 +2,7 @@
   (:require [agent.loop :refer [steer follow-up]]
             [agent.extension-context :refer [create-extension-context]]
             [agent.token-estimation :as te]
-            [agent.providers.registry :refer [build-provider-entry]]
+            [agent.providers.registry :as registry-utils :refer [build-provider-entry]]
             [agent.pricing :as pricing]
             [agent.ui.tool-renderer-registry :as tool-renderers]
             [agent.ui.status-line-segments :as status-segments]
@@ -274,10 +274,13 @@
 
        ;; ── Model control ───────────────────────────────────
          :setModel          (fn [model-spec]
+                              ;; First-slash split (shared with the CLI --model
+                              ;; parser): HuggingFace-style ids like
+                              ;; poolside/Laguna-S-2.1-NVFP4 contain slashes —
+                              ;; the old split-on-every-slash kept only the org
+                              ;; segment as the model id.
                               (let [registry (:provider-registry agent)
-                                    parts    (.split (str model-spec) "/")
-                                    provider (if (> (count parts) 1) (first parts) nil)
-                                    model-id (if (> (count parts) 1) (second parts) (str model-spec))]
+                                    [provider model-id] (registry-utils/split-model-spec model-spec)]
                               ;; Try to resolve from registry, fall back to direct use
                                 (let [model (if (and provider ((:get registry) provider))
                                               ((:resolve registry) provider model-id)
