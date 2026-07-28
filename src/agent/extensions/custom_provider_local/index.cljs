@@ -74,10 +74,12 @@
         (js->clj raw :keywordize-keys true)))))
 
 (defn- js-obj->entry [o]
-  {:name        (or (.-name o) (get o "name"))
-   :base-url    (or (.-baseUrl o) (aget o "base-url") (get o "baseUrl"))
-   :api-key-env (or (.-apiKeyEnv o) (aget o "api-key-env") (get o "apiKeyEnv") "")
-   :models      (or (.-models o) (get o "models") [])})
+  {:name          (or (.-name o) (get o "name"))
+   :base-url      (or (.-baseUrl o) (aget o "base-url") (get o "baseUrl"))
+   :api-key-env   (or (.-apiKeyEnv o) (aget o "api-key-env") (get o "apiKeyEnv") "")
+   :rescue-parsing (or (.-rescueParsing o) (aget o "rescue-parsing") (get o "rescueParsing"))
+   :think-prefill (or (.-thinkPrefill o) (aget o "think-prefill") (get o "thinkPrefill"))
+   :models        (or (.-models o) (get o "models") [])})
 
 (defn- normalize-entry [e]
   (if (map? e) e (js-obj->entry e)))
@@ -103,11 +105,16 @@
     (let [key          (resolve-key entry)
           base-url     (:base-url entry)
           rescue?      (or (:rescue-parsing entry) (get entry "rescueParsing") false)
-          ;; Wrap fetch through reasoning-stream so <think> blocks surface in the UI,
-          ;; then optionally wrap again with rescue parsing for malformed tool calls.
+          prefill?     (or (:think-prefill entry) (get entry "thinkPrefill") false)
+          ;; Wrap fetch through reasoning-stream so <think> blocks surface in the UI
+          ;; (lift-think rewriter cleans replayed assistant turns; think-prefill
+          ;; synthesizes the opener for template-prefilled models), then optionally
+          ;; wrap again with rescue parsing for malformed tool calls.
+          mk-fetch     #(rs/make-fetch rs/lift-think-request-rewriter
+                                       {:think-prefill? (boolean prefill?)})
           base-fetch   (if rescue?
-                         (adapter/wrap-fetch-with-rescue (rs/make-fetch) get-active-tools)
-                         (rs/make-fetch))]
+                         (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)
+                         (mk-fetch))]
       (.chat (createOpenAI #js {:apiKey        key
                                 :baseURL       base-url
                                 :compatibility "compatible"
@@ -152,7 +159,7 @@
         (swap! registered conj (:name entry))
         (catch :default e
           (d/warn "[local-provider] failed to register"
-                           (:name entry) "-" (.-message e)))))
+                  (:name entry) "-" (.-message e)))))
 
     ;; Cleanup
     (fn []

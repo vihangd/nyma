@@ -61,7 +61,29 @@
             (it "whitespace between closing tag and text is consumed"
                 (fn []
                   (let [result (split-think-blocks "<think>r</think>   answer")]
-                    (-> (expect (.-text result)) (.toBe "answer")))))))
+                    (-> (expect (.-text result)) (.toBe "answer")))))
+
+            ;; poolside/Laguna: template pre-fills the opening <think>, so a bare
+            ;; </think> arrives with no opener. The two shapes seen live:
+            (it "orphan closer after thinking text (no opener)"
+                (fn []
+                  (let [result (split-think-blocks "The user is asking about routes...</think>")]
+                    (-> (expect (.-reasoning result)) (.toBe "The user is asking about routes..."))
+                    (-> (expect (.-text result)) (.toBe ""))
+                    (-> (expect (.-text result)) (.not.toContain "</think>")))))
+
+            (it "orphan closer at start (no thinking this step)"
+                (fn []
+                  (let [result (split-think-blocks "</think>This project has 7 routes:")]
+                    (-> (expect (.-reasoning result)) (.toBe ""))
+                    (-> (expect (.-text result)) (.toBe "This project has 7 routes:"))
+                    (-> (expect (.-text result)) (.not.toContain "</think>")))))
+
+            (it "orphan </thinking> variant"
+                (fn []
+                  (let [result (split-think-blocks "reasoning here</thinking>the answer")]
+                    (-> (expect (.-reasoning result)) (.toBe "reasoning here"))
+                    (-> (expect (.-text result)) (.toBe "the answer")))))))
 
 (describe "think_tag_parser/strip-think-tags"
           (fn []

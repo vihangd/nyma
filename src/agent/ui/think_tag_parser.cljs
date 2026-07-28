@@ -16,15 +16,29 @@
 (def ^:private open-re
   (js/RegExp. "<think(?:ing)?>" "i"))
 
+;; Matches a *closing* </think>/</thinking> tag with no corresponding opener.
+;; Happens when the model's chat template pre-fills the opening <think> in the
+;; prompt (poolside/Laguna interleaved-thinking recipe): the model's first
+;; special token is the closer, so a bare </think> arrives in the content
+;; channel. `close-re` (no g) finds the first orphan; `close-re-g` strips the rest.
+(def ^:private close-re
+  (js/RegExp. "<\\/think(?:ing)?>" "i"))
+
+(def ^:private close-re-g
+  (js/RegExp. "<\\/think(?:ing)?>" "gi"))
+
 (defn split-think-blocks
   "Parse inline think tags from accumulated text.
    Returns {:reasoning combined-inner-text :text clean-text}.
 
-   Handles two shapes:
+   Handles three shapes:
    - Closed blocks: <think>…</think> — extracted and removed from :text.
    - Unterminated trailing block: <think>… (no close tag yet) — everything after
      the opener goes to :reasoning; everything before goes to :text.
      This is critical during live streaming when the close tag has not yet arrived.
+   - Orphan closer: …</think>… (a </think> with no opener) — everything before the
+     closer is :reasoning, everything after is :text. This is what poolside/Laguna
+     and other template-prefilled-<think> models emit.
 
    Multiple closed blocks have their inner text joined with \\n\\n."
   [text]
@@ -46,8 +60,18 @@
               after   (subs clean (+ idx tag-len))]
           {:reasoning (str/join "\n\n" (conj @parts after))
            :text      before})
-        {:reasoning (str/join "\n\n" @parts)
-         :text      clean}))))
+        ;; No opener; check for an orphan closer (template-prefilled <think>).
+        (let [close-match (.exec close-re clean)]
+          (if close-match
+            (let [idx     (.-index close-match)
+                  tag-len (count (aget close-match 0))
+                  before  (subs clean 0 idx)
+                  ;; Strip any further stray closers from the answer text.
+                  after   (.trimStart (.replace (subs clean (+ idx tag-len)) close-re-g ""))]
+              {:reasoning (str/join "\n\n" (conj @parts before))
+               :text      after})
+            {:reasoning (str/join "\n\n" @parts)
+             :text      clean}))))))
 
 (defn strip-think-tags
   "Remove inline think tags, returning clean text only.

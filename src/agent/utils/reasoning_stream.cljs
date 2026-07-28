@@ -75,12 +75,25 @@
                                           (some? finish))
                                       (not reasoning))
                     open       (when (and reasoning (not in-think?))
-                                 (swap! state assoc :in-think? true) "<think>")
+                                 (swap! state assoc :in-think? true :prefilled? true) "<think>")
                     close      (when needs-close?
-                                 (swap! state assoc :in-think? false) "</think>\n\n")]
+                                 (swap! state assoc :in-think? false) "</think>\n\n")
+                    ;; Template-prefilled <think> models (poolside/Laguna) emit no
+                    ;; reasoning_content and no opener — their first content token is
+                    ;; the closer. Synthesize the opening <think> on the first content
+                    ;; delta so the stream is balanced and reasoning renders in place
+                    ;; from the start instead of reflowing when </think> arrives.
+                    prefill    (when (and (:think-prefill? @state)
+                                          (not (:prefilled? @state))
+                                          (some? content)
+                                          (not reasoning)
+                                          (not in-think?))
+                                 (swap! state assoc :prefilled? true) "<think>")]
                 (when reasoning
                   (aset delta "content" (str (or open "") reasoning))
                   (strip-reasoning-fields! delta))
+                (when prefill
+                  (aset delta "content" (str prefill content)))
                 (when (and (seq close) (some? content))
                   (aset delta "content" (str close content)))
                 (when (and (seq close) (nil? content))
@@ -93,14 +106,16 @@
 
 (defn wrap-response
   "Wrap a Response so SSE chunks with reasoning deltas are rewritten into
-   <think>-tagged content deltas. No-op for non-event-stream responses."
-  [^js response]
+   <think>-tagged content deltas. No-op for non-event-stream responses.
+   `think-prefill?` synthesizes an opening <think> at content start for
+   models whose chat template pre-fills the opener (poolside/Laguna)."
+  [^js response think-prefill?]
   (let [ct (or (.. response -headers (get "content-type")) "")]
     (if-not (and (.includes ct "text/event-stream") (.-body response))
       response
       (let [decoder (js/TextDecoder.)
             encoder (js/TextEncoder.)
-            state   (atom {:in-think? false})
+            state   (atom {:in-think? false :think-prefill? think-prefill?})
             buffer  (atom "")
             ts (js/TransformStream.
                 #js {:transform
@@ -139,12 +154,20 @@
 (def ^:private open-think-re
   (js/RegExp. "<think(?:ing)?>" "i"))
 
+;; Orphan closer (no opener) — template-prefilled <think> models (poolside/Laguna).
+(def ^:private close-think-re
+  (js/RegExp. "<\\/think(?:ing)?>" "i"))
+
+(def ^:private close-think-re-g
+  (js/RegExp. "<\\/think(?:ing)?>" "gi"))
+
 (defn extract-think-blocks
-  "Pulls reasoning out of content. Handles closed <think>…</think> blocks
-   AND a trailing unterminated <think>… (everything after the opener
-   becomes reasoning) — the latter happens when the model went
-   reasoning → tool_calls without intervening text and the stream
-   wrapper missed the close. Returns [reasoning-text content-cleaned]."
+  "Pulls reasoning out of content. Handles closed <think>…</think> blocks,
+   a trailing unterminated <think>… (everything after the opener becomes
+   reasoning — model went reasoning → tool_calls without intervening text),
+   AND an orphan </think> with no opener (template-prefilled <think> models
+   like poolside/Laguna: everything before the closer becomes reasoning).
+   Returns [reasoning-text content-cleaned]."
   [s]
   (let [parts (atom [])
         clean (.replace (str s) think-block-re
@@ -159,7 +182,15 @@
             after  (subs clean (+ idx (count tag)))]
         (swap! parts conj after)
         [(str/join "\n\n" @parts) before])
-      [(str/join "\n\n" @parts) clean])))
+      (let [cm (.exec close-think-re clean)]
+        (if cm
+          (let [idx    (.-index cm)
+                tag    (aget cm 0)
+                before (subs clean 0 idx)
+                after  (.trimStart (.replace (subs clean (+ idx (count tag))) close-think-re-g ""))]
+            (swap! parts conj before)
+            [(str/join "\n\n" @parts) after])
+          [(str/join "\n\n" @parts) clean])))))
 
 (defn rewrite-assistant-msg
   "Lift <think> tags out of an assistant message's content into a
@@ -169,7 +200,8 @@
   [msg]
   (if (and (= (.-role msg) "assistant")
            (string? (.-content msg))
-           (.includes (.-content msg) "<think"))
+           (or (.includes (.-content msg) "<think")
+               (.includes (.-content msg) "</think")))
     (let [[reasoning clean] (extract-think-blocks (.-content msg))]
       (if (seq reasoning)
         (doto (js/Object.assign #js {} msg)
@@ -195,16 +227,20 @@
   "Build a custom `fetch` that wraps responses through `wrap-response`.
    `request-rewriter` (optional) is `(fn [body-str init] -> body-str)` —
    used by Kimi to inject `chat_template_kwargs.thinking` and lift
-   <think> tags into `reasoning_content` for replay."
-  ([] (make-fetch nil))
-  ([request-rewriter]
-   (fn [url init]
-     (let [body  (and init (.-body init))
-           body2 (if (and request-rewriter (string? body))
-                   (request-rewriter body init)
-                   body)
-           init2 (if (not= body body2)
-                   (doto (js/Object.assign #js {} init) (aset "body" body2))
-                   init)]
-       (-> (js/fetch url init2)
-           (.then wrap-response))))))
+   <think> tags into `reasoning_content` for replay.
+   `opts` (optional) may include `:think-prefill?` — synthesize an opening
+   <think> at content start for template-prefilled models (poolside/Laguna)."
+  ([] (make-fetch nil nil))
+  ([request-rewriter] (make-fetch request-rewriter nil))
+  ([request-rewriter opts]
+   (let [think-prefill? (boolean (:think-prefill? opts))]
+     (fn [url init]
+       (let [body  (and init (.-body init))
+             body2 (if (and request-rewriter (string? body))
+                     (request-rewriter body init)
+                     body)
+             init2 (if (not= body body2)
+                     (doto (js/Object.assign #js {} init) (aset "body" body2))
+                     init)]
+         (-> (js/fetch url init2)
+             (.then (fn [resp] (wrap-response resp think-prefill?)))))))))
