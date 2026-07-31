@@ -162,6 +162,46 @@ Bounded by `max-interventions` (default 3) to avoid the "context ceiling" of ove
 
 Requires the `advisor` extension to be loaded (declared in `dependsOn`).
 
+### `self-tune` (default: off)
+
+ACE-style **online learned playbook**. When the worker (small model) emits a failure
+signal, the lead (advisor) reflects on the transcript and distills **one generalizable
+rule**, appended as an incremental delta to `<cwd>/.nyma/memory/PLAYBOOK.md`. The playbook
+is injected into the worker's system prompt on later turns, so it stops repeating the class
+of mistake. This is the missing *learning-across-turns* layer — profiles tune parameters,
+evidence remembers task state, self-tune accumulates behavioural rules.
+
+**Failure signals** (what "fails" means — never a crash):
+- `quality-signal` from `quality-monitor` — hallucinated tool, exact-repeat call, empty turn.
+- `verify-fail` from `verify_gate` — the worker's edit broke the configured test command.
+
+On frontier models none of these fire, so self-tune is inert.
+
+**SOTA basis** (natural-language self-improvement, no weight updates):
+- **ACE** (Agentic Context Engineering, arXiv 2510.04618): +10.6% on agents; a smaller open
+  model matched the top production AppWorld agent. Updates MUST be **append+dedup deltas**,
+  not block-rewrites — naive rewriting causes *context collapse / brevity bias*. self-tune's
+  store dedups near-duplicates and caps oldest-out for exactly this reason.
+- **TT-D** (arXiv 2510.07841): a stronger model distilling lessons to the weak student —
+  +5.48% avg, 68× fewer samples. nyma's advisor→worker split *is* TT-D.
+- **GEPA** (ICLR 2026 oral), **Reflexion/Self-Refine**: reflective NL evolution beats RL at
+  a fraction of the rollouts.
+
+Reflection is bounded: it fires only after `min-failures` accumulate and stops at
+`max-reflections` per session (the supervisor's context-ceiling guard). Reuses
+`supervisor/call-advisor-tool` for the advisor call and `before_agent_start` for injection —
+no new leader plumbing. Requires the `advisor` extension.
+
+```jsonc
+"self-tune": {
+  "enabled": false,
+  "max-lessons": 20,               // playbook cap; oldest evicted
+  "min-failures": 2,               // reflect only after N signals
+  "max-reflections": 3,            // advisor-call budget per session
+  "reflect-on": ["quality-signal", "verify-fail"]
+}
+```
+
 ## Full settings reference
 
 ```jsonc
@@ -235,7 +275,9 @@ The `respond` tool call is stripped from message storage via `message_before_sto
 | `permission_request` | `supervisor` | Pre-commit gate — advise before destructive git ops |
 | `provider_error` | `thinking-budget` | Retry with thinking off on budget overflow |
 | `agent_end` | `thinking-budget` | Reset retry flag |
-| `small-model/quality-signal` | `supervisor` | Escalate LLM quality signal to advisor |
+| `small-model/quality-signal` | `supervisor`, `self-tune` | Escalate to advisor; count failure & reflect at threshold |
+| `small-model/verify-fail` | `self-tune` | Count verify failure; reflect into playbook at threshold |
+| `before_agent_start` | `self-tune` | Inject the learned playbook block |
 | middleware `:leave` | `quality-monitor`, `respond-tool` | Track tool-call signatures; flag repeats/hallucinations; capture respond() calls |
 
 ## Full settings reference

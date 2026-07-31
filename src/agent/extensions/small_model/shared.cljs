@@ -32,6 +32,14 @@
                      :pre-commit      true}
    :respond-tool    {:enabled false}
 
+   ;; Self-tune: distill worker failures into a learned playbook (ACE-style
+   ;; online delta updates via the advisor lead). Off by default.
+   :self-tune       {:enabled         false
+                     :max-lessons     20
+                     :min-failures    2
+                     :max-reflections 3
+                     :reflect-on      ["quality-signal" "verify-fail"]}
+
    ;; Inject top-K task-relevant knowledge cards from .nyma/knowledge/*.md.
    :knowledge-inject {:enabled      false
                       :dir          "knowledge"

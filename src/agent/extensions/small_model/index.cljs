@@ -18,6 +18,8 @@
      thinking-budget  — cap thinking tokens; retry without thinking on overflow
      supervisor       — proactive babysitter: escalates to advisor on quality
                         signals, periodic check-ins, pre-commit review
+     self-tune        — ACE-style learned playbook: advisor distills worker
+                        failures into rules injected on later turns
      respond-tool     — synthetic respond() tool forces structured output mode;
                         prevents bare-text responses on small models (Forge pattern)
   "
@@ -29,6 +31,7 @@
             [agent.extensions.small-model.read-guard      :as read-guard]
             [agent.extensions.small-model.thinking-budget :as thinking-budget]
             [agent.extensions.small-model.supervisor      :as supervisor]
+            [agent.extensions.small-model.self-tune       :as self-tune]
             [agent.extensions.small-model.respond-tool    :as respond-tool]
             [agent.extensions.small-model.context-relief  :as context-relief]
             [agent.extensions.small-model.knowledge-inject :as knowledge-inject]
@@ -81,6 +84,10 @@
       ;; ── Supervisor ───────────────────────────────────────────────
       (when (shared/enabled? config :supervisor)
         (swap! cleanups conj (supervisor/activate api config state)))
+
+      ;; ── Self-tune (ACE-style learned playbook) ───────────────────
+      (when (shared/enabled? config :self-tune)
+        (swap! cleanups conj (self-tune/activate api config)))
 
       ;; ── Respond tool ─────────────────────────────────────────────
       (when (shared/enabled? config :respond-tool)

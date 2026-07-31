@@ -68,21 +68,28 @@
                               (str "gate also saw pre-failure test edits this episode — worth a look: "
                                    (.join (clj->js (vec earlier)) ", ")))))
                   (end-episode!))
-                (if (< @attempts (:max-attempts cfg))
-                  (do (swap! attempts inc)
-                      ((.-sendUserMessage api)
-                       (shared/failure-message (:cmd cfg) exit-code output
-                                               @attempts (:max-attempts cfg))
-                       #js {:deliverAs "followUp"}))
-                  ;; Cap reached and still red: stop the loop, but don't lie
-                  ;; by staying silent — report without asking for edits.
-                  (do (end-episode!)
-                      ((.-sendUserMessage api)
-                       (str "Verification still failing after the attempt cap (`" (:cmd cfg)
-                            "` exited " exit-code "). Do NOT edit further — summarize the "
-                            "remaining failures for the user:\n\n```\n"
-                            (shared/tail-lines output 40) "\n```")
-                       #js {:deliverAs "followUp"})))))))]
+                ;; Publish a failure signal for small-model/self-tune (additive;
+                ;; no-op if nothing subscribes). Mirrors quality_monitor's bus use.
+                (do
+                  (when (.-emitGlobal api)
+                    (.emitGlobal api "small-model/verify-fail"
+                                 #js {:reason (str "verify command failed (exit " exit-code ")")
+                                      :cmd    (:cmd cfg)}))
+                  (if (< @attempts (:max-attempts cfg))
+                    (do (swap! attempts inc)
+                        ((.-sendUserMessage api)
+                         (shared/failure-message (:cmd cfg) exit-code output
+                                                 @attempts (:max-attempts cfg))
+                         #js {:deliverAs "followUp"}))
+                    ;; Cap reached and still red: stop the loop, but don't lie
+                    ;; by staying silent — report without asking for edits.
+                    (do (end-episode!)
+                        ((.-sendUserMessage api)
+                         (str "Verification still failing after the attempt cap (`" (:cmd cfg)
+                              "` exited " exit-code "). Do NOT edit further — summarize the "
+                              "remaining failures for the user:\n\n```\n"
+                              (shared/tail-lines output 40) "\n```")
+                         #js {:deliverAs "followUp"}))))))))]
 
     (when (:cmd cfg)
       (.on api "tool_complete" on-complete)
