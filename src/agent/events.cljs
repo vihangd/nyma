@@ -117,9 +117,14 @@
   [results]
   (reduce
    (fn [acc result]
-     (if (nil? result)
+     ;; Non-map returns are ignored, not merged: a handler that ends in
+     ;; `(reset! …)`/`(swap! …)` returns a boolean, and reduce-kv over a
+     ;; primitive throws ("true is not iterable") on squint >= 0.14.203,
+     ;; where `iterable` became strict. Previously this read
+     ;; `(if (map? result) result result)` — a no-op that let primitives through.
+     (if-not (map? result)
        acc
-       (let [m (if (map? result) result result)]
+       (let [m result]
          (reduce-kv
           (fn [a k v]
             (let [ks (str k)]
