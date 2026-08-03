@@ -13,7 +13,8 @@
 
    Abort handling: if the AbortSignal fires during any question the tool
    returns `{:cancelled true, :answers <partial>}` immediately."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.utils.ui :as ui]))
 
 ;;; ─── constants ───────────────────────────────────────────────
 
@@ -68,9 +69,13 @@
     (if (and (.-options q) (pos? (.-length (.-options q))))
       ;; ── picker mode ─────────────────────────────────────────
       (let [raw-opts  (js/Array.from (.-options q))
+            ;; `recommended` badges the option the model suggests, borrowed
+            ;; from oh-my-pi's ask tool ("(Recommended)" in its picker).
             picker-items (cond-> (mapv (fn [o]
                                          #js {:value (.-value o)
-                                              :label (or (.-label o) (.-value o))
+                                              :label (str (or (.-label o) (.-value o))
+                                                          (when (.-recommended o)
+                                                            "  (Recommended)"))
                                               :description (.-description o)})
                                        raw-opts)
                            allow-other
@@ -94,9 +99,12 @@
 (defn ^:async questionnaire-execute [api args ctx]
   (let [ui      (.-ui api)
         signal  (when ctx (.-abortSignal ctx))]
-    ;; UI availability check
-    (when (not (.-available ui))
-      (throw (js/Error. "UI not available")))
+    ;; UI availability check. `available` alone is not enough: it is true in
+    ;; the interactive TUI even on hosts that never wired select/input, and
+    ;; this tool then called an undefined `select`. Require the slots it
+    ;; actually uses (same predicate the rest of the repo guards with).
+    (when-not (ui/ui-prompt-ready? ui)
+      (throw (js/Error. "UI not available: this host has no interactive prompt support")))
 
     (let [questions (.-questions args)
           err       (validate-questions questions)]
@@ -161,7 +169,9 @@ or be an open-ended text question."
                                                                  :items #js {:type "object"
                                                                              :properties #js {:value #js {:type "string"}
                                                                                               :label #js {:type "string"}
-                                                                                              :description #js {:type "string"}}
+                                                                                              :description #js {:type "string"}
+                                                                                              :recommended #js {:type "boolean"
+                                                                                                                :description "Mark this as the suggested choice — shown with a (Recommended) badge."}}
                                                                              :required #js ["value"]}}
                                                :allowOther  #js {:type "boolean"
                                                                  :description "Whether to allow free-form answer in addition to options (default: true)."}

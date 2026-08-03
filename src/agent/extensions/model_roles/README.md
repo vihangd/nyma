@@ -44,6 +44,7 @@ Read from `~/.nyma/settings.json` or `.nyma/settings.json`:
 | Key | Type | Description |
 |---|---|---|
 | `roles` | map | Role name → `{provider, model, allowed-tools?, permissions?}` |
+| `cycle-key` | string | Key that cycles to the next role (one-keystroke model switching). Default `ctrl+g`; set `""` to disable. Avoid `ctrl+r` — `prompt_history` owns it. |
 
 If `roles` is absent, a built-in fallback set is used.
 

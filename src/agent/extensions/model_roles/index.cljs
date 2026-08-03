@@ -54,6 +54,20 @@
   [v]
   (if (map? v) v (js-obj->map v)))
 
+(defn cycle-binding
+  "Key that cycles to the next role. Settings-driven so it can be moved or
+   disabled (empty string) without a code change; ctrl+r is deliberately not
+   the default because prompt_history registers it."
+  [api]
+  (let [settings (try (when (.-getSettings api) (.getSettings api))
+                      (catch :default _ nil))
+        mr       (when settings
+                   (or (get settings "model-roles") (get settings :model-roles)))
+        k        (when mr
+                   (or (get mr "cycle-key") (get mr :cycle-key)
+                       (aget mr "cycle-key")))]
+    (if (some? k) (str k) "ctrl+g")))
+
 (defn- get-roles
   "Read roles from settings, merged onto the built-in defaults via
    policy/build-roles: FIELD-level merge (a model-only override keeps the shipped
@@ -266,6 +280,37 @@
                                           (str "Unknown role: \"" role-name "\". Available: "
                                                (str/join ", " (keys roles)))
                                           "error"))))})
+
+    ;; One-keystroke role cycling. oh-my-pi binds alt+p to cycle models for the
+    ;; active role; nyma's roles each carry one model, so cycling roles IS the
+    ;; model switch. Binding is settings-driven (`model-roles.cycle-key`) rather
+    ;; than hardcoded; the default avoids ctrl+r, which prompt_history owns.
+    ;; `.registerShortcut` is capability-gated and absent on non-TUI hosts
+    ;; (RPC, headless, tests), where it comes through undefined.
+    (let [cycle-key (cycle-binding api)]
+      (when (and (seq cycle-key) (.-registerShortcut api))
+        (.registerShortcut
+         api cycle-key
+         (fn []
+           (let [roles   (get-roles api)
+                 names   (vec (keys roles))
+                 current (str (or (:active-role (.getState api)) "default"))
+                 idx     (.indexOf (clj->js names) current)
+                 next-r  (when (seq names)
+                           (nth names (mod (inc idx) (count names))))]
+             (when next-r
+               (let [role-cfg (get roles next-r)
+                     model-id (or (:model role-cfg) (get role-cfg "model"))
+                     provider (or (:provider role-cfg) (get role-cfg "provider"))]
+                 (swap! (.-__state-atom api) assoc :active-role next-r)
+                 (when (and provider model-id)
+                   (.setModel api (str provider "/" model-id)))
+                 (when (.-ui api)
+                   (.notify (.-ui api)
+                            (str "Role: " next-r
+                                 (when (and provider model-id)
+                                   (str " → " provider "/" model-id)))
+                            "info")))))))))
 
     ;; /roles command — list all
     (.registerCommand api "roles"

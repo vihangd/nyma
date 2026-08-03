@@ -1,5 +1,5 @@
 {
   "namespace": "model-roles",
-  "capabilities": ["events", "commands", "model", "state", "ui", "messages"],
+  "capabilities": ["events", "commands", "model", "state", "ui", "messages", "shortcuts"],
   "dependsOn": []
 }

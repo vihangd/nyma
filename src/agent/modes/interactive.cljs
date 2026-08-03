@@ -12,7 +12,8 @@
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
-            [agent.ui.editor-eval :as editor-eval]))
+            [agent.ui.editor-eval :as editor-eval]
+            [agent.ui.overlay-host :as overlay-host]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -337,7 +338,13 @@
                    (fn [msgs] (filterv #(not= (:id %) mid) msgs)))
                   (.requestRender tui))))
         (set! (.-setEditorValue ui) (fn [v] (.setText editor v)))
-        (set! (.-getEditorValue ui) (fn [] (.getText editor)))))
+        (set! (.-getEditorValue ui) (fn [] (.getText editor)))
+        ;; Real overlays: showOverlay/custom/select/confirm/input on top of
+        ;; pi-tui's native overlay stack. Until this call these slots were nil,
+        ;; so every picker in the repo fell through to its text fallback.
+        (overlay-host/install! ui tui
+                               {:restore-focus (fn [] (.setFocus tui editor))
+                                :request-render (fn [] (.requestRender tui))})))
 
     ;; Wire editor
     (set! (.-onSubmit editor) on-submit)

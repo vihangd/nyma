@@ -13,6 +13,8 @@
             [agent.ui.editor-eval :as editor-eval]
             [agent.resources.skills :as skills]
             [agent.ui.skill-picker :as skill-picker]
+            [agent.ui.overlay-host :as overlay-host]
+            [agent.providers.catalog :as catalog]
             [clojure.string :as str]
             ["node:fs" :as fs]))
 
@@ -31,6 +33,72 @@
   (if (and ctx (.-ui ctx) (.-showOverlay (.-ui ctx)))
     (.showOverlay (.-ui ctx) text)
     (js/console.log (str "\n" text "\n"))))
+
+;;; ─── Model selection ────────────────────────────────────────
+;;;
+;;; MRU is per-session and in-memory. ponytail: a cross-session MRU needs a
+;;; storage decision (settings file vs the optional SQLite store); within one
+;;; session this already covers the common "flip between two models" case.
+
+(defonce ^:private recent-models (atom []))
+
+(defn remember-model!
+  "Push `spec` to the front of the MRU list (deduped, capped)."
+  [spec]
+  (when (seq (str spec))
+    (swap! recent-models
+           (fn [xs]
+             (vec (take 10 (cons (str spec) (remove #(= % (str spec)) xs))))))))
+
+(defn current-model-id
+  "Display id of the active model."
+  [agent]
+  (let [m (:model (:config agent))]
+    (cond
+      (nil? m)    "unknown"
+      (string? m) m
+      :else       (or (.-modelId m) "unknown"))))
+
+(defn current-models
+  "Catalogue for the picker, most-recently-used first."
+  [agent]
+  (let [providers ((:list (:provider-registry agent)))
+        ctx-fn    (:context-window (:model-registry agent))]
+    (catalog/rank-by-recent (catalog/list-all-models providers ctx-fn)
+                            @recent-models)))
+
+(defn model->item
+  "Catalogue entry → the {value,label,description} shape ui.select expects."
+  [m]
+  (let [ctx   (catalog/format-context (:context-window m))
+        price (catalog/format-price (:cost m))
+        meta  (->> [ctx price] (filter seq) (str/join " · "))]
+    {:value       (:spec m)
+     :label       (:spec m)
+     :description (if (seq meta) meta (:name m))}))
+
+(defn model-catalogue-text
+  "Plain-text catalogue for `/model list`."
+  [agent]
+  (let [models (current-models agent)]
+    (if (empty? models)
+      "No models registered."
+      (str "Models (" (count models) ") — current: " (current-model-id agent) "\n\n"
+           (str/join "\n"
+                     (map (fn [m]
+                            (str "  " (:spec m)
+                                 "  " (catalog/format-context (:context-window m))
+                                 "  " (catalog/format-price (:cost m))))
+                          models))))))
+
+(defn- ui-selectable? [ctx]
+  (boolean (and ctx (.-ui ctx) (.-select (.-ui ctx)))))
+
+(defn- switch-model! [agent ctx model-spec]
+  (when-let [api (.-extension-api agent)]
+    (.setModel api model-spec))
+  (remember-model! model-spec)
+  (notify ctx (str "Model changed to: " model-spec)))
 
 (defn scaffold-extension
   "Generate a skeleton ClojureScript extension file."
@@ -218,19 +286,32 @@
                         (show-info ctx (str/join "\n" sections))))}
 
           "model"
-          {:description "Show or change current model"
+          {:description "Pick a model (no args), switch to one, or `list` them all"
            :handler (fn [args ctx]
-                      (if (seq args)
+                      (cond
+                        ;; `/model list` — full catalogue as scrollable text
+                        (= (first args) "list")
+                        (show-info ctx (model-catalogue-text agent))
+
+                        ;; `/model <provider/id>` — direct switch (unchanged)
+                        (seq args)
                         (let [model-spec (str/join " " args)]
-                          (when-let [api (.-extension-api agent)]
-                            (.setModel api model-spec))
-                          (notify ctx (str "Model changed to: " model-spec)))
-                        (let [m        (:model (:config agent))
-                              model-id (cond
-                                         (nil? m)    "unknown"
-                                         (string? m) m
-                                         :else       (or (.-modelId m) "unknown"))]
-                          (notify ctx (str "Model: " model-id)))))}
+                          (switch-model! agent ctx model-spec))
+
+                        ;; Bare `/model` — fuzzy picker over the catalogue,
+                        ;; anchored at the bottom so the transcript stays
+                        ;; visible (oh-my-pi's model-picker does the same).
+                        :else
+                        (let [models (current-models agent)]
+                          (if (and (ui-selectable? ctx) (seq models))
+                            (-> (.select (.-ui ctx)
+                                         (str "Model — current: " (current-model-id agent))
+                                         (clj->js (mapv model->item models))
+                                         #js {:overlay overlay-host/bottom-overlay-options})
+                                (.then (fn [chosen]
+                                         (when chosen
+                                           (switch-model! agent ctx (.-value chosen))))))
+                            (notify ctx (str "Model: " (current-model-id agent)))))))}
 
           "clear"
           {:description "Clear messages and reset agent session"
