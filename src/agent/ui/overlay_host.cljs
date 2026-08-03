@@ -56,28 +56,53 @@
     :else nil))
 
 (defn data->key
-  "Build the ink-style key object `dispatch-input` branches on."
+  "Build the ink-style key object pickers branch on. Covers the full set the
+   components use — tree_viewer and friends navigate with more than up/down,
+   and an unmapped key would arrive as an all-false no-op."
   [data]
-  #js {:escape    (matchesKey data "escape")
-       :return    (or (matchesKey data "enter") (matchesKey data "return"))
-       :upArrow   (matchesKey data "up")
-       :downArrow (matchesKey data "down")
-       :backspace (matchesKey data "backspace")
-       :delete    (matchesKey data "delete")
-       :tab       (matchesKey data "tab")
-       :ctrl      (or (matchesKey data "ctrl+p") (matchesKey data "ctrl+n"))})
+  #js {:escape     (matchesKey data "escape")
+       :return     (or (matchesKey data "enter") (matchesKey data "return"))
+       :upArrow    (matchesKey data "up")
+       :downArrow  (matchesKey data "down")
+       :leftArrow  (matchesKey data "left")
+       :rightArrow (matchesKey data "right")
+       :pageUp     (matchesKey data "pageUp")
+       :pageDown   (matchesKey data "pageDown")
+       :home       (matchesKey data "home")
+       :end        (matchesKey data "end")
+       :backspace  (matchesKey data "backspace")
+       :delete     (matchesKey data "delete")
+       :tab        (matchesKey data "tab")
+       :ctrl       (or (matchesKey data "ctrl+p") (matchesKey data "ctrl+n"))})
 
-(defn resolving-key?
-  "True for the keys that end a picker's life. Every picker nyma ships is a
-   single-shot filter picker built on `dispatch-input`, which only calls
-   on-select (Enter) or on-cancel (Escape) — so the host can dismiss on
-   these without the picker needing to signal completion. `ui.custom` is
-   fire-and-forget (the resolve callback is closed over before the call),
-   so there is no other dismissal signal available."
-  [data]
-  (or (matchesKey data "enter")
-      (matchesKey data "return")
-      (matchesKey data "escape")))
+(defn close-signal?
+  "pi-mono's explicit dismissal signal: `onInput` returning `{close: true}`.
+   `tree_viewer` uses this."
+  [result]
+  (boolean (and result (.-close result))))
+
+(defn escape-key? [data]
+  (boolean (matchesKey data "escape")))
+
+(defn select-key? [data]
+  (boolean (or (matchesKey data "enter") (matchesKey data "return"))))
+
+(defn should-dismiss?
+  "Whether the host should tear down the overlay after this keypress.
+
+   Three sources, because `ui.custom` is fire-and-forget — the picker's
+   resolve callback is closed over before the call, so there is no return
+   value to await:
+
+   - `{close: true}` from onInput — the explicit signal (tree_viewer).
+   - Escape — universal cancel across every component in the repo.
+   - Enter — ends single-shot filter pickers built on `dispatch-input`, but
+     NOT components that set `keepOpen`, where Enter is a normal interaction
+     (tree_viewer folds/unfolds a node with it)."
+  [data result keep-open?]
+  (or (close-signal? result)
+      (escape-key? data)
+      (and (not keep-open?) (select-key? data))))
 
 ;; ── Component adapter ────────────────────────────────────────────
 
@@ -95,10 +120,12 @@
 
        :handleInput
        (fn [data]
-         (when-let [on-input (.-onInput picker)]
-           (on-input (printable-char data) (data->key data)))
-         (when after-input (after-input data))
-         nil)
+         ;; The onInput RESULT matters: pi-mono components signal dismissal by
+         ;; returning {close: true}, so it is forwarded to after-input.
+         (let [result (when-let [on-input (.-onInput picker)]
+                        (on-input (printable-char data) (data->key data)))]
+           (when after-input (after-input data result))
+           nil))
 
        :invalidate (fn [] nil)})
 
@@ -127,14 +154,18 @@
   (let [filter-text  (atom "")
         selected-idx (atom 0)]
     #js {:render
-         (fn [w _h]
+         (fn [w h]
            (render-frame
             {:title         (str prompt "  (type to filter, Enter to select, Esc to cancel)")
              :prompt-prefix "> "
              :filter-text   @filter-text
              :items         (filter-items @filter-text items)
              :selected-idx  @selected-idx
-             :max-visible   12
+             ;; Cap rows against the terminal, not just a constant:
+             ;; `default-overlay-options` limits the box to maxHeight 70%, and
+             ;; render-frame adds 2 header lines. A fixed 12 overflows a short
+             ;; terminal (render-frame's own docstring suggests this clamp).
+             :max-visible   (max 3 (min 12 (- (js/Math.floor (* 0.7 (or h 24))) 2)))
              :max-width     (overlay-max-width w)
              :render-item   (fn [it _focused?]
                               (let [d (item-description it)]
@@ -241,8 +272,11 @@
         ;; the promise-returning wrappers dismiss explicitly instead.
         show!
         (fn [picker options auto-dismiss?]
-          (let [handle (atom nil)
-                closed (atom false)
+          (let [handle    (atom nil)
+                closed    (atom false)
+                ;; Multi-step components (tree_viewer) set keepOpen so Enter
+                ;; stays a normal interaction rather than a dismissal.
+                keep-open? (boolean (.-keepOpen picker))
                 done   (fn []
                          (when-not @closed
                            (reset! closed true)
@@ -254,8 +288,9 @@
                         picker
                         {:get-width   get-width
                          :get-height  get-height
-                         :after-input (fn [data]
-                                        (if (and auto-dismiss? (resolving-key? data))
+                         :after-input (fn [data result]
+                                        (if (and auto-dismiss?
+                                                 (should-dismiss? data result keep-open?))
                                           (done)
                                           (rerender)))})]
             (reset! handle (.showOverlay tui comp (or options default-overlay-options)))

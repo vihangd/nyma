@@ -53,36 +53,39 @@
   (let [tree      ((:get-tree session))
         selected  (atom 0)
         collapsed (atom #{})
-        component #js {}]
+        ;; Multi-step: Enter folds/unfolds rather than selecting-and-closing,
+        ;; so the overlay host must not treat it as a dismissal. Escape still
+        ;; closes (onInput returns {close: true}).
+        component #js {:keepOpen true}]
     (set! (.-render component)
-      (fn [w _h]
-        (let [visible (compute-visible tree @collapsed)
-              header  "Session Tree (up/down navigate, Enter fold/unfold, Esc close)"
-              lines   (into [header ""]
-                        (map-indexed
-                          (fn [i {:keys [entry depth]}]
-                            (let [has-kids (has-children? tree (:id entry))
-                                  is-collapsed (contains? @collapsed (:id entry))]
-                              (render-entry entry depth (= i @selected)
-                                            has-kids is-collapsed (or w 80))))
-                          visible))]
-          (.join (clj->js lines) "\n"))))
+          (fn [w _h]
+            (let [visible (compute-visible tree @collapsed)
+                  header  "Session Tree (up/down navigate, Enter fold/unfold, Esc close)"
+                  lines   (into [header ""]
+                                (map-indexed
+                                 (fn [i {:keys [entry depth]}]
+                                   (let [has-kids (has-children? tree (:id entry))
+                                         is-collapsed (contains? @collapsed (:id entry))]
+                                     (render-entry entry depth (= i @selected)
+                                                   has-kids is-collapsed (or w 80))))
+                                 visible))]
+              (.join (clj->js lines) "\n"))))
 
     (set! (.-onInput component)
-      (fn [_input key]
-        (let [visible (compute-visible tree @collapsed)
-              max-idx (max 0 (dec (count visible)))]
-          (cond
-            (.-upArrow key)   (do (swap! selected (fn [s] (max 0 (dec s)))) nil)
-            (.-downArrow key) (do (swap! selected (fn [s] (min max-idx (inc s)))) nil)
-            (.-return key)    (do (let [entry (:entry (nth visible @selected nil))]
-                                    (when (and entry (has-children? tree (:id entry)))
-                                      (swap! collapsed
-                                        (fn [c] (if (contains? c (:id entry))
-                                                   (disj c (:id entry))
-                                                   (conj c (:id entry)))))))
-                                  nil)
-            (.-escape key)    #js {:close true}
-            :else             nil))))
+          (fn [_input key]
+            (let [visible (compute-visible tree @collapsed)
+                  max-idx (max 0 (dec (count visible)))]
+              (cond
+                (.-upArrow key)   (do (swap! selected (fn [s] (max 0 (dec s)))) nil)
+                (.-downArrow key) (do (swap! selected (fn [s] (min max-idx (inc s)))) nil)
+                (.-return key)    (do (let [entry (:entry (nth visible @selected nil))]
+                                        (when (and entry (has-children? tree (:id entry)))
+                                          (swap! collapsed
+                                                 (fn [c] (if (contains? c (:id entry))
+                                                           (disj c (:id entry))
+                                                           (conj c (:id entry)))))))
+                                      nil)
+                (.-escape key)    #js {:close true}
+                :else             nil))))
 
     component))
