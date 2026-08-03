@@ -3,7 +3,89 @@
             ["./agent/ui/overlay_host.mjs"
              :refer [printable-char data->key should-dismiss? close-signal?
                      adapt-component make-select-picker make-input-picker
-                     make-text-overlay]]))
+                     make-text-overlay resolve-content-width resolve-max-height
+                     bottom-overlay-options]]))
+
+;; Worst-case specs actually present in the repo's provider lists.
+(def ^:private real-specs
+  ["openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+   "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+   "groq/meta-llama/llama-4-scout-17b-16e-instruct"
+   "vllm/poolside/Laguna-S-2.1-NVFP4"
+   "anthropic/claude-haiku-4-5-20251001"])
+
+(defn- big-catalogue []
+  (mapv (fn [i]
+          (let [s (nth real-specs (mod i (count real-specs)))]
+            #js {:value (str s i) :label s :description "200.0k · $2.5/$10"}))
+        (range 95)))
+
+(describe "overlay-host/resolve-content-width"
+          (fn []
+            ;; The old path went through overlay-max-width, which reserves 6
+            ;; columns for an ink border+padding pi-tui never draws — at 80 cols
+            ;; that left 42 columns for specs up to 49 characters.
+            (it "resolves a percentage width against the terminal"
+                (fn []
+                  (-> (expect (resolve-content-width #js {:width "50%"} 80)) (.toBe 40))))
+
+            (it "honours minWidth and never exceeds the terminal"
+                (fn []
+                  (-> (expect (resolve-content-width #js {:width "10%" :minWidth 30} 80)) (.toBe 30))
+                  (-> (expect (resolve-content-width #js {:width "200%"} 80)) (.toBe 80))))
+
+            (it "gives the /model picker room for a full spec at 80 cols"
+                (fn []
+                  (let [w (resolve-content-width bottom-overlay-options 80)]
+                    (-> (expect w) (.toBeGreaterThanOrEqual 49)))))))
+
+(describe "overlay-host/select picker at catalogue scale"
+          (fn []
+            ;; 95 entries, real specs, across terminal sizes: the picker must
+            ;; always fit its box on BOTH axes, since pi-tui slices overflow
+            ;; from the bottom (taking the selected row with it) and wraps
+            ;; over-wide rows (breaking the differential renderer).
+            (it "always fits the resolved box"
+                (fn []
+                  (let [items (big-catalogue)]
+                    (doseq [cols [40 60 80 120]
+                            rows [6 10 20 24 40]]
+                      (let [bw    (resolve-content-width bottom-overlay-options cols)
+                            bh    (resolve-max-height bottom-overlay-options rows)
+                            out   ((.-render (make-select-picker "Model" items (fn [_] nil)
+                                                                 (fn [] bw)))
+                                   cols bh)
+                            lines (.split out "\n")]
+                        (-> (expect (.-length lines)) (.toBeLessThanOrEqual bh))
+                        (doseq [l lines]
+                          (-> (expect (count l)) (.toBeLessThanOrEqual bw))))))))
+
+            (it "shows the metadata column on a normal terminal"
+                (fn []
+                  (let [bw  (resolve-content-width bottom-overlay-options 80)
+                        out ((.-render (make-select-picker "Model" (big-catalogue) (fn [_] nil)
+                                                           (fn [] bw)))
+                             80 12)]
+                    (-> (expect out) (.toContain "200.0k")))))
+
+            (it "keeps the distinguishing tail of a long spec"
+                (fn []
+                  (let [bw  (resolve-content-width bottom-overlay-options 60)
+                        out ((.-render (make-select-picker "Model" (big-catalogue) (fn [_] nil)
+                                                           (fn [] bw)))
+                             60 12)]
+                    (-> (expect out) (.toContain "a12b:free")))))
+
+            ;; fuzzy-filter is multi-token, so provider + id can be combined.
+            (it "filters across provider and id with a multi-token query"
+                (fn []
+                  (let [chosen (atom :unset)
+                        picker (make-select-picker "Model" (big-catalogue)
+                                                   (fn [it] (reset! chosen it)) (fn [] 72))
+                        on-in  (.-onInput picker)]
+                    (doseq [c "groq scout"] (on-in (str c) (data->key (str c))))
+                    (on-in nil (data->key ENTER))
+                    (-> (expect (.-label @chosen)) (.toContain "groq")))))))
 
 ;; Raw terminal byte sequences the TUI delivers to handleInput. Written as
 ;; explicit escapes — literal control bytes in source are invisible and easy

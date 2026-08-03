@@ -25,8 +25,10 @@
    twice and every picker would render as a sliver."
   (:require ["@mariozechner/pi-tui" :refer [matchesKey]]
             [clojure.string :as str]
-            [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
-            [agent.ui.picker-input :refer [dispatch-input]]))
+            [agent.ui.picker-frame :refer [render-frame overlay-max-width
+                                           truncate-to two-col-row]]
+            [agent.ui.picker-input :refer [dispatch-input]]
+            [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]))
 
 ;; Matches the 60% assumed by `picker-frame/overlay-max-width`.
 (def default-overlay-options
@@ -35,8 +37,11 @@
 ;; Quick pickers (model switcher) sit at the bottom, out of the way of the
 ;; transcript — borrowed from oh-my-pi's model-picker, which shows its
 ;; non-fullscreen picker with `{ anchor: "bottom-center" }`.
+;; Wider than the default: model specs are `provider/org/id` and reach ~50
+;; characters (openrouter/nvidia/nemotron-3-super-120b-a12b:free), so 60% of an
+;; 80-col terminal could not show one, let alone its context/price column.
 (def bottom-overlay-options
-  #js {:width "60%" :minWidth 30 :maxHeight "50%" :anchor "bottom-center"})
+  #js {:width "90%" :minWidth 40 :maxHeight "50%" :anchor "bottom-center"})
 
 ;; ── Key translation ──────────────────────────────────────────────
 
@@ -123,6 +128,27 @@
           (max 1 (js/Math.floor (* rows (/ pct 100))))))
       :else rows)))
 
+(defn resolve-content-width
+  "Columns a component may actually paint, given the overlay options and the
+   terminal width — the counterpart to `resolve-max-height`.
+
+   Deliberately does NOT go through `picker-frame/overlay-max-width`: that
+   subtracts 6 for an ink Box border + paddingX, chrome pi-tui's overlay never
+   draws (`showOverlay` has no border/padding and composites lines as-is). Under
+   this host those 6 columns are pure loss — at 80 cols it was handing rows 42
+   columns for specs up to 49 characters long."
+  [options term-cols]
+  (let [cols (or term-cols 80)
+        w    (when options (.-width options))
+        mw   (when options (.-minWidth options))
+        base (cond
+               (number? w) w
+               (and (string? w) (.endsWith w "%"))
+               (let [pct (js/parseFloat (.slice w 0 -1))]
+                 (if (js/isNaN pct) cols (js/Math.floor (* cols (/ pct 100)))))
+               :else cols)]
+    (max 1 (min cols (max base (or mw 0))))))
+
 ;; ── Component adapter ────────────────────────────────────────────
 
 (defn adapt-component
@@ -139,12 +165,16 @@
 
        :handleInput
        (fn [data]
-         ;; The onInput RESULT matters: pi-mono components signal dismissal by
-         ;; returning {close: true}, so it is forwarded to after-input.
-         (let [result (when-let [on-input (.-onInput picker)]
-                        (on-input (printable-char data) (data->key data)))]
-           (when after-input (after-input data result))
-           nil))
+         ;; Drop SGR mouse reports — these pickers are keyboard-only and a
+         ;; mouse sequence would otherwise be dispatched as input (oh-my-pi's
+         ;; model-picker guards the same way).
+         (when-not (and (string? data) (.startsWith data "[<"))
+           ;; The onInput RESULT matters: pi-mono components signal dismissal by
+           ;; returning {close: true}, so it is forwarded to after-input.
+           (let [result (when-let [on-input (.-onInput picker)]
+                          (on-input (printable-char data) (data->key data)))]
+             (when after-input (after-input data result))))
+         nil)
 
        :invalidate (fn [] nil)})
 
@@ -156,44 +186,49 @@
 (defn- item-description [it]
   (str (or (.-description it) "")))
 
-(defn- filter-items [query items]
+(defn- filter-items
+  "Fuzzy, multi-token filter over label + description — so `openrouter llama`
+   narrows a ~95-entry catalogue where a plain substring match could not.
+   `fuzzy-filter` was already written and tested but only the autocomplete
+   registry used it; every picker hand-rolled substring matching."
+  [query items]
   (if (empty? query)
     (vec items)
-    (let [q (str/lower-case query)]
-      (filterv (fn [it]
-                 (str/includes?
-                  (str/lower-case (str (item-label it) " " (item-description it)))
-                  q))
-               items))))
+    (vec (fuzzy-filter (vec items) query
+                       (fn [it] (str (item-label it) " " (item-description it)))))))
 
 (defn make-select-picker
   "Filter picker over `items` (JS objects with .label/.value/.description).
    `on-resolve` receives the chosen item, or nil on cancel."
-  [prompt items on-resolve]
+  [prompt items on-resolve width-fn]
   (let [filter-text  (atom "")
         selected-idx (atom 0)]
     #js {:render
          (fn [w h]
-           (render-frame
-            {:title         (str prompt "  (type to filter, Enter to select, Esc to cancel)")
-             :prompt-prefix "> "
-             :filter-text   @filter-text
-             :items         (filter-items @filter-text items)
-             :selected-idx  @selected-idx
-             ;; `h` is the rows available INSIDE the overlay box (the host
-             ;; resolves maxHeight before calling us), minus render-frame's two
-             ;; header lines. A fixed count overflows and pi-tui then slices
-             ;; away the trailing rows — i.e. the selected one.
-             ;; Floor of 1, not 3: in a tiny box, showing one row is correct
-             ;; and fits, whereas a floor of 3 overflows and pi-tui then slices
-             ;; the selected row away.
-             :max-visible   (max 1 (min 12 (- (or h 24) 2)))
-             :max-width     (overlay-max-width w)
-             :render-item   (fn [it _focused?]
-                              (let [d (item-description it)]
-                                (str (item-label it)
-                                     (when (seq d) (str "  — " d)))))
-             :no-match-text "No matches"}))
+           (let [;; The host knows the box geometry and passes it in; the `w`
+                 ;; fallback keeps the picker usable standalone (tests).
+                 cap (if width-fn (width-fn) (overlay-max-width w))
+                 ;; render-frame prepends a 4-char focus/scroll indicator.
+                 row-w (max 1 (- cap 4))]
+             (render-frame
+              {:title         (str prompt "  (type to filter, Enter to select, Esc to cancel)")
+               :prompt-prefix "> "
+               :filter-text   @filter-text
+               :items         (filter-items @filter-text items)
+               :selected-idx  @selected-idx
+               ;; `h` is the rows available INSIDE the overlay box (the host
+               ;; resolves maxHeight before calling us), minus render-frame's two
+               ;; header lines. A fixed count overflows and pi-tui then slices
+               ;; away the trailing rows — i.e. the selected one. No constant cap:
+               ;; `h` already bounds it, and capping at 12 wasted a tall terminal
+               ;; on a ~95-entry catalogue.
+               :max-visible   (max 1 (- (or h 24) 2))
+               :max-width     cap
+               ;; Two fields with separate budgets, metadata flush right, so the
+               ;; `ctx · price` column is not the first thing truncated away.
+               :render-item   (fn [it _focused?]
+                                (two-col-row (item-label it) (item-description it) row-w))
+               :no-match-text "No matches"})))
 
          :onInput
          (dispatch-input
@@ -212,11 +247,11 @@
    and this is one line. Width is still capped so a long value can't overflow
    the overlay box; pi-tui wraps over-wide rows, and a wrapped row throws off
    the differential renderer's line accounting."
-  [prompt placeholder on-resolve]
+  [prompt placeholder on-resolve width-fn]
   (let [text (atom "")]
     #js {:render
          (fn [w _h]
-           (let [cap   (overlay-max-width w)
+           (let [cap   (if width-fn (width-fn) (overlay-max-width w))
                  body-cap (max 1 (- cap 2))
                  shown (if (empty? @text) (str (or placeholder "")) @text)
                  ;; Show the TAIL once the value outgrows the line, so typing
@@ -257,11 +292,11 @@
    `stats_dashboard`, the `tool_dsl` macro). Long content (a stats dashboard)
    would otherwise overflow the box, so this windows the lines and scrolls
    with the arrow keys; Enter/Esc dismiss via the host's auto-dismiss."
-  [text]
+  [text width-fn]
   (let [scroll (atom 0)]
     #js {:render
          (fn [w h]
-           (let [cap     (overlay-max-width w)
+           (let [cap     (if width-fn (width-fn) (overlay-max-width w))
                  lines   (.split (str text) "\n")
                  total   (.-length lines)
                  ;; `h` is the box's rows, not the terminal's; reserve one for
@@ -277,9 +312,10 @@
                                 " of " total " lines — ↑/↓ scroll, Esc to close)\n"))]
              (reset! scroll top)
              (str header
-                  (str/join "\n"
-                            (map (fn [l] (subs (str l) 0 (min (count (str l)) cap)))
-                                 window)))))
+                  ;; Ellipsis, not a bare slice: this renders /help, /model list
+                  ;; and the stats dashboard, and a hard cut lands mid-token with
+                  ;; no indication anything was dropped.
+                  (str/join "\n" (map (fn [l] (truncate-to (str l) cap)) window)))))
 
          :onInput
          (fn [_input key]
@@ -336,6 +372,12 @@
 
         ;; select/confirm/input share this shape: build a picker whose
         ;; resolve callback dismisses the overlay, then hand back a Promise.
+        ;; Thunk giving a host-built picker the columns it may actually paint,
+        ;; so it stops re-deriving geometry from the terminal width.
+        width-fn-for (fn [options]
+                       (fn [] (resolve-content-width (or options default-overlay-options)
+                                                     (get-width))))
+
         promised
         (fn [make-picker options signal]
           (js/Promise.
@@ -371,7 +413,7 @@
             ;; dashboard, tool_dsl); a picker object is also accepted.
             ;; Returns a 0-arg dismiss fn. Enter/Esc close it.
             (let [picker (if (string? content)
-                           (make-text-overlay content)
+                           (make-text-overlay content (width-fn-for options))
                            content)]
               (show! picker (or options default-overlay-options) true))))
 
@@ -382,7 +424,8 @@
     (set! (.-select ui)
           (fn [prompt items opts]
             (promised (fn [done]
-                        (make-select-picker prompt (vec (or items [])) done))
+                        (make-select-picker prompt (vec (or items [])) done
+                                            (width-fn-for (overlay-of opts))))
                       (overlay-of opts) (signal-of opts))))
 
     (set! (.-confirm ui)
@@ -392,7 +435,8 @@
                    (make-select-picker message
                                        [#js {:value true  :label "Yes"}
                                         #js {:value false :label "No"}]
-                                       done))
+                                       done
+                                       (width-fn-for (overlay-of opts))))
                  (overlay-of opts) (signal-of opts))
                 (.then (fn [chosen]
                          (boolean (and chosen (.-value chosen))))))))
@@ -400,6 +444,7 @@
     (set! (.-input ui)
           (fn [prompt placeholder opts]
             (promised (fn [done]
-                        (make-input-picker prompt placeholder done))
+                        (make-input-picker prompt placeholder done
+                                           (width-fn-for (overlay-of opts))))
                       (overlay-of opts) (signal-of opts))))
     nil))

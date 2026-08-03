@@ -83,13 +83,21 @@
   (let [models (current-models agent)]
     (if (empty? models)
       "No models registered."
-      (str "Models (" (count models) ") — current: " (current-model-id agent) "\n\n"
-           (str/join "\n"
-                     (map (fn [m]
-                            (str "  " (:spec m)
-                                 "  " (catalog/format-context (:context-window m))
-                                 "  " (catalog/format-price (:cost m))))
-                          models))))))
+      ;; Pad the spec column: with literal two-space separators the context and
+      ;; price columns never line up once specs vary in length, which they do by
+      ;; ~30 characters across providers.
+      (let [spec-w (reduce (fn [w m] (max w (count (:spec m)))) 0 models)
+            ctx-w  (reduce (fn [w m] (max w (count (catalog/format-context
+                                                    (:context-window m))))) 0 models)
+            pad    (fn [s n] (str s (.repeat " " (max 0 (- n (count s))))))]
+        (str "Models (" (count models) ") — current: " (current-model-id agent) "\n\n"
+             (str/join "\n"
+                       (map (fn [m]
+                              (str/trimr
+                               (str "  " (pad (:spec m) spec-w)
+                                    "  " (pad (catalog/format-context (:context-window m)) ctx-w)
+                                    "  " (catalog/format-price (:cost m)))))
+                            models)))))))
 
 (defn- ui-selectable? [ctx]
   (boolean (and ctx (.-ui ctx) (.-select (.-ui ctx)))))

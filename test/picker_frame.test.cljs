@@ -5,7 +5,55 @@
   (:require ["bun:test" :refer [describe it expect]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame pad-lines truncate-to
-                                           fit-lines overlay-max-width]]))
+                                           fit-lines overlay-max-width
+                                           truncate-tail two-col-row]]))
+
+(describe "picker-frame/truncate-tail"
+          (fn []
+            (it "keeps the string when it fits"
+                (fn []
+                  (-> (expect (truncate-tail "short" 10)) (.toBe "short"))))
+
+            ;; The tail is what distinguishes model ids — head-truncating
+            ;; openrouter/nvidia/... makes siblings indistinguishable.
+            (it "keeps the END and marks the cut"
+                (fn []
+                  (let [out (truncate-tail "openrouter/nvidia/nemotron-3-super-120b-a12b:free" 20)]
+                    (-> (expect (count out)) (.toBe 20))
+                    (-> (expect out) (.toStartWith "…"))
+                    (-> (expect out) (.toEndWith "a12b:free")))))
+
+            (it "degenerate widths don't throw"
+                (fn []
+                  (-> (expect (truncate-tail "abcdef" 1)) (.toBe "…"))
+                  (-> (expect (truncate-tail "abcdef" 0)) (.toBe "abcdef"))))))
+
+(describe "picker-frame/two-col-row"
+          (fn []
+            (it "pads to exactly the given width"
+                (fn []
+                  (doseq [w [20 36 54 72 108]]
+                    (-> (expect (count (two-col-row "left" "right" w))) (.toBe w)))))
+
+            (it "puts the right column flush at the end when both fit"
+                (fn []
+                  (let [out (two-col-row "anthropic/claude-sonnet-5" "200.0k · $3/$15" 72)]
+                    (-> (expect out) (.toContain "anthropic/claude-sonnet-5"))
+                    (-> (expect (str/trimr out)) (.toEndWith "200.0k · $3/$15")))))
+
+            ;; Narrow row: identifying the model matters more than its price.
+            (it "drops the right column rather than gutting the left"
+                (fn []
+                  (let [out (two-col-row "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+                                         "200.0k · $2.5/$10" 36)]
+                    (-> (expect out) (.not.toContain "200.0k"))
+                    (-> (expect (count out)) (.toBe 36))
+                    ;; still identifiable by its tail
+                    (-> (expect (str/trimr out)) (.toEndWith "a12b:free")))))
+
+            (it "handles an empty right column"
+                (fn []
+                  (-> (expect (count (two-col-row "solo" "" 30))) (.toBe 30))))))
 
 (defn- render [opts]
   (render-frame (merge {:title         "Test"

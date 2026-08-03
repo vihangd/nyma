@@ -45,6 +45,48 @@
     ;; Reserve one char for the ellipsis so the total is exactly w.
     :else (str (subs line 0 (max 0 (dec w))) "\u2026")))
 
+(defn truncate-tail
+  "Truncate to `w` chars keeping the END of the string, with a leading `…`.
+
+   For identifiers the tail is the distinguishing part: head-truncating
+   `openrouter/nvidia/nemotron-3-super-120b-a12b:free` yields
+   `openrouter/nvidia/nemotron-3-…`, which is indistinguishable from its
+   siblings, whereas the tail keeps `…nemotron-3-super-120b-a12b:free`."
+  [s w]
+  (let [s (str s)]
+    (cond
+      (or (nil? w) (not (pos? w))) s
+      (<= (count s) w) s
+      (= w 1) "…"
+      :else (str "…" (subs s (- (count s) (dec w)))))))
+
+(defn two-col-row
+  "Lay out `left` and `right` on one row exactly `width` wide: `left` padded
+   out, `right` flush to the end, at least one space between.
+
+   Without per-field budgets a single `left + \"  — \" + right` string gets
+   truncated as a unit, so the right-hand metadata is always the part that
+   disappears — which is the information the row exists to convey."
+  [left right width]
+  (let [width (max 1 (or width 1))
+        right (str right)
+        gap   2
+        ;; Metadata is short and fixed-shape, so it may take up to half the row
+        ;; — but only while the identifier keeps a legible budget. On a narrow
+        ;; terminal both cannot fit, and knowing WHICH model a row is beats
+        ;; knowing its price, so the metadata is what gets dropped.
+        left-budget (- width (count right) gap)
+        show-right? (and (seq right)
+                         (<= (count right) (js/Math.floor (/ width 2)))
+                         (>= left-budget 24))
+        right   (if show-right? right "")
+        gap     (if show-right? gap 0)
+        left-w  (max 1 (- width (count right) gap))
+        left    (truncate-tail left left-w)]
+    (if (seq right)
+      (str (pad-to left left-w) (.repeat " " gap) right)
+      (pad-to left width))))
+
 (defn pad-lines
   "Pad every line in a multi-line string to the width of the widest
    line. Used by the overlay so the picker frame is a solid rectangle
