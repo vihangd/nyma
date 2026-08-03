@@ -26,11 +26,16 @@
         fix-paths (atom #{})
         pre-paths (atom #{})
         attempts (atom 0)
+        ;; One bus signal per red episode, not per failed turn: a subscriber
+        ;; (small-model/self-tune) budgets its reflections, and 4 identical
+        ;; signals for one logical failure would burn that budget on dupes.
+        signalled? (atom false)
 
         end-episode!
         (fn []
           (reset! fix-paths #{})
           (reset! pre-paths #{})
+          (reset! signalled? false)
           (reset! attempts 0))
 
         on-complete
@@ -71,7 +76,8 @@
                 ;; Publish a failure signal for small-model/self-tune (additive;
                 ;; no-op if nothing subscribes). Mirrors quality_monitor's bus use.
                 (do
-                  (when (.-emitGlobal api)
+                  (when (and (.-emitGlobal api) (not @signalled?))
+                    (reset! signalled? true)
                     (.emitGlobal api "small-model/verify-fail"
                                  #js {:reason (str "verify command failed (exit " exit-code ")")
                                       :cmd    (:cmd cfg)}))

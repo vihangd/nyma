@@ -27,21 +27,13 @@
 (def ^:private close-re-g
   (js/RegExp. "<\\/think(?:ing)?>" "gi"))
 
-(defn split-think-blocks
-  "Parse inline think tags from accumulated text.
-   Returns {:reasoning combined-inner-text :text clean-text}.
+(defn split-blocks*
+  "Core parser. `orphan?` enables the orphan-closer branch (see
+   `split-think-blocks`). Callers that persist their output pass false — a
+   false positive there permanently truncates stored text.
 
-   Handles three shapes:
-   - Closed blocks: <think>…</think> — extracted and removed from :text.
-   - Unterminated trailing block: <think>… (no close tag yet) — everything after
-     the opener goes to :reasoning; everything before goes to :text.
-     This is critical during live streaming when the close tag has not yet arrived.
-   - Orphan closer: …</think>… (a </think> with no opener) — everything before the
-     closer is :reasoning, everything after is :text. This is what poolside/Laguna
-     and other template-prefilled-<think> models emit.
-
-   Multiple closed blocks have their inner text joined with \\n\\n."
-  [text]
+   Returns {:reasoning combined-inner-text :text clean-text}."
+  [text orphan?]
   (if (empty? text)
     {:reasoning "" :text ""}
     (let [parts      (atom [])
@@ -60,8 +52,13 @@
               after   (subs clean (+ idx tag-len))]
           {:reasoning (str/join "\n\n" (conj @parts after))
            :text      before})
-        ;; No opener; check for an orphan closer (template-prefilled <think>).
-        (let [close-match (.exec close-re clean)]
+        ;; No opener; maybe an orphan closer (template-prefilled <think>).
+        ;; Requires `orphan?` AND that no closed block was found: a model that
+        ;; pairs its tags properly never emits an orphan, so a stray </think>
+        ;; alongside a closed pair is literal text (e.g. prose about think tags),
+        ;; not a prefill artifact — reclassifying it would eat real answer text.
+        (let [close-match (when (and orphan? (empty? @parts))
+                            (.exec close-re clean))]
           (if close-match
             (let [idx     (.-index close-match)
                   tag-len (count (aget close-match 0))
@@ -73,8 +70,34 @@
             {:reasoning (str/join "\n\n" @parts)
              :text      clean}))))))
 
-(defn strip-think-tags
-  "Remove inline think tags, returning clean text only.
-   Convenience wrapper around split-think-blocks for use at summarization sites."
+(defn split-think-blocks
+  "Parse inline think tags from accumulated text.
+   Returns {:reasoning combined-inner-text :text clean-text}.
+
+   Handles three shapes:
+   - Closed blocks: <think>…</think> — extracted and removed from :text.
+   - Unterminated trailing block: <think>… (no close tag yet) — everything after
+     the opener goes to :reasoning; everything before goes to :text.
+     This is critical during live streaming when the close tag has not yet arrived.
+   - Orphan closer: …</think>… (a </think> with no opener AND no closed block in
+     the same text) — everything before the closer is :reasoning, everything after
+     is :text. This is what poolside/Laguna and other template-prefilled-<think>
+     models emit.
+
+   Render-time only, so an orphan-closer false positive is a transient
+   mis-render. Persisting callers must use `strip-think-tags`, which is
+   deliberately conservative.
+
+   Multiple closed blocks have their inner text joined with \\n\\n."
   [text]
-  (:text (split-think-blocks text)))
+  (split-blocks* text true))
+
+(defn strip-think-tags
+  "Remove inline think tags, returning clean text only — for summarization and
+   compaction sites, whose output is PERSISTED.
+
+   Handles closed blocks and an unterminated opener, but deliberately NOT the
+   orphan closer: a message merely mentioning `</think>` in prose or code would
+   otherwise have everything before it silently dropped from the stored text."
+  [text]
+  (:text (split-blocks* text false)))

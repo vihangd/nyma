@@ -48,9 +48,12 @@
     (let [data (.slice line 6)]
       (if (.startsWith data "[DONE]")
         ;; Belt-and-suspenders: emit a final closing tag chunk if we
-        ;; never saw anything to close it.
-        (if (:in-think? @state)
-          (do (swap! state assoc :in-think? false)
+        ;; never saw anything to close it. Covers a synthesized prefill
+        ;; opener too — a stream cut short mid-reasoning (max_tokens,
+        ;; disconnect) would otherwise leave <think> unterminated and the
+        ;; whole turn would render as reasoning with an empty answer.
+        (if (or (:in-think? @state) (:prefill-open? @state))
+          (do (swap! state assoc :in-think? false :prefill-open? false)
               (str "data: "
                    (js/JSON.stringify
                     #js {:choices #js [#js {:delta #js {:content "</think>\n\n"}
@@ -74,7 +77,10 @@
                                           (some? tool-calls)
                                           (some? finish))
                                       (not reasoning))
-                    open       (when (and reasoning (not in-think?))
+                    ;; A synthesized prefill opener is still open: don't emit a
+                    ;; second <think> if reasoning deltas start arriving after it.
+                    open       (when (and reasoning (not in-think?)
+                                          (not (:prefill-open? @state)))
                                  (swap! state assoc :in-think? true :prefilled? true) "<think>")
                     close      (when needs-close?
                                  (swap! state assoc :in-think? false) "</think>\n\n")
@@ -88,12 +94,19 @@
                                           (some? content)
                                           (not reasoning)
                                           (not in-think?))
-                                 (swap! state assoc :prefilled? true) "<think>")]
+                                 (swap! state assoc :prefilled? true :prefill-open? true)
+                                 "<think>")]
                 (when reasoning
                   (aset delta "content" (str (or open "") reasoning))
                   (strip-reasoning-fields! delta))
                 (when prefill
                   (aset delta "content" (str prefill content)))
+                ;; The model supplies its own closer under prefill; once it
+                ;; arrives the synthesized block is balanced.
+                (when (and (:prefill-open? @state)
+                           (some? content)
+                           (.includes (str content) "</think"))
+                  (swap! state assoc :prefill-open? false))
                 (when (and (seq close) (some? content))
                   (aset delta "content" (str close content)))
                 (when (and (seq close) (nil? content))
@@ -162,13 +175,21 @@
   (js/RegExp. "<\\/think(?:ing)?>" "gi"))
 
 (defn extract-think-blocks
-  "Pulls reasoning out of content. Handles closed <think>…</think> blocks,
+  "Pulls reasoning out of content. Handles closed <think>…</think> blocks and
    a trailing unterminated <think>… (everything after the opener becomes
-   reasoning — model went reasoning → tool_calls without intervening text),
-   AND an orphan </think> with no opener (template-prefilled <think> models
-   like poolside/Laguna: everything before the closer becomes reasoning).
+   reasoning — model went reasoning → tool_calls without intervening text).
+
+   `orphan?` additionally enables the orphan-</think>-with-no-opener branch
+   (template-prefilled <think> models like poolside/Laguna: everything before
+   the closer becomes reasoning). It is OPT-IN because this rewriter runs over
+   every replayed assistant message: a turn that merely mentions `</think>` in
+   prose or code would otherwise have all preceding text moved out of `content`,
+   silently truncating history for providers that ignore `reasoning_content`.
+   It also requires that no closed block was found — a model that pairs its tags
+   never emits an orphan, so a stray closer beside a pair is literal text.
+
    Returns [reasoning-text content-cleaned]."
-  [s]
+  [s orphan?]
   (let [parts (atom [])
         clean (.replace (str s) think-block-re
                         (fn [_match inner]
@@ -182,7 +203,8 @@
             after  (subs clean (+ idx (count tag)))]
         (swap! parts conj after)
         [(str/join "\n\n" @parts) before])
-      (let [cm (.exec close-think-re clean)]
+      (let [cm (when (and orphan? (empty? @parts))
+                 (.exec close-think-re clean))]
         (if cm
           (let [idx    (.-index cm)
                 tag    (aget cm 0)
@@ -196,13 +218,14 @@
   "Lift <think> tags out of an assistant message's content into a
    `reasoning_content` field — required by DeepSeek-V4 / Moonshot K2
    thinking models on replay. No-op for non-assistant messages or
-   assistant messages without <think> markers."
-  [msg]
+   assistant messages without <think> markers.
+   `orphan?` — see `extract-think-blocks`."
+  [msg orphan?]
   (if (and (= (.-role msg) "assistant")
            (string? (.-content msg))
            (or (.includes (.-content msg) "<think")
-               (.includes (.-content msg) "</think")))
-    (let [[reasoning clean] (extract-think-blocks (.-content msg))]
+               (and orphan? (.includes (.-content msg) "</think"))))
+    (let [[reasoning clean] (extract-think-blocks (.-content msg) orphan?)]
       (if (seq reasoning)
         (doto (js/Object.assign #js {} msg)
           (aset "content" clean)
@@ -210,18 +233,26 @@
         msg))
     msg))
 
-(defn lift-think-request-rewriter
-  "Default request-rewriter for `make-fetch`: walks `messages[]` and
-   lifts <think> blocks from assistant turns back into reasoning_content."
-  [body-str _init]
-  (try
-    (let [body (js/JSON.parse body-str)]
-      (when (and (.-messages body) (.-length (.-messages body)))
-        (let [msgs (.-messages body)]
-          (dotimes [i (.-length msgs)]
-            (aset msgs i (rewrite-assistant-msg (aget msgs i))))))
-      (js/JSON.stringify body))
-    (catch :default _ body-str)))
+(defn make-lift-think-request-rewriter
+  "Build a request-rewriter for `make-fetch`: walks `messages[]` and lifts
+   <think> blocks from assistant turns back into reasoning_content.
+   `orphan?` enables orphan-closer lifting — pass true ONLY for providers whose
+   model template pre-fills the opener (see `extract-think-blocks`)."
+  [orphan?]
+  (fn [body-str _init]
+    (try
+      (let [body (js/JSON.parse body-str)]
+        (when (and (.-messages body) (.-length (.-messages body)))
+          (let [msgs (.-messages body)]
+            (dotimes [i (.-length msgs)]
+              (aset msgs i (rewrite-assistant-msg (aget msgs i) orphan?)))))
+        (js/JSON.stringify body))
+      (catch :default _ body-str))))
+
+(def lift-think-request-rewriter
+  "Conservative default rewriter (no orphan-closer handling) — safe for any
+   provider. DeepSeek / Kimi / opencode-zen use this."
+  (make-lift-think-request-rewriter false))
 
 (defn make-fetch
   "Build a custom `fetch` that wraps responses through `wrap-response`.

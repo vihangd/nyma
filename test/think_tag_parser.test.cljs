@@ -83,7 +83,15 @@
                 (fn []
                   (let [result (split-think-blocks "reasoning here</thinking>the answer")]
                     (-> (expect (.-reasoning result)) (.toBe "reasoning here"))
-                    (-> (expect (.-text result)) (.toBe "the answer")))))))
+                    (-> (expect (.-text result)) (.toBe "the answer")))))
+
+            ;; A model that pairs its tags never emits an orphan, so a stray
+            ;; closer beside a closed pair is literal text, not a prefill artifact.
+            (it "closed pair present ⇒ later stray closer is left in text"
+                (fn []
+                  (let [result (split-think-blocks "<think>A</think>B</think>C")]
+                    (-> (expect (.-reasoning result)) (.toBe "A"))
+                    (-> (expect (.-text result)) (.toBe "B</think>C")))))))
 
 (describe "think_tag_parser/strip-think-tags"
           (fn []
@@ -91,6 +99,14 @@
                 (fn []
                   (-> (expect (strip-think-tags "<think>hidden</think>visible"))
                       (.toBe "visible"))))
+
+            ;; Output is PERSISTED (session + smart compaction). An orphan-closer
+            ;; false positive here would permanently drop the preceding text, so
+            ;; the conservative path must leave a literal </think> alone.
+            (it "does NOT apply orphan-closer handling (persisted callers)"
+                (fn []
+                  (let [src "close the block with </think> when done"]
+                    (-> (expect (strip-think-tags src)) (.toBe src)))))
 
             (it "empty string passthrough"
                 (fn []

@@ -60,7 +60,26 @@
 
             (it "empty input yields empty string"
                 (fn []
-                  (-> (expect (clean-lesson "")) (.toBe ""))))))
+                  (-> (expect (clean-lesson "")) (.toBe ""))))
+
+            ;; call-advisor-tool never throws — it RETURNS these strings. They
+            ;; must never reach PLAYBOOK.md as "rules".
+            (it "rejects advisor-failure fallback strings"
+                (fn []
+                  (-> (expect (clean-lesson "Supervisor: advisor call failed — timeout"))
+                      (.toBe ""))
+                  (-> (expect (clean-lesson "Supervisor: advisor tool not available. Focus: x"))
+                      (.toBe ""))))
+
+            (it "does not mangle a rule starting with a number-word"
+                (fn []
+                  (-> (expect (clean-lesson "3-way merges must be resolved manually."))
+                      (.toBe "3-way merges must be resolved manually."))))
+
+            (it "still strips a real numbered/bulleted marker"
+                (fn []
+                  (-> (expect (clean-lesson "- Never guess a tool name.")) (.toBe "Never guess a tool name."))
+                  (-> (expect (clean-lesson "2) Never guess a tool name.")) (.toBe "Never guess a tool name."))))))
 
 (describe "self-tune/activate — bus wiring + gating"
           (fn []
@@ -97,7 +116,21 @@
                     (fire subs "small-model/quality-signal")
                     (fire subs "small-model/quality-signal")   ; would be #2 but cap=1
                     (js-await (flush))
-                    (-> (expect @calls) (.toBe 1)))))))
+                    (-> (expect @calls) (.toBe 1)))))
+
+            ;; squint compiles `or` to JS `||`, where 0 is falsey — 0 must mean
+            ;; "no reflections", not the 3 default.
+            (it "max-reflections 0 disables reflection (0 is not falsey-defaulted)"
+                (^:async fn []
+                  (let [subs (atom {}) calls (atom 0)
+                        cfg  {:self-tune {:enabled true :min-failures 1 :max-reflections 0
+                                          :max-lessons 20 :reflect-on ["quality-signal"]}}
+                        flush (fn [] (js/Promise. (fn [res] (js/setTimeout res 10))))]
+                    (activate (make-api subs calls) cfg)
+                    (fire subs "small-model/quality-signal")
+                    (fire subs "small-model/quality-signal")
+                    (js-await (flush))
+                    (-> (expect @calls) (.toBe 0)))))))
 
 (describe "self-tune/render-playbook"
           (fn []

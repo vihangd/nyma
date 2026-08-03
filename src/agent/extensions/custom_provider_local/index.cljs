@@ -110,7 +110,11 @@
           ;; (lift-think rewriter cleans replayed assistant turns; think-prefill
           ;; synthesizes the opener for template-prefilled models), then optionally
           ;; wrap again with rescue parsing for malformed tool calls.
-          mk-fetch     #(rs/make-fetch rs/lift-think-request-rewriter
+          ;; Orphan-closer lifting is enabled only when the user declared
+          ;; thinkPrefill — i.e. asserted this model's template pre-fills <think>.
+          ;; Otherwise a turn merely quoting "</think>" would lose its leading text.
+          mk-fetch     #(rs/make-fetch (rs/make-lift-think-request-rewriter
+                                        (boolean prefill?))
                                        {:think-prefill? (boolean prefill?)})
           base-fetch   (if rescue?
                          (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)

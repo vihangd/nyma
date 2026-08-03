@@ -69,17 +69,33 @@
     (vec existing)
     (vec (take-last (max 1 max-n) (conj (vec existing) candidate)))))
 
+;; `call-advisor-tool` never throws — on a missing tool or a failed/timed-out
+;; call it RETURNS a "Supervisor: …" string. That is not a lesson; persisting it
+;; would inject advisor plumbing errors into the worker's prompt forever (and
+;; since the fallback interpolates the failure reason, each one is distinct
+;; enough to dodge dedup and eat a playbook slot).
+(def ^:private advisor-failure-re
+  (js/RegExp. "^supervisor:" "i"))
+
+(defn advisor-failure? [s]
+  (boolean (.exec advisor-failure-re (str/trim (str s)))))
+
 (defn clean-lesson
-  "Squeeze advisor output into one short rule: strip preamble bullet/number,
-   collapse to at most 2 non-blank lines, cap length."
+  "Squeeze advisor output into one short rule: strip a leading bullet/number
+   marker, collapse to at most 2 non-blank lines, cap length.
+   Returns \"\" for advisor-plumbing failures so they are never persisted."
   [raw]
-  (let [lines (->> (str/split (str/trim (str raw)) "\n")
-                   (map str/trim)
-                   (remove str/blank?)
-                   (take 2))
-        s (-> (str/join " " lines)
-              (.replace (js/RegExp. "^[-*0-9.)\\s]+") ""))]
-    (if (> (count s) 300) (str (subs s 0 297) "…") s)))
+  (if (advisor-failure? raw)
+    ""
+    (let [lines (->> (str/split (str/trim (str raw)) "\n")
+                     (map str/trim)
+                     (remove str/blank?)
+                     (take 2))
+          ;; Anchor on an actual bullet/number marker — a bare char class would
+          ;; turn "3-way merges must…" into "way merges must…".
+          s (-> (str/join " " lines)
+                (.replace (js/RegExp. "^\\s*(?:[-*•]|\\d+[.)])\\s+") ""))]
+      (if (> (count s) 300) (str (subs s 0 297) "…") s))))
 
 (defn- read-lessons [dir]
   (let [f (lessons-file dir)]
@@ -132,9 +148,14 @@
   "Wire self-tune. Returns a cleanup fn."
   [api config]
   (let [st-cfg      (:self-tune config)
-        max-lessons (or (:max-lessons st-cfg) 20)
-        min-fail    (max 1 (or (:min-failures st-cfg) 2))
-        max-reflect (or (:max-reflections st-cfg) 3)
+        ;; Explicit nil checks, not `or`: squint compiles `or` to JS `||`, where
+        ;; 0 is falsey — so "max-reflections": 0 (the natural way to disable
+        ;; reflection while leaving the module wired) would silently mean 3.
+        num-cfg     (fn [k default]
+                      (let [v (get st-cfg k)] (if (number? v) v default)))
+        max-lessons (num-cfg :max-lessons 20)
+        min-fail    (max 1 (num-cfg :min-failures 2))
+        max-reflect (num-cfg :max-reflections 3)
         reflect-on  (set (map str (or (:reflect-on st-cfg)
                                       ["quality-signal" "verify-fail"])))
         dir         "memory"
