@@ -65,6 +65,15 @@
                     (-> (expect (.-content out)) (.toBe "use </think> to close"))
                     (-> (expect (.-reasoning_content out)) (.toBeUndefined)))))
 
+            ;; Regression: reasoning is empty here, but the content still has a
+            ;; stray tag. Guarding only on reasoning replayed it verbatim.
+            (it "orphan? on: strips a leading </think> even with no reasoning"
+                (fn []
+                  (let [out (rewrite-assistant-msg
+                             #js {:role "assistant" :content "</think>just the answer"} true)]
+                    (-> (expect (.-content out)) (.toBe "just the answer"))
+                    (-> (expect (.-content out)) (.not.toContain "</think>")))))
+
             (it "leaves plain assistant messages untouched"
                 (fn []
                   (let [msg #js {:role "assistant" :content "no tags here"}
@@ -100,6 +109,31 @@
                   (.then (.text (wrap-response (sse-response prefill-chunks) false))
                          (fn [out]
                            (-> (expect out) (.not.toContain "\"content\":\"<think>\""))))))
+
+            ;; Regression: providers may split the closing tag across deltas
+            ;; ("</" then "think>"). Matching a single delta left :prefill-open?
+            ;; set, so [DONE] appended a SECOND, literal </think>.
+            (it "detects a closer split across two deltas"
+                (fn []
+                  (let [split #js ["data: {\"choices\":[{\"delta\":{\"content\":\"reasoning\"},\"index\":0}]}\n\n"
+                                   "data: {\"choices\":[{\"delta\":{\"content\":\"</\"},\"index\":0}]}\n\n"
+                                   "data: {\"choices\":[{\"delta\":{\"content\":\"think>\"},\"index\":0}]}\n\n"
+                                   "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"index\":0}]}\n\n"
+                                   "data: [DONE]\n\n"]]
+                    ;; The tag is split across deltas, so it is never contiguous
+                    ;; in the raw SSE text — assemble delta.content first.
+                    (.then (.text (wrap-response (sse-response split) true))
+                           (fn [out]
+                             (let [content (->> (.split out "\n")
+                                                (filter #(and (.startsWith % "data: ")
+                                                              (not (.includes % "[DONE]"))))
+                                                (map (fn [l]
+                                                       (try
+                                                         (or (.-content (.-delta (aget (.-choices (js/JSON.parse (.slice l 6))) 0))) "")
+                                                         (catch :default _ ""))))
+                                                (apply str))]
+                               ;; Exactly one closer: no duplicate appended at [DONE].
+                               (-> (expect (.-length (.split content "</think>"))) (.toBe 2))))))))
 
             ;; Regression: a prefill stream cut off mid-reasoning (max_tokens,
             ;; disconnect) must still be closed, else the whole turn renders as

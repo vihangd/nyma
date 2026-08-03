@@ -102,11 +102,15 @@
                 (when prefill
                   (aset delta "content" (str prefill content)))
                 ;; The model supplies its own closer under prefill; once it
-                ;; arrives the synthesized block is balanced.
-                (when (and (:prefill-open? @state)
-                           (some? content)
-                           (.includes (str content) "</think"))
-                  (swap! state assoc :prefill-open? false))
+                ;; arrives the synthesized block is balanced. The tag can be
+                ;; SPLIT across deltas ("</" then "think>"), so match against a
+                ;; short carry-over tail — otherwise :prefill-open? never clears
+                ;; and [DONE] appends a second, literal </think>.
+                (when (and (:prefill-open? @state) (some? content))
+                  (let [tail (str (:tail @state) content)]
+                    (if (.includes tail "</think")
+                      (swap! state assoc :prefill-open? false :tail "")
+                      (swap! state assoc :tail (.slice tail -8)))))
                 (when (and (seq close) (some? content))
                   (aset delta "content" (str close content)))
                 (when (and (seq close) (nil? content))
@@ -226,10 +230,15 @@
            (or (.includes (.-content msg) "<think")
                (and orphan? (.includes (.-content msg) "</think"))))
     (let [[reasoning clean] (extract-think-blocks (.-content msg) orphan?)]
-      (if (seq reasoning)
-        (doto (js/Object.assign #js {} msg)
-          (aset "content" clean)
-          (aset "reasoning_content" reasoning))
+      ;; Rewrite when the CONTENT changed too, not only when reasoning was
+      ;; extracted: a prefill turn beginning with a bare `</think>` yields empty
+      ;; reasoning but still has a stray tag to strip, which would otherwise be
+      ;; replayed to the provider verbatim.
+      (if (or (seq reasoning) (not= clean (.-content msg)))
+        (let [out (js/Object.assign #js {} msg)]
+          (aset out "content" clean)
+          (when (seq reasoning) (aset out "reasoning_content" reasoning))
+          out)
         msg))
     msg))
 

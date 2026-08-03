@@ -104,6 +104,25 @@
       (escape-key? data)
       (and (not keep-open?) (select-key? data))))
 
+(defn resolve-max-height
+  "Rows a component may actually render into, given the overlay options and the
+   terminal height. pi-tui resolves `maxHeight` (number or \"N%\") and then
+   SLICES the overlay's lines to fit (tui.js `resolveOverlayLayout`), cutting
+   from the bottom — and `render-frame` uses a trailing window, so the selected
+   row sits near the bottom and is the first thing lost. Components therefore
+   need the box height, not the terminal height, to size themselves."
+  [options term-rows]
+  (let [rows (or term-rows 24)
+        mh   (when options (.-maxHeight options))]
+    (cond
+      (number? mh) (max 1 (min mh rows))
+      (and (string? mh) (.endsWith mh "%"))
+      (let [pct (js/parseFloat (.slice mh 0 -1))]
+        (if (js/isNaN pct)
+          rows
+          (max 1 (js/Math.floor (* rows (/ pct 100))))))
+      :else rows)))
+
 ;; ── Component adapter ────────────────────────────────────────────
 
 (defn adapt-component
@@ -161,11 +180,14 @@
              :filter-text   @filter-text
              :items         (filter-items @filter-text items)
              :selected-idx  @selected-idx
-             ;; Cap rows against the terminal, not just a constant:
-             ;; `default-overlay-options` limits the box to maxHeight 70%, and
-             ;; render-frame adds 2 header lines. A fixed 12 overflows a short
-             ;; terminal (render-frame's own docstring suggests this clamp).
-             :max-visible   (max 3 (min 12 (- (js/Math.floor (* 0.7 (or h 24))) 2)))
+             ;; `h` is the rows available INSIDE the overlay box (the host
+             ;; resolves maxHeight before calling us), minus render-frame's two
+             ;; header lines. A fixed count overflows and pi-tui then slices
+             ;; away the trailing rows — i.e. the selected one.
+             ;; Floor of 1, not 3: in a tiny box, showing one row is correct
+             ;; and fits, whereas a floor of 3 overflows and pi-tui then slices
+             ;; the selected row away.
+             :max-visible   (max 1 (min 12 (- (or h 24) 2)))
              :max-width     (overlay-max-width w)
              :render-item   (fn [it _focused?]
                               (let [d (item-description it)]
@@ -195,10 +217,16 @@
     #js {:render
          (fn [w _h]
            (let [cap   (overlay-max-width w)
+                 body-cap (max 1 (- cap 2))
                  shown (if (empty? @text) (str (or placeholder "")) @text)
-                 body  (str "> " shown)]
+                 ;; Show the TAIL once the value outgrows the line, so typing
+                 ;; past the cap keeps showing what's being typed instead of
+                 ;; freezing on the first `cap` characters.
+                 shown (if (> (count shown) body-cap)
+                         (str "…" (subs shown (- (count shown) (dec body-cap))))
+                         shown)]
              (str prompt "  (Enter to accept, Esc to cancel)" "\n"
-                  (subs body 0 (min (count body) cap)))))
+                  "> " shown)))
 
          :onInput
          (fn [input key]
@@ -210,6 +238,11 @@
              (swap! text (fn [s] (if (empty? s) "" (subs s 0 (dec (count s))))))
 
              (.-tab key) nil
+
+             ;; `printable-char` reports ctrl+p/ctrl+n as bare "p"/"n" for
+             ;; dispatch-input's navigation; without this guard those chords
+             ;; would type a literal letter into a text field.
+             (.-ctrl key) nil
 
              (and input (= (count input) 1))
              (swap! text str input)))
@@ -231,7 +264,10 @@
            (let [cap     (overlay-max-width w)
                  lines   (.split (str text) "\n")
                  total   (.-length lines)
-                 visible (max 3 (- (min (or h 24) 30) 4))
+                 ;; `h` is the box's rows, not the terminal's; reserve one for
+                 ;; the range header. Overshooting here got the bottom of every
+                 ;; window silently clipped by pi-tui.
+                 visible (max 1 (dec (or h 24)))
                  max-top (max 0 (- total visible))
                  top     (min @scroll max-top)
                  window  (.slice lines top (+ top visible))
@@ -287,7 +323,8 @@
                 comp   (adapt-component
                         picker
                         {:get-width   get-width
-                         :get-height  get-height
+                         ;; Box rows, not terminal rows — see resolve-max-height.
+                         :get-height  (fn [] (resolve-max-height options (get-height)))
                          :after-input (fn [data result]
                                         (if (and auto-dismiss?
                                                  (should-dismiss? data result keep-open?))
@@ -300,18 +337,33 @@
         ;; select/confirm/input share this shape: build a picker whose
         ;; resolve callback dismisses the overlay, then hand back a Promise.
         promised
-        (fn [make-picker options]
+        (fn [make-picker options signal]
           (js/Promise.
            (fn [resolve _reject]
-             (let [dismiss (atom nil)
-                   picker  (make-picker (fn [value]
-                                          (when-let [d @dismiss] (d))
-                                          (resolve value)))]
-               (reset! dismiss (show! picker (or options default-overlay-options) false))))))
+             (if (and signal (.-aborted signal))
+               (resolve nil)
+               (let [dismiss  (atom nil)
+                     settled  (atom false)
+                     finish   (fn [value]
+                                (when-not @settled
+                                  (reset! settled true)
+                                  (when-let [d @dismiss] (d))
+                                  (resolve value)))
+                     picker   (make-picker finish)]
+                 ;; Abort must tear the overlay down too: questionnaire passes
+                 ;; `{signal}` per question, and without this an aborted turn
+                 ;; left the picker holding keyboard focus with its promise
+                 ;; pending until the user hit Esc by hand.
+                 (when signal
+                   (.addEventListener signal "abort"
+                                      (fn [] (finish nil))
+                                      #js {:once true}))
+                 (reset! dismiss (show! picker (or options default-overlay-options) false)))))))
 
         ;; Callers may pass `{overlay: <OverlayOptions>}` to place the picker —
         ;; /model uses `bottom-overlay-options` so the transcript stays visible.
-        overlay-of (fn [opts] (when (and opts (.-overlay opts)) (.-overlay opts)))]
+        overlay-of (fn [opts] (when (and opts (.-overlay opts)) (.-overlay opts)))
+        signal-of  (fn [opts] (when (and opts (.-signal opts)) (.-signal opts)))]
 
     (set! (.-showOverlay ui)
           (fn [content options]
@@ -331,7 +383,7 @@
           (fn [prompt items opts]
             (promised (fn [done]
                         (make-select-picker prompt (vec (or items [])) done))
-                      (overlay-of opts))))
+                      (overlay-of opts) (signal-of opts))))
 
     (set! (.-confirm ui)
           (fn [message opts]
@@ -341,7 +393,7 @@
                                        [#js {:value true  :label "Yes"}
                                         #js {:value false :label "No"}]
                                        done))
-                 (overlay-of opts))
+                 (overlay-of opts) (signal-of opts))
                 (.then (fn [chosen]
                          (boolean (and chosen (.-value chosen))))))))
 
@@ -349,5 +401,5 @@
           (fn [prompt placeholder opts]
             (promised (fn [done]
                         (make-input-picker prompt placeholder done))
-                      (overlay-of opts))))
+                      (overlay-of opts) (signal-of opts))))
     nil))

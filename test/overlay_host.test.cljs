@@ -167,24 +167,25 @@
 
 (describe "overlay-host/make-select-picker sizing"
           (fn []
-            (defn- row-count [rows]
+            ;; `h` is the rows available INSIDE the overlay box (the host
+            ;; resolves maxHeight first), so the picker must fit within it —
+            ;; pi-tui slices overflow from the bottom, which is exactly where
+            ;; render-frame's trailing window puts the selected row.
+            (defn- row-count [box-rows]
               (let [items (mapv (fn [i] #js {:value (str "v" i) :label (str "model-" i)})
                                 (range 30))]
                 (count (.split ((.-render (make-select-picker "Pick" items (fn [_] nil)))
-                                100 rows)
+                                100 box-rows)
                                "\n"))))
 
-            ;; The overlay box is maxHeight 70%; a fixed row count overflowed
-            ;; short terminals and pi-tui wraps over-tall content.
-            (it "keeps the picker inside 70% of terminal height"
+            (it "never renders more lines than the box has rows"
                 (fn []
-                  (doseq [rows [40 24 20 15 10]]
-                    (-> (expect (row-count rows))
-                        (.toBeLessThanOrEqual (js/Math.floor (* 0.7 rows)))))))
+                  (doseq [rows [28 16 12 10 7 4]]
+                    (-> (expect (row-count rows)) (.toBeLessThanOrEqual rows)))))
 
-            (it "still shows a usable number of rows on a tall terminal"
+            (it "still shows a usable number of rows in a tall box"
                 (fn []
-                  (-> (expect (row-count 40)) (.toBeGreaterThan 5))))
+                  (-> (expect (row-count 28)) (.toBeGreaterThan 5))))
 
             (it "caps row width on a narrow terminal"
                 (fn []

@@ -61,11 +61,15 @@
   [api]
   (let [settings (try (when (.-getSettings api) (.getSettings api))
                       (catch :default _ nil))
+        ;; Top-level, same as `roles` (index/get-roles) and as documented in
+        ;; the README's settings table. A nested "model-roles" map is also
+        ;; accepted so either spelling works.
         mr       (when settings
                    (or (get settings "model-roles") (get settings :model-roles)))
-        k        (when mr
-                   (or (get mr "cycle-key") (get mr :cycle-key)
-                       (aget mr "cycle-key")))]
+        k        (or (when settings
+                       (or (get settings "cycle-key") (get settings :cycle-key)))
+                     (when mr
+                       (or (get mr "cycle-key") (get mr :cycle-key))))]
     (if (some? k) (str k) "ctrl+g")))
 
 (defn- get-roles
@@ -359,5 +363,10 @@
       (.unregisterCommand api "role")
       (.unregisterCommand api "roles")
       (.unregisterCommand api "mode")
+      ;; Without this the binding survives deactivate/reload pointing at a
+      ;; stale closure, and re-activating double-binds it.
+      (let [k (cycle-binding api)]
+        (when (and (seq k) (.-unregisterShortcut api))
+          (.unregisterShortcut api k)))
       (when @plan-deactivate (@plan-deactivate))
       (when @seg-deactivate (@seg-deactivate)))))
