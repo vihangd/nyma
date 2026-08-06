@@ -1,7 +1,6 @@
 (ns agent.extensions.custom-provider-claude-native.index
-  (:require ["node:fs" :as fs]
-            ["node:path" :as path]
-            [agent.extensions.custom-provider-claude-native.provider :as provider]))
+  (:require [agent.extensions.custom-provider-claude-native.provider :as provider]
+            [agent.utils.credentials :as credentials]))
 
 (def ^:private provider-name "claude-native")
 (def ^:private default-base-url "https://api.anthropic.com/v1")
@@ -23,20 +22,10 @@
        :contextWindow ctx
        :reasoning     false})
 
-(defn- read-credentials-file []
-  (let [home      (.. js/process -env -HOME)
-        cred-path (path/join home ".nyma" "credentials.json")]
-    (when (and home (fs/existsSync cred-path))
-      (try
-        (let [raw    (fs/readFileSync cred-path "utf8")
-              parsed (js/JSON.parse raw)]
-          ;; Stored under "anthropic" key — same as /login anthropic would write
-          (or (aget parsed "anthropic") (aget parsed provider-name)))
-        (catch :default _ nil)))))
-
 (defn resolve-api-key []
   (or (aget js/process.env "ANTHROPIC_API_KEY")
-      (read-credentials-file)))
+      ;; "anthropic" first — that's what `/login anthropic` writes.
+      (credentials/read-credential "anthropic" provider-name)))
 
 (defn- create-claude-native-model [id]
   (let [key (resolve-api-key)]
