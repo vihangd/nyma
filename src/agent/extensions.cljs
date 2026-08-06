@@ -256,19 +256,39 @@
                                     entry (build-provider-entry name cfg)]
                               ;; Register provider
                                 ((:register (:provider-registry agent)) name entry)
-                              ;; Auto-register model metadata
-                                (when models
-                                  ((:register (:model-registry agent))
-                                   (into {} (map (fn [m]
-                                                   [(:id m) {:context-window (:context-window m)}])
-                                                 models)))
-                                ;; Auto-register pricing
-                                  (doseq [m models]
-                                    (when-let [cost (:cost m)]
-                                      (let [input-rate  (or (:input cost) 0)
-                                            output-rate (or (:output cost) 0)]
-                                        (swap! pricing/token-costs assoc (:id m)
-                                               [input-rate output-rate])))))))
+                              ;; A gateway/relay carries OTHER vendors' models under
+                              ;; those vendors' own ids. Two consequences:
+                              ;;   - it must not write bare-id entries, or it silently
+                              ;;     overwrites the first-party provider's metadata
+                              ;;     (last registration wins);
+                              ;;   - its costs must not fall back to the bare id, or
+                              ;;     we display a price the user isn't charged.
+                                (let [gateway? (boolean (.-unpriced config))
+                                      qualify  (fn [id] (str name "/" id))]
+                                  (if gateway?
+                                    (swap! pricing/unpriced-providers conj name)
+                                    (swap! pricing/unpriced-providers disj name))
+                                ;; Auto-register model metadata. Non-gateway providers
+                                ;; register both keys so bare-id callers keep working;
+                                ;; the qualified key disambiguates shared model ids.
+                                  (when models
+                                    ((:register (:model-registry agent))
+                                     (into {} (mapcat (fn [m]
+                                                        (let [meta {:context-window (:context-window m)}
+                                                              q    [[(qualify (:id m)) meta]]]
+                                                          (if gateway?
+                                                            q
+                                                            (cons [(:id m) meta] q))))
+                                                      models)))
+                                  ;; Auto-register pricing
+                                    (doseq [m models]
+                                      (when-let [cost (:cost m)]
+                                        (let [rates [(or (:input cost) 0)
+                                                     (or (:output cost) 0)]]
+                                          (when-not gateway?
+                                            (swap! pricing/token-costs assoc (:id m) rates))
+                                          (swap! pricing/token-costs assoc
+                                                 (qualify (:id m)) rates))))))))
          :unregisterProvider (fn [name]
                                ((:unregister (:provider-registry agent)) name))
 

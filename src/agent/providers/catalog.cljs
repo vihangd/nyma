@@ -14,27 +14,32 @@
             [clojure.string :as str]))
 
 (defn- model-cost
-  "[input-rate output-rate] per 1M tokens, or nil when unpriced (local models)."
-  [id declared]
+  "[input-rate output-rate] per 1M tokens, or nil when unpriced (local models).
+
+   Looks up by full `provider/id` spec, not the bare id: two providers can carry
+   the same model id, and for a relay the bare id would resolve to the vendor's
+   first-party rate rather than what the relay charges."
+  [spec declared]
   (or (when-let [c declared]
         (when (or (:input c) (:output c))
           [(or (:input c) 0) (or (:output c) 0)]))
-      (get @pricing/token-costs (str id))))
+      (pricing/lookup-cost (str spec))))
 
 (defn- entry-models [provider-name entry context-window-fn]
   (let [models (or (:models entry) [])]
     (keep (fn [m]
-            (let [m  (if (map? m) m (js->clj m :keywordize-keys true))
-                  id (or (:id m) (get m "id"))]
+            (let [m    (if (map? m) m (js->clj m :keywordize-keys true))
+                  id   (or (:id m) (get m "id"))
+                  ;; What the user types / what setModel expects.
+                  spec (str provider-name "/" id)]
               (when (seq (str id))
                 {:provider       provider-name
                  :id             (str id)
-                 ;; What the user types / what setModel expects.
-                 :spec           (str provider-name "/" id)
+                 :spec           spec
                  :name           (or (:name m) (str id))
                  :context-window (or (:context-window m)
-                                     (when context-window-fn (context-window-fn id)))
-                 :cost           (model-cost id (:cost m))
+                                     (when context-window-fn (context-window-fn spec)))
+                 :cost           (model-cost spec (:cost m))
                  :reasoning      (:reasoning m)})))
           models)))
 

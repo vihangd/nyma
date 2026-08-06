@@ -2,7 +2,7 @@
   (:require ["ai" :refer [streamText stepCountIs]]
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
-            [agent.pricing :refer [calculate-cost]]
+            [agent.pricing :refer [calculate-cost model-cost-key]]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
             [clojure.string :as str]))
@@ -354,7 +354,7 @@
                         (when (and usage store)
                           (let [input-tokens  (or (.-inputTokens usage) 0)
                                 output-tokens (or (.-outputTokens usage) 0)
-                                cost-model-id (str (:model (:config agent)))
+                                cost-model-id (model-cost-key (:config agent))
                                 cost          (calculate-cost cost-model-id input-tokens output-tokens)]
                             ((:dispatch! store) :usage-updated
                                                 {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
