@@ -31,6 +31,7 @@
    The advisor sees the full transcript but is invoked without tools,
    so it cannot recursively call advisor — loop-safe by construction."
   (:require ["ai" :refer [generateText]]
+            [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [clojure.string :as str]))
 
@@ -72,6 +73,22 @@ plain text; the executor will read it on its next turn.")
       (and adv (:provider adv) (:model adv))    {:provider (:provider adv) :model (:model adv)}
       (and deep (:provider deep) (:model deep)) {:provider (:provider deep) :model (:model deep)}
       :else                                     nil)))
+
+(def default-advisor-thinking
+  "The advisor's whole purpose is to reason harder than the executor, and it is
+   a low-volume, high-stakes call — so it opts in to extended thinking rather
+   than inheriting the session default of \"off\". Override with
+   settings.roles.advisor.thinking (\"off\" disables it)."
+  "high")
+
+(defn advisor-thinking-level
+  "Thinking level for the advisor: settings.roles.advisor.thinking, else high.
+   An unrecognised value falls back to the default rather than being sent."
+  [settings]
+  (let [adv   (:advisor (:roles settings))
+        raw   (or (:thinking adv) (get adv "thinking"))
+        level (str (or raw default-advisor-thinking))]
+    (if (thinking/valid-level? level) level default-advisor-thinking)))
 
 (defn format-transcript-for-advisor
   "Strip nyma-internal fields so the advisor sees a clean OpenAI-style
@@ -158,11 +175,25 @@ plain text; the executor will read it on its next turn.")
 
           :else
           (try
-            (let [result (js-await
-                          (gen-fn #js {:model           model
-                                       :system          advisor-system-prompt
-                                       :messages        (clj->js forwarded2)
-                                       :maxOutputTokens 2048}))
+            (let [;; The advisor exists to reason harder than the executor, so
+                  ;; it asks for extended thinking regardless of the session
+                  ;; level — a reviewer running at the session default of "off"
+                  ;; is the one call where that default is clearly wrong.
+                  ;; Overridable per role, including back to "off".
+                  think-level (advisor-thinking-level settings)
+                  think-opts  (thinking/level->provider-options think-level model)
+                  ;; Thinking needs headroom to think IN: Anthropic counts the
+                  ;; reasoning against max_tokens, so leaving this at 2048 with
+                  ;; a 24k budget makes the request invalid.
+                  max-out     (if think-opts
+                                (+ 2048 (thinking/budget-for-level think-level))
+                                2048)
+                  result (js-await
+                          (gen-fn (cond-> #js {:model           model
+                                               :system          advisor-system-prompt
+                                               :messages        (clj->js forwarded2)
+                                               :maxOutputTokens max-out}
+                                    think-opts (doto (aset "providerOptions" think-opts)))))
                   text   (str (.-text result))]
               (if warn (str warn text) text))
             (catch :default e

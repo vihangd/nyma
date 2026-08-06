@@ -57,10 +57,45 @@
     (-> (expect (count out)) (.toBe 1))
     (-> (expect (:content (first out))) (.toBe "real"))))
 
+;;; ─── advisor thinking level ─────────────────────────────────────
+
+(defn test-advisor-thinking-defaults-high []
+  ;; The advisor exists to reason harder than the executor, so it opts in
+  ;; rather than inheriting the session default of "off".
+  (-> (expect (adv/advisor-thinking-level {})) (.toBe "high"))
+  (-> (expect (adv/advisor-thinking-level
+               {:roles {:advisor {:provider "p" :model "m"}}}))
+      (.toBe "high")))
+
+(defn test-advisor-thinking-explicit []
+  (-> (expect (adv/advisor-thinking-level
+               {:roles {:advisor {:provider "p" :model "m" :thinking "low"}}}))
+      (.toBe "low")))
+
+(defn test-advisor-thinking-off []
+  (-> (expect (adv/advisor-thinking-level
+               {:roles {:advisor {:provider "p" :model "m" :thinking "off"}}}))
+      (.toBe "off")))
+
+(defn test-advisor-thinking-rejects-bogus []
+  ;; An unrecognised level must not be forwarded — the provider would 400.
+  (-> (expect (adv/advisor-thinking-level
+               {:roles {:advisor {:provider "p" :model "m" :thinking "turbo"}}}))
+      (.toBe "high")))
+
+(describe "advisor thinking level" (fn []
+                                     (it "defaults to high" test-advisor-thinking-defaults-high)
+                                     (it "honours an explicit level" test-advisor-thinking-explicit)
+                                     (it "can be turned off per role" test-advisor-thinking-off)
+                                     (it "falls back on an invalid level" test-advisor-thinking-rejects-bogus)))
+
 ;;; ─── consult-advisor (tool execute round-trip) ──────────────────
 
 (defn make-fake-api [{:keys [messages settings]}]
-  (let [resolved-model #js {:fake true :modelId "fake-model"}]
+  ;; A real resolved model always carries a `provider` tag, and thinking routes
+  ;; on it — a fixture without one silently exercises the no-reasoning path.
+  (let [resolved-model #js {:fake true :modelId "fake-model"
+                            :provider "anthropic.messages"}]
     #js {:getState     (fn [] {:messages (or messages [])})
          :resolveModel (fn [_p _m] resolved-model)
          :__state_atom (atom {:config {:model resolved-model}})
@@ -176,3 +211,59 @@
                 test-consult-falls-back-on-resolve-throw)
             (it "fails gracefully when no model is resolved"
                 test-consult-no-model-resolved)))
+
+;;; ─── thinking reaches the advisor's request ─────────────────────
+;;; Asserted on the config handed to generateText, not on the level: the level
+;;; was never the part that was broken — the advisor bypasses agent.loop, so
+;;; the session's thinking wiring never applied to it.
+
+(defn- capturing-gen [box]
+  (fn [cfg]
+    (reset! box cfg)
+    (js/Promise.resolve #js {:text "ok"})))
+
+(defn ^:async consult-with [settings]
+  (let [box (atom nil)
+        api (make-fake-api {:messages [{:role "user" :content "review this"}]})]
+    (js-await (adv/consult-advisor api settings {:gen-fn (capturing-gen box)}))
+    @box))
+
+(defn ^:async test-advisor-sends-thinking-by-default []
+  (let [cfg (js-await (consult-with {:roles {:advisor {:provider "x" :model "y"}}}))]
+    (-> (expect (.. cfg -providerOptions -anthropic -thinking -type)) (.toBe "enabled"))
+    (-> (expect (.. cfg -providerOptions -anthropic -thinking -budgetTokens))
+        (.toBeGreaterThanOrEqual 1024))))
+
+(defn ^:async test-advisor-raises-max-output-for-thinking []
+  ;; Anthropic counts reasoning against max_tokens, so the old flat 2048 cap
+  ;; would make a 24k-budget request invalid.
+  (let [cfg (js-await (consult-with {:roles {:advisor {:provider "x" :model "y"}}}))]
+    (-> (expect (.-maxOutputTokens cfg))
+        (.toBeGreaterThan (.. cfg -providerOptions -anthropic -thinking -budgetTokens)))))
+
+(defn ^:async test-advisor-thinking-off-sends-nothing []
+  (let [cfg (js-await (consult-with
+                       {:roles {:advisor {:provider "x" :model "y" :thinking "off"}}}))]
+    (-> (expect (.-providerOptions cfg)) (.toBeUndefined))
+    ;; And the output cap stays where it was.
+    (-> (expect (.-maxOutputTokens cfg)) (.toBe 2048))))
+
+(defn ^:async test-advisor-thinking-scales-with-level []
+  (let [low  (js-await (consult-with
+                        {:roles {:advisor {:provider "x" :model "y" :thinking "low"}}}))
+        high (js-await (consult-with
+                        {:roles {:advisor {:provider "x" :model "y" :thinking "high"}}}))]
+    (-> (expect (.. high -providerOptions -anthropic -thinking -budgetTokens))
+        (.toBeGreaterThan (.. low -providerOptions -anthropic -thinking -budgetTokens)))
+    (-> (expect (.-maxOutputTokens high)) (.toBeGreaterThan (.-maxOutputTokens low)))))
+
+(describe "advisor — thinking on the wire"
+          (fn []
+            (it "sends an enabled thinking block by default"
+                test-advisor-sends-thinking-by-default)
+            (it "raises maxOutputTokens above the reasoning budget"
+                test-advisor-raises-max-output-for-thinking)
+            (it "sends no provider options when turned off"
+                test-advisor-thinking-off-sends-nothing)
+            (it "scales budget and output cap with the level"
+                test-advisor-thinking-scales-with-level)))

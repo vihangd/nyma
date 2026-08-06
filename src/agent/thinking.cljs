@@ -66,6 +66,15 @@
       (= t "openai.responses")                  :openai-responses
       :else                                     nil)))
 
+(defn budget-for-level
+  "Reasoning token budget for `level`, or 0 for off/unknown.
+
+   Callers that set an explicit output cap need this: Anthropic counts thinking
+   against `max_tokens`, so a request with a 24k budget and a 2k cap is
+   rejected. The main loop doesn't hit this because it sets no cap."
+  [level]
+  (or (get anthropic-budgets (str level)) 0))
+
 (defn level->provider-options
   "providerOptions for `level` on `model`, or nil when nothing should be sent.
 
