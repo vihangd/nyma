@@ -211,16 +211,20 @@ Examples:
    Returns nil when neither is available so the caller can error out
    with a non-zero exit."
   [positionals]
-  (let [pos     (first positionals)
-        pos?    (and (string? pos) (pos? (count pos)))
-        piped?  (not (.-isTTY (.-stdin js/process)))
-        stdin   (when piped?
-                  (let [s (js-await (read-stdin-string))
-                        t (when s (.trim s))]
-                    (when (and t (pos? (count t))) t)))]
+  ;; NB: do not name a local `pos?`. `let` binds sequentially, so it shadows
+  ;; core/pos? for every later binding — the stdin branch below then called a
+  ;; boolean and print mode died with "pos_QMARK_2 is not a function" whenever
+  ;; stdin was not a TTY, i.e. in every pipe, script and CI invocation.
+  (let [pos      (first positionals)
+        has-pos? (and (string? pos) (pos? (count pos)))
+        piped?   (not (.-isTTY (.-stdin js/process)))
+        stdin    (when piped?
+                   (let [s (js-await (read-stdin-string))
+                         t (when s (.trim s))]
+                     (when (and t (pos? (count t))) t)))]
     (cond
-      (and pos? stdin) (str pos "\n\n" stdin)
-      pos?             pos
+      (and has-pos? stdin) (str pos "\n\n" stdin)
+      has-pos?             pos
       stdin            stdin
       :else            nil)))
 
