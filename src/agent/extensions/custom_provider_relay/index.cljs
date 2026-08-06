@@ -209,20 +209,35 @@
   [discovered declared]
   (mapv (fn [m] (merge m (dissoc (get declared (str (:id m))) :name))) discovered))
 
+(defn discovery-disabled?
+  "NYMA_NO_MODEL_DISCOVERY=1 suppresses every network call this extension makes.
+
+   Needed because discovery is on by default and reads the key from the ambient
+   environment: without it, `bun test` on a machine that happens to export
+   YUNWU_API_KEY would make live calls to a third party."
+  []
+  (let [v (aget js/process.env "NYMA_NO_MODEL_DISCOVERY")]
+    (and (seq (str (or v ""))) (not= "0" (str v)) (not= "false" (str v)))))
+
 (defn ^:async discover!
   "Register the cached list immediately, then refresh in the background when
-   stale. Never blocks startup and never throws."
-  [api entry]
+   stale. Never blocks startup and never throws.
+
+   `alive?` guards the late re-registration: a refresh in flight when the
+   extension is deactivated would otherwise resurrect a provider that
+   unregisterProvider has already removed."
+  [api entry alive?]
   (let [pred     (model-fetch/make-filter (:include entry) (:exclude entry))
         declared (declared-by-id entry)
         cached   (model-fetch/cached-models (:name entry) pred)]
-    (when (seq (:models cached))
+    (when (and (alive?) (seq (:models cached)))
       (register! api entry (merge-declared (:models cached) declared)))
-    (when-not (:fresh? cached)
+    (when (and (not (:fresh? cached)) (not (discovery-disabled?)))
       (when-let [key (resolve-key entry)]
         (when-let [fresh (js-await (model-fetch/refresh!
                                     (:name entry) (:base-url entry) key pred))]
-          (register! api entry (merge-declared fresh declared)))))))
+          (when (alive?)
+            (register! api entry (merge-declared fresh declared))))))))
 
 (defn ^:export default [api]
   (let [settings   (try (when (.-getSettings api) (.getSettings api))
@@ -232,7 +247,9 @@
                           (d/warn "relay-provider" (str "bad `providers` setting: " (.-message e)))
                           []))
         entries    (merge-entries presets user)
-        registered (atom [])]
+        registered (atom [])
+        disposed?  (atom false)
+        alive?     (fn [] (not @disposed?))]
 
     (doseq [entry entries]
       (when (and (seq (str (:name entry))) (seq (str (:base-url entry))))
@@ -242,13 +259,14 @@
           (register! api entry (:models entry))
           (swap! registered conj (:name entry))
           (when (:discover entry)
-            (-> (discover! api entry)
+            (-> (discover! api entry alive?)
                 (.catch (fn [e]
                           (d/warn "relay-provider" (str "discovery failed for " (:name entry) ": " (.-message e)))))))
           (catch :default e
             (d/warn "relay-provider" (str "failed to register " (:name entry) ": " (.-message e)))))))
 
     (fn []
+      (reset! disposed? true)
       (doseq [name @registered]
         (try (.unregisterProvider api name)
              (catch :default _ nil))))))

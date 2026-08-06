@@ -37,13 +37,20 @@
   [models id]
   (or (usable (get models id))
       (when-let [bare (bare-id id)] (usable (get models bare)))
-      ;; Fuzzy match: try prefix matching. `usable` matters most here — a
-      ;; gateway's own placeholder entry for this exact id is a prefix of
-      ;; itself, so without it the placeholder wins its own fuzzy match.
-      (some (fn [[k v]]
-              (let [prefix (subs k 0 (min 15 (count k)))]
-                (when (.startsWith id prefix) (usable v))))
-            models)))
+      ;; Fuzzy match, over BARE keys only, against the bare id.
+      ;;
+      ;; Qualified keys must be excluded. The 15-char prefix is shorter than
+      ;; many provider names — "yunwu-claude/" alone is 13 — so two models under
+      ;; one provider differ in as little as two characters of the prefix, and
+      ;; any model whose own window is unknown would inherit whichever sibling
+      ;; `some` reached first. Matching bare-to-bare keeps this doing what it was
+      ;; written for: letting an unrecognised dated id find its family.
+      (let [target (or (bare-id id) id)]
+        (some (fn [[k v]]
+                (when-not (.includes k "/")
+                  (let [prefix (subs k 0 (min 15 (count k)))]
+                    (when (.startsWith target prefix) (usable v)))))
+              models))))
 
 (defn create-model-registry
   "Creates a model registry with context window info.

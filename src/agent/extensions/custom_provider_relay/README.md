@@ -96,6 +96,10 @@ Discovery follows Claude Code's gateway contract, including the parts that exist
 - **no retries.** Gateways commonly throttle repeated auth failures; yunwu answers a bad key
   with a 120-second `429`, so a retry loop turns one typo into a two-minute outage.
 
+Set `NYMA_NO_MODEL_DISCOVERY=1` to suppress every network call this extension makes. The
+test suite sets it via `scripts/test-preload.mjs`, so `bun test` never reaches a gateway even
+on a machine that exports a real key.
+
 Filtering matters at relay scale. A gateway can expose hundreds of models — including image,
 audio and embedding endpoints nyma cannot drive — which would bury the handful you use. The
 `yunwu` preset excludes non-chat families; `yunwu-claude` includes only `claude`.

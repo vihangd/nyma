@@ -14,14 +14,27 @@
 (def ^:private real-home (.. js/process -env -HOME))
 (def ^:private real-fetch js/globalThis.fetch)
 
+;; Read at module load, before any test mutates it — otherwise this reads back
+;; whatever `restore!` last wrote and proves nothing about the preload.
+(def ^:private discovery-guard-at-load
+  (aget js/process.env "NYMA_NO_MODEL_DISCOVERY"))
+
 (defn- temp-home! []
   (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "nyma-relay-"))]
     (aset js/process.env "HOME" dir)
     dir))
 
+(defn- allow-discovery!
+  "Opt back in to network discovery, which scripts/test-preload.mjs disables for
+   the suite. Only safe once `fetch` is stubbed."
+  []
+  (js-delete js/process.env "NYMA_NO_MODEL_DISCOVERY")
+  nil)
+
 (defn- restore! []
   (aset js/process.env "HOME" real-home)
   (aset js/globalThis "fetch" real-fetch)
+  (aset js/process.env "NYMA_NO_MODEL_DISCOVERY" "1")
   (js-delete js/process.env "YUNWU_API_KEY")
   nil)
 
@@ -274,6 +287,7 @@
 
 (defn ^:async test-discovery-updates-catalogue-live []
   (temp-home!)
+  (allow-discovery!)
   (aset js/process.env "YUNWU_API_KEY" "sk-test")
   (aset js/globalThis "fetch"
         (fn [_url _opts]
@@ -301,6 +315,7 @@
 
 (defn ^:async test-discovery-failure-keeps-seed []
   (temp-home!)
+  (allow-discovery!)
   (aset js/process.env "YUNWU_API_KEY" "sk-test")
   (aset js/globalThis "fetch" (fn [_url _opts] (js/Response. "" #js {:status 500})))
   (let [agent   (create-agent {:model "test" :system-prompt "x"})
@@ -314,12 +329,31 @@
       (-> (expect (contains? specs "yunwu-claude/claude-opus-5")) (.toBe true)))
     (cleanup)))
 
+(defn ^:async test-discovery-off-by-default-in-tests []
+  ;; Guards the guard: several test files load every built-in extension, so if
+  ;; the preload ever stops applying, a machine with a real YUNWU_API_KEY
+  ;; exported would start making live third-party calls during `bun test`.
+  (-> (expect discovery-guard-at-load) (.toBe "1"))
+  (temp-home!)
+  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (let [calls (atom 0)]
+    (aset js/globalThis "fetch"
+          (fn [_url _opts] (swap! calls inc) (js/Response. "" #js {:status 200})))
+    (let [agent   (create-agent {:model "test" :system-prompt "x"})
+          api     (create-extension-api agent "relay")
+          cleanup ((aget relay "default") api)]
+      (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+      (-> (expect @calls) (.toBe 0))
+      (cleanup))))
+
 (describe "relay discovery" (fn []
                               (afterEach restore!)
                               (it "a background refresh updates the catalogue without a restart"
                                   test-discovery-updates-catalogue-live)
                               (it "a failed refresh leaves the seed list registered"
-                                  test-discovery-failure-keeps-seed)))
+                                  test-discovery-failure-keeps-seed)
+                              (it "makes no network calls under the suite's default guard"
+                                  test-discovery-off-by-default-in-tests)))
 
 ;; ── Extension registration ───────────────────────────────────
 

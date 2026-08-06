@@ -113,6 +113,28 @@
         ;; The bare entry is untouched.
                                                       (-> (expect ((:context-window reg) "claude-opus-5")) (.toBe 1000000)))))
 
+                                              (it "does not leak one gateway model's window to its siblings"
+                                                  (fn []
+        ;; The prefix match compares the first 15 chars, and "yunwu-claude/" is
+        ;; 13 of them — so qualified keys under one provider differ in as little
+        ;; as two characters. Matching those would make a single declared
+        ;; contextWindow silently apply to every unrecognized sibling.
+                                                    (let [reg (create-model-registry)]
+                                                      ((:register reg) {"yunwu-claude/claude-opus-5-thinking" {:context-window 200000}
+                                                                        "yunwu-claude/claude-unknown-model"   {:context-window nil}})
+                                                      (-> (expect ((:context-window reg) "yunwu-claude/claude-unknown-model"))
+                                                          (.toBe 100000)))))
+
+                                              (it "still fuzzy-matches an unrecognized dated id to its family"
+                                                  (fn []
+                                                    (let [reg (create-model-registry)]
+        ;; Bare-to-bare matching is what this was written for, and it keeps
+        ;; working through a provider prefix.
+                                                      (-> (expect ((:context-window reg) "claude-sonnet-4-20250514-preview"))
+                                                          (.toBe 200000))
+                                                      (-> (expect ((:context-window reg) "relay/claude-sonnet-4-20250514-preview"))
+                                                          (.toBe 200000)))))
+
                                               (it "keeps two providers' entries for the same model id distinct"
                                                   (fn []
                                                     (let [reg (create-model-registry)]
