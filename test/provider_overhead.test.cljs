@@ -98,3 +98,41 @@
                                                  (-> (expect (:overhead-tokens
                                                               (relay/normalize-entry #js {:name "g" :overheadTokens 0})))
                                                      (.toBeNil))))))
+
+;;; ─── The loop resolves the window on the qualified key ──────────
+;;; Model ids are not unique across providers. The loop used to look the window
+;;; up by bare id, so it read whichever provider registered last — while the
+;;; /model picker read the qualified key and showed a different number.
+
+(defn ^:async window-for-two-providers []
+  (let [agent  (create-agent {:model "shared-id" :system-prompt "You are a test agent."})
+        api    (create-extension-api agent "test-two")
+        budget (atom nil)]
+    ;; First provider declares a real window for the shared id.
+    (.registerProvider api "vendor"
+                       #js {:createModel (fn [id] id)
+                            :models #js [#js {:id "shared-id" :contextWindow 262144}]})
+    ;; Second carries the SAME id with a DIFFERENT window. Two real values, so
+    ;; the clobber guard can't mask this: the bare key resolves to whichever
+    ;; provider registered last, and only the qualified key is unambiguous.
+    (.registerProvider api "gateway"
+                       #js {:createModel (fn [id] id)
+                            :models #js [#js {:id "shared-id" :contextWindow 40000}]})
+    ;; Active model is the FIRST provider's.
+    (aset (:config agent) "model" #js {:modelId "shared-id"})
+    (aset (:config agent) "active-provider-name" "vendor")
+    ((:on (:events agent)) "context_assembly"
+     (fn [data] (reset! budget (.-tokenBudget data)) nil))
+    ((:on (:events agent)) "before_provider_request"
+     (fn [_config] #js {:block true :reason "ok"}))
+    (js-await (run agent "test"))
+    (.-contextWindow @budget)))
+
+(defn ^:async test-loop-uses-qualified-key []
+  ;; 40000 here means the bare id won and the loop read the OTHER provider's
+  ;; window for a model it isn't running.
+  (-> (expect (js-await (window-for-two-providers))) (.toBe 262144)))
+
+(describe "loop context window" (fn []
+  (it "resolves on the provider-qualified key, not the shared bare id"
+      test-loop-uses-qualified-key)))

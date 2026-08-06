@@ -7,7 +7,7 @@
      2. Context windows and prices were keyed by bare model id in a global map,
         so a relay carrying `claude-opus-5` overwrote anthropic's entry."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
-            [agent.model-info :refer [create-model-registry]]
+            [agent.model-info :as model-info :refer [create-model-registry]]
             [agent.pricing :as pricing]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]))
@@ -180,3 +180,83 @@
                                                                   (-> (expect (contains? @pricing/unpriced-providers "relayco")) (.toBe true))
         ;; And the relayed model reports no price rather than the vendor's.
                                                                   (-> (expect (pricing/lookup-cost "relayco/claude-opus-5")) (.toBeNil)))))))
+
+;;; ─── One context-window answer, not four ────────────────────────
+;;; The /model picker resolved the provider-qualified key while the loop,
+;;; compaction, headroom and pi-rpc all resolved the bare model id. Model ids
+;;; are not unique across providers, so the two disagreed — the picker showed
+;;; 262144 for kimi/kimi-k2.5 while the loop planned against 100000.
+
+(defn- registry-in-load-order
+  "kimi registers before opencode-zen (extensions load alphabetically). Zen
+   carries the same kimi-k2.5 id and declares NO window for it."
+  []
+  (let [reg (create-model-registry)]
+    ((:register reg) {"kimi/kimi-k2.5" {:context-window 262144}
+                      "kimi-k2.5"      {:context-window 262144}})
+    ((:register reg) {"opencode-zen/kimi-k2.5" {:context-window nil}
+                      "kimi-k2.5"              {:context-window nil}})
+    reg))
+
+(describe "context window has one answer" (fn []
+  (it "the picker and the runtime resolve the same number"
+      (fn []
+        (let [reg   (registry-in-load-order)
+              cw    (:context-window reg)
+              ;; What catalog/entry-models passes for the picker.
+              picker (cw "kimi/kimi-k2.5")
+              ;; What loop / compaction / headroom pass now.
+              runtime (cw (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))]
+          (-> (expect runtime) (.toBe picker))
+          (-> (expect runtime) (.toBe 262144)))))
+
+  (it "a provider declaring no window cannot clobber one that does"
+      (fn []
+        (let [cw (:context-window (registry-in-load-order))]
+          (-> (expect (cw "kimi-k2.5")) (.toBe 262144)))))
+
+  (it "the guard holds in the opposite registration order too"
+      (fn []
+        (let [reg (create-model-registry)]
+          ((:register reg) {"kimi-k2.5" {:context-window nil}})
+          ((:register reg) {"kimi-k2.5" {:context-window 262144}})
+          (-> (expect ((:context-window reg) "kimi-k2.5")) (.toBe 262144)))))
+
+  (it "a real window still replaces another real window"
+      (fn []
+        ;; The guard must not freeze the first value in place — only reject
+        ;; entries that carry nothing.
+        (let [reg (create-model-registry)]
+          ((:register reg) {"m" {:context-window 1000}})
+          ((:register reg) {"m" {:context-window 2000}})
+          (-> (expect ((:context-window reg) "m")) (.toBe 2000)))))
+
+  (it "an undeclared model still falls back to the vendor's own entry"
+      (fn []
+        ;; opencode-zen carries kimi-k2.5 without a window; the qualified lookup
+        ;; falls through to the bare id, which kimi declared.
+        (let [cw (:context-window (registry-in-load-order))]
+          (-> (expect (cw "opencode-zen/kimi-k2.5")) (.toBe 262144)))))))
+
+(describe "model-info/model-key" (fn []
+  (it "qualifies a resolved model object"
+      (fn []
+        (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
+            (.toBe "kimi/kimi-k2.5"))))
+
+  (it "never stringifies the object"
+      (fn []
+        (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
+            (.not.toContain "object Object"))))
+
+  (it "accepts a plain string on the unknown-provider path"
+      (fn []
+        (-> (expect (model-info/model-key "p" "some-model")) (.toBe "p/some-model"))))
+
+  (it "falls back to the bare id when no provider is recorded"
+      (fn []
+        (-> (expect (model-info/model-key "" #js {:modelId "gpt-4o"})) (.toBe "gpt-4o"))))
+
+  (it "returns a lookup-safe value for a missing model"
+      (fn []
+        (-> (expect (model-info/model-key "p" nil)) (.toBe "unknown"))))))

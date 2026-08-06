@@ -89,3 +89,51 @@
                                                                                                                      (js/JSON.stringify #js {:type "abort" :id "7"}))))
                                                                                      (.then (fn [out]
                                                                                               (-> (expect (.-success (first out))) (.toBe true)))))))))
+
+;;; ─── Resolved model objects (regression) ────────────────────────
+;;; The harness above uses a STRING model, which is why this went unnoticed:
+;;; once a provider registry resolves a model, `config.model` holds the AI SDK
+;;; model OBJECT. That was passed straight through as the id, so the client
+;;; received "[object Object]" as id and name, and the registry lookup
+;;; stringified to the same — pinning contextWindow to the 100000 default for
+;;; every model.
+
+(defn- make-agent-with-resolved-model []
+  (let [cfg #js {:model #js {:modelId "kimi-k2.5" :provider "openai.chat"}}]
+    (aset cfg "active-provider-name" "kimi")
+    {:config         cfg
+     ;; Only the provider-qualified key carries the real window, exactly as the
+     ;; registry behaves once two providers declare the same bare id.
+     :model-registry {:context-window (fn [k]
+                                        (if (= k "kimi/kimi-k2.5") 262144 100000))}
+     :thinking-level (atom "off")
+     :state          (atom {:messages []})
+     :follow-queue   (atom [])
+     :session        (atom {:get-file-path (fn [] "/tmp/s.jsonl")
+                            :get-session-name (fn [] "sess1")})
+     :abort-controller (atom (js/AbortController.))
+     :commands       (atom {})}))
+
+(describe "pi-rpc with a resolved model object"
+  (fn []
+    (it "reports the model id, not [object Object]"
+        (fn []
+          (-> (capture (fn []
+                         (pi/handle-line (make-agent-with-resolved-model) (st)
+                                         (js/JSON.stringify #js {:type "get_state" :id "1"}))))
+              (.then (fn [rs]
+                       (let [r (first (filter #(= "get_state" (.-command %)) rs))]
+                         (-> (expect (.. r -data -model -id)) (.toBe "kimi-k2.5"))
+                         (-> (expect (.. r -data -model -name)) (.toBe "kimi-k2.5"))
+                         (-> (expect (.includes (str (.. r -data -model -id)) "object Object"))
+                             (.toBe false))))))))
+
+    (it "resolves the window through the provider-qualified key"
+        (fn []
+          (-> (capture (fn []
+                         (pi/handle-line (make-agent-with-resolved-model) (st)
+                                         (js/JSON.stringify #js {:type "get_state" :id "2"}))))
+              (.then (fn [rs]
+                       (let [r (first (filter #(= "get_state" (.-command %)) rs))]
+                         ;; 100000 here would mean the bare id (or the object) was used.
+                         (-> (expect (.. r -data -model -contextWindow)) (.toBe 262144))))))))))

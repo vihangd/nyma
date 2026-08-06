@@ -268,11 +268,16 @@ with every section below present.
   "Summarize older messages when context approaches model limits.
    Extensions can intercept via 'before_compact' event.
    Accepts optional model-registry for accurate context windows."
-  [session model events & [{:keys [custom-instructions model-registry gen-fn]}]]
+  [session model events & [{:keys [custom-instructions model-registry gen-fn
+                                   model-key]}]]
   (let [context ((:build-context session))
         usage   (te/estimate-messages-tokens context)
+        ;; `model-key` is the provider-qualified key; callers that have the
+        ;; agent config should pass it, since a bare model id is ambiguous across
+        ;; providers and resolves to whichever registered last.
+        lookup  (or model-key (or (.-modelId model) "unknown"))
         limit   (if model-registry
-                  ((:context-window model-registry) (or (.-modelId model) "unknown"))
+                  ((:context-window model-registry) lookup)
                   100000)]
 
     (when (> usage (* limit 0.85))

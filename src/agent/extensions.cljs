@@ -3,6 +3,7 @@
             [agent.extension-context :refer [create-extension-context]]
             [agent.token-estimation :as te]
             [agent.providers.registry :as registry-utils :refer [build-provider-entry]]
+            [agent.model-info :as model-info]
             [agent.pricing :as pricing]
             [agent.ui.tool-renderer-registry :as tool-renderers]
             [agent.ui.status-line-segments :as status-segments]
@@ -405,7 +406,13 @@
                                                (nil? m)    "unknown"
                                                (string? m) m
                                                :else       (or (.-modelId m) "unknown"))
-                                    window   ((:context-window (:model-registry agent)) model-id)
+                                    ;; Provider-qualified: a bare id is ambiguous
+                                    ;; across providers and read whichever one
+                                    ;; registered last, so headroom (which reads
+                                    ;; this) could plan against another provider's
+                                    ;; window for the same model name.
+                                    window   ((:context-window (:model-registry agent))
+                                              (model-info/config-model-key (:config agent)))
                                     state    @(:state agent)
                                     msgs-used (te/estimate-messages-tokens (:messages state))
                                     ;; Add a fixed overhead for system prompt + tool schemas.

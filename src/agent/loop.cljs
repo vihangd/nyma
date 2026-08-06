@@ -2,6 +2,7 @@
   (:require ["ai" :refer [streamText stepCountIs]]
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
+            [agent.model-info :as model-info]
             [agent.pricing :refer [calculate-cost model-cost-key]]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
@@ -141,9 +142,18 @@
 
             ;; Compute token budget for context_assembly
             model-id       (str (or (.-modelId active-model) active-model "unknown"))
+            ;; Lookups use the provider-QUALIFIED key; the bare id above stays as
+            ;; the label in event payloads, which extensions match on. Model ids
+            ;; are not unique across providers, so a bare lookup read whichever
+            ;; provider registered last. on-resolve in model_roles routes through
+            ;; setModel, so active-provider-name and the active model always
+            ;; describe the same choice.
+            model-key      (model-info/model-key
+                            (aget (:config agent) "active-provider-name")
+                            active-model)
             model-registry (:model-registry agent)
             context-window (if model-registry
-                             ((:context-window model-registry) model-id)
+                             ((:context-window model-registry) model-key)
                              100000)
             input-budget   (- context-window (js/Math.floor (* context-window 0.3)))
             ;; Tokens the provider adds to every request that we never see.

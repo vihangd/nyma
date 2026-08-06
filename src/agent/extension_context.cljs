@@ -1,5 +1,6 @@
 (ns agent.extension-context
-  (:require [agent.sessions.compaction :refer [compact]]
+  (:require [agent.model-info :as model-info]
+            [agent.sessions.compaction :refer [compact]]
             [agent.token-estimation :as te]))
 
 (defn create-extension-context
@@ -50,8 +51,14 @@
          ;; Compaction
          :compact            (fn [opts]
                                (when-let [session @(:session agent)]
+                                 ;; The registry was never passed, so compaction
+                                 ;; fell back to a hardcoded 100000 and ignored
+                                 ;; the model's real window entirely.
                                  (compact session (:model (:config agent)) (:events agent)
-                                          opts)))
+                                          (merge {:model-registry (:model-registry agent)
+                                                  :model-key (model-info/config-model-key
+                                                              (:config agent))}
+                                                 (js->clj opts :keywordize-keys true)))))
 
          ;; System prompt
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))

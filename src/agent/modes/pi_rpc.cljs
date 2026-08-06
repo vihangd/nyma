@@ -15,6 +15,7 @@
    (errors, debug) goes to stderr via js/console.error."
   (:require ["node:readline" :as readline]
             [agent.loop :refer [run steer follow-up]]
+            [agent.model-info :as model-info]
             [clojure.string :as str]))
 
 ;; ── stdout: the one and only protocol writer ───────────────────
@@ -71,10 +72,20 @@
 ;; ── get_state ──────────────────────────────────────────────────
 
 (defn- model-obj [agent]
+  ;; `config.model` holds the RESOLVED AI SDK model object, not an id. Sending it
+  ;; through as `mid` meant the client received "[object Object]" as both id and
+  ;; name, and the registry lookup stringified to the same, so contextWindow was
+  ;; ALWAYS the 100000 default regardless of model.
   (let [cfg  (:config agent)
-        mid  (or (.-model cfg) "")
+        m    (.-model cfg)
         prov (or (aget cfg "active-provider-name") "")
-        cw   (try ((:context-window (:model-registry agent)) mid) (catch :default _ nil))]
+        mid  (cond
+               (nil? m)    ""
+               (string? m) m
+               :else       (str (or (.-modelId m) "")))
+        cw   (try ((:context-window (:model-registry agent))
+                   (model-info/model-key prov m))
+                  (catch :default _ nil))]
     {:id mid :name mid :provider prov :api prov
      :contextWindow (or cw 100000)
      :maxTokens (or (aget cfg "max-tokens") (.-maxTokens cfg) 8192)}))

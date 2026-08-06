@@ -13,6 +13,34 @@
    "gpt-4o-mini"              {:context-window 128000}
    "gemini-2.0-flash"         {:context-window 1000000}})
 
+(defn model-key
+  "Registry lookup key for a model: `provider/id` when both are known.
+
+   Every consumer must use this. Model ids are NOT unique across providers —
+   opencode-zen and kimi both carry `kimi-k2.5` — so a bare id is ambiguous, and
+   callers that used one were reading whichever provider registered last.
+
+   `model` is the resolved AI SDK model object, or a plain string on the
+   unknown-provider path where setModel leaves the spec in place. Note the
+   object stringifies to \"[object Object]\", so passing it straight through
+   silently matches nothing — that is exactly what pi_rpc did."
+  [provider model]
+  (let [id (cond
+             (nil? model)    ""
+             (string? model) model
+             :else           (str (or (.-modelId model) "")))
+        p  (str (or provider ""))]
+    (cond
+      (and (seq p) (seq id)) (str p "/" id)
+      (seq id)               id
+      :else                  "unknown")))
+
+(defn config-model-key
+  "`model-key` for the model currently on an agent's config."
+  [config]
+  (when config
+    (model-key (aget config "active-provider-name") (aget config "model"))))
+
 ;; Provider/model splitting mirrors registry/split-model-spec: FIRST slash only,
 ;; since model ids carry slashes of their own (meta-llama/llama-3.3-70b).
 (defn- bare-id [id]
@@ -61,7 +89,22 @@
             (or (resolve-entry @models (str model-id))
                 {:context-window 100000}))
      :register (fn [entries]
-                 (swap! models merge entries))
+                 ;; NOT a plain merge. Providers share the bare-id namespace, so
+                 ;; a provider that declares no window for an id another provider
+                 ;; DID declare would otherwise overwrite the real value with
+                 ;; nothing — silently, and depending only on load order.
+                 ;; Observed: kimi-k2.5 went 262144 -> the default the moment
+                 ;; opencode-zen registered, since Zen omits that model's window.
+                 ;; An entry with no window is not an answer, so it never
+                 ;; displaces one that is.
+                 (swap! models
+                        (fn [current]
+                          (reduce-kv (fn [acc k v]
+                                       (if (and (usable (get acc k)) (not (usable v)))
+                                         acc
+                                         (assoc acc k v)))
+                                     current
+                                     entries))))
      :context-window (fn [model-id]
                        (:context-window
                         (or (resolve-entry @models (str model-id))

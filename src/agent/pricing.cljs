@@ -1,4 +1,5 @@
-(ns agent.pricing)
+(ns agent.pricing
+  (:require [agent.model-info :as model-info]))
 
 ;; Model pricing: [input-rate-per-1M-tokens, output-rate-per-1M-tokens] in USD
 (def token-costs
@@ -50,20 +51,11 @@
 (defn model-cost-key
   "Pricing key for the model currently on `config`, as `provider/id`.
 
-   `config.model` holds the RESOLVED AI SDK model object once the provider
-   registry resolved it, not a spec string — so `(str …)` on it yields
-   \"[object Object]\" and every lookup missed, silently reporting $0 for every
-   registry-resolved model. Falls back to the bare id, then to the raw value
-   for the unknown-provider path where setModel leaves the spec string in place."
+   Delegates to `model-info/config-model-key`: pricing and context windows need
+   the same key, and having two hand-rolled versions is how they drifted apart.
+   See that fn for why a bare id (or the raw model object) is not usable here."
   [config]
-  (let [model    (when config (aget config "model"))
-        provider (when config (aget config "active-provider-name"))
-        id       (when (and model (not (string? model))) (.-modelId model))]
-    (cond
-      (and (seq (str provider)) (seq (str id))) (str provider "/" id)
-      (seq (str id))                            (str id)
-      (string? model)                           model
-      :else                                     "")))
+  (or (model-info/config-model-key config) ""))
 
 (defn calculate-cost
   "Calculate USD cost for a given model and token counts.
