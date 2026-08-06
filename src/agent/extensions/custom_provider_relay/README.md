@@ -167,6 +167,35 @@ expose the same endpoints. Point `baseUrl` at yours and both protocols work:
 ]}
 ```
 
+## Audit what a gateway injects before you trust it
+
+A relay can prepend anything it likes to your requests, and you pay for it. Measured on
+yunwu's Claude path: a request whose entire payload was the word `hi` billed **6,765 input
+tokens**, of which 5,478 were cache reads on the very first call — a fixed prefix shared
+across the gateway's users.
+
+Asked to describe its own context, the model reported a full agentic-IDE system prompt and
+named the product as **Kiro**, an AWS development environment. Consistent with a relay
+reselling Kiro capacity and replaying that client's prompt so traffic looks native.
+
+Consequences worth knowing before pointing real work at any gateway:
+
+- **Your system prompt is added to theirs, not substituted for it.** A ~220-token system
+  prompt of our own grew the request by 475 tokens, so both are present — and nyma's
+  instructions then compete with the injected persona's. Replies come back in the injected
+  house style rather than nyma's.
+- **Context accounting under-reports.** nyma estimates locally, and yunwu returns `404` for
+  `/v1/messages/count_tokens`, so there is no way to see the real figure short of reading
+  `usage` off a response.
+- **The overhead is not a constant.** Observed 6,765 / 6,791 / 7,030 / 7,240 / 7,501 across
+  five requests, with cache reads swinging 5,478 → 6,075.
+- Cost is mostly cache reads, which bill at a fraction of fresh input — but it is not zero,
+  and it is charged on every turn.
+
+To check any gateway yourself, send a one-word prompt with no system prompt and read
+`usage.inputTokens` off the response. Anything far above the size of what you sent is
+injection.
+
 ## Known limitations
 
 - New API rewraps every upstream error as `{"error":{"type":"new_api_error"}}`, so error
