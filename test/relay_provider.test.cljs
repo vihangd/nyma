@@ -130,36 +130,56 @@
 (describe "model-fetch/make-filter" (fn []
                                       (it "passes everything when no patterns are given"
                                           (fn []
-                                            (let [p (mf/make-filter [] [])]
+                                            (let [p (mf/make-filter {})]
                                               (-> (expect (p "anything")) (.toBe true)))))
 
                                       (it "treats include as an allow-list"
                                           (fn []
-                                            (let [p (mf/make-filter ["claude"] [])]
+                                            (let [p (mf/make-filter {:include ["claude"]})]
                                               (-> (expect (p "claude-opus-5")) (.toBe true))
                                               (-> (expect (p "gpt-5.2")) (.toBe false)))))
 
                                       (it "subtracts exclude"
                                           (fn []
-                                            (let [p (mf/make-filter [] ["embedding"])]
+                                            (let [p (mf/make-filter {:exclude ["embedding"]})]
                                               (-> (expect (p "text-embedding-3")) (.toBe false))
                                               (-> (expect (p "gpt-5.2")) (.toBe true)))))
 
                                       (it "lets exclude override include"
                                           (fn []
-                                            (let [p (mf/make-filter ["claude"] ["preview"])]
+                                            (let [p (mf/make-filter {:include ["claude"] :exclude ["preview"]})]
                                               (-> (expect (p "claude-opus-5")) (.toBe true))
                                               (-> (expect (p "claude-opus-5-preview")) (.toBe false)))))
 
                                       (it "supports /regex/ patterns"
                                           (fn []
-                                            (let [p (mf/make-filter ["/^gpt-5/"] [])]
+                                            (let [p (mf/make-filter {:include ["/^gpt-5/"]})]
                                               (-> (expect (p "gpt-5.2")) (.toBe true))
                                               (-> (expect (p "not-gpt-5")) (.toBe false)))))
 
+                                      (it "keeps only models the gateway serves over our protocol"
+                                          (fn []
+        ;; Shapes taken verbatim from a real yunwu /v1/models response.
+                                            (let [p (mf/make-filter {:endpoint-types ["openai"]})]
+                                              (-> (expect (p {:id "glm-4.7" :endpoints ["openai"]})) (.toBe true))
+                                              (-> (expect (p {:id "gemini-2.5-flash" :endpoints ["gemini" "openai"]})) (.toBe true))
+                                              (-> (expect (p {:id "BAAI/bge-reranker-v2-m3" :endpoints ["rerank"]})) (.toBe false))
+                                              (-> (expect (p {:id "mj_inpaint" :endpoints ["mj动作"]})) (.toBe false))
+                                              (-> (expect (p {:id "wan2.5-i2v-preview" :endpoints ["wan视频生成"]})) (.toBe false))
+                                              (-> (expect (p {:id "gpt-4o-transcribe" :endpoints ["语音转文字"]})) (.toBe false))
+        ;; Supports nothing at all — a dead catalogue entry.
+                                              (-> (expect (p {:id "wen-max-2025-01-25" :endpoints []})) (.toBe false)))))
+
+                                      (it "does not filter gateways that don't report endpoint types"
+                                          (fn []
+        ;; supported_endpoint_types is a New API extension, not standard OpenAI.
+        ;; Filtering on an absent field would silently yield an empty catalogue.
+                                            (let [p (mf/make-filter {:endpoint-types ["openai"]})]
+                                              (-> (expect (p {:id "some-model"})) (.toBe true)))))
+
                                       (it "matches case-insensitively"
                                           (fn []
-                                            (let [p (mf/make-filter ["CLAUDE"] [])]
+                                            (let [p (mf/make-filter {:include ["CLAUDE"]})]
                                               (-> (expect (p "claude-opus-5")) (.toBe true)))))))
 
 ;; ── /v1/models parsing ───────────────────────────────────────
@@ -185,6 +205,18 @@
                                            (fn []
                                              (let [ms (mf/parse-models #js {:data #js [#js {:id ""} #js {} #js {:id "ok"}]})]
                                                (-> (expect (count ms)) (.toBe 1)))))
+
+                                       (it "carries supported_endpoint_types through as :endpoints"
+                                           (fn []
+                                             (let [ms (mf/parse-models
+                                                       #js {:data #js [#js {:id "glm-4.7"
+                                                                            :supported_endpoint_types #js ["openai"]}]})]
+                                               (-> (expect (:endpoints (first ms))) (.toEqual #js ["openai"])))))
+
+                                       (it "leaves :endpoints absent when the gateway omits the field"
+                                           (fn []
+                                             (-> (expect (:endpoints (first (mf/parse-models #js {:data #js [#js {:id "a"}]}))))
+                                                 (.toBeUndefined))))
 
                                        (it "returns nil for a non-array payload"
                                            (fn []
@@ -280,7 +312,7 @@
                                     (fn []
                                       (temp-home!)
                                       (mf/write-cache! "g" [{:id "claude-opus-5"} {:id "gpt-5.2"}])
-                                      (let [got (mf/cached-models "g" (mf/make-filter ["claude"] []))]
+                                      (let [got (mf/cached-models "g" (mf/make-filter {:include ["claude"]}))]
                                         (-> (expect (mapv :id (:models got))) (.toEqual #js ["claude-opus-5"])))))))
 
 ;; ── Live catalogue refresh ───────────────────────────────────

@@ -74,6 +74,7 @@ replace it.
 | `credentialName` | `name` | Which `/login` entry to read, for gateways registered twice. |
 | `api` | `openai-compatible` | Or `anthropic` for the native Messages API. |
 | `discover` | `true` | Fetch the model list from `GET <baseUrl>/models`. |
+| `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `models` | `[]` | Seed list, and per-model `contextWindow` / `cost` overrides. |
@@ -101,8 +102,23 @@ test suite sets it via `scripts/test-preload.mjs`, so `bun test` never reaches a
 on a machine that exports a real key.
 
 Filtering matters at relay scale. A gateway can expose hundreds of models — including image,
-audio and embedding endpoints nyma cannot drive — which would bury the handful you use. The
-`yunwu` preset excludes non-chat families; `yunwu-claude` includes only `claude`.
+audio and retrieval endpoints nyma cannot drive — which would bury the handful you use.
+
+Prefer `endpointTypes` over `include`/`exclude` where the gateway supports it. New API
+reports `supported_endpoint_types` per model, which is its own statement of what it will
+serve rather than a guess from the name:
+
+```
+glm-4.7                  ["openai"]          ← kept
+gemini-2.5-flash         ["gemini","openai"] ← kept
+BAAI/bge-reranker-v2-m3  ["rerank"]          ← dropped
+mj_inpaint               ["mj动作"]           ← dropped
+gpt-4o-transcribe        ["语音转文字"]        ← dropped
+wen-max-2025-01-25       []                  ← dropped, serves nothing
+```
+
+The field is a New API extension, not standard OpenAI, so models that don't declare it are
+never filtered on it — a gateway that omits it isn't reduced to an empty catalogue.
 
 ### Context windows and prices
 

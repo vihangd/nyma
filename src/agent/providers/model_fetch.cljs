@@ -47,7 +47,9 @@
                               (keep (fn [m]
                                       (let [id (or (.-id m) (aget m "id"))]
                                         (when (and (string? id) (seq id))
-                                          {:id id :name (or (.-name m) id)}))))
+                                          (cond-> {:id id :name (or (.-name m) id)}
+                                            (js/Array.isArray (aget m "endpoints"))
+                                            (assoc :endpoints (vec (aget m "endpoints"))))))))
                               vec)
              :fetched-at (or (.-fetchedAt parsed) 0)}))
         (catch :default _ nil)))))
@@ -87,37 +89,60 @@
         (fn [s] (str/includes? (str/lower-case s) needle))))))
 
 (defn make-filter
-  "Predicate over model ids. `include` (when non-empty) is an allow-list;
-   `exclude` always subtracts. Both are vectors of substrings or `/regex/`.
+  "Predicate over a model map `{:id :endpoints}`.
 
    Filtering is not cosmetic at relay scale: a gateway can expose hundreds of
-   models, which drowns the picker and buries the handful anyone actually uses."
-  [include exclude]
+   models — many of them image, audio and rerank endpoints nyma cannot drive —
+   which drowns the picker and buries the handful anyone uses.
+
+     :endpoint-types  required `supported_endpoint_types`, matched as ANY-of.
+                      Applied only to models that declare the field, so a
+                      gateway that doesn't report it isn't filtered to nothing.
+     :include         allow-list over the id; substrings or `/regex/`
+     :exclude         subtracted from the above
+
+   Endpoint types beat id patterns where available: they're the gateway's own
+   statement of what it will serve, rather than a guess from the name."
+  [{:keys [include exclude endpoint-types]}]
   (let [inc-preds (mapv pattern->pred (or include []))
-        exc-preds (mapv pattern->pred (or exclude []))]
-    (fn [id]
-      (let [s (str id)]
+        exc-preds (mapv pattern->pred (or exclude []))
+        wanted    (set (map str (or endpoint-types [])))]
+    (fn [m]
+      (let [m   (if (map? m) m {:id m})
+            s   (str (:id m))
+            eps (:endpoints m)]
         (boolean
-         (and (or (empty? inc-preds) (some (fn [p] (p s)) inc-preds))
+         (and (or (empty? wanted)
+                  (nil? eps)
+                  (some (fn [e] (contains? wanted (str e))) eps))
+              (or (empty? inc-preds) (some (fn [p] (p s)) inc-preds))
               (not (some (fn [p] (p s)) exc-preds))))))))
 
 ;; ── Fetch ────────────────────────────────────────────────────
 
 (defn parse-models
-  "Extract [{:id :name}] from an OpenAI-shaped `/v1/models` payload.
+  "Extract [{:id :name :endpoints}] from a `/v1/models` payload.
 
-   New API returns `{id, object, owned_by}` — no context window and no pricing —
-   so those stay nil here and are supplied by the settings entry or resolved
-   from the model registry by the vendor's own id."
+   Carries no context window and no pricing — New API returns neither — so those
+   come from the settings entry, or are resolved from the model registry by the
+   vendor's own id.
+
+   `supported_endpoint_types` is a New API extension, not standard OpenAI, and
+   it is the honest way to tell a chat model from an image or rerank endpoint:
+   it states which protocols the gateway will actually serve for that model.
+   Absent (any other gateway), `:endpoints` is nil and callers must not filter
+   on it."
   [payload]
   (let [data (when payload (.-data payload))]
     (when (js/Array.isArray data)
       (->> (vec data)
            (keep (fn [m]
-                   (let [id (.-id m)]
+                   (let [id  (.-id m)
+                         eps (aget m "supported_endpoint_types")]
                      (when (and (string? id) (seq id))
-                       {:id   id
-                        :name (or (.-display_name m) (.-name m) id)}))))
+                       (cond-> {:id   id
+                                :name (or (.-display_name m) (.-name m) id)}
+                         (js/Array.isArray eps) (assoc :endpoints (vec eps)))))))
            vec))))
 
 (defn ^:async fetch-models
@@ -158,7 +183,7 @@
   [provider-name base-url api-key pred]
   (let [fetched (js-await (fetch-models base-url api-key))]
     (when (seq fetched)
-      (let [kept (filterv (fn [m] (pred (:id m))) fetched)]
+      (let [kept (filterv pred fetched)]
         (write-cache! provider-name kept)
         kept))))
 
@@ -168,6 +193,6 @@
    first refresh."
   [provider-name pred]
   (when-let [entry (read-cache provider-name)]
-    (let [kept (filterv (fn [m] (pred (:id m))) (:models entry))]
+    (let [kept (filterv pred (:models entry))]
       (when (seq kept)
         {:models kept :fresh? (cache-fresh? entry)}))))

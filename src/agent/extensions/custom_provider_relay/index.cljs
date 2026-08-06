@@ -54,11 +54,14 @@
     :api-key-env "YUNWU_API_KEY"
     :api       "openai-compatible"
     :discover  true
-    :exclude   ["embedding" "rerank" "tts" "whisper" "image" "video"
-                "seedream" "flux" "midjourney" "suno"]
-    :models    [{:id "gpt-5.2"}
-                {:id "deepseek-v3.2"}
-                {:id "gemini-2.5-pro"}]}
+    ;; yunwu reports `supported_endpoint_types` per model, so we can ask for the
+    ;; protocol we speak instead of guessing from names. Its catalogue also
+    ;; carries image ("mj动作", "wan视频生成"), audio ("语音转文字") and
+    ;; retrieval ("rerank") endpoints, plus entries supporting nothing at all.
+    :endpoint-types ["openai"]
+    :models    [{:id "deepseek-v3.2"}
+                {:id "glm-4.7"}
+                {:id "gemini-2.5-flash"}]}
    {:name      "yunwu-claude"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"
@@ -102,6 +105,7 @@
                   (if (nil? v) true (boolean v)))
    :include     (->vec (entry-get e "include" "include"))
    :exclude     (->vec (entry-get e "exclude" "exclude"))
+   :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
    :models      (mapv (fn [m]
                         {:id             (entry-get m "id" "id")
                          :name           (entry-get m "name" "name")
@@ -227,7 +231,7 @@
    extension is deactivated would otherwise resurrect a provider that
    unregisterProvider has already removed."
   [api entry alive?]
-  (let [pred     (model-fetch/make-filter (:include entry) (:exclude entry))
+  (let [pred     (model-fetch/make-filter entry)
         declared (declared-by-id entry)
         cached   (model-fetch/cached-models (:name entry) pred)]
     (when (and (alive?) (seq (:models cached)))
