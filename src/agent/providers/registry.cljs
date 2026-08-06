@@ -20,6 +20,9 @@
         base (if (and (not (:max-tokens base)) (:maxTokens base))
                (assoc base :max-tokens (:maxTokens base))
                base)
+        base (if (and (not (:overhead-tokens base)) (:overheadTokens base))
+               (assoc base :overhead-tokens (:overheadTokens base))
+               base)
         ;; Normalize OAuth sub-keys
         base (if-let [oauth (:oauth base)]
                (let [oauth (if (and (not (:get-api-key oauth)) (:getApiKey oauth))

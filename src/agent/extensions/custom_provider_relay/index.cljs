@@ -117,6 +117,8 @@
    :include     (->vec (entry-get e "include" "include"))
    :exclude     (->vec (entry-get e "exclude" "exclude"))
    :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
+   :overhead-tokens (let [n (entry-get e "overheadTokens" "overhead-tokens")]
+                      (when (and (number? n) (pos? n)) n))
    :models      (mapv (fn [m]
                         {:id             (entry-get m "id" "id")
                          :name           (entry-get m "name" "name")
@@ -252,6 +254,9 @@
                                         entry
                                         (fn [id] (get (when endpoints-box @endpoints-box)
                                                       (str id))))
+                          ;; Tokens this gateway adds to every request that nyma
+                          ;; never sees, so context accounting can allow for them.
+                          :overheadTokens (or (:overhead-tokens entry) 0)
                           :baseUrl     (:base-url entry)
                           :apiKeyEnv   (or (:api-key-env entry) "")
                           :api         (:api entry)

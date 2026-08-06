@@ -145,7 +145,19 @@
             context-window (if model-registry
                              ((:context-window model-registry) model-id)
                              100000)
-            input-budget   (- context-window (js/Math.floor (* context-window 0.3)))]
+            input-budget   (- context-window (js/Math.floor (* context-window 0.3)))
+            ;; Tokens the provider adds to every request that we never see.
+            ;; A gateway that injects its own system prompt makes nyma's
+            ;; estimate silently low — measured at ~6.8k on one relay — and
+            ;; compaction then plans against a window it doesn't really have.
+            ;; Declared per provider, since only the operator can know it:
+            ;; Anthropic's count_tokens endpoint is often not proxied.
+            overhead       (let [reg (:provider-registry agent)
+                                 pname (aget (:config agent) "active-provider-name")
+                                 entry (when (and reg (seq (str (or pname ""))))
+                                         ((:get reg) (str pname)))
+                                 n     (:overhead-tokens entry)]
+                             (if (and (number? n) (pos? n)) n 0))]
 
         ;; Inject messages from extensions
         (when (seq inject-msgs)
@@ -162,7 +174,15 @@
                                   :systemPrompt effective-prompt
                                   :tokenBudget #js {:contextWindow context-window
                                                     :inputBudget   input-budget
-                                                    :tokensUsed    (te/estimate-messages-tokens messages)
+                                                    ;; Counted as used, not deducted from the
+                                                    ;; window: it genuinely occupies context, and
+                                                    ;; every consumer of this budget already
+                                                    ;; reasons about used-vs-window.
+                                                    :tokensUsed    (+ (te/estimate-messages-tokens messages)
+                                                                      overhead)
+                                                    ;; Broken out so a consumer can tell how much
+                                                    ;; of `tokensUsed` is not its own content.
+                                                    :overheadTokens overhead
                                                     :model         model-id}
                                   :providers   (clj->js @(:context-providers agent))}))
 

@@ -77,6 +77,7 @@ replace it.
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
+| `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |
 | `models` | `[]` | Seed list, and per-model `contextWindow` / `cost` overrides. |
 
 Credentials resolve as **env var → `/login` entry**. There is no fallback beyond that: a
@@ -213,6 +214,27 @@ cost with none of the caching.
 To check any gateway yourself, send a one-word prompt with no system prompt and read
 `usage.inputTokens` off the response. Anything far above the size of what you sent is
 injection.
+
+### Telling nyma about it: `overheadTokens`
+
+nyma estimates context locally, so an injected prefix is invisible to it and compaction
+plans against a window it does not actually have. Declare the measured figure and it is
+counted as used:
+
+```json
+{ "name": "yunwu-claude", "api": "anthropic",
+  "baseUrl": "https://yunwu.ai/v1", "apiKeyEnv": "YUNWU_API_KEY",
+  "overheadTokens": 6800 }
+```
+
+It is added to `tokenBudget.tokensUsed` and reported separately as
+`tokenBudget.overheadTokens`, so headroom, compaction and priority assembly all allow for
+it while a consumer can still tell how much of the total is not its own content. The
+reported `contextWindow` is left alone — that is the model's real capacity, and shrinking it
+would misreport the model rather than the gateway.
+
+No preset declares a value. The figure belongs to an account and a moment in time, and a
+stale hardcoded number would be worse than none — measure yours with the check above.
 
 ## Known limitations
 

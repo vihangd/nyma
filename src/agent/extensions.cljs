@@ -226,6 +226,11 @@
                                          :base-url      (or (.-baseUrl cfg-raw) (aget cfg-raw "base-url"))
                                          :api-key-env   (or (.-apiKeyEnv cfg-raw) (aget cfg-raw "api-key-env"))
                                          :api           (.-api cfg-raw)
+                                       ;; Tokens this provider adds to every
+                                       ;; request that nyma cannot see — a
+                                       ;; gateway's injected system prompt, say.
+                                         :overhead-tokens (or (.-overheadTokens cfg-raw)
+                                                              (aget cfg-raw "overhead-tokens"))
                                          :stream-fn     stream-fn
                                          :oauth         (when oauth-obj
                                                           {:name          (.-name oauth-obj)
