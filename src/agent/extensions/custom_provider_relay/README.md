@@ -174,9 +174,13 @@ yunwu's Claude path: a request whose entire payload was the word `hi` billed **6
 tokens**, of which 5,478 were cache reads on the very first call — a fixed prefix shared
 across the gateway's users.
 
-Asked to describe its own context, the model reported a full agentic-IDE system prompt and
-named the product as **Kiro**, an AWS development environment. Consistent with a relay
-reselling Kiro capacity and replaying that client's prompt so traffic looks native.
+Asked plainly what product it is, the model answers: *"I'm Kiro, an AI-powered development
+environment built by AWS."* Consistent with a relay reselling Kiro capacity and replaying
+that client's system prompt so traffic looks native.
+
+The injection is **not** protocol-specific. The same model over the OpenAI-compatible path
+bills the identical 6,765 tokens with the identical 5,478-token cache read, so switching
+`api` does not escape it.
 
 Consequences worth knowing before pointing real work at any gateway:
 
@@ -191,6 +195,20 @@ Consequences worth knowing before pointing real work at any gateway:
   five requests, with cache reads swinging 5,478 → 6,075.
 - Cost is mostly cache reads, which bill at a fraction of fresh input — but it is not zero,
   and it is charged on every turn.
+
+The cache split is what makes the `anthropic` variant worth using for Claude, and it is not
+visible from the totals:
+
+| path | input | cacheRead | cacheWrite | plain |
+| --- | --- | --- | --- | --- |
+| `anthropic` | 6,765 | 5,478 | 1,286 | 1 |
+| `openai-compatible` | 6,765 | 5,478 | 0 | 1,287 |
+
+Identical bills for one turn, but only the `anthropic` path writes to the cache — so on that
+path a conversation's own history is cached and read back cheaply on later turns, while on
+the OpenAI path nothing is ever cached and every turn pays fresh input for the lot. That is
+why the `yunwu` preset excludes Claude ids: routing them there would pay the same injection
+cost with none of the caching.
 
 To check any gateway yourself, send a one-word prompt with no system prompt and read
 `usage.inputTokens` off the response. Anything far above the size of what you sent is
