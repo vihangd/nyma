@@ -72,7 +72,7 @@ replace it.
 | `baseUrl` | — | Include the version segment, e.g. `.../v1`. |
 | `apiKeyEnv` | — | Env var holding the key. |
 | `credentialName` | `name` | Which `/login` entry to read, for gateways registered twice. |
-| `api` | `openai-compatible` | Or `anthropic` for the native Messages API. |
+| `api` | `openai-compatible` | Or `anthropic` (Messages API), or `openai-responses`. |
 | `discover` | `true` | Fetch the model list from `GET <baseUrl>/models`. |
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
@@ -119,6 +119,26 @@ wen-max-2025-01-25       []                  ← dropped, serves nothing
 
 The field is a New API extension, not standard OpenAI, so models that don't declare it are
 never filtered on it — a gateway that omits it isn't reduced to an empty catalogue.
+
+### Per-model protocol dispatch
+
+A gateway does not serve every model over every endpoint, so `api` is a default rather than
+a rule: when a model declares its endpoint types, those decide the wire protocol.
+
+```
+gpt-5.2   ["openai","openai-response"]  → /v1/chat/completions
+gpt-5.4   ["openai-response"]           → /v1/responses
+glm-4.7   ["openai"]                    → /v1/chat/completions
+```
+
+This matters on yunwu: much of the GPT-5.x line — `gpt-5.4`, `gpt-5-pro`, `gpt-5-codex`,
+`gpt-5.1-codex-max`, `gpt-5.2-pro` — is `/responses`-only and returns 404 on
+`/v1/chat/completions`. An `anthropic` entry always stays on the Messages API, since Claude
+ids advertise both and only that path preserves caching.
+
+The `yunwu` preset therefore excludes `claude`: those ids serve both protocols, so without
+it they would appear under both providers, and the copy under `yunwu` would silently lose
+prompt caching.
 
 ### Context windows and prices
 

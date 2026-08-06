@@ -315,6 +315,100 @@
                                       (let [got (mf/cached-models "g" (mf/make-filter {:include ["claude"]}))]
                                         (-> (expect (mapv :id (:models got))) (.toEqual #js ["claude-opus-5"])))))))
 
+;; ── Per-model protocol dispatch ──────────────────────────────
+;; Endpoint types below are verbatim from a live yunwu catalogue.
+
+(describe "relay/pick-protocol" (fn []
+                                  (let [oai {:api "openai-compatible"}]
+
+                                    (it "uses /chat when the model serves the chat endpoint"
+                                        (fn []
+                                          (-> (expect (relay/pick-protocol oai ["openai" "openai-response"])) (.toBe :chat))
+                                          (-> (expect (relay/pick-protocol oai ["openai"])) (.toBe :chat))))
+
+                                    (it "uses /responses for models that ONLY serve openai-response"
+                                        (fn []
+          ;; gpt-5.4, gpt-5-pro, gpt-5-codex, gpt-5.1-codex-max are all like this.
+          ;; Sending them to /chat/completions is a 404.
+                                          (-> (expect (relay/pick-protocol oai ["openai-response"])) (.toBe :responses))))
+
+                                    (it "falls back to the entry's api when the gateway reports no endpoints"
+                                        (fn []
+                                          (-> (expect (relay/pick-protocol oai nil)) (.toBe :chat))
+                                          (-> (expect (relay/pick-protocol {:api "openai-responses"} nil)) (.toBe :responses))
+                                          (-> (expect (relay/pick-protocol {:api "anthropic"} nil)) (.toBe :anthropic))))
+
+                                    (it "keeps an anthropic entry on the Messages API regardless of endpoints"
+                                        (fn []
+          ;; Claude ids advertise [anthropic, openai]; caching only survives the
+          ;; former, so the entry's api must win here.
+                                          (-> (expect (relay/pick-protocol {:api "anthropic"} ["anthropic" "openai"]))
+                                              (.toBe :anthropic)))))))
+
+(describe "relay preset filtering against a real catalogue" (fn []
+                                                              (let [ids-kept (fn [entry models]
+                                                                               (let [p (mf/make-filter entry)]
+                                                                                 (mapv :id (filterv p models))))
+        ;; A representative slice of the live response.
+                                                                    catalogue [{:id "claude-opus-5"          :endpoints ["anthropic" "openai"]}
+                                                                               {:id "claude-fable-5"         :endpoints ["anthropic" "openai"]}
+                                                                               {:id "gpt-5.2"                :endpoints ["openai" "openai-response"]}
+                                                                               {:id "gpt-5.4"                :endpoints ["openai-response"]}
+                                                                               {:id "glm-4.7"                :endpoints ["openai"]}
+                                                                               {:id "gpt-5.6-terra-ultra"    :endpoints []}
+                                                                               {:id "gpt-5-all"              :endpoints []}
+                                                                               {:id "BAAI/bge-reranker-v2-m3" :endpoints ["rerank"]}
+                                                                               {:id "mj_inpaint"             :endpoints ["mj动作"]}]]
+
+                                                                (it "the yunwu preset keeps chat and responses models, drops the rest"
+                                                                    (fn []
+                                                                      (let [kept (ids-kept {:endpoint-types ["openai" "openai-response"]
+                                                                                            :exclude ["claude"]}
+                                                                                           catalogue)]
+                                                                        (-> (expect kept) (.toEqual #js ["gpt-5.2" "gpt-5.4" "glm-4.7"])))))
+
+                                                                (it "drops entries that declare no endpoint at all"
+                                                                    (fn []
+          ;; gpt-5-all and gpt-5.6-terra-ultra are listed but unusable.
+                                                                      (let [kept (ids-kept {:endpoint-types ["openai" "openai-response"]} catalogue)]
+                                                                        (-> (expect (some #{"gpt-5-all"} kept)) (.toBeUndefined)))))
+
+                                                                (it "the yunwu-claude preset keeps exactly the anthropic-capable models"
+                                                                    (fn []
+                                                                      (let [kept (ids-kept {:endpoint-types ["anthropic"]} catalogue)]
+                                                                        (-> (expect kept) (.toEqual #js ["claude-opus-5" "claude-fable-5"])))))
+
+                                                                (it "keeps claude models off the openai variant, where caching would die"
+                                                                    (fn []
+                                                                      (let [kept (ids-kept {:endpoint-types ["openai" "openai-response"]
+                                                                                            :exclude ["claude"]}
+                                                                                           catalogue)]
+                                                                        (-> (expect (some (fn [i] (.includes i "claude")) kept)) (.toBeUndefined))))))))
+
+(defn ^:async test-discovered-endpoints-drive-protocol []
+  (temp-home!)
+  (allow-discovery!)
+  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (aset js/globalThis "fetch"
+        (fn [_url _opts]
+          (js/Response. (js/JSON.stringify
+                         #js {:data #js [#js {:id "gpt-5.2"
+                                              :supported_endpoint_types #js ["openai" "openai-response"]}
+                                         #js {:id "gpt-5.4"
+                                              :supported_endpoint_types #js ["openai-response"]}]})
+                        #js {:status 200
+                             :headers #js {"content-type" "application/json"}})))
+  (let [agent   (create-agent {:model "test" :system-prompt "x"})
+        api     (create-extension-api agent "relay")
+        cleanup ((aget relay "default") api)
+        resolve-model (fn [id] ((:resolve (:provider-registry agent)) "yunwu" id))]
+    (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+    ;; The endpoint types discovered at runtime, not the entry's `api`, decide
+    ;; which wire protocol each model speaks.
+    (-> (expect (.-provider (resolve-model "gpt-5.2"))) (.toBe "openai.chat"))
+    (-> (expect (.-provider (resolve-model "gpt-5.4"))) (.toBe "openai.responses"))
+    (cleanup)))
+
 ;; ── Live catalogue refresh ───────────────────────────────────
 
 (defn ^:async test-discovery-updates-catalogue-live []
@@ -385,7 +479,9 @@
                               (it "a failed refresh leaves the seed list registered"
                                   test-discovery-failure-keeps-seed)
                               (it "makes no network calls under the suite's default guard"
-                                  test-discovery-off-by-default-in-tests)))
+                                  test-discovery-off-by-default-in-tests)
+                              (it "discovered endpoint types decide each model's wire protocol"
+                                  test-discovered-endpoints-drive-protocol)))
 
 ;; ── Extension registration ───────────────────────────────────
 

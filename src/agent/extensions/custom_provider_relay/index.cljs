@@ -54,14 +54,23 @@
     :api-key-env "YUNWU_API_KEY"
     :api       "openai-compatible"
     :discover  true
-    ;; yunwu reports `supported_endpoint_types` per model, so we can ask for the
-    ;; protocol we speak instead of guessing from names. Its catalogue also
+    ;; yunwu reports `supported_endpoint_types` per model, so we ask for the
+    ;; protocols we speak instead of guessing from names. Its catalogue also
     ;; carries image ("mj动作", "wan视频生成"), audio ("语音转文字") and
-    ;; retrieval ("rerank") endpoints, plus entries supporting nothing at all.
-    :endpoint-types ["openai"]
+    ;; retrieval ("rerank") endpoints, plus many entries that declare NO
+    ;; endpoint at all and are simply unusable.
+    ;;
+    ;; Both OpenAI protocols are admitted; create-model-fn picks per model,
+    ;; because much of the GPT-5.x line is /responses-only.
+    :endpoint-types ["openai" "openai-response"]
+    ;; Claude ids are served over both `anthropic` and `openai` here, so they
+    ;; would otherwise appear under both providers. Keep them on yunwu-claude:
+    ;; that is the only variant where prompt caching works.
+    :exclude   ["claude"]
     :models    [{:id "deepseek-v3.2"}
                 {:id "glm-4.7"}
-                {:id "gemini-2.5-flash"}]}
+                {:id "gemini-2.5-flash"}
+                {:id "gpt-5.2"}]}
    {:name      "yunwu-claude"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"
@@ -69,7 +78,9 @@
     :credential-name "yunwu"
     :api       "anthropic"
     :discover  true
-    :include   ["claude"]
+    ;; Confirmed against a live catalogue: Claude ids there declare
+    ;; [anthropic, openai], so /v1/messages is genuinely served.
+    :endpoint-types ["anthropic"]
     :models    [{:id "claude-opus-5"}
                 {:id "claude-sonnet-5"}
                 {:id "claude-haiku-4-5-20251001"}]}])
@@ -158,18 +169,54 @@
 
 ;; ── Model creation ───────────────────────────────────────────
 
-(defn create-model-fn [entry]
+(defn pick-protocol
+  "Which wire protocol to speak for one model.
+
+   A gateway does not serve every model over every endpoint. On yunwu the
+   GPT-5.x line splits: some ids are `[openai, openai-response]`, but many
+   flagships — gpt-5.4, gpt-5-pro, gpt-5-codex, gpt-5.1-codex-max — are
+   `[openai-response]` ONLY and 404 on /v1/chat/completions. Dispatching per
+   model (the pattern custom_provider_opencode_zen already uses) is the
+   difference between those models working and not being usable at all.
+
+   `endpoints` is the model's declared supported_endpoint_types, or nil for a
+   gateway that doesn't report them — in which case the entry's own `api` wins."
+  [entry endpoints]
+  (let [eps (set (map str (or endpoints [])))]
+    (cond
+      (= "anthropic" (:api entry))         :anthropic
+      (= "openai-responses" (:api entry))  :responses
+      ;; Only reachable over /responses.
+      (and (seq eps)
+           (contains? eps "openai-response")
+           (not (contains? eps "openai")))  :responses
+      :else                                 :chat)))
+
+(defn create-model-fn
+  "`endpoints-of` maps a model id to its declared endpoint types. It's a
+   function rather than a value because discovery re-registers the provider,
+   and models created later must see the refreshed list."
+  [entry endpoints-of]
   (fn [model-id]
     (let [key (resolve-key entry)]
       (when-not key
         (throw (js/Error. (missing-key-message entry))))
-      (if (= "anthropic" (:api entry))
+      (case (pick-protocol entry (when endpoints-of (endpoints-of model-id)))
         ;; Native Messages API. This is the only path on which prompt caching
         ;; works: cache_control breakpoints survive it, and are dropped by the
         ;; OpenAI-compatible one.
+        :anthropic
         ((createAnthropic #js {:apiKey  key
                                :baseURL (:base-url entry)})
          model-id)
+
+        ;; /responses has native reasoning handling, so no think-lifting shim.
+        :responses
+        (.responses (createOpenAI #js {:apiKey        key
+                                       :baseURL       (:base-url entry)
+                                       :compatibility "compatible"})
+                    model-id)
+
         ;; Gateways relay DeepSeek/GLM/Qwen, which stream reasoning through
         ;; `reasoning_content` and need it replayed on later turns.
         (.chat (createOpenAI #js {:apiKey        key
@@ -189,10 +236,22 @@
 (defn register!
   "Register (or re-register) `entry` with `models`. Re-registering is how a
    background refresh reaches the UI: the registry's register is a plain assoc
-   and the catalogue reads :models at call time, so /model updates live."
-  [api entry models]
+   and the catalogue reads :models at call time, so /model updates live.
+
+   `endpoints-box` is shared across re-registrations so a model resolved after a
+   refresh dispatches on the freshly discovered endpoint types."
+  [api entry models endpoints-box]
+  (when endpoints-box
+    (reset! endpoints-box
+            (into {} (keep (fn [m]
+                             (when (:endpoints m)
+                               [(str (:id m)) (:endpoints m)]))
+                           models))))
   (.registerProvider api (:name entry)
-                     #js {:createModel (create-model-fn entry)
+                     #js {:createModel (create-model-fn
+                                        entry
+                                        (fn [id] (get (when endpoints-box @endpoints-box)
+                                                      (str id))))
                           :baseUrl     (:base-url entry)
                           :apiKeyEnv   (or (:api-key-env entry) "")
                           :api         (:api entry)
@@ -230,18 +289,18 @@
    `alive?` guards the late re-registration: a refresh in flight when the
    extension is deactivated would otherwise resurrect a provider that
    unregisterProvider has already removed."
-  [api entry alive?]
+  [api entry alive? endpoints-box]
   (let [pred     (model-fetch/make-filter entry)
         declared (declared-by-id entry)
         cached   (model-fetch/cached-models (:name entry) pred)]
     (when (and (alive?) (seq (:models cached)))
-      (register! api entry (merge-declared (:models cached) declared)))
+      (register! api entry (merge-declared (:models cached) declared) endpoints-box))
     (when (and (not (:fresh? cached)) (not (discovery-disabled?)))
       (when-let [key (resolve-key entry)]
         (when-let [fresh (js-await (model-fetch/refresh!
                                     (:name entry) (:base-url entry) key pred))]
           (when (alive?)
-            (register! api entry (merge-declared fresh declared))))))))
+            (register! api entry (merge-declared fresh declared) endpoints-box)))))))
 
 (defn ^:export default [api]
   (let [settings   (try (when (.-getSettings api) (.getSettings api))
@@ -260,12 +319,13 @@
         (try
           ;; Register the seed list synchronously so the provider resolves even
           ;; if discovery never completes.
-          (register! api entry (:models entry))
-          (swap! registered conj (:name entry))
-          (when (:discover entry)
-            (-> (discover! api entry alive?)
-                (.catch (fn [e]
-                          (d/warn "relay-provider" (str "discovery failed for " (:name entry) ": " (.-message e)))))))
+          (let [endpoints-box (atom {})]
+            (register! api entry (:models entry) endpoints-box)
+            (swap! registered conj (:name entry))
+            (when (:discover entry)
+              (-> (discover! api entry alive? endpoints-box)
+                  (.catch (fn [e]
+                            (d/warn "relay-provider" (str "discovery failed for " (:name entry) ": " (.-message e))))))))
           (catch :default e
             (d/warn "relay-provider" (str "failed to register " (:name entry) ": " (.-message e)))))))
 
