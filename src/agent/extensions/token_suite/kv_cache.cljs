@@ -13,10 +13,17 @@
       Anthropic's 20-block lookback window so cache hits compound
       instead of degrading.
 
-   Provider routing via shared/detect-cache-provider:
-     - claude*, anthropic.*  → providerOptions.anthropic.cacheControl
-     - gemini*               → providerOptions.google.cacheControl
-     - extras via settings    → e.g. minimax via Anthropic-compat
+   Provider routing via shared/detect-cache-provider-for-model, which keys off
+   the AI SDK model's `provider` tag rather than its id:
+     - anthropic.messages, claude-native → providerOptions.anthropic.cacheControl
+     - google.generative-ai              → providerOptions.google.cacheControl
+     - everything else                   → no breakpoints
+     - extras via settings               → e.g. minimax via Anthropic-compat
+
+   Keying off the id was wrong for any Claude model served over an
+   OpenAI-compatible endpoint (a relay, an Anthropic-compat shim): the id starts
+   `claude`, so it looked cacheable, but @ai-sdk/openai drops
+   providerOptions.anthropic, so the breakpoints were spent and never sent.
 
    Anthropic enforces a 4-breakpoint limit per request:
      slot 1: system stable section
@@ -136,8 +143,11 @@
           ;; request whose after_provider_request never fired.
           (reset! expected-hit? false)
           (let [model     (.-model config-obj)
-                model-id  (str (or (when model (.-modelId model)) model ""))
-                provider  (shared/detect-cache-provider model-id extra-providers)
+                ;; Route on the model's PROVIDER, not its id: a `claude-*` model
+                ;; reached over an OpenAI-compatible endpoint cannot carry
+                ;; cache_control at all, and annotating it burned breakpoints
+                ;; that never reached the wire.
+                provider  (shared/detect-cache-provider-for-model model extra-providers)
                 system    (.-system config-obj)
                 annotated (atom false)]
 

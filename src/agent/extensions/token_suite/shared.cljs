@@ -128,6 +128,54 @@
            (in? :google))              :google
        :else                           nil))))
 
+;; AI SDK provider tags, as reported by `model.provider`:
+;;   @ai-sdk/anthropic          -> "anthropic.messages"
+;;   @ai-sdk/google             -> "google.generative-ai"
+;;   @ai-sdk/openai (.chat)     -> "openai.chat"
+;;   custom_provider_claude_native -> "claude-native"
+(defn- extras-match
+  "Only the settings-declared `extra-providers` prefixes — deliberately NOT the
+   built-in `claude*` heuristic, which is what this routing exists to bypass."
+  [id extra-providers]
+  (let [m   (str id)
+        in? (fn [provider]
+              (some #(.startsWith m %) (get extra-providers provider [])))]
+    (cond
+      (in? :anthropic) :anthropic
+      (in? :google)    :google
+      :else            nil)))
+
+(defn- provider-tag->cache-provider [tag]
+  (let [t (str tag)]
+    (cond
+      (or (.startsWith t "anthropic") (.startsWith t "claude-native")) :anthropic
+      (.startsWith t "google")                                         :google
+      :else                                                            nil)))
+
+(defn detect-cache-provider-for-model
+  "Which cache_control dialect (if any) `model` accepts.
+
+   Routes on the model's PROVIDER, not its id. Routing on the id was wrong in a
+   way that cost money silently: a Claude model reached over an OpenAI-compatible
+   endpoint (a relay, or an Anthropic-compat shim) has an id starting `claude`,
+   so it looked cacheable — but @ai-sdk/openai ignores providerOptions.anthropic
+   entirely, so the breakpoints were computed, counted against the 4-breakpoint
+   budget, and never reached the wire.
+
+   Falls back to the id heuristic only when the model exposes no provider tag,
+   which keeps string model values and hand-rolled test doubles working."
+  ([model] (detect-cache-provider-for-model model nil))
+  ([model extra-providers]
+   (let [tag (when (and model (not (string? model))) (.-provider model))
+         id  (if (string? model) model (when model (.-modelId model)))]
+     (if (seq (str tag))
+       ;; A provider tag is authoritative — except that settings-declared extras
+       ;; still apply, since those name Anthropic-compat endpoints served over an
+       ;; OpenAI-shaped SDK (e.g. minimax), which no tag can express.
+       (or (provider-tag->cache-provider tag)
+           (extras-match id extra-providers))
+       (detect-cache-provider id extra-providers)))))
+
 (defn msg-role [msg]
   (or (when (map? msg) (:role msg))
       (when (object? msg) (.-role msg))
