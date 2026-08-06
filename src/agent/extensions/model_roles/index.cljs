@@ -72,6 +72,22 @@
                        (or (get mr "cycle-key") (get mr :cycle-key))))]
     (if (some? k) (str k) "ctrl+g")))
 
+(defn cyclable-role-names
+  "Role names the cycle shortcut may visit: MODEL roles only.
+
+   `get-roles` also returns the permission MODES (accept-edits, full-auto,
+   plan), and `on-permission` resolves a decision from `:active-role` where
+   allow beats ask. Cycling onto `full-auto` would therefore switch off the
+   approval prompt for writes, shell and network — with no feedback beyond a
+   role name, and no model in the notification since those roles carry none.
+   Landing on `plan` is the mirror image, silently denying them.
+
+   A role without a model is not a model switch, so it is not cyclable."
+  [roles]
+  (vec (keep (fn [[k cfg]]
+               (when (or (:model cfg) (get cfg "model")) k))
+             roles)))
+
 (defn- get-roles
   "Read roles from settings, merged onto the built-in defaults via
    policy/build-roles: FIELD-level merge (a model-only override keeps the shipped
@@ -297,7 +313,7 @@
          api cycle-key
          (fn []
            (let [roles   (get-roles api)
-                 names   (vec (keys roles))
+                 names   (cyclable-role-names roles)
                  current (str (or (:active-role (.getState api)) "default"))
                  idx     (.indexOf (clj->js names) current)
                  next-r  (when (seq names)

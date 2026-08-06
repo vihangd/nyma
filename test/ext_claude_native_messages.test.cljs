@@ -222,3 +222,57 @@
                                                                (-> (expect (nth roles 1)) (.toBe "assistant"))
                                                                (-> (expect (nth roles 2)) (.toBe "user"))
                                                                (-> (expect (nth roles 3)) (.toBe "assistant")))))))
+
+;;; ─── Extended thinking ──────────────────────────────────────────
+;;; agent.thinking routes the `claude-native` provider tag to the anthropic
+;;; dialect, but this provider is hand-rolled and reads providerOptions itself.
+;;; Before this it ignored them, so /thinking reported a level and changed
+;;; nothing on the wire — the silent no-op the routing exists to prevent.
+
+(defn- body-with-thinking [budget max-out]
+  (msgs/build-request-body
+   "claude-opus-5"
+   #js {:prompt #js [#js {:role "user" :content #js [#js {:type "text" :text "hi"}]}]
+        :maxOutputTokens max-out
+        :providerOptions #js {:anthropic #js {:thinking #js {:type "enabled"
+                                                             :budgetTokens budget}}}}))
+
+(describe "claude-native — extended thinking"
+  (fn []
+    (it "emits an enabled thinking block from providerOptions"
+        (fn []
+          (let [body (body-with-thinking 24000 2048)]
+            (-> (expect (get (get body "thinking") "type")) (.toBe "enabled"))
+            (-> (expect (get (get body "thinking") "budget_tokens")) (.toBe 24000)))))
+
+    (it "raises max_tokens above the budget"
+        (fn []
+          ;; Anthropic counts reasoning against max_tokens and rejects a request
+          ;; whose budget is not strictly smaller — a flat 2048 cap would 400.
+          (let [body (body-with-thinking 24000 2048)]
+            (-> (expect (get body "max_tokens")) (.toBeGreaterThan 24000)))))
+
+    (it "leaves a sufficient max_tokens alone"
+        (fn []
+          (let [body (body-with-thinking 4000 64000)]
+            (-> (expect (get body "max_tokens")) (.toBe 64000)))))
+
+    (it "emits nothing when providerOptions carry no thinking"
+        (fn []
+          (let [body (msgs/build-request-body
+                      "claude-opus-5"
+                      #js {:prompt #js [#js {:role "user"
+                                             :content #js [#js {:type "text" :text "hi"}]}]
+                           :maxOutputTokens 2048
+                           :providerOptions #js {}})]
+            (-> (expect (get body "thinking")) (.toBeUndefined))
+            (-> (expect (get body "max_tokens")) (.toBe 2048)))))
+
+    (it "ignores a disabled thinking block"
+        (fn []
+          (let [body (msgs/build-request-body
+                      "claude-opus-5"
+                      #js {:prompt #js [#js {:role "user"
+                                             :content #js [#js {:type "text" :text "hi"}]}]
+                           :providerOptions #js {:anthropic #js {:thinking #js {:type "disabled"}}}})]
+            (-> (expect (get body "thinking")) (.toBeUndefined)))))))

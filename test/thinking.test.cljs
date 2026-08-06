@@ -242,3 +242,39 @@
                                                   (fn []
                                                     (-> (expect (js/Object.keys (thinking/merge-provider-options nil nil)))
                                                         (.toEqual #js []))))))
+
+;; ── Google: only thinking-capable models ─────────────────────
+;; thinkingConfig is rejected outright by models that don't support it, and the
+;; only built-in Gemini (gemini-2.0-flash) is one — so an ungated branch turns
+;; `/thinking` into a hard 400 rather than a no-op.
+
+(defn- gemini [id] #js {:provider "google.generative-ai" :modelId id})
+
+(describe "thinking on google" (fn []
+  (it "sends nothing for a non-thinking Gemini"
+      (fn []
+        (-> (expect (thinking/level->provider-options "high" (gemini "gemini-2.0-flash")))
+            (.toBeNil))))
+
+  (it "sends a budget for the 2.5 line"
+      (fn []
+        (-> (expect (.. (thinking/level->provider-options "low" (gemini "gemini-2.5-flash"))
+                        -google -thinkingConfig -thinkingBudget))
+            (.toBeGreaterThan 0))))
+
+  (it "clamps to Gemini's maximum budget"
+      (fn []
+        ;; xhigh is 32000 on the Anthropic ladder; 2.5 Flash caps at 24576 and
+        ;; 400s above it.
+        (-> (expect (.. (thinking/level->provider-options "xhigh" (gemini "gemini-2.5-flash"))
+                        -google -thinkingConfig -thinkingBudget))
+            (.toBeLessThanOrEqual 24576))))
+
+  (it "recognises an explicit thinking model"
+      (fn []
+        (-> (expect (thinking/gemini-thinking-model? (gemini "gemini-2.0-flash-thinking")))
+            (.toBe true))))
+
+  (it "declines an unrecognised Gemini rather than risking a 400"
+      (fn []
+        (-> (expect (thinking/gemini-thinking-model? (gemini "gemini-1.5-pro"))) (.toBe false))))))

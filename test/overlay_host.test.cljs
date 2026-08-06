@@ -4,7 +4,7 @@
              :refer [printable-char data->key should-dismiss? close-signal?
                      adapt-component make-select-picker make-input-picker
                      make-text-overlay resolve-content-width resolve-max-height
-                     bottom-overlay-options]]))
+                     bottom-overlay-options paste-payload]]))
 
 ;; Worst-case specs actually present in the repo's provider lists.
 (def ^:private real-specs
@@ -338,3 +338,49 @@
                   (let [wide (.repeat "x" 400)
                         out  ((.-render (make-text-overlay wide)) 100 20)]
                     (-> (expect (.-length out)) (.toBeLessThan 100)))))))
+
+;;; ─── Bracketed paste ────────────────────────────────────────────
+;;; pi-tui delivers a paste as ONE chunk wrapped in bracketed-paste markers
+;;; (terminal.js:106). The single-character test dropped it silently, which is
+;;; what `/login` did with a pasted API key.
+
+(def ^:private ESC-CHAR (js/String.fromCharCode 27))
+(defn- wrap-paste [s] (str ESC-CHAR "[200~" s ESC-CHAR "[201~"))
+
+(describe "overlay-host/paste"
+  (fn []
+    (it "unwraps a bracketed-paste chunk"
+        (fn []
+          (-> (expect (paste-payload (wrap-paste "sk-ant-api03-XYZ")))
+              (.toBe "sk-ant-api03-XYZ"))))
+
+    (it "returns nil for ordinary input"
+        (fn []
+          (-> (expect (paste-payload "a")) (.toBeNil))
+          (-> (expect (paste-payload ESC-CHAR)) (.toBeNil))))
+
+    (it "tolerates a chunk with no closing marker"
+        (fn []
+          (-> (expect (paste-payload (str ESC-CHAR "[200~tail-only")))
+              (.toBe "tail-only"))))
+
+    (it "feeds a pasted API key through as typed text"
+        (fn []
+          ;; The whole point: this returned nil before, so /login stayed empty.
+          (-> (expect (printable-char (wrap-paste "sk-ant-api03-XYZ")))
+              (.toBe "sk-ant-api03-XYZ"))))
+
+    (it "strips control characters so a multi-line paste can't corrupt the field"
+        (fn []
+          (-> (expect (printable-char (wrap-paste "line1\nline2")))
+              (.toBe "line1line2"))))
+
+    (it "still passes single printable characters"
+        (fn []
+          (-> (expect (printable-char "a")) (.toBe "a"))))
+
+    (it "still rejects bare control bytes and mouse reports"
+        (fn []
+          (-> (expect (printable-char ESC-CHAR)) (.toBeNil))
+          (-> (expect (printable-char (str ESC-CHAR "[<0;10;5M"))) (.toBeNil))
+          (-> (expect (printable-char (js/String.fromCharCode 3))) (.toBeNil))))))

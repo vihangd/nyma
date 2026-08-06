@@ -45,20 +45,46 @@
 
 ;; ── Key translation ──────────────────────────────────────────────
 
+;; Built rather than written as literals: a raw ESC byte in source does not
+;; survive this repo's formatter, which is how the SGR guard below lost its.
+(def ^:private esc (js/String.fromCharCode 27))
+(def ^:private paste-start (str esc "[200~"))
+(def ^:private paste-end   (str esc "[201~"))
+(def ^:private sgr-mouse   (str esc "[<"))
+
+(defn paste-payload
+  "Content of a bracketed-paste chunk, or nil when `data` isn't one.
+
+   pi-tui re-wraps pastes in the bracketed-paste markers and hands the whole
+   thing to handleInput as ONE string (terminal.js:106). Without this the chunk
+   fails the single-character test below and the paste is dropped in silence —
+   which is what `/login` does with a pasted API key."
+  [data]
+  (when (and (string? data) (.startsWith data paste-start))
+    (let [body (.slice data (count paste-start))
+          end  (.indexOf body paste-end)]
+      (if (neg? end) body (.slice body 0 end)))))
+
 (defn printable-char
-  "The character `dispatch-input` should treat as typed text, or nil.
+  "The character(s) `dispatch-input` should treat as typed text, or nil.
 
    Ctrl+P / Ctrl+N are reported as their bare letter with the ctrl flag set,
    because `dispatch-input` tests `(and (.-ctrl key) (= input \"p\"))`."
   [data]
-  (cond
-    (matchesKey data "ctrl+p") "p"
-    (matchesKey data "ctrl+n") "n"
-    (and (string? data)
-         (= (count data) 1)
-         (>= (.charCodeAt data 0) 32)
-         (not= (.charCodeAt data 0) 127)) data
-    :else nil))
+  (let [pasted (paste-payload data)
+        clean  (when pasted
+                 (.replace pasted (js/RegExp. "[\\x00-\\x1f\\x7f]" "g") ""))]
+    (cond
+      (matchesKey data "ctrl+p") "p"
+      (matchesKey data "ctrl+n") "n"
+      ;; A paste arrives as one chunk; hand back the whole payload with control
+      ;; characters stripped, so a multi-line paste can't corrupt the field.
+      (and clean (seq clean)) clean
+      (and (string? data)
+           (= (count data) 1)
+           (>= (.charCodeAt data 0) 32)
+           (not= (.charCodeAt data 0) 127)) data
+      :else nil)))
 
 (defn data->key
   "Build the ink-style key object pickers branch on. Covers the full set the
@@ -168,7 +194,7 @@
          ;; Drop SGR mouse reports — these pickers are keyboard-only and a
          ;; mouse sequence would otherwise be dispatched as input (oh-my-pi's
          ;; model-picker guards the same way).
-         (when-not (and (string? data) (.startsWith data "[<"))
+         (when-not (and (string? data) (.startsWith data sgr-mouse))
            ;; The onInput RESULT matters: pi-mono components signal dismissal by
            ;; returning {close: true}, so it is forwarded to after-input.
            (let [result (when-let [on-input (.-onInput picker)]

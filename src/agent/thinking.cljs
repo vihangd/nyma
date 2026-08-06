@@ -44,6 +44,25 @@
    "high"    "high"
    "xhigh"   "high"})
 
+;; Gemini 2.5 Flash accepts 0–24576; 2.5 Pro goes higher. Clamp to the lower
+;; bound so one ladder is safe across the line.
+(def ^:private gemini-max-budget 24576)
+
+(defn gemini-thinking-model?
+  "Whether this Gemini model accepts `thinkingConfig` at all.
+
+   Unlike the provider-tag routing elsewhere, support here genuinely varies per
+   MODEL within one endpoint: 2.0 Flash rejects the field, 2.5 requires it to
+   think. Conservative allowlist — an unrecognised Gemini gets no reasoning
+   parameter rather than a failed request."
+  [model]
+  (let [id (str (cond
+                  (nil? model)    ""
+                  (string? model) model
+                  :else           (or (.-modelId model) "")))]
+    (boolean (or (re-find #"gemini-(2\.5|3)" id)
+                 (str/includes? id "thinking")))))
+
 (defn- provider-tag [model]
   (cond
     (nil? model)     ""
@@ -88,9 +107,17 @@
           #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens budget}}})
 
         :google
-        (when-let [budget (get anthropic-budgets level)]
-          #js {:google #js {:thinkingConfig #js {:thinkingBudget  budget
-                                                 :includeThoughts true}}})
+        ;; Only the thinking-capable Gemini lines, and clamped: `thinkingConfig`
+        ;; is rejected outright by models that don't support it (the only
+        ;; built-in Gemini, gemini-2.0-flash, is one), and 2.5 Flash caps the
+        ;; budget at 24576 — either way the request 400s rather than degrading.
+        ;; Same principle as excluding openai.chat: a parameter that fails is
+        ;; worse than no reasoning.
+        (when (gemini-thinking-model? model)
+          (when-let [budget (get anthropic-budgets level)]
+            #js {:google #js {:thinkingConfig
+                              #js {:thinkingBudget  (min budget gemini-max-budget)
+                                   :includeThoughts true}}}))
 
         :openai-responses
         (when-let [effort (get openai-efforts level)]

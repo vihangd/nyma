@@ -4,6 +4,7 @@
             [agent.events :refer [combine-decision]]
             [agent.extensions.model-roles.policy :as policy]
             [agent.extensions.model-roles.status-segment :as status-seg]
+            [agent.extensions.model-roles.index :as mr]
             [agent.settings.manager :refer [defaults]]))
 
 ;; get-roles refinements: field-level merge + provider-aware inherit.
@@ -285,3 +286,44 @@
                                                    (fn []
                                                      (-> (expect (:content (status-seg/render-role "fast"))) (.toBe "fast"))
                                                      (-> (expect (:content (status-seg/render-mode "full-auto"))) (.toContain "full-auto"))))))
+
+;;; ─── Role cycling must not change the permission policy ─────────
+;;; get-roles returns the modes-as-roles map, and on-permission resolves a
+;;; decision from :active-role where allow beats ask. Cycling onto full-auto
+;;; would switch off the approval prompt for writes, shell and network, with no
+;;; feedback beyond a role name — and no model in the notification, since those
+;;; roles carry none.
+
+(describe "role cycling excludes permission modes"
+  (fn []
+    (it "offers only roles that carry a model"
+        (fn []
+          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+            (-> (expect (contains? names :default)) (.toBe true))
+            (-> (expect (contains? names :fast)) (.toBe true))
+            (-> (expect (contains? names :deep)) (.toBe true)))))
+
+    (it "never offers full-auto, which would disable the ask gate"
+        (fn []
+          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+            (-> (expect (contains? names :full-auto)) (.toBe false))
+            (-> (expect (contains? names :accept-edits)) (.toBe false)))))
+
+    (it "confirms why: full-auto's allow overrides the default mode's ask"
+        (fn []
+          ;; The consequence this guards against, stated as a test rather than
+          ;; a comment: combine-decision is deny > allow > ask.
+          (let [mode-d (policy/resolve-decision
+                        (:default (:roles defaults)) "write" "write")
+                role-d (policy/resolve-decision
+                        (:full-auto (:roles defaults)) "write" "write")]
+            (-> (expect (str mode-d)) (.toBe "ask"))
+            (-> (expect (str role-d)) (.toBe "allow"))
+            (-> (expect (str (combine-decision mode-d role-d))) (.toBe "allow")))))
+
+    (it "skips a model-less custom role too"
+        (fn []
+          (let [names (set (mr/cyclable-role-names
+                            {:a {:model "m" :provider "p"}
+                             :b {:policy {"write" "allow"}}}))]
+            (-> (expect names) (.toEqual (set [:a]))))))))

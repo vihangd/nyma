@@ -192,12 +192,20 @@
                                                       (handler "" (k {}))
                                                       (-> (expect @filter-text) (.toBe "")))))
 
-                                              (it "multi-char input (paste) is ignored"
+                                              (it "multi-char input (paste) is appended"
                                                   (fn []
-      ;; The dispatcher only handles single-char input. Paste
-      ;; would need its own path (bracketed-paste handler).
+      ;; Was deliberately ignored, which silently dropped pasted text —
+      ;; `/login` swallowed pasted API keys. The bracketed-paste chunk is
+      ;; unwrapped and control-stripped by overlay-host/printable-char before
+      ;; it reaches here, so by this point it is ordinary text.
                                                     (let [{:keys [handler filter-text]} (make-harness)]
                                                       (handler "hello" (k {}))
+                                                      (-> (expect @filter-text) (.toBe "hello")))))
+
+                                              (it "still ignores empty input"
+                                                  (fn []
+                                                    (let [{:keys [handler filter-text]} (make-harness)]
+                                                      (handler "" (k {}))
                                                       (-> (expect @filter-text) (.toBe "")))))))
 
 ;;; ─── Tab is swallowed ────────────────────────────────

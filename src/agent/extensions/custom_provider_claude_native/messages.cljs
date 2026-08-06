@@ -118,11 +118,27 @@
   (let [prompt     (.-prompt opts)
         system-str (extract-system prompt)
         messages   (prompt->anthropic-messages prompt)
-        max-tokens (or (.-maxOutputTokens opts) default-max-tokens)]
+        ;; Extended thinking, under the same providerOptions.anthropic.thinking
+        ;; key @ai-sdk/anthropic uses — agent.thinking routes `claude-native` to
+        ;; the anthropic dialect, and this provider is hand-rolled, so without
+        ;; this the block was built and silently dropped.
+        thinking   (let [po (.-providerOptions opts)
+                         a  (when po (aget po "anthropic"))
+                         t  (when a (aget a "thinking"))]
+                     (when (and t (= "enabled" (str (.-type t))))
+                       {"type" "enabled"
+                        "budget_tokens" (or (.-budgetTokens t)
+                                            (aget t "budget_tokens"))}))
+        budget     (get thinking "budget_tokens")
+        ;; Anthropic counts reasoning against max_tokens and rejects a request
+        ;; whose budget is not strictly smaller.
+        max-tokens (let [m (or (.-maxOutputTokens opts) default-max-tokens)]
+                     (if (and budget (<= m budget)) (+ budget 1024) m))]
     (cond-> {"model"      model-id
              "max_tokens" max-tokens
              "stream"     true
              "messages"   messages}
+      thinking                         (assoc "thinking" thinking)
       system-str                       (assoc "system" system-str)
       (some? (.-temperature opts))     (assoc "temperature" (.-temperature opts))
       (some? (.-topP opts))            (assoc "top_p" (.-topP opts))

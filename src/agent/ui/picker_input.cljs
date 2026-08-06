@@ -75,7 +75,9 @@
       ;; Tab is deliberately swallowed — prevents leaking to overlay.
       (.-tab key) nil
 
-      ;; Printable character → grow filter, reset selection.
-      (and input (= (count input) 1))
+      ;; Printable text → grow filter, reset selection. Length is not capped at
+      ;; 1: a bracketed paste arrives as a single chunk carrying the whole
+      ;; payload, and the caller has already stripped control characters.
+      (and input (pos? (count input)))
       (do (swap! filter-text-atom str input)
           (reset! selected-idx-atom 0)))))
