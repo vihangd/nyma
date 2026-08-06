@@ -19,6 +19,14 @@
   (let [i (.indexOf id "/")]
     (when-not (neg? i) (.slice id (inc i)))))
 
+(defn- usable
+  "An entry with no context window is not an answer — it's a placeholder a
+   gateway registered for a model whose /v1/models response said nothing about
+   size. Treat it as a miss so the lookup falls through to the vendor's own
+   entry, rather than reporting a default that compaction would plan against."
+  [entry]
+  (when (:context-window entry) entry))
+
 (defn- resolve-entry
   "Look up `id` in `models`: exact, then — for a `provider/id` spec — the bare
    id, then a prefix match. Nil when nothing matches.
@@ -27,12 +35,14 @@
    a gateway's /v1/models response carries no context field, but the relayed id
    is the vendor's own, so the first-party entry is the right answer."
   [models id]
-  (or (get models id)
-      (when-let [bare (bare-id id)] (get models bare))
-      ;; Fuzzy match: try prefix matching
+  (or (usable (get models id))
+      (when-let [bare (bare-id id)] (usable (get models bare)))
+      ;; Fuzzy match: try prefix matching. `usable` matters most here — a
+      ;; gateway's own placeholder entry for this exact id is a prefix of
+      ;; itself, so without it the placeholder wins its own fuzzy match.
       (some (fn [[k v]]
               (let [prefix (subs k 0 (min 15 (count k)))]
-                (when (.startsWith id prefix) v)))
+                (when (.startsWith id prefix) (usable v))))
             models)))
 
 (defn create-model-registry

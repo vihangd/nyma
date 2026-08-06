@@ -240,9 +240,12 @@
                                              (vec (map (fn [m]
                                                          {:id             (.-id m)
                                                           :name           (.-name m)
+                                                          ;; No default: a fabricated context window is
+                                                          ;; worse than none, because compaction plans
+                                                          ;; against it. Left nil, the model registry
+                                                          ;; falls through to the vendor's own entry.
                                                           :context-window (or (.-contextWindow m)
-                                                                              (aget m "context-window")
-                                                                              100000)
+                                                                              (aget m "context-window"))
                                                           :max-tokens     (or (.-maxTokens m) (aget m "max-tokens"))
                                                           :reasoning      (.-reasoning m)
                                                           :input          (when (.-input m) (vec (.-input m)))

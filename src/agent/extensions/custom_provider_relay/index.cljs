@@ -1,0 +1,254 @@
+(ns agent.extensions.custom-provider-relay.index
+  "Register any remote OpenAI- or Anthropic-compatible gateway as a provider,
+   without writing code.
+
+   A gateway (relay, proxy, LLM gateway) fronts OTHER vendors' models under
+   those vendors' own ids. That is the difference from `custom_provider_local`,
+   which this deliberately does not extend:
+
+     - a missing key is a real error here, not something to paper over with a
+       placeholder — a remote gateway answers a dummy key with an opaque 401;
+     - its prices are its own, so its models must not inherit the first-party
+       rate for the same model id (see agent.pricing/unpriced-providers);
+     - its catalogue is large and changes without notice, so the model list is
+       discovered from `/v1/models` rather than hardcoded.
+
+   Configuration in settings.json:
+     {
+       \"providers\": [
+         {
+           \"name\":       \"yunwu\",                  // /model yunwu/<id>
+           \"baseUrl\":    \"https://yunwu.ai/v1\",
+           \"apiKeyEnv\":  \"YUNWU_API_KEY\",          // or /login yunwu
+           \"api\":        \"openai-compatible\",      // or \"anthropic\"
+           \"include\":    [\"claude\", \"/^gpt-5/\"],   // allow-list, optional
+           \"exclude\":    [\"preview\"],              // subtracted, optional
+           \"discover\":   true,                      // GET /v1/models
+           \"models\":     [{\"id\": \"...\", \"contextWindow\": 200000}]
+         }
+       ]
+     }
+
+   Presets ship for yunwu (https://yunwu.ai), a New API relay, in both
+   protocols. Prompt caching for Claude models works only on the `anthropic`
+   variant: the OpenAI-compatible path cannot carry cache_control breakpoints —
+   @ai-sdk/openai drops them, and New API's OpenAI→Claude request converter
+   discards any that survive."
+  (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
+            ["@ai-sdk/openai" :refer [createOpenAI]]
+            [agent.debug :as d]
+            [agent.providers.model-fetch :as model-fetch]
+            [agent.utils.credentials :as credentials]
+            [agent.utils.reasoning-stream :as rs]))
+
+;; ── Presets ──────────────────────────────────────────────────
+;; Both point at the same base URL. `createAnthropic` appends /messages and
+;; `createOpenAI` appends /chat/completions, and New API serves both.
+;;
+;; The seed lists are deliberately tiny — enough that `/model` is useful before
+;; the first discovery call, not an attempt to mirror the catalogue.
+
+(def ^:private presets
+  [{:name      "yunwu"
+    :base-url  "https://yunwu.ai/v1"
+    :api-key-env "YUNWU_API_KEY"
+    :api       "openai-compatible"
+    :discover  true
+    :exclude   ["embedding" "rerank" "tts" "whisper" "image" "video"
+                "seedream" "flux" "midjourney" "suno"]
+    :models    [{:id "gpt-5.2"}
+                {:id "deepseek-v3.2"}
+                {:id "gemini-2.5-pro"}]}
+   {:name      "yunwu-claude"
+    :base-url  "https://yunwu.ai/v1"
+    :api-key-env "YUNWU_API_KEY"
+    ;; Same account as `yunwu`, so one /login covers both.
+    :credential-name "yunwu"
+    :api       "anthropic"
+    :discover  true
+    :include   ["claude"]
+    :models    [{:id "claude-opus-5"}
+                {:id "claude-sonnet-5"}
+                {:id "claude-haiku-4-5-20251001"}]}])
+
+;; ── Settings ─────────────────────────────────────────────────
+
+(defn- entry-get
+  "Read `k` from a settings entry that may be a CLJS map, a JS object with
+   camelCase keys, or a JS object with kebab-case keys."
+  [e camel kebab]
+  (or (get e (keyword kebab))
+      (when (object? e) (or (aget e camel) (aget e kebab)))
+      (get e camel)
+      (get e kebab)))
+
+(defn- ->vec [x]
+  (cond
+    (nil? x)              []
+    (js/Array.isArray x)  (vec x)
+    (vector? x)           x
+    (seq? x)              (vec x)
+    :else                 [x]))
+
+(defn normalize-entry [e]
+  {:name        (entry-get e "name" "name")
+   :base-url    (entry-get e "baseUrl" "base-url")
+   :api-key-env (entry-get e "apiKeyEnv" "api-key-env")
+   :credential-name (entry-get e "credentialName" "credential-name")
+   :api         (or (entry-get e "api" "api") "openai-compatible")
+   :discover    (let [v (entry-get e "discover" "discover")]
+                  ;; Absent means "yes" — a gateway's whole point is that we
+                  ;; don't know its catalogue.
+                  (if (nil? v) true (boolean v)))
+   :include     (->vec (entry-get e "include" "include"))
+   :exclude     (->vec (entry-get e "exclude" "exclude"))
+   :models      (mapv (fn [m]
+                        {:id             (entry-get m "id" "id")
+                         :name           (entry-get m "name" "name")
+                         :context-window (or (entry-get m "contextWindow" "context-window")
+                                             (entry-get m "ctx" "ctx"))
+                         :cost           (entry-get m "cost" "cost")})
+                      (->vec (entry-get e "models" "models")))})
+
+(defn load-settings-entries [settings]
+  (let [raw (when settings (or (get settings "providers") (get settings :providers)))]
+    (mapv normalize-entry (->vec raw))))
+
+(defn merge-entries
+  "User entries override presets of the same name."
+  [presets user-entries]
+  (let [named (set (keep :name user-entries))]
+    (vec (concat (remove (fn [p] (contains? named (:name p))) presets)
+                 user-entries))))
+
+;; ── Credentials ──────────────────────────────────────────────
+
+(defn credential-name
+  "Which `/login` entry this provider's key is stored under.
+
+   Two providers can front the same gateway on different protocols (yunwu and
+   yunwu-claude), and they share one account. Without this, `/login yunwu` would
+   authenticate only half of it."
+  [entry]
+  (or (:credential-name entry) (:name entry)))
+
+(defn resolve-key
+  "Env var, then a key saved by `/login <credential-name>`. Nil when neither
+   exists — callers must fail loudly rather than send a placeholder."
+  [entry]
+  (let [env-var (:api-key-env entry)
+        cred    (credential-name entry)]
+    (or (when (seq (str env-var)) (aget js/process.env (str env-var)))
+        (credentials/read-credential cred)
+        ;; Fall back to the provider's own name when it differs, so a key saved
+        ;; against either name works.
+        (when (not= cred (:name entry))
+          (credentials/read-credential (:name entry))))))
+
+(defn missing-key-message [entry]
+  (str "No credentials for '" (:name entry) "'. "
+       (if (seq (str (:api-key-env entry)))
+         (str "Set the " (:api-key-env entry) " env var or run /login "
+              (credential-name entry) ".")
+         (str "Run /login " (credential-name entry) " to save a key."))))
+
+;; ── Model creation ───────────────────────────────────────────
+
+(defn create-model-fn [entry]
+  (fn [model-id]
+    (let [key (resolve-key entry)]
+      (when-not key
+        (throw (js/Error. (missing-key-message entry))))
+      (if (= "anthropic" (:api entry))
+        ;; Native Messages API. This is the only path on which prompt caching
+        ;; works: cache_control breakpoints survive it, and are dropped by the
+        ;; OpenAI-compatible one.
+        ((createAnthropic #js {:apiKey  key
+                               :baseURL (:base-url entry)})
+         model-id)
+        ;; Gateways relay DeepSeek/GLM/Qwen, which stream reasoning through
+        ;; `reasoning_content` and need it replayed on later turns.
+        (.chat (createOpenAI #js {:apiKey        key
+                                  :baseURL       (:base-url entry)
+                                  :compatibility "compatible"
+                                  :fetch         (rs/make-fetch rs/lift-think-request-rewriter)})
+               model-id)))))
+
+(defn- ->js-model [m]
+  (let [o #js {:id (str (:id m)) :name (str (or (:name m) (:id m)))}]
+    (when (:context-window m) (aset o "contextWindow" (:context-window m)))
+    (when-let [c (:cost m)]
+      (aset o "cost" #js {:input  (or (get c "input") (:input c) 0)
+                          :output (or (get c "output") (:output c) 0)}))
+    o))
+
+(defn register!
+  "Register (or re-register) `entry` with `models`. Re-registering is how a
+   background refresh reaches the UI: the registry's register is a plain assoc
+   and the catalogue reads :models at call time, so /model updates live."
+  [api entry models]
+  (.registerProvider api (:name entry)
+                     #js {:createModel (create-model-fn entry)
+                          :baseUrl     (:base-url entry)
+                          :apiKeyEnv   (or (:api-key-env entry) "")
+                          :api         (:api entry)
+                          ;; This is a gateway: its rates are its own, and its
+                          ;; ids collide with the vendors it relays.
+                          :unpriced    true
+                          :models      (clj->js (mapv ->js-model models))}))
+
+;; ── Entry point ──────────────────────────────────────────────
+
+(defn- declared-by-id [entry]
+  (into {} (map (fn [m] [(str (:id m)) m]) (:models entry))))
+
+(defn- merge-declared
+  "Discovered models carry only an id and a display name. Overlay any
+   contextWindow/cost the settings entry declared for that id — for a relay
+   whose /v1/models says nothing, that is the only way to get real numbers."
+  [discovered declared]
+  (mapv (fn [m] (merge m (dissoc (get declared (str (:id m))) :name))) discovered))
+
+(defn ^:async discover!
+  "Register the cached list immediately, then refresh in the background when
+   stale. Never blocks startup and never throws."
+  [api entry]
+  (let [pred     (model-fetch/make-filter (:include entry) (:exclude entry))
+        declared (declared-by-id entry)
+        cached   (model-fetch/cached-models (:name entry) pred)]
+    (when (seq (:models cached))
+      (register! api entry (merge-declared (:models cached) declared)))
+    (when-not (:fresh? cached)
+      (when-let [key (resolve-key entry)]
+        (when-let [fresh (js-await (model-fetch/refresh!
+                                    (:name entry) (:base-url entry) key pred))]
+          (register! api entry (merge-declared fresh declared)))))))
+
+(defn ^:export default [api]
+  (let [settings   (try (when (.-getSettings api) (.getSettings api))
+                        (catch :default _ nil))
+        user       (try (load-settings-entries settings)
+                        (catch :default e
+                          (d/warn "relay-provider" (str "bad `providers` setting: " (.-message e)))
+                          []))
+        entries    (merge-entries presets user)
+        registered (atom [])]
+
+    (doseq [entry entries]
+      (when (and (seq (str (:name entry))) (seq (str (:base-url entry))))
+        (try
+          ;; Register the seed list synchronously so the provider resolves even
+          ;; if discovery never completes.
+          (register! api entry (:models entry))
+          (swap! registered conj (:name entry))
+          (when (:discover entry)
+            (-> (discover! api entry)
+                (.catch (fn [e]
+                          (d/warn "relay-provider" (str "discovery failed for " (:name entry) ": " (.-message e)))))))
+          (catch :default e
+            (d/warn "relay-provider" (str "failed to register " (:name entry) ": " (.-message e)))))))
+
+    (fn []
+      (doseq [name @registered]
+        (try (.unregisterProvider api name)
+             (catch :default _ nil))))))

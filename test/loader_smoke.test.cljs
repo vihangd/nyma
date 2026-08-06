@@ -33,6 +33,7 @@
     "custom-provider-opencode-zen"
     "custom-provider-openrouter"
     "custom-provider-qwen-cli"
+    "custom-provider-relay"
     "desktop-notify"
     "lsp-suite"
     "mcp-client"
@@ -107,7 +108,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 29 expected namespaces load and none collide on 'index'"
+            (it "all 30 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)
