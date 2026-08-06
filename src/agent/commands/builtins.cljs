@@ -15,6 +15,7 @@
             [agent.ui.skill-picker :as skill-picker]
             [agent.ui.overlay-host :as overlay-host]
             [agent.providers.catalog :as catalog]
+            [agent.thinking :as thinking]
             [clojure.string :as str]
             ["node:fs" :as fs]))
 
@@ -691,6 +692,30 @@
                         (if (fs/existsSync path)
                           (show-info ctx (fs/readFileSync path "utf8"))
                           (notify ctx "No CHANGELOG.md found" "error"))))}
+
+          "thinking"
+          {:description (str "Set extended thinking level: /thinking <"
+                             (str/join "|" thinking/levels) ">")
+           :handler (fn [args ctx]
+                      (let [level (some-> (first args) str/trim str/lower-case)
+                            cur   @(:thinking-level agent)]
+                        (cond
+                          (nil? level)
+                          (notify ctx (str "Thinking level: " cur
+                                           "  (set with /thinking <"
+                                           (str/join "|" thinking/levels) ">)"))
+
+                          (not (thinking/valid-level? level))
+                          (notify ctx (str "Invalid thinking level: " level
+                                           ". Valid: " (str/join ", " thinking/levels))
+                                  "error")
+
+                          :else
+                          (do (reset! (:thinking-level agent) level)
+                              (notify ctx
+                                      (if (= "off" level)
+                                        "Thinking off — no reasoning parameter will be sent"
+                                        (str "Thinking level: " level)))))))}
 
           "login"
           {:description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"

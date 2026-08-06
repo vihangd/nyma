@@ -157,6 +157,9 @@ Model selection:
       --provider <name>  Provider id (anthropic, openai, google, or any
                          extension-registered provider). Default: anthropic.
   -m, --model <id>       Model id. Default: claude-sonnet-4-20250514.
+      --thinking <level> Extended thinking: off, minimal, low, medium, high,
+                         xhigh. Default: off. Anthropic and Google models, and
+                         OpenAI models on /responses. Also /thinking at runtime.
 
 Session:
   -c, --continue         Resume the most recent session.
@@ -353,6 +356,9 @@ Examples:
                {:model         nil
                 :system-prompt ((:build-system-prompt resources))
                 :max-steps     (or (:max-steps merged) 100)
+                ;; --thinking beats settings :thinking. Both were parsed and
+                ;; then dropped before this.
+                :thinking      (or (:thinking values) (:thinking merged))
                 :settings      settings})
         resolved (try
                    (resolve-model-via-registry (:provider-registry agent) values merged)
@@ -409,7 +415,7 @@ Examples:
       ;; computed default so a typo'd headless flag still gets full-auto).
       (when (and requested (not (perm-policy/mode? requested)))
         (d/warn (str "[nyma] Unknown --permission-mode \"" requested
-                              "\"; using " pm ".")))
+                     "\"; using " pm ".")))
       (swap! (:state agent) assoc :permission-mode pm))
 
     ;; Attach extension API to agent so UI can access it

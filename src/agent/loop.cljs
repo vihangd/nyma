@@ -3,6 +3,7 @@
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.pricing :refer [calculate-cost model-cost-key]]
+            [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
             [clojure.string :as str]))
@@ -215,7 +216,13 @@
                              :abortSignal     (when-let [c (:abort-controller agent)] (.-signal @c))
                              :maxRetries      5
                              :stopWhen        (stepCountIs (:max-steps config))
-                             :providerOptions #js {}
+                             ;; Extended thinking is opt-in per request: with no
+                             ;; `thinking` field a Claude model returns no
+                             ;; reasoning at all, measured against Opus 5.
+                             :providerOptions (or (thinking/level->provider-options
+                                                   (when-let [tl (:thinking-level agent)] @tl)
+                                                   active-model)
+                                                  #js {})
                              :onError         (fn [e] (throw (.-error e)))
                              :onStepFinish    (fn [step]
                                                 (when-let [u (.-usage step)]

@@ -10,6 +10,7 @@
             [agent.model-info :refer [create-model-registry]]
             [agent.tool-metadata :as tool-metadata]
             [agent.keybinding-registry :as kbr]
+            [agent.thinking :as thinking-util]
             [agent.ui.autocomplete-provider :as ac]))
 
 (defn- filter-tools-by-policy
@@ -49,7 +50,7 @@
    :exclude-capabilities — #{kw} tool must NOT declare ANY of these capabilities
    :modes                — #{kw} tool must be allowed in at least one of these modes"
   [{:keys [model system-prompt tools max-steps extensions settings
-           require-capabilities exclude-capabilities modes]
+           require-capabilities exclude-capabilities modes thinking]
     :or   {max-steps 20}}]
   (let [tool-filter-opts  {:require-capabilities require-capabilities
                            :exclude-capabilities exclude-capabilities
@@ -79,7 +80,10 @@
         autocomplete-registry (ac/create-provider-registry)
         ;; Phase 2 additions
         provider-registry (create-provider-registry builtin-providers)
-        thinking-level    (atom "off")
+        ;; Seeded from --thinking / settings :thinking, both of which used to be
+        ;; parsed and dropped. "off" sends no reasoning parameter at all.
+        thinking-level    (atom (let [t (str (or thinking "off"))]
+                                  (if (thinking-util/valid-level? t) t "off")))
         abort-controller  (atom (js/AbortController.))
         inter-events      (create-event-bus)  ;; Inter-extension communication bus
         flags             (atom {})           ;; Extension CLI flags {name → {:description :type :default :value}}
