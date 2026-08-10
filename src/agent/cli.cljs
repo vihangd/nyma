@@ -45,6 +45,33 @@
     ((:emit events) "session_end_summary" stats)
     ((:emit events) "session_end" stats)))
 
+(defn ^:async finish-one-shot!
+  "Shut down and exit after a one-shot mode (-p / --mode json).
+
+   `main` used to just return here. Nothing else ran: the `exit` handler that
+   performs cleanup only fires when the process is already exiting, and the
+   process never exited, because a loaded extension still held the event loop
+   open (LSP clients, file watchers, MCP sockets). So `nyma -p` printed its
+   answer and then sat there forever — fine interactively, fatal for a script
+   or a CI step, which is exactly what one-shot mode is for.
+
+   Only the SUCCESS path was affected, which is why no test caught it: the
+   error paths throw and the process dies on its own.
+
+   Mirrors the SIGINT sequence — async shutdown so extensions awaiting cleanup
+   get a chance to finish, then deactivate, then exit."
+  [agent extensions-atom shutdown-done? emit-async-fn deactivate-fn]
+  (when-not @shutdown-done?
+    (reset! shutdown-done? true)
+    (js-await (-> (emit-async-fn agent "exit")
+                  (.catch (fn [_] nil))))
+    (try (deactivate-fn @extensions-atom) (catch :default _ nil)))
+  ;; One macrotask so buffered stdout drains before the hard exit — console.log
+  ;; to a pipe is not guaranteed synchronous, and truncating the answer would be
+  ;; a worse bug than the one being fixed.
+  (js-await (js/Promise. (fn [res] (js/setTimeout res 0))))
+  (js/process.exit (or (.-exitCode js/process) 0)))
+
 (defn ^:async emit-session-shutdown-async!
   "Async half of the shutdown sequence (used by the SIGINT handler so
    extensions awaiting cleanup get a chance to finish). Same event order
@@ -427,7 +454,10 @@ Examples:
 
     ;; Load all extensions (both .cljs and .ts/.js)
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api))
-          extensions-atom   (atom loaded-extensions)]
+          extensions-atom   (atom loaded-extensions)
+          ;; Shared by the SIGINT handler, the `exit` handler and the one-shot
+          ;; finisher so shutdown runs exactly once.
+          shutdown-done?    (atom false)]
 
       ;; Re-resolve model now that extensions have registered their providers.
       ;; The startup resolution above runs against the built-in registry only
@@ -467,17 +497,22 @@ Examples:
       ;; SIGINT: async shutdown so extensions awaiting cleanup get a chance to finish.
       (.on js/process "SIGINT"
            (fn []
+             (reset! shutdown-done? true)
              (-> (emit-session-shutdown-async! agent "sigint")
                  (.finally (fn []
                              (deactivate-all @extensions-atom)
                              (js/process.exit 0))))))
       ;; exit: synchronous shutdown — node won't wait on promises here.
+      ;; Skipped when a one-shot mode already shut down, so extension cleanup
+      ;; and the session_end events don't run twice.
       (.on js/process "exit"
            (fn []
-             (try
-               (emit-session-shutdown! agent "exit")
-               (catch :default _ nil))
-             (deactivate-all @extensions-atom)))
+             (when-not @shutdown-done?
+               (reset! shutdown-done? true)
+               (try
+                 (emit-session-shutdown! agent "exit")
+                 (catch :default _ nil))
+               (deactivate-all @extensions-atom))))
 
       ;; Dispatch to mode. Print/json resolve stdin here (not in the mode
       ;; module) so unit tests can call mode/start directly with nil and
@@ -490,10 +525,14 @@ Examples:
                         ;; object (for headless orchestrators); default → text.
                         (if (= (:output-format values) "json")
                           (js-await (print-mode/start-result agent p))
-                          (js-await (print-mode/start agent p))))
+                          (js-await (print-mode/start agent p)))
+                        (js-await (finish-one-shot! agent extensions-atom shutdown-done?
+                                                    emit-session-shutdown-async! deactivate-all)))
         "json"        (let [p (js-await (resolve-one-shot-prompt positionals))]
                         (when-not p (die-no-prompt! "--mode json"))
-                        (js-await (print-mode/start-json agent p)))
+                        (js-await (print-mode/start-json agent p))
+                        (js-await (finish-one-shot! agent extensions-atom shutdown-done?
+                                                    emit-session-shutdown-async! deactivate-all)))
         "rpc"         (js-await (rpc/start agent))
         "pi-rpc"      (js-await (pi-rpc/start agent))))))
 
