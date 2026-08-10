@@ -204,10 +204,18 @@
         ;; structured envelope {:ok :summary :data :error :error-kind}.
         ;; ctx :result is replaced with the policy-truncated model-visible string.
         ;; The full envelope is stored as :result-envelope for UI consumers.
+        ;; Measured either side of the policy, because these are the only two
+        ;; points where both numbers exist: `raw-bytes` is what the tool
+        ;; produced, `model-bytes` is what actually enters the context window.
+        ;; Tool output dominates a transcript — 92% of message bytes in sampled
+        ;; sessions — so without this there is no way to tell whether a change
+        ;; aimed at it helped, or how much the per-tool caps already save.
+        raw-bytes  (count (str (:result ctx)))
         envelope   (policy/apply-policy (:result ctx) (:tool-name ctx))
         ctx        (-> ctx
                        (assoc :result (policy/model-string envelope))
                        (assoc :result-envelope envelope))
+        model-bytes (count (str (:result ctx)))
         result-str (truncate-text (str (:result ctx)) 500)
         display    (and (:tool ctx) (.-display (:tool ctx)))
         custom-result (when display
@@ -223,6 +231,14 @@
                                :args           (:args ctx)
                                :duration       duration
                                :result         result-str
+                               ;; `result` above is for DISPLAY: ANSI-wrapped to
+                               ;; terminal width, then capped at 500 lines. Its
+                               ;; length tracks neither figure — wrapping can
+                               ;; make it longer than the raw output, and the
+                               ;; line cap can make it far shorter. Hence
+                               ;; explicit counts.
+                               :rawBytes       raw-bytes
+                               :modelBytes     model-bytes
                                :resultEnvelope (:result-envelope ctx)
                                :details        (:result-details ctx)
                                :isError        (:result-is-error ctx)

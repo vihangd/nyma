@@ -26,11 +26,11 @@
         (when (seq by-model)
           (str "\n\n  By Model\n"
                (str/join "\n"
-                 (map (fn [m]
-                        (str "    " (or (:model m) "unknown")
-                             "  " (format-cost (:total-cost m))
-                             "  (" (:turns m) " turns)"))
-                   by-model))))
+                         (map (fn [m]
+                                (str "    " (or (:model m) "unknown")
+                                     "  " (format-cost (:total-cost m))
+                                     "  (" (:turns m) " turns)"))
+                              by-model))))
 
         ;; Daily section
         max-daily-cost (if (seq by-day) (apply max (map :total-cost by-day)) 0)
@@ -38,19 +38,58 @@
         (when (seq by-day)
           (str "\n\n  Daily (last " (count by-day) " days)\n"
                (str/join "\n"
-                 (map (fn [d]
-                        (str "    " (:day d)
-                             "  " (format-cost (:total-cost d))
-                             "  " (bar-chart (:total-cost d) max-daily-cost 20)))
-                   (take 10 by-day)))))]
+                         (map (fn [d]
+                                (str "    " (:day d)
+                                     "  " (format-cost (:total-cost d))
+                                     "  " (bar-chart (:total-cost d) max-daily-cost 20)))
+                              (take 10 by-day)))))]
 
     (str "─── Usage Stats ─────────────────────────────\n\n"
          totals-section
          (or model-section "")
          (or day-section ""))))
 
+(defn- pct [part whole]
+  (if (pos? whole) (js/Math.round (* 100 (/ part whole))) 0))
+
+(defn format-tool-report
+  "Per-tool timings plus how much context each tool actually consumed.
+
+   `model` is the figure that matters: bytes that entered the context window
+   after the per-tool result policy. `raw` is what the tool produced, so the
+   gap shows how much the existing caps already save — without both, a change
+   aimed at tool output cannot be told apart from noise."
+  [metrics]
+  (let [rows        (sort-by (fn [[_ m]] (- (or (:model-bytes m) 0)
+                                            (or (:calls m) 0)))
+                             metrics)
+        total-model (reduce + 0 (map (fn [[_ m]] (or (:model-bytes m) 0)) metrics))
+        total-raw   (reduce + 0 (map (fn [[_ m]] (or (:raw-bytes m) 0)) metrics))]
+    (str "Tool Performance:\n"
+         (str/join "\n"
+                   (map (fn [[tname m]]
+                          (let [calls (or (:calls m) 0)
+                                model (or (:model-bytes m) 0)
+                                raw   (or (:raw-bytes m) 0)]
+                            (str "  " tname ": " calls " calls, "
+                                 (js/Math.round (/ (or (:total-ms m) 0) (max 1 calls))) "ms avg"
+                                 (when (> (or (:errors m) 0) 0)
+                                   (str ", " (:errors m) " errors"))
+                                 (when (pos? model)
+                                   (str "\n      context " (format-tokens model) " chars"
+                                        " (" (pct model total-model) "% of tool output)"
+                                        (when (> raw model)
+                                          (str ", capped from " (format-tokens raw))))))))
+                        rows))
+         (when (pos? total-model)
+           (str "\n\n  Tool output entering context: " (format-tokens total-model) " chars"
+                (when (> total-raw total-model)
+                  (str " (policy saved " (format-tokens (- total-raw total-model))
+                       ", " (pct (- total-raw total-model) total-raw) "%)")))))))
+
 (defn ^:export default [api]
-  (let [tool-metrics (atom {}) ;; {tool-name → {:calls :total-ms :errors}}
+  (let [;; {tool-name → {:calls :total-ms :errors :raw-bytes :model-bytes}}
+        tool-metrics (atom {})
 
         on-tool-complete
         (fn [data]
@@ -58,59 +97,69 @@
                 dur  (or (.-duration data) 0)
                 err  (boolean (.-isError data))]
             (swap! tool-metrics update tool
-              (fn [m]
-                (let [m (or m {:calls 0 :total-ms 0 :errors 0})]
-                  (-> m
-                      (update :calls inc)
-                      (update :total-ms + dur)
-                      (cond-> err (update :errors inc))))))))]
+                   (fn [m]
+                     (let [m (or m {:calls 0 :total-ms 0 :errors 0})]
+                       (-> m
+                           (update :calls inc)
+                           (update :total-ms + dur)
+                           (cond-> err (update :errors inc))))))))
+
+        ;; Bytes come from tool_execution_end, which fires AFTER the per-tool
+        ;; result policy — the only point where both the raw size and the
+        ;; model-visible size exist. tool_complete fires before it and sees
+        ;; only the raw string.
+        on-tool-bytes
+        (fn [data]
+          (let [tool  (str (.-toolName data))
+                raw   (or (.-rawBytes data) 0)
+                model (or (.-modelBytes data) 0)]
+            (when (pos? (+ raw model))
+              (swap! tool-metrics update tool
+                     (fn [m]
+                       (let [m (or m {:calls 0 :total-ms 0 :errors 0})]
+                         (-> m
+                             (update :raw-bytes (fnil + 0) raw)
+                             (update :model-bytes (fnil + 0) model))))))))]
 
     (.on api "tool_complete" on-tool-complete)
+    (.on api "tool_execution_end" on-tool-bytes)
 
     ;; /stats command with subcommands
     (.registerCommand api "stats"
-      #js {:description "Show usage statistics. Subcommands: tools"
-           :handler
-           (fn [args ctx]
-             (if (= (first args) "tools")
+                      #js {:description "Show usage statistics. Subcommands: tools"
+                           :handler
+                           (fn [args ctx]
+                             (if (= (first args) "tools")
                ;; Per-tool performance metrics
-               (let [metrics @tool-metrics]
-                 (if (empty? metrics)
-                   (.notify (.-ui ctx) "No tool calls recorded" "info")
-                   (.notify (.-ui ctx)
-                     (str "Tool Performance:\n"
-                          (str/join "\n"
-                            (map (fn [[tname m]]
-                                   (str "  " tname ": " (:calls m) " calls, "
-                                        (js/Math.round (/ (:total-ms m) (max 1 (:calls m)))) "ms avg"
-                                        (when (> (:errors m) 0) (str ", " (:errors m) " errors"))))
-                              (sort-by (fn [[_ m]] (- (:calls m))) metrics))))
-                     "info")))
+                               (let [metrics @tool-metrics]
+                                 (if (empty? metrics)
+                                   (.notify (.-ui ctx) "No tool calls recorded" "info")
+                                   (.notify (.-ui ctx) (format-tool-report metrics) "info")))
                ;; Default: full dashboard
-               (if-let [store (.-__sqlite-store api)]
-                 (let [totals   ((:get-usage-totals store))
-                       by-model ((:get-usage-by-model store))
-                       by-day   ((:get-usage-by-day store) 14)
-                       dashboard (format-dashboard {:totals totals :by-model by-model :by-day by-day})]
-                   (if (and (.-ui ctx) (.-showOverlay (.-ui ctx)))
-                     (.showOverlay (.-ui ctx) dashboard)
-                     (.notify (.-ui ctx) dashboard "info")))
-                 (.notify (.-ui ctx) "Stats require SQLite storage" "error"))))})
+                               (if-let [store (.-__sqlite-store api)]
+                                 (let [totals   ((:get-usage-totals store))
+                                       by-model ((:get-usage-by-model store))
+                                       by-day   ((:get-usage-by-day store) 14)
+                                       dashboard (format-dashboard {:totals totals :by-model by-model :by-day by-day})]
+                                   (if (and (.-ui ctx) (.-showOverlay (.-ui ctx)))
+                                     (.showOverlay (.-ui ctx) dashboard)
+                                     (.notify (.-ui ctx) dashboard "info")))
+                                 (.notify (.-ui ctx) "Stats require SQLite storage" "error"))))})
 
     ;; /stats-session — current session only
     (.registerCommand api "stats-session"
-      #js {:description "Show usage stats for current session"
-           :handler
-           (fn [_args ctx]
-             (let [state (.getState api)
-                   input  (:total-input-tokens state)
-                   output (:total-output-tokens state)
-                   cost   (:total-cost state)
-                   turns  (:turn-count state)]
-               (.notify (.-ui ctx)
-                 (str "Session: " turns " turns | "
-                      (format-tokens input) " in / " (format-tokens output) " out | "
-                      (format-cost cost)))))})
+                      #js {:description "Show usage stats for current session"
+                           :handler
+                           (fn [_args ctx]
+                             (let [state (.getState api)
+                                   input  (:total-input-tokens state)
+                                   output (:total-output-tokens state)
+                                   cost   (:total-cost state)
+                                   turns  (:turn-count state)]
+                               (.notify (.-ui ctx)
+                                        (str "Session: " turns " turns | "
+                                             (format-tokens input) " in / " (format-tokens output) " out | "
+                                             (format-cost cost)))))})
 
     ;; Cleanup
     (fn []
