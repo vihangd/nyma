@@ -3,7 +3,7 @@
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.model-info :as model-info]
-            [agent.pricing :refer [calculate-cost model-cost-key]]
+            [agent.pricing :refer [calculate-turn-cost model-cost-key]]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
@@ -391,8 +391,19 @@
                         (when (and usage store)
                           (let [input-tokens  (or (.-inputTokens usage) 0)
                                 output-tokens (or (.-outputTokens usage) 0)
+                                ;; inputTokens INCLUDES these; the cost fn splits
+                                ;; them out. Same field the event payload below
+                                ;; already reads — the cost line just ignored it,
+                                ;; overstating a cache-heavy turn ~3x.
+                                cache-read    (or (some-> usage .-inputTokenDetails .-cacheReadTokens) 0)
+                                cache-write   (or (some-> usage .-inputTokenDetails .-cacheWriteTokens) 0)
                                 cost-model-id (model-cost-key (:config agent))
-                                cost          (calculate-cost cost-model-id input-tokens output-tokens)]
+                                cost          (calculate-turn-cost
+                                               cost-model-id
+                                               {:input-tokens  input-tokens
+                                                :output-tokens output-tokens
+                                                :cache-read-tokens  cache-read
+                                                :cache-write-tokens cache-write})]
                             ((:dispatch! store) :usage-updated
                                                 {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
                           ;; after_provider_request — inform extensions of usage/cache metrics

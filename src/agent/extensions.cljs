@@ -257,7 +257,13 @@
                                                           :input          (when (.-input m) (vec (.-input m)))
                                                           :cost           (when (.-cost m)
                                                                             {:input  (.-input (.-cost m))
-                                                                             :output (.-output (.-cost m))})})
+                                                                             :output (.-output (.-cost m))
+                                                                             ;; Optional: lets a provider price
+                                                                             ;; cached input separately.
+                                                                             :cache-read  (or (.-cacheRead (.-cost m))
+                                                                                              (aget (.-cost m) "cache_read"))
+                                                                             :cache-write (or (.-cacheWrite (.-cost m))
+                                                                                              (aget (.-cost m) "cache_write"))})})
                                                        models-arr)))
                                     cfg (if models (assoc cfg :models models) cfg)
                                   ;; Remove nil create-model so build-provider-entry can auto-generate
@@ -292,8 +298,18 @@
                                   ;; Auto-register pricing
                                     (doseq [m models]
                                       (when-let [cost (:cost m)]
-                                        (let [rates [(or (:input cost) 0)
-                                                     (or (:output cost) 0)]]
+                                        ;; 4-element form only when a cache rate
+                                        ;; is declared; otherwise keep the plain
+                                        ;; [input output] shape so nothing that
+                                        ;; reads these pairs has to change.
+                                        (let [cr (:cache-read cost)
+                                              cw (:cache-write cost)
+                                              rates (if (or (number? cr) (number? cw))
+                                                      [(or (:input cost) 0)
+                                                       (or (:output cost) 0)
+                                                       cr cw]
+                                                      [(or (:input cost) 0)
+                                                       (or (:output cost) 0)])]
                                           (when-not gateway?
                                             (swap! pricing/token-costs assoc (:id m) rates))
                                           (swap! pricing/token-costs assoc

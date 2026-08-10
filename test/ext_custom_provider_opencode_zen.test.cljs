@@ -275,3 +275,49 @@
                                                                                  (aset js/process.env "OPENCODE_API_KEY" orig-alias)
                                                                                  (js-delete js/process.env "OPENCODE_API_KEY"))
                                                                                (fs/rmSync tmp-dir #js {:recursive true :force true}))))))))
+
+;;; ─── Declared context windows ───────────────────────────────────
+;;; 23 of the 27 models declared no window, so they fell back to the registry
+;;; default — including big-pickle, which is a common default model, and the
+;;; whole GPT-5 line at 400k. Compaction and headroom planned against 100k.
+;;; Values come from models.dev's `opencode` provider; Zen's own /v1/models
+;;; carries no window, despite a note here that used to say otherwise.
+
+(defn- zen-agent []
+  (let [agent (create-agent {:model "m" :system-prompt "s"})]
+    ((aget zen-ext "default") (create-extension-api agent "zen-ctx"))
+    agent))
+
+(defn- zen-registry [] (:context-window (:model-registry (zen-agent))))
+
+(defn- zen-model-ids
+  "Ids as REGISTERED, rather than the extension's private `models` vector —
+   this is what the rest of nyma actually sees."
+  [agent]
+  (let [get-provider (:get (:provider-registry agent))
+        entry        (get-provider "opencode-zen")]
+    (mapv :id (:models entry))))
+
+(describe "opencode-zen context windows"
+  (fn []
+    (it "resolves real windows instead of the default"
+        (fn []
+          (let [cw (zen-registry)]
+            (-> (expect (cw "opencode-zen/big-pickle")) (.toBe 200000))
+            (-> (expect (cw "opencode-zen/gpt-5")) (.toBe 400000))
+            (-> (expect (cw "opencode-zen/gpt-5.4")) (.toBe 1050000))
+            (-> (expect (cw "opencode-zen/kimi-k2.5")) (.toBe 262144)))))
+
+    (it "leaves the one model models.dev doesn't list on the default"
+        (fn []
+          ;; Documented omission, not an oversight — asserted so it stays visible.
+          (-> (expect ((zen-registry) "opencode-zen/ling-2.6-flash")) (.toBe 100000))))
+
+    (it "declares a window for every model but that one"
+        (fn []
+          (let [agent (zen-agent)
+                cw    (:context-window (:model-registry agent))
+                ids   (zen-model-ids agent)
+                defaulted (filterv (fn [id] (= 100000 (cw (str "opencode-zen/" id)))) ids)]
+            (-> (expect (count ids)) (.toBeGreaterThan 20))
+            (-> (expect defaulted) (.toEqual #js ["ling-2.6-flash"])))))))

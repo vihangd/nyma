@@ -13,41 +13,48 @@
 ;; Free models still require a funded Zen account ($20 minimum top-up at
 ;; https://opencode.ai/auth) — "free" means zero per-token cost, not zero signup.
 ;;
-;; Context windows are omitted where Zen doesn't publish them; use
-;; GET /zen/v1/models at runtime for authoritative values.
+;; Context windows come from models.dev's `opencode` provider — the same
+;; catalogue the opencode CLI itself uses.
+;;
+;; NOT from GET /zen/v1/models, which an earlier note here recommended: that
+;; endpoint is public but returns only {id, object, created, owned_by}, with no
+;; window and no pricing, so it cannot answer this question. Checked directly.
+;;
+;; `ling-2.6-flash` is the one model models.dev doesn't list; it has no :ctx and
+;; falls back to the registry default. That omission is known, not an oversight.
 (def ^:private models
   [;; ── Free ────────────────────────────────────────────────────────────────
-   {:id "gpt-5-nano"           :name "GPT-5 Nano (free)"           :protocol :responses :ctx 400000 :cost {:input 0   :output 0}}
-   {:id "minimax-m2.5-free"    :name "MiniMax M2.5 Free"           :protocol :chat      :ctx 204800 :cost {:input 0   :output 0}}
-   {:id "big-pickle"           :name "Big Pickle (free)"           :protocol :chat                  :cost {:input 0   :output 0}}
+   {:id "gpt-5-nano"           :name "GPT-5 Nano (free)"           :protocol :responses :ctx 400000 :cost {:input 0   :output 0 :cache-read 0.005}}
+   {:id "minimax-m2.5-free"    :name "MiniMax M2.5 Free"           :protocol :chat      :ctx 204800 :cost {:input 0   :output 0 :cache-read 0}}
+   {:id "big-pickle"           :name "Big Pickle (free)"           :protocol :chat                  :ctx 200000 :cost {:input 0   :output 0 :cache-read 0}}
    {:id "ling-2.6-flash"       :name "Ling 2.6 Flash (free)"       :protocol :chat                  :cost {:input 0   :output 0}}
-   {:id "nemotron-3-super-free" :name "Nemotron 3 Super Free"      :protocol :chat                  :cost {:input 0   :output 0}}
+   {:id "nemotron-3-super-free" :name "Nemotron 3 Super Free"      :protocol :chat                  :ctx 204800 :cost {:input 0   :output 0 :cache-read 0}}
 
    ;; ── Paid — /responses (GPT-5.x) ─────────────────────────────────────────
-   {:id "gpt-5"                :name "GPT-5"                       :protocol :responses :cost {:input 1.07  :output 8.50}}
-   {:id "gpt-5-codex"         :name "GPT-5 Codex"                 :protocol :responses :cost {:input 1.07  :output 8.50}}
-   {:id "gpt-5.1"             :name "GPT-5.1"                     :protocol :responses :cost {:input 1.07  :output 8.50}}
-   {:id "gpt-5.1-codex"       :name "GPT-5.1 Codex"               :protocol :responses :cost {:input 1.07  :output 8.50}}
-   {:id "gpt-5.1-codex-max"   :name "GPT-5.1 Codex Max"           :protocol :responses :cost {:input 1.25  :output 10.00}}
-   {:id "gpt-5.1-codex-mini"  :name "GPT-5.1 Codex Mini"          :protocol :responses :cost {:input 0.25  :output 2.00}}
-   {:id "gpt-5.2"             :name "GPT-5.2"                     :protocol :responses :cost {:input 1.75  :output 14.00}}
-   {:id "gpt-5.2-codex"       :name "GPT-5.2 Codex"               :protocol :responses :cost {:input 1.75  :output 14.00}}
-   {:id "gpt-5.3-codex"       :name "GPT-5.3 Codex"               :protocol :responses :cost {:input 1.75  :output 14.00}}
-   {:id "gpt-5.3-codex-spark" :name "GPT-5.3 Codex Spark"         :protocol :responses :cost {:input 1.75  :output 14.00}}
-   {:id "gpt-5.4"             :name "GPT-5.4"                     :protocol :responses :cost {:input 2.50  :output 15.00}}
-   {:id "gpt-5.4-mini"        :name "GPT-5.4 Mini"                :protocol :responses :cost {:input 0.75  :output 4.50}}
-   {:id "gpt-5.4-nano"        :name "GPT-5.4 Nano"                :protocol :responses :cost {:input 0.20  :output 1.25}}
-   {:id "gpt-5.4-pro"         :name "GPT-5.4 Pro"                 :protocol :responses :cost {:input 30.00 :output 180.00}}
+   {:id "gpt-5"                :name "GPT-5"                       :protocol :responses :ctx 400000 :cost {:input 1.07  :output 8.50 :cache-read 0.107}}
+   {:id "gpt-5-codex"         :name "GPT-5 Codex"                 :protocol :responses :ctx 400000 :cost {:input 1.07  :output 8.50 :cache-read 0.107}}
+   {:id "gpt-5.1"             :name "GPT-5.1"                     :protocol :responses :ctx 400000 :cost {:input 1.07  :output 8.50 :cache-read 0.107}}
+   {:id "gpt-5.1-codex"       :name "GPT-5.1 Codex"               :protocol :responses :ctx 400000 :cost {:input 1.07  :output 8.50 :cache-read 0.107}}
+   {:id "gpt-5.1-codex-max"   :name "GPT-5.1 Codex Max"           :protocol :responses :ctx 400000 :cost {:input 1.25  :output 10.00 :cache-read 0.125}}
+   {:id "gpt-5.1-codex-mini"  :name "GPT-5.1 Codex Mini"          :protocol :responses :ctx 400000 :cost {:input 0.25  :output 2.00 :cache-read 0.025}}
+   {:id "gpt-5.2"             :name "GPT-5.2"                     :protocol :responses :ctx 400000 :cost {:input 1.75  :output 14.00 :cache-read 0.175}}
+   {:id "gpt-5.2-codex"       :name "GPT-5.2 Codex"               :protocol :responses :ctx 400000 :cost {:input 1.75  :output 14.00 :cache-read 0.175}}
+   {:id "gpt-5.3-codex"       :name "GPT-5.3 Codex"               :protocol :responses :ctx 400000 :cost {:input 1.75  :output 14.00 :cache-read 0.175}}
+   {:id "gpt-5.3-codex-spark" :name "GPT-5.3 Codex Spark"         :protocol :responses :ctx 128000 :cost {:input 1.75  :output 14.00 :cache-read 0.175}}
+   {:id "gpt-5.4"             :name "GPT-5.4"                     :protocol :responses :ctx 1050000 :cost {:input 2.50  :output 15.00 :cache-read 0.25}}
+   {:id "gpt-5.4-mini"        :name "GPT-5.4 Mini"                :protocol :responses :ctx 400000 :cost {:input 0.75  :output 4.50 :cache-read 0.075}}
+   {:id "gpt-5.4-nano"        :name "GPT-5.4 Nano"                :protocol :responses :ctx 400000 :cost {:input 0.20  :output 1.25 :cache-read 0.02}}
+   {:id "gpt-5.4-pro"         :name "GPT-5.4 Pro"                 :protocol :responses :ctx 1050000 :cost {:input 30.00 :output 180.00 :cache-read 30}}
 
    ;; ── Paid — /chat/completions ─────────────────────────────────────────────
-   {:id "minimax-m2.5"        :name "MiniMax M2.5"                :protocol :chat :ctx 204800 :cost {:input 0.30 :output 1.20}}
-   {:id "minimax-m2.7"        :name "MiniMax M2.7"                :protocol :chat :ctx 204800 :cost {:input 0.30 :output 1.20}}
-   {:id "glm-5"               :name "GLM-5"                       :protocol :chat              :cost {:input 1.00 :output 3.20}}
-   {:id "glm-5.1"             :name "GLM-5.1"                     :protocol :chat              :cost {:input 1.40 :output 4.40}}
-   {:id "kimi-k2.5"           :name "Kimi K2.5 (via Zen)"         :protocol :chat              :cost {:input 0.60 :output 3.00}}
-   {:id "kimi-k2.6"           :name "Kimi K2.6 (via Zen)"         :protocol :chat              :cost {:input 0.95 :output 4.00}}
-   {:id "qwen3.5-plus"        :name "Qwen 3.5 Plus"               :protocol :chat              :cost {:input 0.20 :output 1.20}}
-   {:id "qwen3.6-plus"        :name "Qwen 3.6 Plus"               :protocol :chat              :cost {:input 0.50 :output 3.00}}])
+   {:id "minimax-m2.5"        :name "MiniMax M2.5"                :protocol :chat :ctx 204800 :cost {:input 0.30 :output 1.20 :cache-read 0.06}}
+   {:id "minimax-m2.7"        :name "MiniMax M2.7"                :protocol :chat :ctx 204800 :cost {:input 0.30 :output 1.20 :cache-read 0.06}}
+   {:id "glm-5"               :name "GLM-5"                       :protocol :chat              :ctx 204800 :cost {:input 1.00 :output 3.20 :cache-read 0.2}}
+   {:id "glm-5.1"             :name "GLM-5.1"                     :protocol :chat              :ctx 204800 :cost {:input 1.40 :output 4.40 :cache-read 0.26}}
+   {:id "kimi-k2.5"           :name "Kimi K2.5 (via Zen)"         :protocol :chat              :ctx 262144 :cost {:input 0.60 :output 3.00 :cache-read 0.08}}
+   {:id "kimi-k2.6"           :name "Kimi K2.6 (via Zen)"         :protocol :chat              :ctx 262144 :cost {:input 0.95 :output 4.00 :cache-read 0.16}}
+   {:id "qwen3.5-plus"        :name "Qwen 3.5 Plus"               :protocol :chat              :ctx 262144 :cost {:input 0.20 :output 1.20 :cache-read 0.02}}
+   {:id "qwen3.6-plus"        :name "Qwen 3.6 Plus"               :protocol :chat              :ctx 262144 :cost {:input 0.50 :output 3.00 :cache-read 0.05}}])
 
 (def ^:private protocol-by-id
   (into {} (map (juxt :id :protocol) models)))
@@ -55,7 +62,13 @@
 (defn- ->js-model [{:keys [id name ctx cost]}]
   (let [base #js {:id id :name name}]
     (when ctx (aset base "contextWindow" ctx))
-    (when cost (aset base "cost" #js {:input (:input cost) :output (:output cost)}))
+    (when cost
+      (let [c #js {:input (:input cost) :output (:output cost)}]
+        ;; Zen caches aggressively, so pricing cached input at the full input
+        ;; rate materially overstates a long session.
+        (when (number? (:cache-read cost)) (aset c "cacheRead" (:cache-read cost)))
+        (when (number? (:cache-write cost)) (aset c "cacheWrite" (:cache-write cost)))
+        (aset base "cost" c)))
     base))
 
 (defn resolve-base-url []

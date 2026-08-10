@@ -73,8 +73,14 @@
 
                                                          (it "falls back to the bare id for an ordinary provider"
                                                              (fn []
-                                                               (-> (expect (pricing/lookup-cost "anthropic/claude-opus-5"))
-                                                                   (.toEqual #js [5.0 25.0]))))
+      ;; Asserts the FALLBACK, not the rate-vector shape: entries carry
+      ;; [input output] or [input output cache-read cache-write], and pinning
+      ;; the exact vector here made a pricing-data change look like a
+      ;; resolution regression.
+                                                               (let [rates (pricing/lookup-cost "anthropic/claude-opus-5")]
+                                                                 (-> (expect rates) (.not.toBeNil))
+                                                                 (-> (expect (first rates)) (.toBe 5.0))
+                                                                 (-> (expect (second rates)) (.toBe 25.0)))))
 
                                                          (it "does NOT fall back for a provider marked unpriced"
                                                              (fn []
@@ -199,64 +205,64 @@
     reg))
 
 (describe "context window has one answer" (fn []
-  (it "the picker and the runtime resolve the same number"
-      (fn []
-        (let [reg   (registry-in-load-order)
-              cw    (:context-window reg)
+                                            (it "the picker and the runtime resolve the same number"
+                                                (fn []
+                                                  (let [reg   (registry-in-load-order)
+                                                        cw    (:context-window reg)
               ;; What catalog/entry-models passes for the picker.
-              picker (cw "kimi/kimi-k2.5")
+                                                        picker (cw "kimi/kimi-k2.5")
               ;; What loop / compaction / headroom pass now.
-              runtime (cw (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))]
-          (-> (expect runtime) (.toBe picker))
-          (-> (expect runtime) (.toBe 262144)))))
+                                                        runtime (cw (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))]
+                                                    (-> (expect runtime) (.toBe picker))
+                                                    (-> (expect runtime) (.toBe 262144)))))
 
-  (it "a provider declaring no window cannot clobber one that does"
-      (fn []
-        (let [cw (:context-window (registry-in-load-order))]
-          (-> (expect (cw "kimi-k2.5")) (.toBe 262144)))))
+                                            (it "a provider declaring no window cannot clobber one that does"
+                                                (fn []
+                                                  (let [cw (:context-window (registry-in-load-order))]
+                                                    (-> (expect (cw "kimi-k2.5")) (.toBe 262144)))))
 
-  (it "the guard holds in the opposite registration order too"
-      (fn []
-        (let [reg (create-model-registry)]
-          ((:register reg) {"kimi-k2.5" {:context-window nil}})
-          ((:register reg) {"kimi-k2.5" {:context-window 262144}})
-          (-> (expect ((:context-window reg) "kimi-k2.5")) (.toBe 262144)))))
+                                            (it "the guard holds in the opposite registration order too"
+                                                (fn []
+                                                  (let [reg (create-model-registry)]
+                                                    ((:register reg) {"kimi-k2.5" {:context-window nil}})
+                                                    ((:register reg) {"kimi-k2.5" {:context-window 262144}})
+                                                    (-> (expect ((:context-window reg) "kimi-k2.5")) (.toBe 262144)))))
 
-  (it "a real window still replaces another real window"
-      (fn []
+                                            (it "a real window still replaces another real window"
+                                                (fn []
         ;; The guard must not freeze the first value in place — only reject
         ;; entries that carry nothing.
-        (let [reg (create-model-registry)]
-          ((:register reg) {"m" {:context-window 1000}})
-          ((:register reg) {"m" {:context-window 2000}})
-          (-> (expect ((:context-window reg) "m")) (.toBe 2000)))))
+                                                  (let [reg (create-model-registry)]
+                                                    ((:register reg) {"m" {:context-window 1000}})
+                                                    ((:register reg) {"m" {:context-window 2000}})
+                                                    (-> (expect ((:context-window reg) "m")) (.toBe 2000)))))
 
-  (it "an undeclared model still falls back to the vendor's own entry"
-      (fn []
+                                            (it "an undeclared model still falls back to the vendor's own entry"
+                                                (fn []
         ;; opencode-zen carries kimi-k2.5 without a window; the qualified lookup
         ;; falls through to the bare id, which kimi declared.
-        (let [cw (:context-window (registry-in-load-order))]
-          (-> (expect (cw "opencode-zen/kimi-k2.5")) (.toBe 262144)))))))
+                                                  (let [cw (:context-window (registry-in-load-order))]
+                                                    (-> (expect (cw "opencode-zen/kimi-k2.5")) (.toBe 262144)))))))
 
 (describe "model-info/model-key" (fn []
-  (it "qualifies a resolved model object"
-      (fn []
-        (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
-            (.toBe "kimi/kimi-k2.5"))))
+                                   (it "qualifies a resolved model object"
+                                       (fn []
+                                         (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
+                                             (.toBe "kimi/kimi-k2.5"))))
 
-  (it "never stringifies the object"
-      (fn []
-        (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
-            (.not.toContain "object Object"))))
+                                   (it "never stringifies the object"
+                                       (fn []
+                                         (-> (expect (model-info/model-key "kimi" #js {:modelId "kimi-k2.5"}))
+                                             (.not.toContain "object Object"))))
 
-  (it "accepts a plain string on the unknown-provider path"
-      (fn []
-        (-> (expect (model-info/model-key "p" "some-model")) (.toBe "p/some-model"))))
+                                   (it "accepts a plain string on the unknown-provider path"
+                                       (fn []
+                                         (-> (expect (model-info/model-key "p" "some-model")) (.toBe "p/some-model"))))
 
-  (it "falls back to the bare id when no provider is recorded"
-      (fn []
-        (-> (expect (model-info/model-key "" #js {:modelId "gpt-4o"})) (.toBe "gpt-4o"))))
+                                   (it "falls back to the bare id when no provider is recorded"
+                                       (fn []
+                                         (-> (expect (model-info/model-key "" #js {:modelId "gpt-4o"})) (.toBe "gpt-4o"))))
 
-  (it "returns a lookup-safe value for a missing model"
-      (fn []
-        (-> (expect (model-info/model-key "p" nil)) (.toBe "unknown"))))))
+                                   (it "returns a lookup-safe value for a missing model"
+                                       (fn []
+                                         (-> (expect (model-info/model-key "p" nil)) (.toBe "unknown"))))))

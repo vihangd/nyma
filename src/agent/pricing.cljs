@@ -1,20 +1,29 @@
 (ns agent.pricing
   (:require [agent.model-info :as model-info]))
 
-;; Model pricing: [input-rate-per-1M-tokens, output-rate-per-1M-tokens] in USD
+;; Model pricing in USD per 1M tokens:
+;;   [input output]                              — no cache rates known
+;;   [input output cache-read cache-write]       — cached tokens priced separately
+;;
+;; Both shapes are valid; the 2-element form keeps every existing entry and
+;; caller working. Cache rates are only ever applied when a model declares them,
+;; because the ratios are not universal — Anthropic reads at 0.1x and writes at
+;; 1.25x, OpenAI reads at roughly 0.1x with no separate write charge, Gemini
+;; differs again. Guessing a ratio would replace a known-wrong number with an
+;; unknown-wrong one.
 (def token-costs
-  (atom {"claude-opus-5"                 [5.0 25.0]
-         "claude-opus-4-8"              [15.0 75.0]
-         "claude-sonnet-5"              [3.0 15.0]
-         "claude-haiku-4-5-20251001"    [1.0 5.0]
-         "claude-sonnet-4-20250514"     [3.0 15.0]
-         "claude-opus-4-20250514"       [15.0 75.0]
-         "claude-haiku-3-20240307"      [0.25 1.25]
-         "gpt-4o"                       [2.5 10.0]
-         "gpt-4o-mini"                  [0.15 0.6]
+  (atom {"claude-opus-5"                 [5.0 25.0 0.5 6.25]
+         "claude-opus-4-8"              [15.0 75.0 1.5 18.75]
+         "claude-sonnet-5"              [3.0 15.0 0.3 3.75]
+         "claude-haiku-4-5-20251001"    [1.0 5.0 0.1 1.25]
+         "claude-sonnet-4-20250514"     [3.0 15.0 0.3 3.75]
+         "claude-opus-4-20250514"       [15.0 75.0 1.5 18.75]
+         "claude-haiku-3-20240307"      [0.25 1.25 0.03 0.30]
+         "gpt-4o"                       [2.5 10.0 1.25 nil]
+         "gpt-4o-mini"                  [0.15 0.6 0.075 nil]
          "gpt-4-turbo"                  [10.0 30.0]
-         "gemini-2.0-flash"             [0.1 0.4]
-         "gemini-1.5-pro"               [1.25 5.0]}))
+         "gemini-2.0-flash"             [0.1 0.4 0.025 nil]
+         "gemini-1.5-pro"               [1.25 5.0 0.3125 nil]}))
 
 (def unpriced-providers
   "Provider names whose per-token rates we don't know.
@@ -57,14 +66,53 @@
   [config]
   (or (model-info/config-model-key config) ""))
 
+(defn calculate-turn-cost
+  "USD cost for one turn, pricing cached input separately when the model
+   declares cache rates. Returns 0 when the model has no pricing at all.
+
+   `usage` keys: :input-tokens :output-tokens :cache-read-tokens
+   :cache-write-tokens.
+
+   `:input-tokens` INCLUDES the cached tokens — measured on a live turn,
+   cacheRead 5478 + cacheWrite 1286 + noCache 1 == inputTokens 6765 — so the
+   fresh portion is the remainder, and charging the whole of it at the input
+   rate overstated a cache-heavy Opus turn by 3.1x.
+
+   A model with no declared cache rates is priced exactly as before: everything
+   at the input rate. That keeps an unknown model's number unchanged rather than
+   swapping one wrong answer for another.
+
+   Deliberately not an extra arity of `calculate-cost` — this repo's formatter
+   mangles multi-arity defns."
+  [model-id usage]
+  (if-let [rates (lookup-cost model-id)]
+    (let [[in-rate out-rate cr-rate cw-rate] rates
+          input  (or (:input-tokens usage) 0)
+          output (or (:output-tokens usage) 0)
+          cr     (or (:cache-read-tokens usage) 0)
+          cw     (or (:cache-write-tokens usage) 0)
+          per-1m (fn [tokens rate] (/ (* tokens rate) 1000000))]
+      (if-not (or (number? cr-rate) (number? cw-rate))
+        ;; No cache rates for this model — previous behaviour, unchanged.
+        (+ (per-1m input in-rate) (per-1m output out-rate))
+        ;; A provider may price reads but not writes (OpenAI); an undeclared
+        ;; side falls back to the plain input rate rather than to free.
+        (let [fresh (max 0 (- input cr cw))]
+          (+ (per-1m fresh in-rate)
+             (per-1m cr (or cr-rate in-rate))
+             (per-1m cw (or cw-rate in-rate))
+             (per-1m output out-rate)))))
+    0))
+
 (defn calculate-cost
   "Calculate USD cost for a given model and token counts.
-   Returns 0 if model pricing is unknown."
+   Returns 0 if model pricing is unknown.
+
+   Cache-unaware: callers that know the cache split should use
+   `calculate-turn-cost`, which prices it."
   [model-id input-tokens output-tokens]
-  (if-let [[input-rate output-rate] (lookup-cost model-id)]
-    (+ (* (/ input-tokens 1000000) input-rate)
-       (* (/ output-tokens 1000000) output-rate))
-    0))
+  (calculate-turn-cost model-id {:input-tokens input-tokens
+                                 :output-tokens output-tokens}))
 
 (defn format-cost
   "Format USD cost as a human-readable string."

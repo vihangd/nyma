@@ -81,7 +81,11 @@ Switch models: `/model opencode-zen/<id>` — e.g. `/model opencode-zen/minimax-
 | `qwen3.5-plus` | unpublished | $0.20 | $1.20 |
 | `qwen3.6-plus` | unpublished | $0.50 | $3.00 |
 
-Context windows marked "unpublished" are not documented by Zen. Fetch `GET https://opencode.ai/zen/v1/models` for authoritative metadata.
+Context windows come from [models.dev](https://models.dev/api.json)'s `opencode` provider —
+the catalogue the opencode CLI itself uses. `GET https://opencode.ai/zen/v1/models` is **not**
+a source for them: it is public, but returns only `{id, object, created, owned_by}` with no
+window and no pricing. `ling-2.6-flash` is the one model models.dev doesn't list, so it has no
+declared window and falls back to the registry default.
 
 ## Known quirks
 

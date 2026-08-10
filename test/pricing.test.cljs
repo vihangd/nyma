@@ -1,6 +1,7 @@
 (ns pricing.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.pricing :refer [calculate-cost format-cost format-tokens token-costs]]))
+            [agent.pricing :refer [calculate-cost calculate-turn-cost format-cost
+                                   format-tokens token-costs]]))
 
 (describe "calculate-cost" (fn []
   (it "calculates cost for known model"
@@ -62,3 +63,62 @@
   (it "has pricing for gpt-4o"
     (fn []
       (-> (expect (get @token-costs "gpt-4o")) (.toBeDefined))))))
+
+;;; ─── Cached input is not full-price input ───────────────────────
+;;; `usage.inputTokens` INCLUDES cached tokens. Measured on a live turn:
+;;;   cacheRead 5478 + cacheWrite 1286 + noCache 1 == inputTokens 6765
+;;; so charging the whole of it at the input rate overstated a cache-heavy
+;;; Opus turn ~2.7x. That matters on a relay that reads ~5.5k cached tokens
+;;; every turn.
+
+(defn- usage [in out cr cw]
+  {:input-tokens in :output-tokens out
+   :cache-read-tokens cr :cache-write-tokens cw})
+
+(describe "calculate-turn-cost — cached tokens"
+  (fn []
+    (it "prices the measured turn well below the undifferentiated rate"
+        (fn []
+          (let [priced (calculate-turn-cost "claude-opus-5" (usage 6765 112 5478 1286))
+                flat   (calculate-cost "claude-opus-5" 6765 112)]
+            (-> (expect priced) (.toBeLessThan flat))
+            ;; noCache 1 + read 5478@0.5 + write 1286@6.25 + out 112@25
+            (-> (expect (js/Math.round (* priced 10000))) (.toBe 136)))))
+
+    (it "does not double count — the parts must sum to inputTokens"
+        (fn []
+          ;; If the fresh portion were not the remainder, the same tokens would
+          ;; be billed twice: once at the input rate and again as cache.
+          (let [all-cached (calculate-turn-cost "claude-opus-5" (usage 1000 0 1000 0))
+                explicit   (/ (* 1000 0.5) 1000000)]
+            (-> (expect all-cached) (.toBeCloseTo explicit 10)))))
+
+    (it "matches the old number when nothing was cached"
+        (fn []
+          (-> (expect (calculate-turn-cost "claude-opus-5" (usage 6765 112 0 0)))
+              (.toBe (calculate-cost "claude-opus-5" 6765 112)))))
+
+    (it "leaves a model with no declared cache rates exactly as it was"
+        (fn []
+          ;; gpt-4-turbo has a 2-element entry. Charging its cached tokens at a
+          ;; guessed ratio would swap a known-wrong number for an unknown-wrong
+          ;; one, so it must stay unchanged.
+          (-> (expect (calculate-turn-cost "gpt-4-turbo" (usage 1000 100 500 200)))
+              (.toBe (calculate-cost "gpt-4-turbo" 1000 100)))))
+
+    (it "falls back to the input rate for a side the provider doesn't price"
+        (fn []
+          ;; gpt-4o declares a read rate but no write rate.
+          (let [c (calculate-turn-cost "gpt-4o" (usage 1000 0 0 1000))]
+            (-> (expect c) (.toBe (/ (* 1000 2.5) 1000000))))))
+
+    (it "never goes negative when cache counts exceed the input total"
+        (fn []
+          ;; Defensive: a provider reporting inconsistent numbers must not
+          ;; produce a negative fresh-token count.
+          (-> (expect (calculate-turn-cost "claude-opus-5" (usage 10 0 5000 5000)))
+              (.toBeGreaterThan 0))))
+
+    (it "still returns 0 for a model with no pricing at all"
+        (fn []
+          (-> (expect (calculate-turn-cost "nope/nothing" (usage 1000 100 0 0))) (.toBe 0))))))
