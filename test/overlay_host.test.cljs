@@ -1,5 +1,6 @@
 (ns overlay-host.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth]]
             ["./agent/ui/overlay_host.mjs"
              :refer [printable-char data->key should-dismiss? close-signal?
                      adapt-component make-select-picker make-input-picker
@@ -57,8 +58,44 @@
                                    cols bh)
                             lines (.split out "\n")]
                         (-> (expect (.-length lines)) (.toBeLessThanOrEqual bh))
+                        ;; COLUMNS, not characters. This corpus is ASCII, so
+                        ;; the two agree here; the wide-glyph case below is
+                        ;; what distinguishes them.
                         (doseq [l lines]
-                          (-> (expect (count l)) (.toBeLessThanOrEqual bw))))))))
+                          (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual bw))))))))
+
+            (it "fits the box for non-ASCII labels too"
+                (fn []
+                  ;; The reachable crash: picker-frame measured rows with
+                  ;; `count`, so a label of CJK or emoji occupied two to four
+                  ;; columns per character it had budgeted one for. Measured
+                  ;; through this exact production path — resolve-content-width
+                  ;; + bottom-overlay-options — a catalogue with wide glyphs
+                  ;; emitted 81 columns inside an 80-column box, at every
+                  ;; terminal size tried. pi-tui throws on that from inside its
+                  ;; own render timer after calling stop(), so it ends the
+                  ;; session: /model, the skill picker and mention pickers all
+                  ;; route through here.
+                  (let [wide  ["\u6f22\u5b57\u30c6\u30b9\u30c8/\u30e2\u30c7\u30eb-\u5927"
+                               "\ud83c\udf89 celebration/\ud83d\ude80-turbo-v2"
+                               "\ud83c\uddef\ud83c\uddf5 jp/\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67\u200d\ud83d\udc66-family-model"
+                               "\u4e2d\u6587\u5b57\u7b26 \ud83c\udf89 mixed/ascii-tail"]
+                        items (mapv (fn [i]
+                                      #js {:value (str "m" i)
+                                           :label (nth wide (mod i (count wide)))
+                                           :description "200.0k \u00b7 $2.5/$10"})
+                                    (range 40))]
+                    (doseq [cols [40 60 80 120]
+                            rows [6 10 24]]
+                      (let [bw    (resolve-content-width bottom-overlay-options cols)
+                            bh    (resolve-max-height bottom-overlay-options rows)
+                            out   ((.-render (make-select-picker "Model" items (fn [_] nil)
+                                                                 (fn [] bw)))
+                                   cols bh)
+                            lines (.split out "\n")]
+                        (-> (expect (.-length lines)) (.toBeLessThanOrEqual bh))
+                        (doseq [l lines]
+                          (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual bw))))))))
 
             (it "shows the metadata column on a normal terminal"
                 (fn []
@@ -384,3 +421,19 @@
           (-> (expect (printable-char ESC-CHAR)) (.toBeNil))
           (-> (expect (printable-char (str ESC-CHAR "[<0;10;5M"))) (.toBeNil))
           (-> (expect (printable-char (js/String.fromCharCode 3))) (.toBeNil))))))
+
+(describe "overlay-host/input picker width safety" (fn []
+  (it "keeps a CJK value inside the box while typing"
+    (fn []
+      ;; The tail-truncation dropped leading CHARACTERS against a COLUMN
+      ;; budget, so every wide glyph the user typed pushed the row two
+      ;; columns wider than budgeted. Measured through this production path
+      ;; before the fix: 122 columns inside a 72-column box at an 80-column
+      ;; terminal — enough to kill the session. Reachable by typing CJK into
+      ;; any input picker.
+      (doseq [cols [40 60 80 120]]
+        (let [bw (resolve-content-width bottom-overlay-options cols)
+              p  (make-input-picker "Name" "placeholder" (fn [_] nil) (fn [] bw))]
+          (dotimes [_ 60] (.onInput p "\u6f22" #js {}))
+          (doseq [l (.split (.render p cols 10) "\n")]
+            (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual bw)))))))))

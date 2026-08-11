@@ -15,8 +15,20 @@
    arrow-down past the last visible row immediately scrolls. The
    older centred strategy hides scrolling for the first ~half of
    the visible count and makes the list feel stuck."
-  (:require [clojure.string :as str]
+  (:require ["@mariozechner/pi-tui" :refer [visibleWidth truncateToWidth]]
+            [clojure.string :as str]
             [agent.ui.picker-math :refer [safe-index window-trailing]]))
+
+;; Widths here are DISPLAY COLUMNS, not characters. `count` was used
+;; throughout, which is the same number only for ASCII: one CJK glyph is two
+;; columns and an emoji can be four, so a row padded to 20 "chars" of 漢 is 40
+;; columns — and pi-tui kills the session over any line wider than the
+;; terminal. Measured before this: a picker with CJK/emoji items emitted 81
+;; columns at width 80, at every width tested.
+(defn- width-of [s] (visibleWidth (str s)))
+
+;; squint drops \uXXXX escapes in some string positions; build it explicitly.
+(def ^:private ellipsis (js/String.fromCharCode 0x2026))
 
 (def ^:private focus-prefix "  \u25b6 ")
 (def ^:private blank-prefix "    ")
@@ -24,26 +36,32 @@
 (def ^:private scroll-dn-prefix "  \u2193 ")
 
 (defn- pad-to
-  "Right-pad `line` with spaces until it's `w` chars wide. Lines longer
+  "Right-pad `line` with spaces until it's `w` display COLUMNS wide. Lines longer
    than `w` are returned unchanged — caller should have truncated them
    already if that matters."
   [line w]
-  (let [n (count line)]
+  (let [n (width-of line)]
     (if (>= n w)
       line
       (str line (.repeat " " (- w n))))))
 
 (defn truncate-to
-  "Truncate `line` to at most `w` visible characters, appending a
-   single-char ellipsis `…` when truncation actually happens.
-   Returns the line unchanged when it already fits. Guards against
-   nil / non-positive widths by returning the input as-is."
+  "Truncate `line` to at most `w` display COLUMNS, appending a single-char
+   ellipsis when truncation actually happens. Returns the line unchanged when
+   it already fits. Guards against nil / non-positive widths by returning the
+   input as-is.
+
+   Columns, not characters: one CJK glyph is two columns, so the previous
+   `count`-based version let a 20-column budget emit 40 actual columns."
   [line w]
   (cond
     (or (nil? line) (nil? w) (not (pos? w))) line
-    (<= (count line) w) line
-    ;; Reserve one char for the ellipsis so the total is exactly w.
-    :else (str (subs line 0 (max 0 (dec w))) "\u2026")))
+    (<= (width-of line) w) line
+    ;; Truncate to (w-1) COLUMNS with pi-tui's indicator suppressed, then add
+    ;; our own. Letting pi-tui append it instead leaves a reset escape AFTER
+    ;; the ellipsis, so the row no longer ends in the character callers (and
+    ;; tests) look for.
+    :else (str (truncateToWidth (str line) (max 0 (dec w)) "" false) ellipsis)))
 
 (defn truncate-tail
   "Truncate to `w` chars keeping the END of the string, with a leading `…`.
@@ -56,9 +74,17 @@
   (let [s (str s)]
     (cond
       (or (nil? w) (not (pos? w))) s
-      (<= (count s) w) s
+      (<= (width-of s) w) s
       (= w 1) "…"
-      :else (str "…" (subs s (- (count s) (dec w)))))))
+      ;; Column-accurate tail: drop leading characters until the remainder
+      ;; fits in (w-1) columns. Character arithmetic would overshoot on wide
+      ;; glyphs, which is the bug this file had throughout.
+      :else (let [budget (dec w)]
+              (loop [i 0]
+                (let [tail (subs s i)]
+                  (if (or (>= i (count s)) (<= (width-of tail) budget))
+                    (str "…" tail)
+                    (recur (inc i)))))))))
 
 (defn two-col-row
   "Lay out `left` and `right` on one row exactly `width` wide: `left` padded
@@ -75,13 +101,13 @@
         ;; — but only while the identifier keeps a legible budget. On a narrow
         ;; terminal both cannot fit, and knowing WHICH model a row is beats
         ;; knowing its price, so the metadata is what gets dropped.
-        left-budget (- width (count right) gap)
+        left-budget (- width (width-of right) gap)
         show-right? (and (seq right)
-                         (<= (count right) (js/Math.floor (/ width 2)))
+                         (<= (width-of right) (js/Math.floor (/ width 2)))
                          (>= left-budget 24))
         right   (if show-right? right "")
         gap     (if show-right? gap 0)
-        left-w  (max 1 (- width (count right) gap))
+        left-w  (max 1 (- width (width-of right) gap))
         left    (truncate-tail left left-w)]
     (if (seq right)
       (str (pad-to left left-w) (.repeat " " gap) right)
@@ -94,7 +120,7 @@
    the chat view underneath leaks through the ragged right edge."
   [s]
   (let [lines (.split (or s "") "\n")
-        width (reduce (fn [w l] (max w (count l))) 0 lines)]
+        width (reduce (fn [w l] (max w (width-of l))) 0 lines)]
     (->> lines
          (map (fn [l] (pad-to l width)))
          (str/join "\n"))))
@@ -117,9 +143,10 @@
     (max 30 avail)))
 
 (defn fit-lines
-  "Truncate every line to at most `w` characters, then right-pad any
-   shorter lines back up to exactly `w`. Every returned line is
-   guaranteed to be exactly `w` visible characters.
+  "Truncate every line to at most `w` display COLUMNS, then right-pad any
+   shorter lines back up to `w`. Every returned line is guaranteed to occupy
+   at most `w` columns \u2014 exactly `w` unless a wide glyph straddles the
+   boundary and pi-tui stops one column short rather than splitting it.
 
    This is the overlay's fix for long rows: without the truncation
    step, a single long line (e.g. `/agent-shell__agent` plus a huge

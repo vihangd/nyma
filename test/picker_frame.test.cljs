@@ -3,6 +3,7 @@
    render-frame gets an assertion — focus prefix placement, empty
    state, above/below overflow markers, item formatter plumbing."
   (:require ["bun:test" :refer [describe it expect]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame pad-lines truncate-to
                                            fit-lines overlay-max-width
@@ -275,15 +276,33 @@
 
             (it "truncates and appends an ellipsis when over width"
                 (fn []
-        ;; Width 5 → 4 chars of content + 1 char ellipsis = 5 total.
-                  (-> (expect (truncate-to "hello world" 5)) (.toBe "hell\u2026"))))
+                  ;; Asserted on VISIBLE WIDTH, not `count`: pi-tui's truncator
+                  ;; emits a reset escape alongside the indicator, so characters
+                  ;; outnumber columns. Columns are what kills the session.
+                  (let [out (truncate-to "hello world" 5)]
+                    (-> (expect (visibleWidth out)) (.toBe 5))
+                    (-> (expect (.startsWith out "hell")) (.toBe true))
+                    (-> (expect (.endsWith out "\u2026")) (.toBe true)))))
 
-            (it "result is exactly width chars long after truncation"
+            (it "result is exactly width columns after truncation"
                 (fn []
                   (doseq [w [10 20 50]]
                     (let [line (apply str (repeat 200 "x"))
                           out  (truncate-to line w)]
-                      (-> (expect (count out)) (.toBe w))))))
+                      (-> (expect (visibleWidth out)) (.toBe w))))))
+
+            (it "never exceeds the width for wide glyphs"
+                (fn []
+                  ;; The bug this file had throughout: `count` equals columns
+                  ;; only for ASCII. One CJK glyph is two columns and an emoji
+                  ;; up to four, so character-based truncation emitted 2-4x the
+                  ;; budget — measured at 81 columns inside an 80-column box.
+                  (doseq [line [(apply str (repeat 50 "\u6f22"))
+                                (apply str (repeat 30 "\ud83c\udf89"))
+                                (apply str (repeat 20 "\ud83c\uddef\ud83c\uddf5"))]
+                          w    [40 20 10 5 2 1]]
+                    (-> (expect (visibleWidth (truncate-to line w)))
+                        (.toBeLessThanOrEqual w)))))
 
             (it "handles nil line"
                 (fn []
@@ -300,12 +319,22 @@
 
 (describe "fit-lines"
           (fn []
-            (it "every output line is exactly w chars"
+            (it "every output line is exactly w columns"
                 (fn []
                   (let [out (fit-lines "short\nmuch longer line than the cap\nmid" 12)
                         lines (str/split out #"\n")]
                     (doseq [l lines]
-                      (-> (expect (count l)) (.toBe 12))))))
+                      (-> (expect (visibleWidth l)) (.toBe 12))))))
+
+            (it "wide glyphs never push a line past w"
+                (fn []
+                  ;; A row of CJK padded to 12 "chars" is 24 columns — wider
+                  ;; than the box, which pi-tui turns into a dead session.
+                  (doseq [w [40 20 12 6]]
+                    (let [out (fit-lines (str "\u6f22\u5b57\u30c6\u30b9\u30c8 \ud83c\udf89 plain\n"
+                                              "\ud83c\uddef\ud83c\uddf5 flag row\nascii") w)]
+                      (doseq [l (str/split out #"\n")]
+                        (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))
 
             (it "truncates long lines with ellipsis"
                 (fn []
@@ -355,7 +384,7 @@
 
 (describe "render-frame: overflow-wrap regression"
           (fn []
-            (it "with :max-width, every row is exactly max-width chars"
+            (it "with :max-width, every row is exactly max-width columns"
                 (fn []
         ;; The bug: one very long row (mimics /agent-shell__agent
         ;; with its 'claude, gemini, opencode, qwen, goose, kiro'
@@ -378,7 +407,7 @@
                                            :no-match-text "none"})
                         lines (str/split out #"\n")]
                     (doseq [l lines]
-                      (-> (expect (count l)) (.toBe 42))))))
+                      (-> (expect (visibleWidth l)) (.toBe 42))))))
 
             (it "long row is truncated with an ellipsis"
                 (fn []

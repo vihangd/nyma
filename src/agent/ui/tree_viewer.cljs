@@ -1,5 +1,6 @@
 (ns agent.ui.tree-viewer
-  (:require [agent.utils.ansi :refer [terminal-width string-width]]))
+  (:require [agent.ui.picker-frame :refer [truncate-to]]
+            [agent.utils.ansi :refer [terminal-width string-width]]))
 
 ;; Pi-mono render object for interactive session tree browsing.
 ;; Used with ctx.ui.custom() via the CustomComponentAdapter in overlay.cljs.
@@ -38,9 +39,12 @@
         content (or (:content entry) "")
         prefix  (str cursor indent fold role)
         max-len (max 10 (- w (string-width prefix) 2))
-        display (if (> (count content) max-len)
-                  (str (subs content 0 max-len) "…")
-                  content)]
+        ;; COLUMNS, not characters. max-len is a column budget (it comes
+        ;; from string-width), so comparing it against `count` mixes units:
+        ;; a message of CJK or emoji rendered at two to four columns per
+        ;; budgeted character and blew past `w`, which pi-tui kills the
+        ;; session over.
+        display (truncate-to content max-len)]
     (str prefix display)))
 
 (defn create-tree-viewer
@@ -60,14 +64,20 @@
     (set! (.-render component)
           (fn [w _h]
             (let [visible (compute-visible tree @collapsed)
-                  header  "Session Tree (up/down navigate, Enter fold/unfold, Esc close)"
+                  cols    (or w 80)
+                  ;; The header is a fixed 61 columns; below that terminal
+                  ;; width it overflowed no matter what the entries held,
+                  ;; which pi-tui turns into a dead session.
+                  header  (truncate-to
+                           "Session Tree (up/down navigate, Enter fold/unfold, Esc close)"
+                           cols)
                   lines   (into [header ""]
                                 (map-indexed
                                  (fn [i {:keys [entry depth]}]
                                    (let [has-kids (has-children? tree (:id entry))
                                          is-collapsed (contains? @collapsed (:id entry))]
                                      (render-entry entry depth (= i @selected)
-                                                   has-kids is-collapsed (or w 80))))
+                                                   has-kids is-collapsed cols)))
                                  visible))]
               (.join (clj->js lines) "\n"))))
 

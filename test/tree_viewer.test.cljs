@@ -1,5 +1,6 @@
 (ns tree-viewer.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth]]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]))
 
 (defn- make-session [entries]
@@ -59,3 +60,22 @@
         (.onInput tv nil #js {:upArrow true})
         (let [output (.render tv 80 24)]
           (-> (expect output) (.toContain "Session Tree"))))))))
+
+(describe "tree-viewer width safety" (fn []
+  (it "never emits a row wider than the width it was given"
+    (fn []
+      ;; render-entry budgeted `max-len` in COLUMNS (it derives from
+      ;; string-width) but compared it against `count`, so a message of CJK
+      ;; or emoji put two to four columns on screen per budgeted character.
+      ;; pi-tui throws on an over-wide line from inside its own render timer
+      ;; after calling stop(), so this ends the session rather than looking
+      ;; wrong. /tree renders arbitrary conversation content.
+      (let [wide    (apply str (repeat 20 "\u6f22\u5b57\u30c6\u30b9\u30c8\u306e\u5185\u5bb9 \ud83c\udf89 "))
+            entries (mapv (fn [i]
+                            {:id (str i) :role "user" :content wide
+                             :parent-id nil :depth 0})
+                          (range 8))
+            tv      (create-tree-viewer (make-session entries))]
+        (doseq [w [120 80 60 40 20]]
+          (doseq [l (.split (.render tv w 12) "\n")]
+            (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))))

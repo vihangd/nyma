@@ -26,7 +26,7 @@
   (:require ["@mariozechner/pi-tui" :refer [matchesKey]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame overlay-max-width
-                                           truncate-to two-col-row]]
+                                           truncate-to truncate-tail two-col-row]]
             [agent.ui.picker-input :refer [dispatch-input]]
             [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]))
 
@@ -283,9 +283,11 @@
                  ;; Show the TAIL once the value outgrows the line, so typing
                  ;; past the cap keeps showing what's being typed instead of
                  ;; freezing on the first `cap` characters.
-                 shown (if (> (count shown) body-cap)
-                         (str "…" (subs shown (- (count shown) (dec body-cap))))
-                         shown)]
+                 ;; COLUMNS, not characters: typing CJK or emoji into an
+                 ;; input picker put two to four columns on screen for every
+                 ;; character this budgeted one for, overflowing the box.
+                 ;; truncate-tail does the same head-drop, measured properly.
+                 shown (truncate-tail shown body-cap)]
              (str prompt "  (Enter to accept, Esc to cancel)" "\n"
                   "> " shown)))
 
