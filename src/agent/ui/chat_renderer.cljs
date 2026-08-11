@@ -115,7 +115,13 @@
                  (mutated on each call; pass nil to skip caching)"
   [{:keys [msg width theme md-cache]}]
   (let [role    (:role msg)
-        content (or (:content msg) "")
+        ;; Tabs are expanded HERE, before any wrapping or markdown rendering.
+        ;; Every layer below measures a tab differently (0 / 1 / 3 / 4-8
+        ;; columns), so a line containing one has no true width — that is what
+        ;; crashed the TUI on tab-indented Go under a permission overlay.
+        ;; Expanding later, once a line is wrapped or composited, only widens
+        ;; it further.
+        content (ansi/expand-tabs (or (:content msg) ""))
         w       (or width 80)
         pc      (fg (get-in theme [:colors :primary]   "#7aa2f7"))
         sc      (fg (get-in theme [:colors :secondary] "#9ece6a"))
