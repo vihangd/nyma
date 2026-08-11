@@ -14,7 +14,8 @@
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
             [agent.ui.overlay-host :as overlay-host]
-            [agent.ui.width-guard :refer [attach-guarded-children!]]))
+            [agent.ui.width-guard :refer [attach-guarded-children!]]
+            [agent.ui.crash-recovery :as crash-recovery]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -399,6 +400,23 @@
                                      ["status-bar" status-bar]
                                      ["editor" editor]])
       (.setFocus tui editor)
+
+      ;; Net under the guard. The guard clamps component output, which is what
+      ;; actually prevents this; but pi-tui throws from inside its own render
+      ;; timer with no catch point, so if anything still gets through, the
+      ;; alternative to this handler is a dead session. pi-tui stops the
+      ;; terminal before throwing and `start()` clears its stopped flag, so
+      ;; the same instance can be brought back up in place.
+      (crash-recovery/install!
+       {:tui tui
+        :session-path-fn (fn [] (when session
+                                  (try ((:get-file-path session))
+                                       (catch :default _ nil))))
+        :on-recovered (fn [msg]
+                        (update-messages!
+                         (fn [msgs]
+                           (conj (vec msgs)
+                                 {:role "info" :content msg :id (new-id)}))))})
 
       ;; Initial status render
       (sync-status!)
