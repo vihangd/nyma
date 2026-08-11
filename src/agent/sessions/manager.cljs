@@ -212,17 +212,42 @@
       ;; user saw on screen.
       (when events
         ((:on events) "message_update"
-         (fn [data]
-           (swap! acc str (or (and data (.-textDelta data)) ""))
-           ((:note! ckpt) @acc)
-           nil))
+                      (fn [data]
+                        (swap! acc str (or (and data (.-textDelta data)) ""))
+                        ((:note! ckpt) @acc)
+                        nil))
 
         ;; Deliberately NOT hooked to "turn_end": that is emitted from the
         ;; SDK's :onStepFinish, so it fires once per STEP, not once per turn.
         ;; Clearing there would delete the sidecar in the middle of any
         ;; tool-using response — exactly when it is protecting something. The
         ;; turn boundary that matters is the next user message, below.
-        )
+
+        ;; A turn that ended WITHOUT storing a response: write what was
+        ;; streamed, rather than discarding it.
+        ;;
+        ;; The assistant message is dispatched at exactly one place in the loop
+        ;; (the final-text path). A provider error or a user interrupt throws
+        ;; out of the stream and is swallowed by the loop's catch, and
+        ;; retry-exhaustion emits agent_end carrying the accumulated text and
+        ;; drops it — so in both cases a response the user WATCHED ARRIVE was
+        ;; never recorded. Measured on real sessions before this: seven user
+        ;; messages, two assistant messages.
+        ;;
+        ;; Safe because of an ordering invariant: on a normal turn the
+        ;; assistant :message-added fires BEFORE turn_finalize and the
+        ;; subscriber below resets `acc`. So a non-empty `acc` here means
+        ;; nothing was stored — precisely the interrupted case. That ordering
+        ;; is load-bearing and has its own test.
+        ((:on events) "turn_finalize"
+                      (fn [_]
+                        (let [text @acc]
+                          (when (seq (.trim (str text)))
+                            ((:append session) {:role "assistant"
+                                                :content (partial/mark-cutoff text)})
+                            (reset! acc "")
+                            ((:commit! ckpt))))
+                        nil)))
 
       ((:subscribe (:store agent))
        (fn [event-type state]

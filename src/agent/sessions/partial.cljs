@@ -125,6 +125,19 @@
             (when (seq (.trim (str (or text "")))) text))
           (catch :default _ nil))))))
 
+(def cutoff-marker
+  "Appended to a response that never finished, so the model is not shown a
+   truncated answer as though it were complete — it would otherwise continue
+   from a sentence it believes it finished. Shared by the crash-recovery fold-in
+   and by the interrupted-turn append in `sessions/manager`, so both read the
+   same to a resumed session."
+  "\n\n[response was cut off here]")
+
+(defn mark-cutoff
+  "`text` marked as an unfinished response."
+  [text]
+  (str text cutoff-marker))
+
 (defn clear-partial!
   "Drop the sidecar once its contents have been folded into the conversation.
 
@@ -150,7 +163,7 @@
   (if-not (seq (str (or partial-text "")))
     (vec messages)
     (let [v      (vec messages)
-          marked (str partial-text "\n\n[response was cut off here]")
+          marked (mark-cutoff partial-text)
           tail   (last v)]
       (if (= "assistant" (:role tail))
         (update v (dec (count v)) assoc :content marked)

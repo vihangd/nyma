@@ -7,7 +7,8 @@
             [agent.state :refer [create-agent-store]]
             [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
             [agent.sessions.partial :refer [read-partial]]
-            [agent.events :refer [create-event-bus]]))
+            [agent.events :refer [create-event-bus]]
+            [agent.modes.interactive :refer [pane-messages]]))
 
 (def ^:private test-dir (atom nil))
 
@@ -246,3 +247,119 @@
                       (-> (expect (str (fs/readFileSync fp "utf8"))) (.toBe before))
                       ;; …and the in-flight response is still protected.
                       (-> (expect (read-partial fp)) (.toBeTruthy))))))))
+
+;;; ─── a turn that ends without storing a response ─────────────────────────
+;;; The assistant message is dispatched at exactly one place in the loop (the
+;;; final-text path). A provider error or a user interrupt throws out of the
+;;; stream into the loop's catch, and retry-exhaustion emits agent_end carrying
+;;; the accumulated text and drops it — so a response the user WATCHED ARRIVE
+;;; was never recorded. Measured on real sessions before this: seven user
+;;; messages, two assistant messages.
+
+(describe "an interrupted turn still records its response"
+          (fn []
+            (it "writes the streamed text when nothing else stored it"
+                (fn []
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})
+                    ((:emit events) "message_update" #js {:textDelta "partial answer"})
+                    ;; The turn dies here — no assistant :message-added ever comes.
+                    ((:emit events) "turn_finalize" #js {:error true})
+                    (let [lines (read-lines fp)]
+                      (-> (expect (count lines)) (.toBe 2))
+                      (-> (expect (.-role (nth lines 1))) (.toBe "assistant"))
+                      (-> (expect (.includes (.-content (nth lines 1)) "partial answer"))
+                          (.toBe true))))))
+
+            (it "marks it as cut off"
+                (fn []
+                  ;; Unmarked, the model resumes from a sentence it believes it
+                  ;; finished.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "message_update" #js {:textDelta "half a thought"})
+                    ((:emit events) "turn_finalize" #js {:error true})
+                    (-> (expect (.includes (.-content (first (read-lines fp))) "cut off"))
+                        (.toBe true)))))
+
+            (it "does NOT double-write when the turn completed normally"
+                (fn []
+                  ;; The ordering this design rests on: the assistant
+                  ;; :message-added fires BEFORE turn_finalize and resets the
+                  ;; accumulator, so a non-empty accumulator at finalize means
+                  ;; nothing was stored. If that order ever reversed, every
+                  ;; normal turn would be written twice — which is why this
+                  ;; test exists rather than a comment.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "message_update" #js {:textDelta "hello "})
+                    ((:emit events) "message_update" #js {:textDelta "world"})
+                    ((:dispatch! store) :message-added
+                     {:message {:role "assistant" :content "hello world"}})
+                    ((:emit events) "turn_finalize" #js {:error false})
+                    (let [lines (read-lines fp)]
+                      (-> (expect (count lines)) (.toBe 1))
+                      (-> (expect (.-content (first lines))) (.toBe "hello world"))))))
+
+            (it "writes nothing for a turn that produced no text"
+                (fn []
+                  ;; A tool-only step must not leave an empty assistant entry.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "turn_finalize" #js {:error false})
+                    ((:emit events) "message_update" #js {:textDelta "   "})
+                    ((:emit events) "turn_finalize" #js {:error false})
+                    (-> (expect (count (read-lines fp))) (.toBe 0)))))
+
+            (it "clears the sidecar once the interrupted text is on disk"
+                (fn []
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "message_update" #js {:textDelta "streamed"})
+                    (-> (expect (read-partial fp)) (.toBeTruthy))
+                    ((:emit events) "turn_finalize" #js {:error true})
+                    ;; The real entry exists now, so the checkpoint is spent.
+                    (-> (expect (read-partial fp)) (.toBeNil)))))
+
+            (it "shows up in the resumed transcript"
+                (fn []
+                  ;; The user-visible claim: interrupt a turn, resume, see the
+                  ;; response.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:dispatch! store) :message-added {:message {:role "user" :content "ask"}})
+                    ((:emit events) "message_update" #js {:textDelta "the answer so far"})
+                    ((:emit events) "turn_finalize" #js {:error true})
+                    ;; Reload from scratch, exactly as a resume does.
+                    (let [fresh (create-session-manager fp)
+                          _     ((:load fresh))
+                          shown (pane-messages fresh)]
+                      (-> (expect (count shown)) (.toBe 2))
+                      (-> (expect (:role (last shown))) (.toBe "assistant"))
+                      (-> (expect (.includes (:content (last shown)) "the answer so far"))
+                          (.toBe true))))))))
