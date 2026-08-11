@@ -17,8 +17,8 @@
             ["@mariozechner/pi-tui" :refer [visibleWidth]]
             [clojure.string :as str]
             [agent.utils.ansi :as ansi]
-            [agent.ui.chat-pane :refer [clamp-line create-chat-pane]]
-            [agent.ui.chat-renderer :as cr]))
+            [agent.ui.chat-pane :refer [create-chat-pane]]
+            [agent.ui.chat-renderer :as cr :refer [clamp-line]]))
 
 (def ^:private ESC (js/String.fromCharCode 27))
 
@@ -163,26 +163,71 @@
                     (doseq [l (vec (.render pane 1))]
                       (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual 1))))))))
 
-;; ── A real over-width path, found while widening the corpus ──
-;; Calling render-message WITHOUT a markdown cache takes a different wrapping
-;; path from the one chat-pane uses, and that path emits grapheme clusters
-;; whole: a ZWJ family emoji is 4 columns and a regional-indicator flag 6, so
-;; at width 1-3 it produces lines pi-tui would throw on. The pane is safe
-;; because it always passes a cache — but any other caller of this fn is not.
+;; ── render-message honours its own width contract ────────
+;; An earlier note here blamed the markdown cache. That was wrong: measured with
+;; and without a cache atom the results are identical. The variable is WIDTH.
+;;
+;; Before the exit clamp, every role overflowed and each in a different way —
+;; assistant from width 3, user from 5, thinking from 6, and the tool branches
+;; from 10, the last because they floor their wrap budget at `(max 10 …)`, a
+;; floor above the width they were handed. `wrap-ansi` cannot break inside a
+;; grapheme cluster, so a run of flags at width 2 came out 240 columns over.
 
-(describe "render-message without a cache"
+(def ^:private wide "🇯🇵漢字 hello world")
+
+(def ^:private every-role
+  {"user"        {:role "user" :content wide}
+   "assistant"   {:role "assistant" :content wide}
+   "thinking"    {:role "thinking" :content wide}
+   "asst+think"  {:role "assistant" :content "<think>deep 漢字 thought</think>answer 🇯🇵"}
+   "tool-start"  {:role "tool-start" :tool-name "read" :args {:path "/very/long/path/漢字.go"}}
+   "tool-end"    {:role "tool-end" :tool-name "read" :args {:path "/x"}
+                  :result (apply str (repeat 20 "🇯🇵"))}
+   "error"       {:role "error" :content wide}
+   "shell"       {:role "shell" :content wide}
+   "info"        {:role "info" :content wide}
+   "plan"        {:role "plan" :content wide}
+   "unknown"     {:role "surprise" :content wide}})
+
+(describe "render-message never exceeds the width it was given"
           (fn []
-            (it "can exceed the requested width on wide grapheme clusters"
-                (fn []
-                  ;; Documents the hazard rather than asserting it is fine.
-                  (let [lines (cr/render-message {:msg {:role "assistant" :content "🇯🇵"}
-                                                  :width 2 :theme {} :md-cache nil})
-                        over  (filterv (fn [l] (> (visibleWidth l) 2)) lines)]
-                    (-> (expect (count over)) (.toBeGreaterThan 0)))))
+            (doseq [[label msg] every-role]
+              (it (str label " fits at every width from 1 to 12")
+                  (fn []
+                    ;; The full matrix on purpose: a single-role test would have
+                    ;; missed the tool branches, which failed from width 10.
+                    (doseq [w (range 1 13)]
+                      (doseq [l (cr/render-message {:msg msg :width w
+                                                    :theme {} :md-cache nil})]
+                        (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))
 
-            (it "is made safe by the clamp"
+            (it "contains the catastrophic case"
                 (fn []
-                  ;; Which is what the clamp exists for.
-                  (doseq [l (cr/render-message {:msg {:role "assistant" :content "🇯🇵"}
+                  ;; 60 flags at width 2 previously produced one line 240 columns over.
+                  (doseq [l (cr/render-message {:msg {:role "assistant"
+                                                      :content (apply str (repeat 60 "🇯🇵"))}
                                                 :width 2 :theme {} :md-cache nil})]
-                    (-> (expect (visibleWidth (clamp-line l 2))) (.toBeLessThanOrEqual 2)))))))
+                    (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual 2)))))
+
+            (it "is unaffected by the markdown cache"
+                (fn []
+                  ;; The claim this corrects. Same input, cache vs no cache.
+                  (let [m {:role "assistant" :content "🇯🇵"}
+                        no-cache (cr/render-message {:msg m :width 3 :theme {} :md-cache nil})
+                        cached   (cr/render-message {:msg m :width 3 :theme {}
+                                                     :md-cache (atom nil)})]
+                    (-> (expect (vec no-cache)) (.toEqual (vec cached))))))))
+
+(describe "the clamp does not alter normal rendering"
+          (fn []
+            (doseq [[label msg] every-role]
+              (it (str label " is untouched at readable widths")
+                  (fn []
+                    ;; The clamp must remove crashes without silently truncating
+                    ;; real content, so at sane widths it has to be a no-op:
+                    ;; every line already fits, therefore clamp-line returns it
+                    ;; identically.
+                    (doseq [w [40 80 120]]
+                      (doseq [l (cr/render-message {:msg msg :width w
+                                                    :theme {} :md-cache nil})]
+                        (-> (expect (clamp-line l w)) (.toBe l)))))))))

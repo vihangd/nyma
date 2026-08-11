@@ -1,8 +1,28 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require [agent.utils.ansi :as ansi]
+  (:require ["@mariozechner/pi-tui" :refer [visibleWidth truncateToWidth]]
+            [agent.utils.ansi :as ansi]
             [agent.utils.markdown-blocks :as mb]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]))
+
+(defn clamp-line
+  "Truncate one rendered line to `width`, measured the way pi-tui measures it.
+
+   pi-tui THROWS on any line wider than the terminal, from inside its own render
+   timer — it calls stop() first, so the exception escapes with the terminal
+   already torn down and takes the session with it. There is no error hook and
+   no strict-width opt-out.
+
+   Deliberately uses pi-tui's `visibleWidth` / `truncateToWidth` rather than our
+   `string-width` and `truncate-line-to-width`: ours route through `wrap-ansi`,
+   which cannot break inside a grapheme cluster and so emits an over-wide one
+   whole. pi-tui's slices by column and holds for regional-indicator flags, ZWJ
+   families, CJK and ANSI alike. Agreeing with the function whose verdict
+   crashes us is the point."
+  [line width]
+  (if (and (number? width) (pos? width) (> (visibleWidth line) width))
+    (truncateToWidth line width)
+    line))
 
 ;;; ─── ANSI helpers ─────────────────────────────────────────────────────────
 ;;; squint silently drops \u001b from string literals; build ESC via charCode.
@@ -104,8 +124,9 @@
 
 ;;; ─── Message renderer ─────────────────────────────────────────────────────
 
-(defn render-message
-  "Render a single message map to string[] (one element per terminal line).
+(defn- render-message*
+  "Per-role rendering. Callers want `render-message`, which additionally
+   enforces the width guarantee.
 
    Options:
      :msg      — the message map
@@ -215,3 +236,23 @@
 
       ;; fallback
       (wrap+split (str mc role ": " RESET content) w))))
+
+(defn render-message
+  "Render a single message map to string[], every line guaranteed to fit
+   `:width`. See `render-message*` for the per-role rendering.
+
+   The guarantee is enforced here rather than in each branch because every
+   branch got it wrong in a different way, and pi-tui turns an over-wide line
+   into a dead session. Measured before this existed: `assistant` overflowed
+   from width 3, `user` from 5, `thinking` from 6, and the tool branches from
+   **10** — the last two because they floor their wrap budget at `(max 10 …)`,
+   a floor above the width they were handed. A run of wide graphemes at width 2
+   came out 240 columns over, since `wrap-ansi` cannot break inside a cluster
+   and emits it whole.
+
+   At any sane width this is a no-op — the branches already fit — so it costs
+   nothing and removes a whole class of crash. Below ~6 columns it truncates,
+   which is the right trade against losing the session."
+  [opts]
+  (let [w (or (:width opts) 80)]
+    (mapv (fn [l] (clamp-line l w)) (render-message* opts))))
