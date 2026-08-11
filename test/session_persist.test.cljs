@@ -213,3 +213,36 @@
                     (let [recovered (str (read-partial fp))]
                       (-> (expect (.includes recovered "FRESH")) (.toBe true))
                       (-> (expect (.includes recovered "ABANDONED")) (.toBe false))))))))
+
+(describe "a /resume replay must not write anything"
+          (fn []
+            (it "neither re-appends nor drops a live checkpoint"
+                (fn []
+                  ;; /resume sets :replaying-session? then dispatches
+                  ;; :message-added for every seeded message, so persistence
+                  ;; must sit the whole thing out. The append guard has always
+                  ;; been there; the checkpoint branches added later sit inside
+                  ;; the same `when`, and if they ever escaped it a replayed
+                  ;; user message would unlink a sidecar holding a live partial
+                  ;; response — silent data loss.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ;; A response is mid-flight and checkpointed.
+                    ((:emit events) "message_update" #js {:textDelta "in flight"})
+                    (-> (expect (read-partial fp)) (.toBeTruthy))
+                    (let [before (str (fs/readFileSync fp "utf8"))]
+                      ;; The replay, exactly as /resume performs it.
+                      ((:swap store) (fn [st] (assoc st :replaying-session? true)))
+                      ((:dispatch! store) :message-added
+                       {:message {:role "user" :content "replayed"}})
+                      ((:dispatch! store) :message-added
+                       {:message {:role "assistant" :content "replayed too"}})
+                      ((:swap store) (fn [st] (assoc st :replaying-session? false)))
+                      ;; Nothing appended…
+                      (-> (expect (str (fs/readFileSync fp "utf8"))) (.toBe before))
+                      ;; …and the in-flight response is still protected.
+                      (-> (expect (read-partial fp)) (.toBeTruthy))))))))
