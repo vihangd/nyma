@@ -3,6 +3,7 @@
    basic render contract, AND extension auto-append segment integration
    (regression: register-segment used to write to a registry no consumer read)."
   (:require ["bun:test" :refer [describe it expect afterEach]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.status-line-segments :as segs]))
 
@@ -140,7 +141,7 @@
 ;;; doesn't blank the bar.
 
 (defn- cleanup-segs! []
-  (doseq [id ["test.x" "test.y" "test.boom" "test.hidden"]]
+  (doseq [id ["test.x" "test.y" "test.boom" "test.hidden" "test.wide"]]
     (try (segs/unregister-segment id) (catch :default _ nil))))
 
 (afterEach cleanup-segs!)
@@ -290,3 +291,51 @@
                                         :provider "minimax"})
                     (let [text (render-bar bar 200)]
                       (-> (expect (.includes text "minimax/minimax-m2.5-free")) (.toBe true))))))))
+
+;;; ─── width safety ────────────────────────────────────────────────────────
+;;; The status bar is a BASE child of the TUI (interactive.cljs addChild), so
+;;; unlike the overlay pickers nothing composites it down afterwards: pi-tui
+;;; compares each rendered line against the terminal width and throws from
+;;; inside its own render timer, having already called stop(). An over-wide
+;;; status bar therefore ends the session.
+;;;
+;;; The bug: the right half was measured with `count` on an ANSI-stripped
+;;; string (CHARACTERS) while the left half was cut with truncateToWidth
+;;; (COLUMNS). Segment content is arbitrary extension code, so one CJK or
+;;; emoji glyph undercounted right-w, inflated left-w, and the concatenation
+;;; overflowed — measured at 85 columns inside a width of 80.
+
+(describe "status-bar width safety"
+          (fn []
+            (it "never exceeds the width it was given, with wide-glyph segments"
+                (fn []
+                  (segs/register-segment
+                   "test.wide"
+                   {:auto-append? true :position :right
+                    :render (fn [_] {:visible? true
+                                     :content "\u6f22\u5b57\u6f22\u5b57\ud83c\udf89\ud83c\udf89\u5efa"})})
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+                                        :provider "openrouter" :role "default"
+                                        :streaming true :turn-count 42})
+                    ;; Down to 1: a resize to a sliver must degrade, not crash.
+                    (doseq [w [120 100 80 60 50 40 30 20 10 5 1]]
+                      (doseq [l (vec (.render bar w))]
+                        (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))
+
+            (it "keeps the right half inside the width when it alone overflows"
+                (fn []
+                  ;; left-w floors at 0, so on a narrow terminal the left half
+                  ;; vanishes and the right half was appended whole: 41
+                  ;; columns at width 20.
+                  (segs/register-segment
+                   "test.wide"
+                   {:auto-append? true :position :right
+                    :render (fn [_] {:visible? true
+                                     :content (apply str (repeat 20 "\u6f22"))})})
+                  (let [bar (create-status-bar theme)]
+                    (.setState bar #js {:model "m" :provider "p" :role "default"
+                                        :streaming false :turn-count 1})
+                    (doseq [w [20 10 5 1]]
+                      (doseq [l (vec (.render bar w))]
+                        (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))))

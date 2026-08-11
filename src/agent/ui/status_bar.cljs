@@ -11,7 +11,7 @@
    Each render call walks the registry fresh, so there's no caching
    layer to invalidate when extensions add/remove segments at
    runtime."
-  (:require ["@mariozechner/pi-tui" :refer [truncateToWidth]]
+  (:require ["@mariozechner/pi-tui" :refer [truncateToWidth visibleWidth]]
             [agent.ui.status-line-segments :as segs]))
 
 (def ^:private ESC   (js/String.fromCharCode 27))
@@ -129,7 +129,28 @@
                                     (apply str (map #(format-segment % border) left-segs)))
                          right (str (apply str (map #(format-segment % border) right-segs))
                                     core-right)
-                         right-w (count (.replace right (js/RegExp. (str ESC "\\[[0-9;]*m") "g") ""))
+                         ;; COLUMNS, not characters. This measured `count` of
+                         ;; an ANSI-stripped string while the left half was cut
+                         ;; in columns, so the two halves were budgeted in
+                         ;; different units. A wide glyph in a segment (segment
+                         ;; content is arbitrary extension code) undercounted
+                         ;; right-w, inflated left-w, and the concatenation
+                         ;; overflowed: measured 85 columns at width 80. The
+                         ;; status bar is a base child of the TUI, so unlike
+                         ;; the overlay pickers nothing composites it down
+                         ;; afterwards — pi-tui throws and the session dies.
+                         ;;
+                         ;; visibleWidth ignores escapes itself, so the
+                         ;; hand-rolled SGR strip goes away with it.
+                         ;; The right half is clamped FIRST. `left-w` floors
+                         ;; at 0, so on a narrow terminal the left half
+                         ;; vanishes and `right` was appended whole — 41
+                         ;; columns at width 20. Truncating it first bounds
+                         ;; the row by construction.
+                         right   (if (> (visibleWidth right) width)
+                                   (truncateToWidth right width "\u2026" false)
+                                   right)
+                         right-w (visibleWidth right)
                          left-w  (max 0 (- width right-w))
                          left-t  (truncateToWidth left left-w "…" false)]
                      [(str left-t right)]))
