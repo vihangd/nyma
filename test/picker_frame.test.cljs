@@ -291,6 +291,27 @@
                           out  (truncate-to line w)]
                       (-> (expect (visibleWidth out)) (.toBe w))))))
 
+            (it "keeps the tail inside the width without splitting a glyph"
+                (fn []
+                  ;; truncate-tail stepped by code UNIT, so it could stop
+                  ;; between the halves of an emoji's surrogate pair and emit
+                  ;; a lone surrogate — measurable at w=10, 20 and 30. The
+                  ;; width was right either way; the row just rendered
+                  ;; garbled.
+                  ;; Built from code points: squint mangles \uXXXX escapes
+                  ;; inside a string literal, which silently turned an earlier
+                  ;; version of this pattern into replacement characters that
+                  ;; matched nothing — the test passed against the bug.
+                  (let [cc   (fn [n] (js/String.fromCharCode n))
+                        hi   (str "[" (cc 0xd800) "-" (cc 0xdbff) "]")
+                        lo   (str "[" (cc 0xdc00) "-" (cc 0xdfff) "]")
+                        lone (js/RegExp. (str hi "(?!" lo ")|(?<!" hi ")" lo))
+                        s    (str (apply str (repeat 20 "\ud83c\udf89")) "/tail-id")]
+                    (doseq [w [30 20 10 5 2 1]]
+                      (let [out (truncate-tail s w)]
+                        (-> (expect (visibleWidth out)) (.toBeLessThanOrEqual w))
+                        (-> (expect (.test lone out)) (.toBe false)))))))
+
             (it "never exceeds the width for wide glyphs"
                 (fn []
                   ;; The bug this file had throughout: `count` equals columns

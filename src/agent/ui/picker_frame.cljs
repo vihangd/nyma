@@ -27,9 +27,6 @@
 ;; columns at width 80, at every width tested.
 (defn- width-of [s] (visibleWidth (str s)))
 
-;; squint drops \uXXXX escapes in some string positions; build it explicitly.
-(def ^:private ellipsis (js/String.fromCharCode 0x2026))
-
 (def ^:private focus-prefix "  \u25b6 ")
 (def ^:private blank-prefix "    ")
 (def ^:private scroll-up-prefix "  \u2191 ")
@@ -61,10 +58,11 @@
     ;; our own. Letting pi-tui append it instead leaves a reset escape AFTER
     ;; the ellipsis, so the row no longer ends in the character callers (and
     ;; tests) look for.
-    :else (str (truncateToWidth (str line) (max 0 (dec w)) "" false) ellipsis)))
+    :else (str (truncateToWidth (str line) (max 0 (dec w)) "" false) "…")))
 
 (defn truncate-tail
-  "Truncate to `w` chars keeping the END of the string, with a leading `…`.
+  "Truncate to `w` display COLUMNS keeping the END of the string, with a
+   leading `…`.
 
    For identifiers the tail is the distinguishing part: head-truncating
    `openrouter/nvidia/nemotron-3-super-120b-a12b:free` yields
@@ -76,13 +74,21 @@
       (or (nil? w) (not (pos? w))) s
       (<= (width-of s) w) s
       (= w 1) "…"
-      ;; Column-accurate tail: drop leading characters until the remainder
-      ;; fits in (w-1) columns. Character arithmetic would overshoot on wide
+      ;; Column-accurate tail: drop leading glyphs until the remainder fits
+      ;; in (w-1) columns. Character arithmetic would overshoot on wide
       ;; glyphs, which is the bug this file had throughout.
-      :else (let [budget (dec w)]
+      ;;
+      ;; Steps by CODE POINT (Array.from), not code unit: `subs` can stop
+      ;; between the halves of an emoji's surrogate pair and emit a lone
+      ;; surrogate, which was measurable at w=10/20/30. Width stays correct
+      ;; either way, so this is legibility, not crash-safety. A ZWJ sequence
+      ;; can still be cut at a joint.
+      :else (let [budget (dec w)
+                  glyphs (js/Array.from s)
+                  n      (.-length glyphs)]
               (loop [i 0]
-                (let [tail (subs s i)]
-                  (if (or (>= i (count s)) (<= (width-of tail) budget))
+                (let [tail (.join (.slice glyphs i) "")]
+                  (if (or (>= i n) (<= (width-of tail) budget))
                     (str "…" tail)
                     (recur (inc i)))))))))
 
@@ -144,9 +150,9 @@
 
 (defn fit-lines
   "Truncate every line to at most `w` display COLUMNS, then right-pad any
-   shorter lines back up to `w`. Every returned line is guaranteed to occupy
-   at most `w` columns \u2014 exactly `w` unless a wide glyph straddles the
-   boundary and pi-tui stops one column short rather than splitting it.
+   shorter lines back up to `w`, so every returned line is exactly `w`
+   columns \u2014 truncation may stop a column short when a wide glyph
+   straddles the boundary, and the padding makes that up.
 
    This is the overlay's fix for long rows: without the truncation
    step, a single long line (e.g. `/agent-shell__agent` plus a huge

@@ -3,14 +3,17 @@
    Stores every submitted prompt in SQLite, provides search overlay."
   (:require [clojure.string :as str]
             [agent.utils.time :refer [relative-time]]
-            [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
+            [agent.ui.picker-frame :refer [render-frame overlay-max-width truncate-to]]
             [agent.ui.picker-input :refer [dispatch-input]]))
 
-(defn- truncate-line [text max-len]
-  (let [one-line (first (str/split-lines (or text "")))]
-    (if (> (count one-line) max-len)
-      (str (subs one-line 0 (- max-len 1)) "…")
-      one-line)))
+(defn- truncate-line
+  "First line of `text`, truncated to `max-len` display COLUMNS.
+
+   Was character-based, which equals columns only for ASCII. render-frame
+   re-clamps by column afterwards so this never overflowed the box, but a CJK
+   entry got truncated twice and lost more text than the budget called for."
+  [text max-len]
+  (truncate-to (first (str/split-lines (or text ""))) max-len))
 
 (defn create-history-picker
   "Create a fuzzy-searchable history picker component.
