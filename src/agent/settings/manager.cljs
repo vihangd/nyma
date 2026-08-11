@@ -38,6 +38,18 @@
                             :left-segments nil
                             :right-segments nil
                             :separator nil}
+   ;; Where pickers, prompts and info overlays are placed. `anchor` accepts any
+   ;; of pi-tui's nine values — center, top-left, top-center, top-right,
+   ;; left-center, right-center, bottom-left, bottom-center, bottom-right —
+   ;; and anything else falls back to the default rather than reaching pi-tui.
+   ;; `width` and `max-height` take a column/row count or an "N%" string.
+   ;;
+   ;; Bottom by default so a permission prompt does not cover the transcript
+   ;; the user is reading to answer it. See agent.ui.overlay-host.
+   :ui                     {:overlay {:anchor     "bottom-center"
+                                      :width      "90%"
+                                      :min-width  40
+                                      :max-height "70%"}}
    ;; A role may carry a permission :policy mapping a tool CATEGORY
    ;; (exec|write|read|network) → allow|ask|deny. This is the permission-MODE
    ;; axis (modes-as-roles): /mode switches the active role; the gate asks/denies

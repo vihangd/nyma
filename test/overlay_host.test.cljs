@@ -5,7 +5,7 @@
              :refer [printable-char data->key should-dismiss? close-signal?
                      adapt-component make-select-picker make-input-picker
                      make-text-overlay resolve-content-width resolve-max-height
-                     bottom-overlay-options paste-payload]]))
+                     default-overlay-options paste-payload]]))
 
 ;; Worst-case specs actually present in the repo's provider lists.
 (def ^:private real-specs
@@ -37,7 +37,7 @@
 
             (it "gives the /model picker room for a full spec at 80 cols"
                 (fn []
-                  (let [w (resolve-content-width bottom-overlay-options 80)]
+                  (let [w (resolve-content-width default-overlay-options 80)]
                     (-> (expect w) (.toBeGreaterThanOrEqual 49)))))))
 
 (describe "overlay-host/select picker at catalogue scale"
@@ -51,8 +51,8 @@
                   (let [items (big-catalogue)]
                     (doseq [cols [40 60 80 120]
                             rows [6 10 20 24 40]]
-                      (let [bw    (resolve-content-width bottom-overlay-options cols)
-                            bh    (resolve-max-height bottom-overlay-options rows)
+                      (let [bw    (resolve-content-width default-overlay-options cols)
+                            bh    (resolve-max-height default-overlay-options rows)
                             out   ((.-render (make-select-picker "Model" items (fn [_] nil)
                                                                  (fn [] bw)))
                                    cols bh)
@@ -70,7 +70,7 @@
                   ;; `count`, so a label of CJK or emoji occupied two to four
                   ;; columns per character it had budgeted one for. Measured
                   ;; through this exact production path — resolve-content-width
-                  ;; + bottom-overlay-options — a catalogue with wide glyphs
+                  ;; + default-overlay-options — a catalogue with wide glyphs
                   ;; emitted 81 columns inside an 80-column box, at every
                   ;; terminal size tried. pi-tui throws on that from inside its
                   ;; own render timer after calling stop(), so it ends the
@@ -87,8 +87,8 @@
                                     (range 40))]
                     (doseq [cols [40 60 80 120]
                             rows [6 10 24]]
-                      (let [bw    (resolve-content-width bottom-overlay-options cols)
-                            bh    (resolve-max-height bottom-overlay-options rows)
+                      (let [bw    (resolve-content-width default-overlay-options cols)
+                            bh    (resolve-max-height default-overlay-options rows)
                             out   ((.-render (make-select-picker "Model" items (fn [_] nil)
                                                                  (fn [] bw)))
                                    cols bh)
@@ -99,7 +99,7 @@
 
             (it "shows the metadata column on a normal terminal"
                 (fn []
-                  (let [bw  (resolve-content-width bottom-overlay-options 80)
+                  (let [bw  (resolve-content-width default-overlay-options 80)
                         out ((.-render (make-select-picker "Model" (big-catalogue) (fn [_] nil)
                                                            (fn [] bw)))
                              80 12)]
@@ -107,7 +107,7 @@
 
             (it "keeps the distinguishing tail of a long spec"
                 (fn []
-                  (let [bw  (resolve-content-width bottom-overlay-options 60)
+                  (let [bw  (resolve-content-width default-overlay-options 60)
                         out ((.-render (make-select-picker "Model" (big-catalogue) (fn [_] nil)
                                                            (fn [] bw)))
                              60 12)]
@@ -432,7 +432,7 @@
       ;; terminal — enough to kill the session. Reachable by typing CJK into
       ;; any input picker.
       (doseq [cols [40 60 80 120]]
-        (let [bw (resolve-content-width bottom-overlay-options cols)
+        (let [bw (resolve-content-width default-overlay-options cols)
               p  (make-input-picker "Name" "placeholder" (fn [_] nil) (fn [] bw))]
           (dotimes [_ 60] (.onInput p "\u6f22" #js {}))
           (doseq [l (.split (.render p cols 10) "\n")]

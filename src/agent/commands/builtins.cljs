@@ -13,7 +13,6 @@
             [agent.ui.editor-eval :as editor-eval]
             [agent.resources.skills :as skills]
             [agent.ui.skill-picker :as skill-picker]
-            [agent.ui.overlay-host :as overlay-host]
             [agent.providers.catalog :as catalog]
             [agent.thinking :as thinking]
             [clojure.string :as str]
@@ -307,16 +306,16 @@
                         (let [model-spec (str/join " " args)]
                           (switch-model! agent ctx model-spec))
 
-                        ;; Bare `/model` — fuzzy picker over the catalogue,
-                        ;; anchored at the bottom so the transcript stays
-                        ;; visible (oh-my-pi's model-picker does the same).
+                        ;; Bare `/model` — fuzzy picker over the catalogue.
+                        ;; This used to pass :overlay explicitly to sit at the
+                        ;; bottom; the shared default is bottom-anchored now, so
+                        ;; the override would only restate it.
                         :else
                         (let [models (current-models agent)]
                           (if (and (ui-selectable? ctx) (seq models))
                             (-> (.select (.-ui ctx)
                                          (str "Model — current: " (current-model-id agent))
-                                         (clj->js (mapv model->item models))
-                                         #js {:overlay overlay-host/bottom-overlay-options})
+                                         (clj->js (mapv model->item models)))
                                 (.then (fn [chosen]
                                          (when chosen
                                            (switch-model! agent ctx (.-value chosen))))))

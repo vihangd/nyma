@@ -30,18 +30,71 @@
             [agent.ui.picker-input :refer [dispatch-input]]
             [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]))
 
-;; Matches the 60% assumed by `picker-frame/overlay-max-width`.
+;; Overlays sit at the BOTTOM, out of the way of the transcript — borrowed from
+;; oh-my-pi, which shows its pickers and its plan-review overlay with
+;; `showOverlay(c, "bottom-center", {width: "100%", margin: 0})` and pins its
+;; error banner to a fixed region above the input for the same reason.
+;;
+;; This used to be `{width "60%", anchor "center"}`, and every overlay in the
+;; repo inherited it — 23 of 24 call sites pass no options at all, so a
+;; permission prompt landed dead centre, covering the transcript the user needs
+;; to read to answer it. That was never a decision anyone made; it was the
+;; fallthrough.
+;;
+;; 90% rather than the default 60%: model specs are `provider/org/id` and reach
+;; ~50 characters (openrouter/nvidia/nemotron-3-super-120b-a12b:free), so 60% of
+;; an 80-col terminal could not show one, let alone its context/price column.
+;;
+;; Consequence, accepted deliberately: a bottom anchor starts at
+;; `availHeight - height` (pi-tui's resolveAnchorRow, tui.js:540), so a tall
+;; overlay covers the status bar and the editor — at 24 rows a 70% overlay
+;; occupies the bottom 16, leaving 8 rows of transcript above. Every overlay
+;; here captures focus, so the editor is inert while one is open and there is
+;; nothing to type into; and the transcript is what the user actually needs to
+;; see, whether they are answering a permission prompt or reading /help. Giving
+;; the big info views their own `center` override would put us back to deciding
+;; placement per call site, which is the fallthrough this replaced.
 (def default-overlay-options
-  #js {:width "60%" :minWidth 30 :maxHeight "70%" :anchor "center"})
+  #js {:width "90%" :minWidth 40 :maxHeight "70%" :anchor "bottom-center"})
 
-;; Quick pickers (model switcher) sit at the bottom, out of the way of the
-;; transcript — borrowed from oh-my-pi's model-picker, which shows its
-;; non-fullscreen picker with `{ anchor: "bottom-center" }`.
-;; Wider than the default: model specs are `provider/org/id` and reach ~50
-;; characters (openrouter/nvidia/nemotron-3-super-120b-a12b:free), so 60% of an
-;; 80-col terminal could not show one, let alone its context/price column.
-(def bottom-overlay-options
-  #js {:width "90%" :minWidth 40 :maxHeight "50%" :anchor "bottom-center"})
+(def valid-anchors
+  "pi-tui's nine anchors (dist/tui.d.ts:56). Settings carry no schema — only
+   de-duping and case normalization — so an arbitrary string reaches us
+   unchecked and must not be handed to pi-tui."
+  #{"center" "top-left" "top-center" "top-right"
+    "left-center" "right-center"
+    "bottom-left" "bottom-center" "bottom-right"})
+
+(defn- size-value
+  "A pi-tui SizeValue is a column/row count or a `\"N%\"` string. Anything else
+   (nil, a bare number-as-string, junk) yields nil so the default stands."
+  [v]
+  (cond
+    (number? v) v
+    (and (string? v) (.endsWith v "%") (not (js/isNaN (js/parseFloat v)))) v
+    :else nil))
+
+(defn settings->overlay-options
+  "Build pi-tui overlay options from the settings map.
+
+   Settings arrive KEBAB-CASE: `settings/manager.cljs` runs `normalize-keys`
+   over loaded JSON, so a user writing `\"maxHeight\"` gets `:max-height` here.
+   pi-tui wants `maxHeight`/`minWidth`. This is where that is undone — settings
+   are kebab, pi-tui is camel, and the boundary is exactly one function.
+
+   Every field falls back to `default-overlay-options` independently, so a
+   partial override (just `:anchor`, say) keeps the rest."
+  [settings-map]
+  (let [ov     (get-in settings-map [:ui :overlay])
+        anchor (get ov :anchor)
+        anchor (if (contains? valid-anchors (str anchor))
+                 (str anchor)
+                 (.-anchor default-overlay-options))
+        width  (or (size-value (get ov :width))  (.-width default-overlay-options))
+        maxh   (or (size-value (get ov :max-height)) (.-maxHeight default-overlay-options))
+        minw   (let [m (get ov :min-width)]
+                 (if (number? m) m (.-minWidth default-overlay-options)))]
+    #js {:width width :minWidth minw :maxHeight maxh :anchor anchor}))
 
 ;; ── Key translation ──────────────────────────────────────────────
 
@@ -359,13 +412,25 @@
   "Assign the overlay-backed `api.ui` slots on `ui`, driven by `tui`.
 
    `restore-focus` is called after every dismissal so the editor regains
-   focus; `request-render` schedules a repaint."
-  [ui tui {:keys [restore-focus request-render]}]
+   focus; `request-render` schedules a repaint.
+
+   `overlay-options-fn` is a THUNK, not a value: it is called at show time so a
+   `/settings` change to `:ui/:overlay` takes effect on the next overlay rather
+   than needing a restart. Omitted (tests, non-settings hosts) it falls back to
+   `default-overlay-options`."
+  [ui tui {:keys [restore-focus request-render overlay-options-fn]}]
   (let [term       (.-terminal tui)
         get-width  (fn [] (or (.-columns term) 80))
         get-height (fn [] (or (.-rows term) 24))
         rerender   (fn [] (when request-render (request-render)))
         refocus    (fn [] (when restore-focus (restore-focus)))
+
+        ;; Resolved per show, so it tracks live settings.
+        base-options
+        (fn []
+          (or (when overlay-options-fn
+                (try (overlay-options-fn) (catch :default _ nil)))
+              default-overlay-options))
 
         ;; Show `picker`, returning a 0-arg dismiss fn. `auto-dismiss?`
         ;; closes the overlay on Enter/Escape (the ui.custom contract);
@@ -394,7 +459,7 @@
                                                  (should-dismiss? data result keep-open?))
                                           (done)
                                           (rerender)))})]
-            (reset! handle (.showOverlay tui comp (or options default-overlay-options)))
+            (reset! handle (.showOverlay tui comp (or options (base-options))))
             (rerender)
             done))
 
@@ -403,7 +468,7 @@
         ;; Thunk giving a host-built picker the columns it may actually paint,
         ;; so it stops re-deriving geometry from the terminal width.
         width-fn-for (fn [options]
-                       (fn [] (resolve-content-width (or options default-overlay-options)
+                       (fn [] (resolve-content-width (or options (base-options))
                                                      (get-width))))
 
         promised
@@ -428,10 +493,12 @@
                    (.addEventListener signal "abort"
                                       (fn [] (finish nil))
                                       #js {:once true}))
-                 (reset! dismiss (show! picker (or options default-overlay-options) false)))))))
+                 (reset! dismiss (show! picker (or options (base-options)) false)))))))
 
-        ;; Callers may pass `{overlay: <OverlayOptions>}` to place the picker —
-        ;; /model uses `bottom-overlay-options` so the transcript stays visible.
+        ;; Callers may pass `{overlay: <OverlayOptions>}` to place one picker
+        ;; somewhere specific. Nothing in-repo needs to any more: the shared
+        ;; default is bottom-anchored, which is what the one previous override
+        ;; (/model) wanted.
         overlay-of (fn [opts] (when (and opts (.-overlay opts)) (.-overlay opts)))
         signal-of  (fn [opts] (when (and opts (.-signal opts)) (.-signal opts)))]
 
@@ -443,11 +510,11 @@
             (let [picker (if (string? content)
                            (make-text-overlay content (width-fn-for options))
                            content)]
-              (show! picker (or options default-overlay-options) true))))
+              (show! picker (or options (base-options)) true))))
 
     (set! (.-custom ui)
           (fn [picker options]
-            (show! picker (or options default-overlay-options) true)))
+            (show! picker (or options (base-options)) true)))
 
     (set! (.-select ui)
           (fn [prompt items opts]

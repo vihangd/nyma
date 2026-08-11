@@ -346,7 +346,15 @@
         ;; so every picker in the repo fell through to its text fallback.
         (overlay-host/install! ui tui
                                {:restore-focus (fn [] (.setFocus tui editor))
-                                :request-render (fn [] (.requestRender tui))})))
+                                :request-render (fn [] (.requestRender tui))
+                                ;; A thunk, so a /settings change to
+                                ;; :ui/:overlay applies to the next overlay
+                                ;; without needing a restart.
+                                :overlay-options-fn
+                                (fn []
+                                  (when-let [settings (:settings agent)]
+                                    (overlay-host/settings->overlay-options
+                                     ((:get settings)))))})))
 
     ;; Wire editor
     (set! (.-onSubmit editor) on-submit)
