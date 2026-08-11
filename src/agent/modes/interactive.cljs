@@ -13,7 +13,8 @@
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
-            [agent.ui.overlay-host :as overlay-host]))
+            [agent.ui.overlay-host :as overlay-host]
+            [agent.ui.width-guard :refer [attach-guarded-children!]]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -386,10 +387,17 @@
                                     history)))
               (sync-pane!)))))
 
-      ;; Layout: chat → status-bar → editor
-      (.addChild tui chat-pane)
-      (.addChild tui status-bar)
-      (.addChild tui editor)
+      ;; Layout: chat → status-bar → editor.
+      ;;
+      ;; Attached through attach-guarded-children! so every base child's
+      ;; render is width-clamped. These three are the whole crash surface:
+      ;; overlays are composited by pi-tui, which truncates them itself, but
+      ;; base children go straight into the diff loop that throws. Adding a
+      ;; fourth child here gets the guard for free — forgetting to wrap one
+      ;; is how the status bar stayed unguarded.
+      (attach-guarded-children! tui [["chat-pane" chat-pane]
+                                     ["status-bar" status-bar]
+                                     ["editor" editor]])
       (.setFocus tui editor)
 
       ;; Initial status render
