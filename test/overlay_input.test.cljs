@@ -15,7 +15,7 @@
    real terminal actually sends."
   (:require ["bun:test" :refer [describe it expect]]
             ["@mariozechner/pi-tui" :refer [TUI]]
-            [agent.ui.overlay-host :as oh :refer [printable-char install!]]
+            [agent.ui.overlay-host :as oh :refer [printable-char install! enter-key?]]
             [agent.modes.interactive :refer [abort-on-escape?]]))
 
 (def ^:private ESC (js/String.fromCharCode 27))
@@ -160,3 +160,51 @@
                 (fn []
                   (doseq [d ["a" (str ESC "[97u") (str ESC "[B")]]
                     (-> (expect (abort-on-escape? d true 0)) (.toBe false)))))))
+
+;;; ─── Enter, in every encoding ────────────────────────────────────────────
+;;; pi-tui's own matchesKey misses one. Its plain-Enter branch
+;;; (keys.js:719-725) checks \r, \n, SS3 and the two Kitty forms and RETURNS —
+;;; never reaching the matchesModifyOtherKeys call below it, which is wired
+;;; only for MODIFIED Enter. pi-tui puts the terminal into modifyOtherKeys
+;;; itself when the Kitty query goes unanswered, so on those terminals plain
+;;; Enter was unrecognised and no picker could ever accept a selection.
+
+(describe "Enter is recognised whatever the terminal sends"
+          (fn []
+            (it "accepts every encoding"
+                (fn []
+                  (doseq [d [(js/String.fromCharCode 13)      ;; legacy CR
+                             (js/String.fromCharCode 10)      ;; legacy LF
+                             (str ESC "[13u")                 ;; kitty
+                             (str ESC "[13;1u")               ;; kitty, explicit modifier
+                             (str ESC "[13;1:1u")             ;; kitty, press event
+                             (str ESC "[57414u")              ;; kitty KP_ENTER
+                             (str ESC "[27;1;13~")            ;; modifyOtherKeys CR
+                             (str ESC "[27;1;10~")]]          ;; modifyOtherKeys LF
+                    (-> (expect (enter-key? d)) (.toBe true)))))
+
+            (it "does not fire on anything else"
+                (fn []
+                  ;; A loose match here would make every keystroke submit.
+                  (doseq [d ["a" (str ESC "[97u") (str ESC "[B") (str ESC "[A")
+                             ESC (str ESC "[27;1;97~") (str ESC "[27;1;27~")
+                             (js/String.fromCharCode 127)]]
+                    (-> (expect (enter-key? d)) (.toBe false)))))
+
+            (it "resolves a real picker under every encoding"
+                (^:async
+                 fn []
+                 ;; The reported symptom: the prompt is on screen, the arrow
+                 ;; moves, and Enter does nothing at all — the promise never
+                 ;; settles, so the tool call hangs waiting for an approval
+                 ;; that can't be given.
+                 (doseq [enter [(js/String.fromCharCode 13)
+                                (str ESC "[13u")
+                                (str ESC "[27;1;13~")
+                                (str ESC "[57414u")]]
+                   (let [{:keys [tui ui]} (host)
+                         p (.select ui "Allow 'web_search'?"
+                                    #js ["Allow once" "Allow always (this project)" "Deny"])]
+                     (.handleInput tui (str ESC "[B"))
+                     (.handleInput tui enter)
+                     (-> (expect (js-await p)) (.toBe "Allow always (this project)"))))))))

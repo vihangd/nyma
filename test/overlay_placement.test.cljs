@@ -25,7 +25,7 @@
                 (fn []
                   (let [o (settings->overlay-options {})]
                     (-> (expect (.-anchor o)) (.toBe "bottom-center"))
-                    (-> (expect (.-width o)) (.toBe "90%")))))
+                    (-> (expect (.-width o)) (.toBe "100%")))))
 
             (it "accepts every anchor pi-tui supports"
                 (fn []
@@ -46,7 +46,7 @@
                   (let [o (settings->overlay-options {:ui {:overlay {:anchor "center"}}})]
                     (-> (expect (.-anchor o)) (.toBe "center"))
                     ;; The fields the user did not mention keep their defaults.
-                    (-> (expect (.-width o)) (.toBe "90%"))
+                    (-> (expect (.-width o)) (.toBe "100%"))
                     (-> (expect (.-minWidth o)) (.toBe 40))
                     (-> (expect (.-maxHeight o)) (.toBe "70%")))))
 
@@ -74,7 +74,7 @@
                   ;; pi-tui compute NaN geometry.
                   (doseq [bad ["wide" "80" "%" true nil]]
                     (let [o (settings->overlay-options {:ui {:overlay {:width bad}}})]
-                      (-> (expect (.-width o)) (.toBe "90%"))))))
+                      (-> (expect (.-width o)) (.toBe "100%"))))))
 
             (it "survives settings with no :ui key at all"
                 (fn []
@@ -216,7 +216,7 @@
                         (-> (expect (.-minWidth opts)) (.toBe 22))
                         ;; Never mentioned in the file, and wiped from defaults
                         ;; by the shallow merge — still correct.
-                        (-> (expect (.-width opts)) (.toBe "90%")))
+                        (-> (expect (.-width opts)) (.toBe "100%")))
                       (finally
                         (try (fs/rmSync dir #js {:recursive true :force true})
                              (catch :default _ nil)))))))
@@ -261,3 +261,28 @@
                                                          (.includes l "model-30")))
                                             (vec lines)))
                               (.toBe true))))))))))
+
+;;; ─── no bleed ────────────────────────────────────────────────────────────
+
+(describe "the overlay covers the full width"
+          (fn []
+            (it "leaves no columns for the base UI to show through"
+                (fn []
+                  ;; pi-tui composites an overlay line over the base content at
+                  ;; a column offset, so anything narrower than the terminal
+                  ;; leaves the rows underneath visible on BOTH sides. At 90%
+                  ;; on a 170-column terminal that was 8 columns each side of
+                  ;; the editor's border and the status bar, framing every row
+                  ;; in debris:
+                  ;;   ────────  ▶ Allow once                        ─────────
+                  ;;    nyma │ >  (1/3)
+                  (doseq [cols [200 170 120 100 80 60 40]]
+                    (-> (expect (oh/resolve-content-width default-overlay-options cols))
+                        (.toBe cols)))))
+
+            (it "still honours a narrower width when asked"
+                (fn []
+                  ;; Full-width is the default, not a rule — the setting stays
+                  ;; live for anyone who prefers a floating panel.
+                  (let [o (settings->overlay-options {:ui {:overlay {:width "60%"}}})]
+                    (-> (expect (oh/resolve-content-width o 100)) (.toBe 60)))))))

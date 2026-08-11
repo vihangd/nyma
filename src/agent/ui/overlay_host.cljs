@@ -47,9 +47,19 @@
 ;; to read to answer it. That was never a decision anyone made; it was the
 ;; fallthrough.
 ;;
-;; 90% rather than the default 60%: model specs are `provider/org/id` and reach
-;; ~50 characters (openrouter/nvidia/nemotron-3-super-120b-a12b:free), so 60% of
-;; an 80-col terminal could not show one, let alone its context/price column.
+;; FULL width, and that part is not cosmetic. pi-tui composites an overlay line
+;; over the base content at a column offset, so anything narrower than the
+;; terminal leaves the rows underneath showing on both sides — at 170 columns a
+;; 90% overlay left 8 columns of the editor's border and the status bar visible
+;; either side of every row, which reads as a broken frame rather than a panel:
+;;
+;;   ────────  ▶ Allow once                                       ─────────
+;;    nyma │ >  (1/3)
+;;
+;; Full width also gives model specs room: `provider/org/id` reaches ~50
+;; characters (openrouter/nvidia/nemotron-3-super-120b-a12b:free), which 60% of
+;; an 80-col terminal could not show at all. oh-my-pi uses `width: "100%"` with
+;; `margin: 0` for the same reason. Overridable via settings#ui.overlay.width.
 ;;
 ;; Consequence, accepted deliberately: a bottom anchor starts at
 ;; `availHeight - height` (pi-tui's resolveAnchorRow, tui.js:540), so a tall
@@ -61,7 +71,7 @@
 ;; the big info views their own `center` override would put us back to deciding
 ;; placement per call site, which is the fallthrough this replaced.
 (def default-overlay-options
-  #js {:width "90%" :minWidth 40 :maxHeight "70%" :anchor "bottom-center"})
+  #js {:width "100%" :minWidth 40 :maxHeight "70%" :anchor "bottom-center"})
 
 (def valid-anchors
   "pi-tui's nine anchors (dist/tui.d.ts:56). Settings carry no schema — only
@@ -177,13 +187,36 @@
            (not= (.charCodeAt data 0) 127)) data
       :else nil)))
 
+(def ^:private mok-enter-re
+  ;; xterm modifyOtherKeys: CSI 27 ; <modifier> ; <codepoint> ~ .
+  ;; 13 is CR, 10 is LF.
+  (js/RegExp. (str "^" esc "\\[27;\\d+;(13|10)~$")))
+
+(defn enter-key?
+  "Is `data` the Enter key, in ANY encoding the terminal might use?
+
+   pi-tui's own `matchesKey` misses one: its plain-Enter branch
+   (keys.js:719-725) checks `\\r`, `\\n`, SS3 `\\x1bOM` and the two Kitty forms
+   and then RETURNS — it never reaches the `matchesModifyOtherKeys` call a few
+   lines below, which is only wired for MODIFIED Enter. So under xterm's
+   modifyOtherKeys mode, which pi-tui itself switches the terminal into when
+   the Kitty query goes unanswered (terminal.js:132-137), plain Enter is
+   unrecognised and every picker silently refuses to accept a selection.
+
+   Verified end to end: with `ESC[27;1;13~` the select promise stays pending
+   forever, while `\\r`, `ESC[13u` and KP_ENTER all resolve."
+  [data]
+  (boolean (or (matchesKey data "enter")
+               (matchesKey data "return")
+               (and (string? data) (.test mok-enter-re data)))))
+
 (defn data->key
   "Build the ink-style key object pickers branch on. Covers the full set the
    components use — tree_viewer and friends navigate with more than up/down,
    and an unmapped key would arrive as an all-false no-op."
   [data]
   #js {:escape     (matchesKey data "escape")
-       :return     (or (matchesKey data "enter") (matchesKey data "return"))
+       :return     (enter-key? data)
        :upArrow    (matchesKey data "up")
        :downArrow  (matchesKey data "down")
        :leftArrow  (matchesKey data "left")

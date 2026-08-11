@@ -47,7 +47,7 @@
    ;; Bottom by default so a permission prompt does not cover the transcript
    ;; the user is reading to answer it. See agent.ui.overlay-host.
    :ui                     {:overlay {:anchor     "bottom-center"
-                                      :width      "90%"
+                                      :width      "100%"
                                       :min-width  40
                                       :max-height "70%"}}
    ;; A role may carry a permission :policy mapping a tool CATEGORY
