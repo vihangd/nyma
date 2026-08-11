@@ -5,7 +5,9 @@
             ["node:os" :as os]
             [agent.cli :refer [pick-session]]
             [agent.state :refer [create-agent-store]]
-            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]))
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
+            [agent.sessions.partial :refer [read-partial]]
+            [agent.events :refer [create-event-bus]]))
 
 (def ^:private test-dir (atom nil))
 
@@ -105,3 +107,66 @@
                              (it "empty session list returns nil"
                                  (fn []
                                    (-> (expect (pick-session [] "")) (.toBeNil)))))))
+
+;;; ─── streamed text durability ────────────────────────────────────────────
+;;; Every other message reaches disk synchronously as it is added. The
+;;; assistant's own text did not: it is dispatched to the store only when the
+;;; turn COMPLETES, so a crash mid-stream lost the entire response. The
+;;; checkpoint closes that, and this asserts it is actually wired into
+;;; attach-session-persistence! rather than merely available.
+
+(describe "attach-session-persistence! checkpoints the streaming response"
+          (fn []
+            (it "writes the partial response to a sidecar as deltas arrive"
+                (fn []
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)
+                        agent  {:store store :events events}]
+                    (attach-session-persistence! agent mgr)
+                    ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})
+                    ;; The stream begins. Nothing has completed.
+                    ((:emit events) "message_update" #js {:textDelta "Once upon "})
+                    ((:emit events) "message_update" #js {:textDelta "a time"})
+                    ;; This is the crash: the turn never completes.
+                    ;;
+                    ;; Asserted as a PREFIX, not the full text. Writes are
+                    ;; throttled — a response streams hundreds of deltas and a
+                    ;; synchronous write per delta would slow every turn to
+                    ;; protect text about to be superseded. So the guarantee
+                    ;; is "the response so far, minus at most the last flush
+                    ;; interval", against a previous guarantee of nothing.
+                    (let [recovered (read-partial fp)]
+                      (-> (expect recovered) (.toBeTruthy))
+                      (-> (expect (.startsWith "Once upon a time" recovered)) (.toBe true)))
+                    ;; And the JSONL is untouched by it — only the user turn.
+                    (-> (expect (count (read-lines fp))) (.toBe 1)))))
+
+            (it "drops the sidecar once the real assistant entry is stored"
+                (fn []
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)
+                        agent  {:store store :events events}]
+                    (attach-session-persistence! agent mgr)
+                    ((:emit events) "message_update" #js {:textDelta "hello"})
+                    (-> (expect (read-partial fp)) (.toBe "hello"))
+                    ((:dispatch! store) :message-added {:message {:role "assistant" :content "hello world"}})
+                    ;; The checkpoint has nothing left to protect.
+                    (-> (expect (read-partial fp)) (.toBeNil))
+                    (-> (expect (.-content (first (read-lines fp)))) (.toBe "hello world")))))
+
+            (it "still works for a session with no event bus"
+                (fn []
+                  ;; sdk/gateway callers pass an agent without :events.
+                  (let [fp    (path/join @test-dir "s.jsonl")
+                        _     (fs/writeFileSync fp "")
+                        mgr   (create-session-manager fp)
+                        store (create-agent-store {:messages []})]
+                    (attach-session-persistence! {:store store} mgr)
+                    ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})
+                    (-> (expect (count (read-lines fp))) (.toBe 1)))))))

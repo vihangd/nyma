@@ -1,5 +1,6 @@
 (ns agent.sessions.manager
   (:require ["node:fs" :as fs]
+            [agent.sessions.partial :as partial]
             [agent.protocols :refer [ISessionStore_session_load
                                      ISessionStore_session_append
                                      ISessionStore_session_build_context
@@ -193,16 +194,45 @@
 (defn attach-session-persistence!
   "Mirror new user/assistant turns into the session JSONL as they're added to
    the store. No-op for ephemeral (nil file path) sessions. Returns nothing.
-   Shared by cli (interactive/print) and modes.sdk (embedders + gateway)."
+   Shared by cli (interactive/print) and modes.sdk (embedders + gateway).
+
+   Also checkpoints the assistant's response WHILE it streams. Everything else
+   here is already crash-safe — appends are synchronous, one per message — but
+   the assistant message is only dispatched once the turn completes, so a
+   crash mid-stream lost the whole response. The checkpoint goes to a sidecar
+   and is dropped the moment the real entry reaches the JSONL."
   [agent session]
   (when (and session ((:get-file-path session)))
-    ((:subscribe (:store agent))
-     (fn [event-type state]
-       ;; Skip replays (/resume, /import seed via :message-added too) — those
-       ;; messages are already on disk; re-appending would double the file.
-       (when (and (= event-type :message-added)
-                  (not (:replaying-session? state)))
-         (let [msg  (last (:messages state))
-               role (:role msg)]
-           (when (contains? #{"user" "assistant"} role)
-             ((:append session) (select-keys msg [:role :content])))))))))
+    (let [ckpt  (partial/create-checkpoint ((:get-file-path session)))
+          acc   (atom "")
+          events (:events agent)]
+
+      ;; Stream deltas: accumulate and checkpoint. `message_update` is the
+      ;; same event the UI renders from, so this cannot drift from what the
+      ;; user saw on screen.
+      (when events
+        ((:on events) "message_update"
+         (fn [data]
+           (swap! acc str (or (and data (.-textDelta data)) ""))
+           ((:note! ckpt) @acc)
+           nil))
+
+        ;; A turn that ends without being stored (abort, provider error) has
+        ;; no partial worth recovering — the next turn starts clean.
+        ((:on events) "turn_end" (fn [_] (reset! acc "") ((:abandon! ckpt)) nil)))
+
+      ((:subscribe (:store agent))
+       (fn [event-type state]
+         ;; Skip replays (/resume, /import seed via :message-added too) — those
+         ;; messages are already on disk; re-appending would double the file.
+         (when (and (= event-type :message-added)
+                    (not (:replaying-session? state)))
+           (let [msg  (last (:messages state))
+                 role (:role msg)]
+             (when (contains? #{"user" "assistant"} role)
+               ((:append session) (select-keys msg [:role :content]))
+               ;; The real entry is on disk now, so the checkpoint has nothing
+               ;; left to protect.
+               (when (= role "assistant")
+                 (reset! acc "")
+                 ((:commit! ckpt)))))))))))

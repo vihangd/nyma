@@ -9,6 +9,7 @@
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
+            [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
@@ -422,7 +423,15 @@ Examples:
     ;; atom directly — not via dispatch! — so it never re-appends to the JSONL).
     (when (and session ((:get-file-path session)))
       ((:load session))
-      (let [seeded (session->seed-messages ((:build-context session)))]
+      (let [seeded (session->seed-messages ((:build-context session)))
+            ;; A sidecar next to the session file means the previous run died
+            ;; mid-response. Fold it back in so a resumed session doesn't lose
+            ;; the turn that was in flight when it crashed.
+            partial-text (session-partial/read-partial ((:get-file-path session)))
+            seeded       (if partial-text
+                           (do (session-partial/clear-partial! ((:get-file-path session)))
+                               (session-partial/append-partial seeded partial-text))
+                           seeded)]
         (when (seq seeded)
           (swap! (:state agent) assoc :messages seeded)
           ((:emit (:events agent)) "session_start"
