@@ -6,7 +6,7 @@
    soft-wraps and silently desynchronizes pi-tui's line accounting. The guard
    covers both halves, which a crash handler cannot."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth TUI ProcessTerminal Editor]]
             ["node:fs" :as fs]
             [agent.ui.width-guard :refer [guard-render! attach-guarded-children! clamps]]))
 
@@ -117,6 +117,47 @@
                       (doseq [w [80 40 10]]
                         (doseq [l (vec (.render c w))]
                           (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w))))))))))
+
+;;; ─── the real Editor ─────────────────────────────────────────────────────
+;;; The other tests use hand-rolled components, which prove the mechanism but
+;;; not the thing it is actually applied to. pi-tui's Editor is a class whose
+;;; render lives on the prototype, and the guard sets an OWN property that
+;;; shadows it — if that broke `this` state, focus or input routing, nothing
+;;; else in this suite would notice and every real session would.
+
+(defn- make-editor []
+  ;; Editor's theme is a map of STYLING FUNCTIONS, not strings.
+  (let [tui   (new TUI (new ProcessTerminal))
+        theme (new js/Proxy #js {} #js {:get (fn [& _] (fn [s] s))})]
+    (new Editor tui theme #js {:paddingX 1})))
+
+(describe "guard-render! on pi-tui's own Editor"
+          (fn []
+            (it "renders identically and stays inside every width"
+                (fn []
+                  (let [ed     (make-editor)
+                        before (js/JSON.stringify (.render ed 80))]
+                    (guard-render! ed "editor")
+                    ;; No-op at a sane width: the guard must not alter normal
+                    ;; rendering.
+                    (-> (expect (js/JSON.stringify (.render ed 80))) (.toBe before))
+                    (doseq [w [120 80 40 20 10]]
+                      (doseq [l (vec (.render ed w))]
+                        (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))
+
+            (it "still accepts input and still invalidates"
+                (fn []
+                  ;; A guarded editor that renders but is inert would look
+                  ;; fine here and be unusable in a session.
+                  (let [ed (make-editor)]
+                    (guard-render! ed "editor")
+                    (-> (expect (fn? (.-invalidate ed))) (.toBe true))
+                    (.invalidate ed)
+                    (let [before (js/JSON.stringify (.render ed 80))]
+                      (doseq [ch (vec (.split "hello \u6f22\u5b57" ""))]
+                        (.handleInput ed ch))
+                      (-> (expect (js/JSON.stringify (.render ed 80)))
+                          (.not.toBe before))))))))
 
 ;;; ─── wiring ──────────────────────────────────────────────────────────────
 ;;; This one asserts on the compiled source rather than behaviour, deliberately.
