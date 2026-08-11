@@ -36,6 +36,22 @@
    losing all of it."
   400)
 
+(def ^:private live
+  "Checkpoints created in this process, so an exit path can flush them without
+   the session layer having to thread a flush fn down through cli and the
+   interactive mode. There is exactly one session per process; this is a
+   registry of one in practice."
+  (atom []))
+
+(defn flush-all!
+  "Write out any pending checkpoint text. Called from the paths that are about
+   to end the process, where the throttle would otherwise discard the last
+   interval of a response for no benefit."
+  []
+  (doseq [c @live]
+    (try ((:flush! c)) (catch :default _ nil)))
+  nil)
+
 (defn create-checkpoint
   "Checkpointer for one session file. Returns
    {:note! :commit! :abandon! :flush!}.
@@ -64,7 +80,7 @@
           (reset! pending nil)
           (reset! last-at (now-fn)))]
 
-    {:note!
+    (as-> {:note!
      (fn [text]
        (when (and path (seq (str (or text ""))))
          (reset! pending text)
@@ -78,13 +94,21 @@
      (fn []
        (when path
          (reset! pending nil)
+         ;; Reset the write clock too, so the NEXT turn's first delta lands
+         ;; immediately instead of being throttled against the last turn's
+         ;; write. Otherwise a crash just after a turn starts loses the
+         ;; opening of the response for no reason.
+         (reset! last-at 0)
          (remove-fn path)))
 
      :abandon!
      (fn []
        (when path
          (reset! pending nil)
-         (remove-fn path)))}))
+         (reset! last-at 0)
+         (remove-fn path)))}
+          c
+          (do (when path (swap! live conj c)) c))))
 
 (defn read-partial
   "The partial response left by a session that died mid-stream, or nil.

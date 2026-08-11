@@ -217,3 +217,23 @@
                     ((:note! c) "x") ((:flush! c))
                     (p/clear-partial! sp)
                     (-> (expect (p/read-partial sp)) (.toBeNil)))))))
+
+(describe "flush-all!"
+          (fn []
+            (it "writes out text the throttle was still holding"
+                (fn []
+                  ;; The exit paths call this. Without it, the last flush
+                  ;; interval of a response is discarded on the way out for no
+                  ;; benefit — the process is ending anyway.
+                  (let [sp (tmp-session)
+                        c  (p/create-checkpoint sp)]
+                    ((:note! c) "first")          ;; written immediately
+                    ((:note! c) "first second")   ;; throttled, still pending
+                    (-> (expect (p/read-partial sp)) (.toBe "first"))
+                    (p/flush-all!)
+                    (-> (expect (p/read-partial sp)) (.toBe "first second")))))
+
+            (it "is safe with nothing pending"
+                (fn []
+                  (p/flush-all!)
+                  (-> (expect true) (.toBe true))))))

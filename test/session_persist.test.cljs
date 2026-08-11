@@ -170,3 +170,46 @@
                     (attach-session-persistence! {:store store} mgr)
                     ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})
                     (-> (expect (count (read-lines fp))) (.toBe 1)))))))
+
+(describe "checkpoint turn boundaries"
+          (fn []
+            (it "does not clear mid-turn when a STEP finishes"
+                (fn []
+                  ;; "turn_end" comes from the SDK's :onStepFinish, so it fires
+                  ;; once per step — several times inside any tool-using
+                  ;; response. Clearing on it would delete the sidecar exactly
+                  ;; when it is protecting something.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "message_update" #js {:textDelta "thinking about it"})
+                    ((:emit events) "turn_end" #js {:step 1})
+                    ((:emit events) "turn_end" #js {:step 2})
+                    ;; Still there — the response has not been stored yet.
+                    (-> (expect (read-partial fp)) (.toBeTruthy)))))
+
+            (it "starts clean on the next user message"
+                (fn []
+                  ;; Otherwise an unfinished turn's text gets prefixed onto the
+                  ;; next response, and a later crash resurrects text the user
+                  ;; already moved on from.
+                  (let [fp     (path/join @test-dir "s.jsonl")
+                        _      (fs/writeFileSync fp "")
+                        mgr    (create-session-manager fp)
+                        store  (create-agent-store {:messages []})
+                        events (create-event-bus)
+                        clock  (atom 0)]
+                    (attach-session-persistence! {:store store :events events} mgr)
+                    ((:emit events) "message_update" #js {:textDelta "ABANDONED"})
+                    (-> (expect (read-partial fp)) (.toBeTruthy))
+                    ;; The turn never completed; the user types again.
+                    ((:dispatch! store) :message-added {:message {:role "user" :content "never mind"}})
+                    (-> (expect (read-partial fp)) (.toBeNil))
+                    ;; And the new response carries none of the old text.
+                    ((:emit events) "message_update" #js {:textDelta "FRESH"})
+                    (let [recovered (str (read-partial fp))]
+                      (-> (expect (.includes recovered "FRESH")) (.toBe true))
+                      (-> (expect (.includes recovered "ABANDONED")) (.toBe false))))))))

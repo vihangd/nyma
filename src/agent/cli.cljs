@@ -516,6 +516,9 @@ Examples:
       ;; and the session_end events don't run twice.
       (.on js/process "exit"
            (fn []
+             ;; Flush the streaming checkpoint before anything else — this is
+             ;; the last synchronous moment the process has.
+             (try (session-partial/flush-all!) (catch :default _ nil))
              (when-not @shutdown-done?
                (reset! shutdown-done? true)
                (try

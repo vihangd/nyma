@@ -21,7 +21,8 @@
    renderer without throwing at all). Restarting only ever addresses the loud
    half, and restarting into a component that still emits the same bad line
    would crash-loop — which is what the repeat window below is for."
-  (:require [agent.ui.width-guard :as guard]))
+  (:require [agent.ui.width-guard :as guard]
+            [agent.sessions.partial :as session-partial]))
 
 (def ^:private width-error-marker
   ;; The message pi-tui builds at tui.js:967. Matching on a message string is
@@ -97,6 +98,10 @@
 
         give-up!
         (fn [err]
+          ;; About to exit: write out the streaming response's last pending
+          ;; deltas. The checkpoint throttles writes, and there is no reason
+          ;; to discard the final interval of a response on the way out.
+          (try (session-partial/flush-all!) (catch :default _ nil))
           ;; For a width error pi-tui already stopped; for anything else the
           ;; terminal is still in raw mode and must be restored before we
           ;; print, or the message lands in a screen nobody can read.

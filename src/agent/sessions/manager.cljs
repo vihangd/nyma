@@ -217,9 +217,12 @@
            ((:note! ckpt) @acc)
            nil))
 
-        ;; A turn that ends without being stored (abort, provider error) has
-        ;; no partial worth recovering — the next turn starts clean.
-        ((:on events) "turn_end" (fn [_] (reset! acc "") ((:abandon! ckpt)) nil)))
+        ;; Deliberately NOT hooked to "turn_end": that is emitted from the
+        ;; SDK's :onStepFinish, so it fires once per STEP, not once per turn.
+        ;; Clearing there would delete the sidecar in the middle of any
+        ;; tool-using response — exactly when it is protecting something. The
+        ;; turn boundary that matters is the next user message, below.
+        )
 
       ((:subscribe (:store agent))
        (fn [event-type state]
@@ -231,8 +234,16 @@
                  role (:role msg)]
              (when (contains? #{"user" "assistant"} role)
                ((:append session) (select-keys msg [:role :content]))
-               ;; The real entry is on disk now, so the checkpoint has nothing
-               ;; left to protect.
-               (when (= role "assistant")
-                 (reset! acc "")
-                 ((:commit! ckpt)))))))))))
+               (cond
+                 ;; The real entry is on disk now, so the checkpoint has
+                 ;; nothing left to protect.
+                 (= role "assistant")
+                 (do (reset! acc "") ((:commit! ckpt)))
+
+                 ;; A new user message starts a new turn. Whatever the last
+                 ;; one left behind is either already committed or belongs to
+                 ;; a turn that never finished — either way it must not be
+                 ;; prefixed onto the response about to stream, and it must
+                 ;; not be resurrected by a later crash.
+                 (= role "user")
+                 (do (reset! acc "") ((:abandon! ckpt))))))))))))
