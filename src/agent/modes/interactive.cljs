@@ -15,7 +15,8 @@
             [agent.ui.editor-eval :as editor-eval]
             [agent.ui.overlay-host :as overlay-host]
             [agent.ui.width-guard :refer [attach-guarded-children!]]
-            [agent.ui.crash-recovery :as crash-recovery]))
+            [agent.ui.crash-recovery :as crash-recovery]
+            [agent.sessions.manager :refer [session->seed-messages]]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -43,6 +44,47 @@
   (boolean (and (matchesKey data "escape")
                 submitting?
                 (zero? (or overlay-count 0)))))
+
+(defn pane-messages
+  "Renderable messages for `session`'s current branch, or [] when there is no
+   session or nothing in it.
+
+   Built with `session->seed-messages` — the same function that builds the
+   MODEL's context — so the transcript and the context cannot disagree. The
+   inline filter this replaced kept raw user/assistant entries and dropped
+   `compaction` / `branch-summary`, which seed-messages folds into a summary
+   message, so a compacted session rendered less than the model actually saw.
+
+   Pure so it can be tested without a TUI."
+  [session]
+  (or (when session
+        (when-let [build (:build-context session)]
+          (vec (session->seed-messages (build)))))
+      []))
+
+(defn session-start-clears?
+  "Should a `session_start` blank the transcript instead of re-seeding it?
+
+   Only for `/new`. Every other emitter — /resume, /import, /fork — changes
+   which branch is current BEFORE it emits, so re-seeding shows what the user
+   asked for. /new emits this without switching files, so re-seeding would
+   repaint the conversation it was asked to clear. That is the whole reason
+   this predicate exists rather than the handler simply always re-seeding."
+  [reason]
+  (= "new" (str (or reason ""))))
+
+(defn make-session-start-handler
+  "The `session_start` handler, built from callbacks so it can be tested
+   without a TUI.
+
+   `get-session` returns the CURRENT session — read at call time, not captured,
+   because /resume and /import switch files before emitting. `on-messages`
+   receives the messages to render; `on-clear` blanks the transcript."
+  [{:keys [get-session on-messages on-clear]}]
+  (fn [data]
+    (if (session-start-clears? (and data (.-reason data)))
+      (on-clear)
+      (on-messages (pane-messages (get-session))))))
 
 (defn pager-mode-enabled?
   [{:keys [alt-screen? scrollback-mode-setting]}]
@@ -381,17 +423,50 @@
                                    nil))
 
     ;; ── Session-level event handlers ──────────────────────────────────────
-    (let [on-model-select   (fn [_] (sync-status!))
+    (let [;; The pane's ONLY seeding path. Everything that changes which branch
+          ;; is current goes through here, so the transcript cannot drift from
+          ;; the session the way it used to: startup seeded the pane with one
+          ;; filter, cli seeded the agent's context with `session->seed-messages`,
+          ;; and /resume wrote to the store — which the pane does not subscribe
+          ;; to — so it restored nothing at all.
+          ;;
+          ;; Uses `session->seed-messages`, the same function that builds the
+          ;; model's context, so the two cannot disagree. The old inline filter
+          ;; kept raw user/assistant entries and dropped `compaction` /
+          ;; `branch-summary`, which seed-messages folds into a summary message
+          ;; — on a compacted session the screen showed less than the model saw.
+          seed-pane! (fn []
+                       (reset! messages
+                               (mapv (fn [m] (assoc m :id (new-id)))
+                                     (pane-messages @(:session agent))))
+                       (reset! widgets {})
+                       (sync-pane!))
+
+          on-model-select   (fn [_] (sync-status!))
           on-session-clear  (fn [_]
                               (reset! messages [])
                               (reset! widgets {})
                               (sync-pane!))
-          on-session-start  (fn [_]
-                              (reset! messages [])
-                              (reset! widgets {})
-                              (reset! turn-count 0)
-                              (sync-pane!)
-                              (sync-status!))]
+          ;; Re-seeds rather than only clearing. /resume and /import call
+          ;; switch-file BEFORE emitting and /fork re-points the leaf, so by the
+          ;; time this runs `build-context` is already the branch the user asked
+          ;; for. /new is the exception — see session-start-clears?.
+          on-session-start
+          (let [h (make-session-start-handler
+                   {:get-session (fn [] @(:session agent))
+                    :on-messages (fn [msgs]
+                                   (reset! messages
+                                           (mapv (fn [m] (assoc m :id (new-id))) msgs))
+                                   (reset! widgets {})
+                                   (sync-pane!))
+                    :on-clear    (fn []
+                                   (reset! messages [])
+                                   (reset! widgets {})
+                                   (sync-pane!))})]
+            (fn [data]
+              (reset! turn-count 0)
+              (h data)
+              (sync-status!)))]
 
       ;; Subscribe to tool lifecycle events
       ((:on events) "tool_execution_start"  on-tool-start)
@@ -401,16 +476,9 @@
       ((:on events) "session_clear"         on-session-clear)
       ((:on events) "session_start"         on-session-start)
 
-      ;; Load prior conversation history from session (user+assistant messages only)
-      (when-let [s @(:session agent)]
-        (when-let [build (:build-context s)]
-          (let [history (build)]
-            (when (pos? (count history))
-              (reset! messages
-                      (mapv (fn [m] (assoc m :id (new-id)))
-                            (filter #(contains? #{"user" "assistant"} (:role %))
-                                    history)))
-              (sync-pane!)))))
+      ;; Prior conversation, for a session resumed with -c / -r / --session.
+      ;; Same path the runtime events use — see seed-pane! above.
+      (seed-pane!)
 
       ;; Layout: chat → status-bar → editor.
       ;;
