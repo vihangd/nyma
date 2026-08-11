@@ -31,7 +31,7 @@
             ;; rename would fail the build loudly rather than silently.
             ["@mariozechner/pi-tui/dist/keys.js" :refer [decodePrintableKey]]
             [clojure.string :as str]
-            [agent.ui.picker-frame :refer [render-frame overlay-max-width
+            [agent.ui.picker-frame :refer [render-frame overlay-max-width set-theme!
                                            truncate-to truncate-tail two-col-row]]
             [agent.ui.picker-input :refer [dispatch-input]]
             [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]))
@@ -328,7 +328,11 @@
                  ;; render-frame prepends a 4-char focus/scroll indicator.
                  row-w (max 1 (- cap 4))]
              (render-frame
-              {:title         (str prompt "  (type to filter, Enter to select, Esc to cancel)")
+              {:title         (str prompt)
+               ;; Passed separately so the frame can dim it — the key hints are
+               ;; reference material and used to compete with the prompt for
+               ;; attention at the same weight.
+               :hint          "(type to filter, Enter to select, Esc to cancel)"
                :prompt-prefix "> "
                :filter-text   @filter-text
                :items         (filter-items @filter-text items)
@@ -456,7 +460,10 @@
    `/settings` change to `:ui/:overlay` takes effect on the next overlay rather
    than needing a restart. Omitted (tests, non-settings hosts) it falls back to
    `default-overlay-options`."
-  [ui tui {:keys [restore-focus request-render overlay-options-fn]}]
+  [ui tui {:keys [restore-focus request-render overlay-options-fn theme]}]
+  ;; One theme for every picker in the process, including the three built
+  ;; far from the TUI that have no theme in scope.
+  (set-theme! theme)
   (let [term       (.-terminal tui)
         get-width  (fn [] (or (.-columns term) 80))
         get-height (fn [] (or (.-rows term) 24))

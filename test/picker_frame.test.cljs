@@ -9,6 +9,15 @@
                                            fit-lines overlay-max-width
                                            truncate-tail two-col-row]]))
 
+(def ^:private ESC (js/String.fromCharCode 27))
+
+(defn- strip
+  "Rendered frames now carry colour. These tests are about STRUCTURE — where
+   the title, the pointer and the rows land — so they assert on the text a
+   user actually sees. Width is asserted separately, in columns."
+  [s]
+  (.replace (str s) (js/RegExp. (str ESC "\\[[0-9;]*m") "g") ""))
+
 (describe "picker-frame/truncate-tail"
           (fn []
             (it "keeps the string when it fits"
@@ -74,15 +83,15 @@
                   ;; pad-lines right-pads every row to the widest line,
                   ;; so the title now has trailing spaces before the
                   ;; newline — assert on prefix only.
-                  (-> (expect (.startsWith (render {}) "Test")) (.toBe true))
+                  (-> (expect (.startsWith (strip (render {})) "Test")) (.toBe true))
                   ;; And the title line should end with a newline somewhere
                   ;; before any list row is emitted.
-                  (let [first-nl (.indexOf (render {}) "\n")]
+                  (let [first-nl (.indexOf (strip (render {})) "\n")]
                     (-> (expect (pos? first-nl)) (.toBe true)))))
 
             (it "shows the prompt prefix + filter text on the second line"
                 (fn []
-                  (-> (expect (.includes (render {:filter-text "foo"}) "> foo")) (.toBe true))))
+                  (-> (expect (.includes (strip (render {:filter-text "foo"})) "> foo")) (.toBe true))))
 
             (it "renders every item in the list when it fits"
                 (fn []
@@ -93,7 +102,7 @@
 
             (it "prepends a focus arrow only to the selected row"
                 (fn []
-                  (let [out (render {:items ["one" "two" "three"] :selected-idx 1})]
+                  (let [out (strip (render {:items ["one" "two" "three"] :selected-idx 1}))]
           ;; Focused row has the arrow; others have blank spaces.
                     (-> (expect (.includes out "\u25b6 two")) (.toBe true))
           ;; Focus arrow is on the selected row and not a different one.
@@ -158,7 +167,7 @@
                   ;; [0, 3). The last visible row (item 2) should be
                   ;; prefixed with ↓.
                   (let [items (vec (for [i (range 10)] (str "item" i)))
-                        out   (render {:items items :selected-idx 0 :max-visible 3})]
+                        out   (strip (render {:items items :selected-idx 0 :max-visible 3}))]
                     (-> (expect (.includes out "\u2193")) (.toBe true)))))
 
             (it "does NOT emit scroll arrows when the window covers everything"
@@ -174,7 +183,7 @@
                   ;; over the arrow — otherwise the user couldn't tell
                   ;; which row is focused.
                   (let [items (vec (for [i (range 10)] (str "item" i)))
-                        out   (render {:items items :selected-idx 0 :max-visible 3})]
+                        out   (strip (render {:items items :selected-idx 0 :max-visible 3}))]
                     ;; Focused on the first visible row; even though
                     ;; this is the top of the list, there's no ↑ here
                     ;; (start = 0, not clipped above). And item 0 must
@@ -203,7 +212,7 @@
                 (fn []
         ;; Regression: stored idx 99 with only 3 items must not blow
         ;; up the render; safe-index inside render-frame clamps it.
-                  (let [out (render {:items ["a" "b" "c"] :selected-idx 99})]
+                  (let [out (strip (render {:items ["a" "b" "c"] :selected-idx 99}))]
           ;; The last item must be the focused row now.
                     (-> (expect (.includes out "\u25b6 c")) (.toBe true)))))))
 
@@ -254,9 +263,13 @@
                                            :render-item   (fn [item _] (str item))
                                            :no-match-text "none"})
                         lines (str/split out #"\n")
-                        widest (reduce (fn [w l] (max w (count l))) 0 lines)]
+                        ;; COLUMNS, not characters: the frame carries colour
+                        ;; now, and escapes are zero-width. `count` would see
+                        ;; the escape bytes and report ragged lines that render
+                        ;; perfectly square.
+                        widest (reduce (fn [w l] (max w (visibleWidth l))) 0 lines)]
                     (doseq [l lines]
-                      (-> (expect (count l)) (.toBe widest))))))))
+                      (-> (expect (visibleWidth l)) (.toBe widest))))))))
 
 ;;; ─── truncate-to / fit-lines / overlay-max-width ──────
 ;;; These lock in the fix for the overflow-wrap bug: a single long
@@ -463,6 +476,86 @@
                         lines (str/split out #"\n")]
         ;; Uniform width, but that width is the widest line's width,
         ;; not a caller-supplied cap.
-                    (let [widest (reduce (fn [w l] (max w (count l))) 0 lines)]
+                    (let [widest (reduce (fn [w l] (max w (visibleWidth l))) 0 lines)]
                       (doseq [l lines]
-                        (-> (expect (count l)) (.toBe widest)))))))))
+                        (-> (expect (visibleWidth l)) (.toBe widest)))))))))
+
+;;; ─── colour ──────────────────────────────────────────────────────────────
+;;; The picker had no styling at all — one `▶` glyph marked the selection and
+;;; nothing separated the overlay from the transcript it floats over.
+;;;
+;;; The width constraint is the whole risk here: escapes must be zero-width in
+;;; practice, and every styled line must close, or the padding and the row
+;;; below inherit an open colour.
+
+(defn- has-ansi? [s] (.includes (str s) ESC))
+
+(describe "render-frame colour"
+          (fn []
+            (it "emphasises the focused row and dims the rest of the frame"
+                (fn []
+                  (let [out   (render {:items ["one" "two" "three"] :selected-idx 1})
+                        lines (str/split out #"\n")]
+                    ;; Title, prompt line and the focused row all carry style.
+                    (-> (expect (has-ansi? (first lines))) (.toBe true))
+                    (-> (expect (has-ansi? (second lines))) (.toBe true))
+                    (-> (expect (some (fn [l] (and (.includes (strip l) "▶ two")
+                                                   (has-ansi? l)))
+                                      lines))
+                        (.toBe true)))))
+
+            (it "closes every styled line"
+                (fn []
+                  ;; truncateToWidth re-emits pending SGR but never closes it,
+                  ;; and fit-lines pads AFTER truncating — so an unclosed line
+                  ;; bleeds its colour through the padding into the next row.
+                  (doseq [w [120 80 40 20]]
+                    (doseq [l (str/split (render {:items ["alpha" "beta" "gamma"]
+                                                  :selected-idx 1
+                                                  :max-width w})
+                                         #"\n")]
+                      (when (has-ansi? l)
+                        (-> (expect (.endsWith l (str ESC "[0m"))) (.toBe true)))))))
+
+            (it "adds no columns at any width, with wide glyphs"
+                (fn []
+                  ;; The load-bearing property. An escape that measured as
+                  ;; visible would overflow the box and kill the TUI.
+                  (doseq [w [120 80 60 40 20 10]]
+                    (doseq [l (str/split (render {:items ["漢字テスト/モデル"
+                                                          "🎉 party/🚀-v2"
+                                                          "plain-ascii"]
+                                                  :selected-idx 1
+                                                  :max-width w})
+                                         #"\n")]
+                      (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w))))))
+
+            (it "leaves the visible text identical to the unstyled frame"
+                (fn []
+                  ;; Colour must not change WHAT is shown, only how it looks.
+                  (let [opts {:items ["one" "two" "three"] :selected-idx 1 :max-width 40}
+                        out  (render opts)]
+                    (-> (expect (.includes (strip out) "▶ two")) (.toBe true))
+                    (-> (expect (.includes (strip out) "(2/3)")) (.toBe true)))))
+
+            (it "shows a counter and a warning when nothing matched"
+                (fn []
+                  ;; Previously the counter was suppressed at zero matches, so
+                  ;; a filter that matched nothing looked identical to one that
+                  ;; matched everything.
+                  (let [out (render {:items [] :filter-text "zzz" :no-match-text "No matches"})]
+                    (-> (expect (.includes (strip out) "(0/0)")) (.toBe true))
+                    (-> (expect (.includes (strip out) "No matches")) (.toBe true))
+                    (-> (expect (some (fn [l] (and (.includes (strip l) "No matches")
+                                                   (has-ansi? l)))
+                                      (str/split out #"\n")))
+                        (.toBe true)))))
+
+            (it "dims the key hints so they stop competing with the title"
+                (fn []
+                  (let [out   (render {:title "Pick a model" :hint "(Enter to select)"})
+                        title (first (str/split out #"\n"))]
+                    (-> (expect (.includes (strip title) "Pick a model")) (.toBe true))
+                    (-> (expect (.includes (strip title) "(Enter to select)")) (.toBe true))
+                    ;; Two different styles on one line.
+                    (-> (expect (> (count (.split title ESC)) 3)) (.toBe true)))))))

@@ -23,7 +23,19 @@
    of q appears in t in order. Score is a penalty-based number, lower is
    better. Returns nil when there's no match."
   [q t]
-  (let [qn (count q)
+  ;; Indexed as CODE POINTS, not code units. squint's `count` on a string
+  ;; returns `.length` (code units) while its `nth` indexes code points — so on
+  ;; any string holding an astral character the two disagree and `(nth t ti)`
+  ;; threw `Index out of bounds` partway through the scan. One emoji in a
+  ;; picker item was enough: typing a single character crashed the process,
+  ;; since the throw escapes through the input handler.
+  ;;
+  ;; Converting once here makes the units agree AND makes an emoji a single
+  ;; unit to match against, rather than two halves that can never equal a
+  ;; query character.
+  (let [q  (vec (js/Array.from (str q)))
+        t  (vec (js/Array.from (str t)))
+        qn (count q)
         tn (count t)]
     (loop [qi 0
            ti 0

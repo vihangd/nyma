@@ -109,3 +109,47 @@
             result (fuzzy-filter items "al" (fn [i] (:name i)))]
         (-> (expect (count result)) (.toBe 1))
         (-> (expect (:name (first result))) (.toBe "alpha")))))))
+
+;;; ─── astral characters ───────────────────────────────────────────────────
+;;; squint's `count` on a string returns `.length` (CODE UNITS) while its `nth`
+;;; indexes CODE POINTS. On any string holding an emoji the two disagree, and
+;;; the subsequence scan ran off the end with `Index out of bounds`.
+;;;
+;;; That throw escapes through the picker's input handler and kills the
+;;; process. It was unreachable only because typing in overlays was broken;
+;;; fixing that made one keystroke against an emoji-bearing item fatal.
+
+(describe "fuzzy matching against astral characters"
+          (fn []
+            (it "does not throw on labels containing emoji"
+                (fn []
+                  (doseq [label ["🎉 celebration/🚀-turbo-v2"
+                                 "🇯🇵 jp/👨‍👩‍👧‍👦-family-model"
+                                 "漢字テスト/モデル-大きい"
+                                 "plain-ascii/model"]
+                          query ["z" "zz" "a" "e" "cel" "漢" "🎉" ""]]
+                    ;; The assertion is that this returns at all.
+                    (-> (expect (fn? (fn [] (fuzzy-match query label)))) (.toBe true))
+                    (fuzzy-match query label))))
+
+            (it "treats an emoji as one unit, so it can be matched"
+                (fn []
+                  ;; Indexing by code unit also meant a query could never equal
+                  ;; half a surrogate pair — emoji were unmatchable, not just
+                  ;; crash-prone.
+                  (let [r (fuzzy-match "🎉" "🎉 celebration")]
+                    (-> (expect (.-matches r)) (.toBe true)))))
+
+            (it "still matches ascii through an emoji-bearing label"
+                (fn []
+                  (let [r (fuzzy-match "cel" "🎉 celebration")]
+                    (-> (expect (.-matches r)) (.toBe true)))))
+
+            (it "filters a list of emoji items without throwing"
+                (fn []
+                  ;; The production path: fuzzy-filter over picker items.
+                  (let [items ["🎉 alpha" "beta 🚀" "🇯🇵 gamma" "delta"]]
+                    (doseq [q ["a" "z" "🚀" "gam"]]
+                      (-> (expect (js/Array.isArray
+                                   (to-array (fuzzy-filter items q (fn [x] x)))))
+                          (.toBe true)))))))) 

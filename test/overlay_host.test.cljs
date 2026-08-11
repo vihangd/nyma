@@ -312,7 +312,9 @@
                                         :label "anthropic/claude-haiku-4-5-20251001-long"
                                         :description "200.0k · $1/$5"}]
                         out   ((.-render (make-select-picker "Pick" items (fn [_] nil))) 40 24)
-                        widest (reduce max 0 (map count (.split out "\n")))]
+                        ;; COLUMNS, not characters — the frame carries colour
+                        ;; now and escapes are zero-width.
+                        widest (reduce max 0 (map visibleWidth (.split out "\n")))]
                     (-> (expect widest) (.toBeLessThanOrEqual 40)))))))
 
 (describe "overlay-host/make-input-picker"

@@ -405,6 +405,7 @@
         (overlay-host/install! ui tui
                                {:restore-focus (fn [] (.setFocus tui editor))
                                 :request-render (fn [] (.requestRender tui))
+                                :theme theme
                                 ;; A thunk, so a /settings change to
                                 ;; :ui/:overlay applies to the next overlay
                                 ;; without needing a restart.
