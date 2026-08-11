@@ -28,6 +28,22 @@
                 (not= env-value "0")
                 (not= env-value "false"))))
 
+(defn abort-on-escape?
+  "Should a global Escape abort the in-flight run?
+
+   Only while a submit is active — otherwise Esc is the editor's and the
+   pickers' own key — and only when NO overlay is open. Input listeners run
+   before focus dispatch (pi-tui tui.js:379-394), so without the overlay check
+   a single Esc did two things: killed the turn AND dismissed the picker. A
+   permission prompt is shown precisely while a submit is in flight, so
+   cancelling the prompt aborted the very run it was asking about.
+
+   Pure so it can be tested without a TUI."
+  [data submitting? overlay-count]
+  (boolean (and (matchesKey data "escape")
+                submitting?
+                (zero? (or overlay-count 0)))))
+
 (defn pager-mode-enabled?
   [{:keys [alt-screen? scrollback-mode-setting]}]
   (boolean (and (not alt-screen?)
@@ -432,9 +448,17 @@
       ;; Global Esc → abort the in-flight run (stream + tools listening on
       ;; the run's AbortSignal). Only while a submit is active so pickers and
       ;; the editor keep their own Esc behavior when idle.
+      ;;
+      ;; …and only when no overlay is open. Input listeners run BEFORE focus
+      ;; dispatch (tui.js:379-394), so without this check one Esc did two
+      ;; things at once: killed the turn AND dismissed the picker. A permission
+      ;; prompt is shown precisely while a submit is in flight, so cancelling
+      ;; the prompt aborted the run it was asking about.
       (.addInputListener tui
                          (fn [data]
-                           (when (and (matchesKey data "escape") @submit-lock)
+                           (when (abort-on-escape?
+                                  data @submit-lock
+                                  (.-length (.-overlayStack tui)))
                              (when-let [ctrl-atom (:abort-controller agent)]
                                (.abort @ctrl-atom "user-interrupt")))
                            nil))

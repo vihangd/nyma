@@ -24,6 +24,12 @@
    picker the terminal width instead — otherwise the 60% would be applied
    twice and every picker would render as a sliver."
   (:require ["@mariozechner/pi-tui" :refer [matchesKey]]
+            ;; decodePrintableKey covers BOTH escape encodings a terminal can be
+            ;; put in (see printable-char). Only its Kitty half is re-exported
+            ;; from the package index, so this reaches the module directly —
+            ;; pi-tui ships all of dist/ and declares no "exports" map, and a
+            ;; rename would fail the build loudly rather than silently.
+            ["@mariozechner/pi-tui/dist/keys.js" :refer [decodePrintableKey]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame overlay-max-width
                                            truncate-to truncate-tail two-col-row]]
@@ -122,14 +128,46 @@
   "The character(s) `dispatch-input` should treat as typed text, or nil.
 
    Ctrl+P / Ctrl+N are reported as their bare letter with the ctrl flag set,
-   because `dispatch-input` tests `(and (.-ctrl key) (= input \"p\"))`."
+   because `dispatch-input` tests `(and (.-ctrl key) (= input \"p\"))`.
+
+   `decodePrintableKey` FIRST, and it is not optional. pi-tui never leaves the
+   terminal sending bare characters: it queries for the Kitty keyboard protocol
+   and, failing that, falls back to xterm's modifyOtherKeys (terminal.js:128-138).
+   Under the first a plain `a` arrives as `ESC [97u`; under the second as
+   `ESC [27;1;97~`. The single-character test below is false for both, so
+   typing was dropped in EVERY overlay — the picker filter, /login's API-key
+   field, the model switcher. Arrows and Enter kept working, because those go
+   through `matchesKey`, which understands every encoding; that asymmetry is
+   why this presented as a dead overlay rather than as dead typing.
+
+   pi-tui's own Editor uses exactly this pairing (components/editor.js:438).
+   Order matters: `decodePrintableKey` answers for the encoded forms and
+   returns undefined for a bare character, so the test below stays as the
+   fallback for a terminal in neither mode."
   [data]
   (let [pasted (paste-payload data)
         clean  (when pasted
-                 (.replace pasted (js/RegExp. "[\\x00-\\x1f\\x7f]" "g") ""))]
+                 (.replace pasted (js/RegExp. "[\\x00-\\x1f\\x7f]" "g") ""))
+        ;; The decoder also answers for keys that are not text: backspace
+        ;; comes back as a one-character string holding DEL (charCode 127),
+        ;; which prints as nothing and is TRUTHY. Unguarded it would take the
+        ;; printable branch and swallow the key instead of letting the
+        ;; backspace branch handle it.
+        ;;
+        ;; Same predicate as the legacy branch below, deliberately: whatever
+        ;; counts as typed text should not depend on which encoding the
+        ;; terminal happens to be using.
+        typed  (let [k (decodePrintableKey data)]
+                 (when (and (string? k)
+                            (pos? (.-length k))
+                            (>= (.charCodeAt k 0) 32)
+                            (not= (.charCodeAt k 0) 127))
+                   k))]
     (cond
       (matchesKey data "ctrl+p") "p"
       (matchesKey data "ctrl+n") "n"
+      ;; An encoded printable key → the character it stands for.
+      typed typed
       ;; A paste arrives as one chunk; hand back the whole payload with control
       ;; characters stripped, so a multi-line paste can't corrupt the field.
       (and clean (seq clean)) clean
