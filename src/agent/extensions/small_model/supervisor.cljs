@@ -28,16 +28,28 @@
 
 ;; ── Destructive tool patterns ────────────────────────────────────
 
-(def ^:private commit-tools
-  #{"bash" "write"})
+(def ^:private commit-commands
+  ["git commit" "git push" "git merge"])
 
-(defn- commit-like? [tool-name args]
-  (and (contains? commit-tools tool-name)
-       (when (= tool-name "bash")
-         (let [cmd (str (.-command args))]
-           (or (str/includes? cmd "git commit")
-               (str/includes? cmd "git push")
-               (str/includes? cmd "git merge"))))))
+(defn commit-like?
+  "Is this tool call about to publish work?
+
+   Only `bash` can be: the check is on the command string. `\"write\"` used to
+   sit in a `commit-tools` set alongside `\"bash\"`, but the body then guarded
+   `(when (= tool-name \"bash\") …)`, so for a write the `and` fell through to
+   nil and the gate could never fire — the set implied a capability the code
+   did not have. Nothing defines a commit-like *write*, and treating every
+   file write as one would summon the advisor on virtually every turn, so the
+   predicate now says what it does.
+
+   Exported for tests: this gate is one of three that decide when a second
+   model is consulted, and it was silently dead."
+  [tool-name args]
+  (boolean
+   (and (= tool-name "bash")
+        args
+        (let [cmd (str (.-command args))]
+          (some (fn [pat] (str/includes? cmd pat)) commit-commands)))))
 
 ;; ── Consult-advisor bridge ────────────────────────────────────────
 ;;

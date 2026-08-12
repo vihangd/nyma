@@ -140,3 +140,50 @@
                     (-> (expect out) (.toContain "# Playbook"))
                     (-> (expect out) (.toContain "- do x"))
                     (-> (expect out) (.toContain "- do y")))))))
+
+;;; ─── the failure signal's payload reaches the advisor ────────────────────
+;;; verify_gate publishes the real test output alongside the exit code. Without
+;;; passing it through, the advisor is asked to write a rule preventing a class
+;;; of failure it can only see summarised as a number.
+
+(defn- capture-api [subs focuses]
+  #js {:on      (fn [ev h] (swap! subs update ev (fn [v] (conj (or v []) h))))
+       :off     (fn [_ _] nil)
+       :getTool (fn [_] #js {:execute (fn [args]
+                                        (swap! focuses conj (str (.-focus args)))
+                                        "")})})
+
+(describe "self-tune failure payload"
+          (fn []
+            (it "forwards the verify output to the advisor"
+                (^:async
+                 fn []
+                  (let [subs (atom {}) focuses (atom [])
+                        cfg  #js {:self-tune #js {:min-failures 1 :max-reflections 3}}]
+                    (activate (capture-api subs focuses) cfg)
+                    (doseq [h (get @subs "small-model/verify-fail")]
+                      (h #js {:reason "verify command failed (exit 1)"
+                              :output "FAIL test/foo.test.cljs: expected 3, got 4"}
+                         nil))
+                    ;; reflect! is fire-and-forget so the bus isn't blocked —
+                    ;; let its microtask land before asserting.
+                    (js-await (js/Promise. (fn [res] (js/setTimeout res 20))))
+                    (let [focus (str (first @focuses))]
+                      (-> (expect focus) (.toContain "exit 1"))
+                      ;; The part that used to be dropped.
+                      (-> (expect focus) (.toContain "expected 3, got 4"))))))
+
+            (it "still works for signals that carry no output"
+                (^:async
+                 fn []
+                  ;; quality-signal is heuristic and has no output field; the
+                  ;; focus must not gain an empty 'Failure output:' section.
+                  (let [subs (atom {}) focuses (atom [])
+                        cfg  #js {:self-tune #js {:min-failures 1 :max-reflections 3}}]
+                    (activate (capture-api subs focuses) cfg)
+                    (doseq [h (get @subs "small-model/quality-signal")]
+                      (h #js {:reason "hallucinated tool: frobnicate"} nil))
+                    (js-await (js/Promise. (fn [res] (js/setTimeout res 20))))
+                    (let [focus (str (first @focuses))]
+                      (-> (expect focus) (.toContain "frobnicate"))
+                      (-> (expect (.includes focus "Failure output:")) (.toBe false))))))))

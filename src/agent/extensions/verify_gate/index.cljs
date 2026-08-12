@@ -80,7 +80,14 @@
                     (reset! signalled? true)
                     (.emitGlobal api "small-model/verify-fail"
                                  #js {:reason (str "verify command failed (exit " exit-code ")")
-                                      :cmd    (:cmd cfg)}))
+                                      :cmd    (:cmd cfg)
+                                      ;; The failure OUTPUT, not just the exit
+                                      ;; number. self-tune asks the advisor to
+                                      ;; write a rule preventing this class of
+                                      ;; mistake; with only "exit 1" to go on it
+                                      ;; was reasoning about a failure it could
+                                      ;; not see. Same tail the model gets.
+                                      :output (shared/tail-lines output 40)}))
                   (if (< @attempts (:max-attempts cfg))
                     (do (swap! attempts inc)
                         ((.-sendUserMessage api)

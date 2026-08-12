@@ -4,13 +4,19 @@
             [agent.extensions.verify-gate.index :as vg]))
 
 (defn- make-api [cmd sent]
-  (let [handlers (atom {})]
+  (let [handlers (atom {})
+        ;; Emits get their own sink: the existing tests count `sent` to assert
+        ;; how many follow-ups were injected, so mixing bus traffic in there
+        ;; would silently change what those assertions mean.
+        emits    (atom [])]
     {:api #js {:getSettings     (fn [] (if cmd #js {:verify #js {:cmd cmd :max-attempts 2}} #js {}))
                :on              (fn [evt h] (swap! handlers assoc evt h))
                :off             (fn [evt _] (swap! handlers dissoc evt))
                :sendMessage     (fn [_ _])
-               :sendUserMessage (fn [text opts] (swap! sent conj {:text text :opts opts}))}
-     :handlers handlers}))
+               :sendUserMessage (fn [text opts] (swap! sent conj {:text text :opts opts}))
+               :emitGlobal      (fn [evt data] (swap! emits conj {:emit evt :data data}))}
+     :handlers handlers
+     :emits    emits}))
 
 (defn- fire [handlers evt data]
   (when-let [h (get @handlers evt)] (h data nil)))
@@ -101,3 +107,40 @@
                                        (-> (expect (count @sent)) (.toBe 3))
                                        (-> (expect (:text (nth @sent 2))) (.toContain "Do NOT edit further"))
                                        (-> (expect (:text (nth @sent 2))) (.toContain "STILLRED")))))))
+
+;;; ─── what the failure signal carries ─────────────────────────────────────
+;;; self-tune asks the advisor to write a rule that prevents this CLASS of
+;;; failure. It used to be handed only "verify command failed (exit 1)" — a
+;;; rule written against an exit number is a guess. The gate already has the
+;;; output in hand and already sends it to the model; it now puts it on the bus
+;;; too.
+
+(describe "verify-fail signal"
+          (fn []
+            (it "carries the failure output, not just the exit code"
+                (^:async
+                 fn []
+                 (let [sent (atom [])
+                       {:keys [api handlers emits]} (make-api "echo ASSERTION_XYZ; exit 1" sent)]
+                   (vg/activate api)
+                   (fire handlers "tool_complete" #js {:toolName "edit" :isError false})
+                   (js-await (fire handlers "turn_finalize" #js {:error false}))
+                   (let [signal (first @emits)]
+                     (-> (expect signal) (.toBeTruthy))
+                     (-> (expect (:emit signal)) (.toBe "small-model/verify-fail"))
+                     (-> (expect (.-reason (:data signal))) (.toContain "exit 1"))
+                     ;; The part that was missing.
+                     (-> (expect (.-output (:data signal))) (.toContain "ASSERTION_XYZ"))))))
+
+            (it "tails the output rather than shipping the whole log"
+                (^:async
+                 fn []
+                 (let [sent (atom [])
+                       cmd  "for i in $(seq 1 100); do echo line$i; done; exit 1"
+                       {:keys [api handlers emits]} (make-api cmd sent)]
+                   (vg/activate api)
+                   (fire handlers "tool_complete" #js {:toolName "edit" :isError false})
+                   (js-await (fire handlers "turn_finalize" #js {:error false}))
+                   (let [out (str (.-output (:data (first @emits))))]
+                     (-> (expect out) (.toContain "line100"))
+                     (-> (expect (.includes out "line1\n")) (.toBe false))))))))

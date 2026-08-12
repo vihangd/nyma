@@ -168,7 +168,16 @@
         ;; reset the counter so the next lesson needs another N failures.
         on-failure
         (fn [data _ctx]
-          (let [reason (str (or (.-reason data) "quality issue detected"))]
+          (let [reason (str (or (.-reason data) "quality issue detected"))
+                ;; verify_gate carries the actual failure output; the heuristic
+                ;; signals carry only a reason. Pass it through when present —
+                ;; a rule written against "exit 1" is a guess, one written
+                ;; against the assertion that failed is not.
+                output (when (and data (.-output data))
+                         (str (.-output data)))
+                reason (if (seq (str (or output "")))
+                         (str reason "\n\nFailure output:\n" output)
+                         reason)]
             (swap! failures inc)
             (when (and (>= @failures min-fail)
                        (< @reflections max-reflect))
