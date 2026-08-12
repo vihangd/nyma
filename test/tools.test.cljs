@@ -6,13 +6,13 @@
             ["ai" :refer [tool]]
             ["zod" :as z]
             ["@ai-sdk/provider-utils" :refer [asSchema]]
-            [agent.tools :refer [read-execute write-execute edit-execute bash-execute
+            [agent.tools :refer [read-execute write-execute edit-execute bash-execute bash-tool-execute
                                  think-execute ls-execute glob-execute grep-execute
                                  web-fetch-execute web-search-execute deep-research-execute
                                  builtin-tools read-tool write-tool edit-tool bash-tool
                                  try-binary detect-search-binary]]
             [agent.tool-registry :refer [create-registry]]
-            [agent.middleware :refer [create-pipeline wrap-tools-with-middleware]]
+            [agent.middleware :refer [create-pipeline wrap-tools-with-middleware normalize-tool-result]]
             [agent.events :refer [create-event-bus]]))
 
 (defn- make-tmp-dir []
@@ -1299,3 +1299,91 @@
                            (it "try-binary returns true for existing binary" test-try-binary-exists)
                            (it "try-binary returns false for nonexistent binary" test-try-binary-nonexistent)
                            (it "detect-search-binary returns valid binary" test-detect-search-binary)))
+
+;;; ─── bash failure visibility ─────────────────────────────────────────────
+;;; `bash-execute` returns a JSON string, and middleware's is-error check is
+;;;   (and (some? raw) (not (string? raw)) (.-isError raw))
+;;; so for a string it was ALWAYS false. A command exiting 1 was
+;;; indistinguishable from success to every consumer of :result-is-error and to
+;;; the tool_result event's :isError. Two extensions already re-parsed the exit
+;;; code out of the opaque JSON by hand, which is the tell that the signal was
+;;; wanted and the plumbing was missing.
+
+(defn ^:async test-bash-tool-flags-failure []
+  (let [r (js-await (bash-tool-execute {:command "exit 42"}))]
+    (-> (expect (.-isError r)) (.toBe true))
+    (-> (expect (.-exitCode (.-details r))) (.toBe 42))))
+
+(defn ^:async test-bash-tool-success-not-error []
+  (let [r (js-await (bash-tool-execute {:command "true"}))]
+    (-> (expect (.-isError r)) (.toBe false))
+    (-> (expect (.-exitCode (.-details r))) (.toBe 0))))
+
+(defn ^:async test-bash-tool-model-output-unchanged []
+  ;; The load-bearing property: the model must see exactly the string it saw
+  ;; before. normalize-tool-result renders the content part back to it, and
+  ;; wrap-tools-with-middleware hands the SDK that string because bash
+  ;; declares no toModelOutput.
+  (doseq [cmd ["echo hello" "exit 42" "echo boom >&2; exit 1"]]
+    (let [direct (js-await (bash-execute {:command cmd}))
+          viaTool (normalize-tool-result (js-await (bash-tool-execute {:command cmd})))]
+      (-> (expect viaTool) (.toBe direct)))))
+
+(defn ^:async test-bash-tool-result-still-parses []
+  ;; The two extensions that hand-parse exitCode out of the payload must keep
+  ;; working (token_suite/observation_mask, bash_suite/output_handling).
+  (let [s (normalize-tool-result (js-await (bash-tool-execute {:command "echo x >&2; exit 3"})))
+        p (js/JSON.parse s)]
+    (-> (expect (.-exitCode p)) (.toBe 3))
+    (-> (expect (.includes (.-stderr p) "x")) (.toBe true))))
+
+(describe "bash failure is visible to the harness"
+          (fn []
+            (it "flags a non-zero exit as an error" test-bash-tool-flags-failure)
+            (it "does not flag success" test-bash-tool-success-not-error)
+            (it "leaves the model-visible output byte-identical" test-bash-tool-model-output-unchanged)
+            (it "keeps the payload parseable for existing consumers" test-bash-tool-result-still-parses)))
+
+;;; ─── the wiring, not just the helper ─────────────────────────────────────
+;;; The tests above call bash-tool-execute directly, so they pass even if the
+;;; tool definition is pointed back at the raw-string helper — verified by
+;;; reverting it and watching them stay green. These go through the real
+;;; registry → pipeline → event path, which is what actually has to work.
+
+(defn ^:async test-bash-pipeline-reports-error []
+  (let [events   (create-event-bus)
+        seen     (atom [])
+        _        ((:on events) "tool_result"
+                  (fn [e] (swap! seen conj {:name (.-toolName e)
+                                            :error (boolean (.-isError e))}) nil))
+        pipeline (create-pipeline events)
+        registry (create-registry builtin-tools)
+        active   ((:get-active registry))
+        wrapped  (wrap-tools-with-middleware active pipeline events)
+        bash     (get wrapped "bash")]
+    ;; A failing command must reach the event bus flagged as an error.
+    (js-await ((.-execute bash) #js {:command "exit 7"}))
+    (js-await ((.-execute bash) #js {:command "true"}))
+    (let [results (vec @seen)]
+      (-> (expect (count results)) (.toBe 2))
+      (-> (expect (:error (first results))) (.toBe true))
+      (-> (expect (:error (second results))) (.toBe false)))))
+
+(defn ^:async test-bash-pipeline-model-string []
+  ;; And the SDK must still receive the plain JSON string, not the wrapper —
+  ;; bash declares no toModelOutput, so wrap-tools-with-middleware takes the
+  ;; :result branch.
+  (let [events   (create-event-bus)
+        pipeline (create-pipeline events)
+        registry (create-registry builtin-tools)
+        active   ((:get-active registry))
+        wrapped  (wrap-tools-with-middleware active pipeline events)
+        bash     (get wrapped "bash")
+        out      (js-await ((.-execute bash) #js {:command "echo hi"}))]
+    (-> (expect (string? out)) (.toBe true))
+    (-> (expect (.trim (.-stdout (js/JSON.parse out)))) (.toBe "hi"))))
+
+(describe "bash error status survives the real pipeline"
+          (fn []
+            (it "tool_result reports isError for a failed command" test-bash-pipeline-reports-error)
+            (it "the SDK still receives the JSON string" test-bash-pipeline-model-string)))

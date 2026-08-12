@@ -123,6 +123,36 @@
           :exitCode code
           :aborted  (boolean (and signal (.-aborted signal)))})))
 
+(defn ^:async bash-tool-execute
+  "Tool-facing wrapper: same JSON payload the model has always seen, plus the
+   structured status the HARNESS needs.
+
+   `bash-execute` returns a JSON string, and middleware's `is-error` check is
+   `(and (some? raw-result) (not (string? raw-result)) (.-isError raw-result))`
+   — so for a string it was always false. A command exiting 1 was therefore
+   indistinguishable from success to every consumer of `:result-is-error` and
+   to the `tool_result` event's `:isError`. The exit code was reachable only by
+   re-parsing the opaque JSON, which two places already do by hand
+   (`token_suite/observation_mask`, `bash_suite/output_handling`) — the signal
+   was wanted and the plumbing was missing.
+
+   Returning the pi-compatible `{content:[{type:text}], isError, details}` shape
+   fixes that WITHOUT changing a byte the model sees: `normalize-tool-result`
+   renders `content` back to exactly this string, and the SDK is handed that
+   string (bash declares no `toModelOutput`, so `wrap-tools-with-middleware`
+   takes the `:result` branch).
+
+   `bash-execute` itself keeps returning a string — the editor's `!` command
+   (`ui/editor_bash.cljs`) and the tool tests parse it directly."
+  [args & [ext-ctx]]
+  (let [payload (js-await (bash-execute args ext-ctx))
+        code    (try (let [parsed (js/JSON.parse payload)]
+                       (aget parsed "exitCode"))
+                     (catch :default _ nil))]
+    #js {:content #js [#js {:type "text" :text payload}]
+         :isError (boolean (and (number? code) (not (zero? code))))
+         :details #js {:exitCode code}}))
+
 (def bash-tool
   (tool
    #js {:description "Run a shell command. Use only for build, test, git, and install commands. For file operations use the dedicated read/write/edit/ls/glob/grep tools instead."
@@ -130,7 +160,7 @@
                                #js {:command (.string z)
                                     :timeout (-> (.number z) (.optional)
                                                  (.describe "Timeout in ms, default 30000"))})
-        :execute bash-execute}))
+        :execute bash-tool-execute}))
 
 ;;; ─── think ─────────────────────────────────────────────────
 
