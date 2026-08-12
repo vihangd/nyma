@@ -1309,15 +1309,20 @@
 ;;; code out of the opaque JSON by hand, which is the tell that the signal was
 ;;; wanted and the plumbing was missing.
 
-(defn ^:async test-bash-tool-flags-failure []
+(defn ^:async test-bash-tool-exposes-exit-code []
   (let [r (js-await (bash-tool-execute {:command "exit 42"}))]
-    (-> (expect (.-isError r)) (.toBe true))
-    (-> (expect (.-exitCode (.-details r))) (.toBe 42))))
-
-(defn ^:async test-bash-tool-success-not-error []
+    (-> (expect (.-exitCode (.-details r))) (.toBe 42)))
   (let [r (js-await (bash-tool-execute {:command "true"}))]
-    (-> (expect (.-isError r)) (.toBe false))
     (-> (expect (.-exitCode (.-details r))) (.toBe 0))))
+
+(defn ^:async test-bash-tool-does-not-flag-error []
+  ;; A non-zero exit is NOT a tool failure — the command ran. claude_hook_bridge
+  ;; switches PostToolUse -> PostToolUseFailure on isError, so flagging routine
+  ;; non-zero exits (grep with no match, test -f, git diff --quiet) would stop a
+  ;; user's PostToolUse hooks firing for them.
+  (doseq [cmd ["exit 1" "exit 42" "grep zzz /dev/null"]]
+    (let [r (js-await (bash-tool-execute {:command cmd}))]
+      (-> (expect (boolean (.-isError r))) (.toBe false)))))
 
 (defn ^:async test-bash-tool-model-output-unchanged []
   ;; The load-bearing property: the model must see exactly the string it saw
@@ -1339,8 +1344,8 @@
 
 (describe "bash failure is visible to the harness"
           (fn []
-            (it "flags a non-zero exit as an error" test-bash-tool-flags-failure)
-            (it "does not flag success" test-bash-tool-success-not-error)
+            (it "exposes the exit code as structured metadata" test-bash-tool-exposes-exit-code)
+            (it "does not flag a non-zero exit as a tool failure" test-bash-tool-does-not-flag-error)
             (it "leaves the model-visible output byte-identical" test-bash-tool-model-output-unchanged)
             (it "keeps the payload parseable for existing consumers" test-bash-tool-result-still-parses)))
 
@@ -1355,7 +1360,8 @@
         seen     (atom [])
         _        ((:on events) "tool_result"
                   (fn [e] (swap! seen conj {:name (.-toolName e)
-                                            :error (boolean (.-isError e))}) nil))
+                                            :error (boolean (.-isError e))
+                                            :exit  (some-> (.-details e) (.-exitCode))}) nil))
         pipeline (create-pipeline events)
         registry (create-registry builtin-tools)
         active   ((:get-active registry))
@@ -1366,7 +1372,11 @@
     (js-await ((.-execute bash) #js {:command "true"}))
     (let [results (vec @seen)]
       (-> (expect (count results)) (.toBe 2))
-      (-> (expect (:error (first results))) (.toBe true))
+      ;; The exit code reaches the event as structured metadata …
+      (-> (expect (:exit (first results))) (.toBe 7))
+      (-> (expect (:exit (second results))) (.toBe 0))
+      ;; … and neither is reported as a tool failure.
+      (-> (expect (:error (first results))) (.toBe false))
       (-> (expect (:error (second results))) (.toBe false)))))
 
 (defn ^:async test-bash-pipeline-model-string []
@@ -1385,5 +1395,5 @@
 
 (describe "bash error status survives the real pipeline"
           (fn []
-            (it "tool_result reports isError for a failed command" test-bash-pipeline-reports-error)
+            (it "tool_result carries the exit code, and no false failure" test-bash-pipeline-reports-error)
             (it "the SDK still receives the JSON string" test-bash-pipeline-model-string)))

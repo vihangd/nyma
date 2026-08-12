@@ -259,11 +259,15 @@
                                                                             {:input  (.-input (.-cost m))
                                                                              :output (.-output (.-cost m))
                                                                              ;; Optional: lets a provider price
-                                                                             ;; cached input separately.
-                                                                             :cache-read  (or (.-cacheRead (.-cost m))
-                                                                                              (aget (.-cost m) "cache_read"))
-                                                                             :cache-write (or (.-cacheWrite (.-cost m))
-                                                                                              (aget (.-cost m) "cache_write"))})})
+                                                                             ;; cached input separately. `or` would coerce a declared
+                                                                             ;; rate of 0 to the fallback and then to nil, so a provider
+                                                                             ;; advertising FREE cache reads looked like one that never
+                                                                             ;; declared them — and its cached tokens were billed at the
+                                                                             ;; full input rate.
+                                                                             :cache-read  (let [a (.-cacheRead (.-cost m))]
+                                                                                          (if (some? a) a (aget (.-cost m) "cache_read")))
+                                                                             :cache-write (let [a (.-cacheWrite (.-cost m))]
+                                                                                          (if (some? a) a (aget (.-cost m) "cache_write")))})})
                                                        models-arr)))
                                     cfg (if models (assoc cfg :models models) cfg)
                                   ;; Remove nil create-model so build-provider-entry can auto-generate

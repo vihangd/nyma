@@ -60,8 +60,11 @@
    gap shows how much the existing caps already save — without both, a change
    aimed at tool output cannot be told apart from noise."
   [metrics]
-  (let [rows        (sort-by (fn [[_ m]] (- (or (:model-bytes m) 0)
-                                            (or (:calls m) 0)))
+  ;; Descending by model-bytes — the biggest context consumers first, which is
+  ;; the entire point of the report. `(- a b)` here was two-arg SUBTRACTION,
+  ;; not negation, so it sorted ascending on `bytes - calls` and buried the
+  ;; worst offenders at the bottom.
+  (let [rows        (sort-by (fn [[_ m]] (- (or (:model-bytes m) 0)))
                              metrics)
         total-model (reduce + 0 (map (fn [[_ m]] (or (:model-bytes m) 0)) metrics))
         total-raw   (reduce + 0 (map (fn [[_ m]] (or (:raw-bytes m) 0)) metrics))]

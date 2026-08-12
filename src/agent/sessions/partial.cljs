@@ -81,34 +81,34 @@
           (reset! last-at (now-fn)))]
 
     (as-> {:note!
-     (fn [text]
-       (when (and path (seq (str (or text ""))))
-         (reset! pending text)
-         (when (>= (- (now-fn) @last-at) flush-interval-ms)
-           (write! text))))
+           (fn [text]
+             (when (and path (seq (str (or text ""))))
+               (reset! pending text)
+               (when (>= (- (now-fn) @last-at) flush-interval-ms)
+                 (write! text))))
 
-     :flush!
-     (fn [] (when (and path @pending) (write! @pending)))
+           :flush!
+           (fn [] (when (and path @pending) (write! @pending)))
 
-     :commit!
-     (fn []
-       (when path
-         (reset! pending nil)
+           :commit!
+           (fn []
+             (when path
+               (reset! pending nil)
          ;; Reset the write clock too, so the NEXT turn's first delta lands
          ;; immediately instead of being throttled against the last turn's
          ;; write. Otherwise a crash just after a turn starts loses the
          ;; opening of the response for no reason.
-         (reset! last-at 0)
-         (remove-fn path)))
+               (reset! last-at 0)
+               (remove-fn path)))
 
-     :abandon!
-     (fn []
-       (when path
-         (reset! pending nil)
-         (reset! last-at 0)
-         (remove-fn path)))}
+           :abandon!
+           (fn []
+             (when path
+               (reset! pending nil)
+               (reset! last-at 0)
+               (remove-fn path)))}
           c
-          (do (when path (swap! live conj c)) c))))
+      (do (when path (swap! live conj c)) c))))
 
 (defn read-partial
   "The partial response left by a session that died mid-stream, or nil.
@@ -166,5 +166,13 @@
           marked (mark-cutoff partial-text)
           tail   (last v)]
       (if (= "assistant" (:role tail))
-        (update v (dec (count v)) assoc :content marked)
+        ;; APPEND to the existing content, don't replace it. `assoc :content
+        ;; marked` discarded whatever that assistant turn already held — a
+        ;; completed response silently lost, with the partial standing in its
+        ;; place. Hard to reach today (the on-disk tail is normally a user
+        ;; entry, since seed-messages drops tool_call/tool_result) but reachable
+        ;; the moment a stream starts after the interrupted-turn append in
+        ;; sessions/manager without an intervening user message.
+        (update v (dec (count v)) assoc
+                :content (str (:content tail) marked))
         (conj v {:role "assistant" :content marked})))))

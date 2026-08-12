@@ -429,8 +429,24 @@ Examples:
             ;; the turn that was in flight when it crashed.
             partial-text (session-partial/read-partial ((:get-file-path session)))
             seeded       (if partial-text
-                           (do (session-partial/clear-partial! ((:get-file-path session)))
-                               (session-partial/append-partial seeded partial-text))
+                           (let [marked (session-partial/mark-cutoff partial-text)]
+                             ;; PERSIST it before dropping the sidecar. Folding
+                             ;; it into `:messages` alone put the recovered turn
+                             ;; in this session's context and nowhere else — the
+                             ;; sidecar was deleted in the same breath, so the
+                             ;; next message linked to the pre-crash leaf and the
+                             ;; recovered response was gone from disk for good.
+                             ;; Any later resume silently lost it.
+                             ;;
+                             ;; Appending also matches the interrupted-turn path
+                             ;; in sessions/manager, which writes the same shape
+                             ;; via (:append session). Seeding uses `swap!`
+                             ;; rather than `dispatch!`, so the persistence
+                             ;; subscriber does not fire and this cannot
+                             ;; double-write.
+                             ((:append session) {:role "assistant" :content marked})
+                             (session-partial/clear-partial! ((:get-file-path session)))
+                             (session-partial/append-partial seeded partial-text))
                            seeded)]
         (when (seq seeded)
           (swap! (:state agent) assoc :messages seeded)

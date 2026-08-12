@@ -124,23 +124,28 @@
           :aborted  (boolean (and signal (.-aborted signal)))})))
 
 (defn ^:async bash-tool-execute
-  "Tool-facing wrapper: same JSON payload the model has always seen, plus the
-   structured status the HARNESS needs.
+  "Tool-facing wrapper: the same JSON payload the model has always seen, plus
+   the exit code as STRUCTURED metadata instead of only inside an opaque string.
 
-   `bash-execute` returns a JSON string, and middleware's `is-error` check is
-   `(and (some? raw-result) (not (string? raw-result)) (.-isError raw-result))`
-   — so for a string it was always false. A command exiting 1 was therefore
-   indistinguishable from success to every consumer of `:result-is-error` and
-   to the `tool_result` event's `:isError`. The exit code was reachable only by
-   re-parsing the opaque JSON, which two places already do by hand
-   (`token_suite/observation_mask`, `bash_suite/output_handling`) — the signal
-   was wanted and the plumbing was missing.
+   Consumers previously had to re-parse the payload to learn whether a command
+   failed — `token_suite/observation_mask` and `bash_suite/output_handling` both
+   do exactly that by hand. `:details` rides the `tool_result` event
+   (`middleware.cljs:154`), so the signal is available without the parsing.
 
-   Returning the pi-compatible `{content:[{type:text}], isError, details}` shape
-   fixes that WITHOUT changing a byte the model sees: `normalize-tool-result`
-   renders `content` back to exactly this string, and the SDK is handed that
-   string (bash declares no `toModelOutput`, so `wrap-tools-with-middleware`
-   takes the `:result` branch).
+   Deliberately does NOT set `:isError`. A command that exits non-zero still
+   RAN — the tool call succeeded and returned its output; `isError` means the
+   call itself failed. Conflating the two is not academic: `claude_hook_bridge`
+   dispatches `PostToolUseFailure` instead of `PostToolUse` when `isError` is
+   set (`events/post_tool_use.cljs:54,61`), so flagging every non-zero exit
+   silently stops a user's PostToolUse hooks from firing for `grep` with no
+   match, `test -f`, `git diff --quiet` — all routine, all exit 1. An earlier
+   version of this function set `isError` and would have broken a live hook
+   setup for no gain: nothing in-tree consumes `:result-is-error` for bash
+   (`checkpoints` and `verify_gate` both gate on `edit-tool?`).
+
+   Nothing the model sees changes: `normalize-tool-result` renders `content`
+   back to exactly this string, and the SDK is handed that string because bash
+   declares no `toModelOutput`.
 
    `bash-execute` itself keeps returning a string — the editor's `!` command
    (`ui/editor_bash.cljs`) and the tool tests parse it directly."
@@ -150,7 +155,6 @@
                        (aget parsed "exitCode"))
                      (catch :default _ nil))]
     #js {:content #js [#js {:type "text" :text payload}]
-         :isError (boolean (and (number? code) (not (zero? code))))
          :details #js {:exitCode code}}))
 
 (def bash-tool

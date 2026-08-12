@@ -10,7 +10,8 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            [agent.sessions.partial :as p]))
+            [agent.sessions.partial :as p]
+            [agent.sessions.manager :refer [create-session-manager session->seed-messages]]))
 
 ;;; ─── fakes ───────────────────────────────────────────────────────────────
 
@@ -150,11 +151,21 @@
                 (fn []
                   ;; Two assistant turns in a row is not a shape every provider
                   ;; accepts.
+                  ;;
+                  ;; The earlier version of this test asserted only that the
+                  ;; partial was present, and passed against an implementation
+                  ;; that REPLACED the existing content — silently discarding a
+                  ;; completed response. Assert both halves survive.
                   (let [out (p/append-partial [{:role "user" :content "hi"}
-                                               {:role "assistant" :content "done"}]
-                                              "more")]
+                                               {:role "assistant" :content "COMPLETED"}]
+                                              "more")
+                        tail (:content (last out))]
                     (-> (expect (count out)) (.toBe 2))
-                    (-> (expect (.includes (:content (last out)) "more")) (.toBe true)))))
+                    (-> (expect (.includes tail "COMPLETED")) (.toBe true))
+                    (-> (expect (.includes tail "more")) (.toBe true))
+                    ;; …and in that order.
+                    (-> (expect (< (.indexOf tail "COMPLETED") (.indexOf tail "more")))
+                        (.toBe true)))))
 
             (it "leaves the conversation untouched with nothing to recover"
                 (fn []
@@ -237,3 +248,36 @@
                 (fn []
                   (p/flush-all!)
                   (-> (expect true) (.toBe true))))))
+
+;;; ─── recovery must be durable ────────────────────────────────────────────
+;;; The resume path folded the sidecar into `:messages` and deleted it in the
+;;; same expression. Seeding uses `swap!` (deliberately, so nothing
+;;; re-appends), so the recovered turn lived only in that session's memory: the
+;;; next user message linked to the pre-crash leaf, and every later resume
+;;; silently dropped the response. Recovery has to reach disk.
+
+(describe "a recovered partial survives the next resume"
+          (fn []
+            (it "is on disk after being folded in"
+                (fn []
+                  (let [sp (tmp-session)
+                        mgr (create-session-manager sp)]
+                    ((:append mgr) {:role "user" :content "do the thing"})
+                    ;; crash mid-stream
+                    (let [c (p/create-checkpoint sp)]
+                      ((:note! c) "half an answer")
+                      ((:flush! c)))
+                    ;; what the resume path does
+                    (let [recovered (p/read-partial sp)]
+                      (-> (expect recovered) (.toBeTruthy))
+                      ((:append mgr) {:role "assistant" :content (p/mark-cutoff recovered)})
+                      (p/clear-partial! sp))
+                    ;; a LATER resume, fresh manager, sidecar long gone
+                    (let [again (create-session-manager sp)
+                          _     ((:load again))
+                          ctx   (session->seed-messages ((:build-context again)))
+                          text  (.join (to-array (mapv (fn [m] (str (:content m))) ctx)) " ")]
+                      (-> (expect (count ctx)) (.toBe 2))
+                      (-> (expect (:role (last ctx))) (.toBe "assistant"))
+                      (-> (expect (.includes text "half an answer")) (.toBe true))
+                      (-> (expect (.includes text "cut off")) (.toBe true))))))))
