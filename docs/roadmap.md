@@ -199,17 +199,51 @@ A feature that declares a registry-backed API but has nothing consuming the regi
 
 **Mitigation:** anything that depends on a live `api.ui` object should run from a user-interaction handler OR use a "try later" guard + retry. Document the contract in any new extension that uses the UI surface.
 
+**2026-08 — second confirmed instance, and it was load-bearing.** `cli.cljs:437` emits `session_start` about 96 lines and one extension-load phase before `interactive/start` (`cli.cljs:533`) registers a handler for it. The event bus has no replay or stickiness, so that emit reaches an empty handler list — for the UI *and* for every extension (`mcp_client`, `claude_hook_bridge`, `openwiki` all subscribe to it and never see the startup emit). Startup resume works only because `interactive/start` seeds the pane directly, by a separate code path.
+
+**Mitigation:** an emit that fires before subscribers exist is dead, not merely early. Either move the emit after extension load and UI mount, or give the bus a replay for lifecycle events. Until then, treat `session_start` at startup as unreliable and seed from state directly.
+
 ### 3d. "Picker silently swallows a key"
 
 Every picker we ship reimplements `onInput`. We hit `key.delete` vs `key.backspace` (macOS), we hit `/agent qwen` arg-swallowing, and we hit the Ctrl+P/N navigation gap. Phase 12 consolidated all four pickers through a single `dispatch-input` so the next one-branch fix only happens once.
 
 **Mitigation:** new pickers should use `src/agent/ui/picker_input.cljs` + `src/agent/ui/picker_frame.cljs`. Any branch not covered by the dispatcher (e.g. Shift+Tab for a second `onTab`) means we should extend the dispatcher, not roll a one-off cond.
 
+**2026-08 — the same class, one layer down: the ENCODING, not the branch.** Typing did nothing in any overlay, and Enter did nothing either. pi-tui never leaves the terminal sending bare characters: it negotiates the Kitty keyboard protocol and falls back to xterm `modifyOtherKeys` (`terminal.js:128-138`), so a plain `a` arrives as `ESC[97u` or `ESC[27;1;97~`. `printable-char` tested `(= (count data) 1)` and returned nil for both. Arrows and Enter kept working via `matchesKey`, which understands every encoding — that asymmetry is why it presented as "the overlay is dead" rather than "typing is dead". Separately, pi-tui's own plain-Enter branch (`keys.js:719-725`) returns before ever reaching its `matchesModifyOtherKeys` call, so plain Enter under that mode is unrecognised upstream too.
+
+**Mitigation:** never hand-roll "is this a printable character". Use pi-tui's `decodePrintableKey`, and treat any new key predicate as owing a test in *every* encoding — the existing overlay tests drove `handleInput` with hand-written legacy bytes and were green throughout. `overlay_host/enter-key?` and `test/overlay_input.test.cljs` are the pattern.
+
+### 3f. "Two units for one number"
+
+The most productive bug class of 2026-08 — five distinct instances, every one a silent wrong answer rather than a crash:
+
+- `picker_frame` sized rows with `count` (characters) against a **column** budget → 81 columns emitted inside an 80-column box.
+- `status_bar` measured its right half with `count` on an ANSI-stripped string while cutting the left half in columns → 85 columns at width 80, and unlike the overlays it is a base child, so pi-tui throws and the session dies.
+- `truncate-tail` stepped by **code unit** rather than code point → lone surrogates from a cut emoji.
+- `fuzzy_scorer` hit the same split *inside squint*: `count` on a string is `.length` (code units) while `nth` indexes code points, so any label containing an emoji ran the scan off the end and threw — killing the process on one keystroke.
+- A tab is measured 0 / 1 / 3 / 4-8 columns by four different layers, so a line containing one has no true width.
+
+**Mitigation:** state the unit in the name or the docstring of anything holding a width, and measure with the function whose verdict matters — `visibleWidth` for anything pi-tui will render, code points (`Array.from`) for anything that slices text. Assert widths in tests with `visibleWidth`, never `count`: several tests asserted `count` and passed while the rendered row overflowed.
+
 ### 3e. "JSON silently drops data"
 
 `JSON.parse` keeps the last value when a key repeats. We had this latent in `settings/manager/load-json`; the Phase 12 fix scans for duplicates before parsing and emits a `d/warn`. Anywhere else we parse user JSON, we should consider the same scan.
 
 **Known callsites worth auditing:** `keybindings.cljs` (user keybindings file), `.nymaignore` if it's JSON, extension configs loaded from `~/.nyma/`. Not urgent unless a user reports a silently-dropped setting.
+
+---
+
+## 3.5 Deferred, with a known reason (2026-08)
+
+Each of these was found while fixing something else, understood, and left. They are not "unknown unknowns".
+
+- **`truncate-tail` is not ANSI-safe — blocks per-item colour in pickers.** It drops leading code points one at a time, so it eats an opening SGR and can cut inside `ESC[38;2;r;g;bm`, leaving `8;2;122;162;247m` as literal text — which inflates the measured width into the class of violation that kills the TUI (§3f). `two-col-row:117` routes the left column through it, so item labels and descriptions must stay plain. Fixing it unblocks muted descriptions, a dimmed input placeholder, and fuzzy-match highlighting.
+
+- **`/new` does not switch session files.** It clears the store and emits `session_start` but leaves the session manager pointing at the same JSONL, so the next message parent-links to the pre-clear conversation and a later `nyma -c` replays both as one. Fixing it means giving `/new` a fresh session path, which also makes "the pane always mirrors the current branch" uniformly true and removes the one `:reason "new"` special case in the `session_start` handler.
+
+- **`tool_call` entries are not rendered on resume.** `session->seed-messages` keeps only `user`/`assistant`, so a resumed transcript reads as a conversation with no evidence of the work — the newest session on disk is 214 `tool_call` entries against 10 messages. Matches what the model sees on resume, which is why it was left, but it is a real asymmetry with the live view.
+
+- **Upstream pi-tui report, still unfiled.** Three findings worth one issue: (1) plain Enter under `modifyOtherKeys` is unrecognised — `keys.js:719-725` returns before reaching its own `matchesModifyOtherKeys` call; (2) `fullRender` (`tui.js:759-789`) does no width check at all, so an over-wide line on first render/resize/forced render soft-wraps and desynchronizes the differential renderer instead of throwing — the silent twin of the loud crash; (3) `truncateToWidth` re-emits pending SGR but never closes it. Blocked on there being no release since 2026-05-07; the ask is a release, not a patch.
 
 ---
 

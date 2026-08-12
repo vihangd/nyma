@@ -153,6 +153,7 @@ src/
     sessions/      Session management + compaction
       listing.cljs   Scans .jsonl files, returns sorted metadata
       storage.cljs   SQLite-backed session store with usage tracking
+      partial.cljs   Checkpoints the in-flight response to a .partial sidecar
     settings/      Configuration system
     resources/     Resource discovery (prompts, skills, themes)
     packages/      Package management
@@ -408,19 +409,92 @@ Aliases become `/slash` commands immediately — `/cc` would switch to claude-so
 
 ### Default Settings
 
+Source of truth is `defaults` in `src/agent/settings/manager.cljs` — check there
+before relying on a value here.
+
 ```json
 {
   "model": "claude-sonnet-4-20250514",
   "provider": "anthropic",
   "thinking": "off",
   "compaction": { "enabled": true, "threshold": 0.85 },
-  "retry": { "enabled": true, "max-retries": 3 },
-  "tools": ["read", "write", "edit", "bash"],
+  "retry": { "enabled": true, "max-retries": 5 },
+  "max-steps": 100,
   "steering-mode": "one-at-a-time",
   "follow-up-mode": "one-at-a-time",
-  "transport": "auto"
+  "transport": "auto",
+  "tool-display": "collapsed",
+  "tool-display-max-lines": 500,
+  "scrollback-mode": true,
+  "status-line": { "preset": "default" },
+  "ui": {
+    "overlay": {
+      "anchor": "bottom-center",
+      "width": "100%",
+      "min-width": 40,
+      "max-height": "70%"
+    }
+  }
 }
 ```
+
+Larger maps omitted above because they are long, not because they are optional:
+`roles` (11 model/permission presets), `plan-mode`, `subagent`. Read them in
+`manager.cljs`.
+
+Keys are accepted in either kebab-case or camelCase — `load-json` normalizes
+camelCase to kebab before merging, so `maxHeight` and `max-height` are the same
+key.
+
+### Overlay placement (`ui.overlay`)
+
+Where pickers, permission prompts and info overlays are drawn. Every overlay in
+the repo shares this — only pass per-call `:overlay` options if one genuinely
+needs different placement.
+
+| key | default | notes |
+| --- | --- | --- |
+| `anchor` | `bottom-center` | Any of pi-tui's nine: `center`, `top-left`, `top-center`, `top-right`, `left-center`, `right-center`, `bottom-left`, `bottom-center`, `bottom-right`. An unrecognised value falls back to the default rather than reaching pi-tui. |
+| `width` | `"100%"` | Column count or `"N%"`. Full width by default because pi-tui composites an overlay over the base content at a column offset — anything narrower leaves the editor border and status bar showing on both sides. |
+| `min-width` | `40` | Floor, applied after the percentage. |
+| `max-height` | `"70%"` | Row count or `"N%"`. pi-tui slices overlay lines from the BOTTOM at this height. |
+
+Bottom-anchored so a permission prompt does not cover the transcript you are
+reading in order to answer it. A tall overlay therefore covers the editor and
+status bar; overlays capture focus, so the editor is inert while one is open.
+
+### Session files
+
+Conversations live in `~/.nyma/sessions/<epoch-ms>.jsonl` — an append-only tree
+whose entries link by `parent-id`. Appends are synchronous, one per message, so
+a hard kill loses nothing already written.
+
+Alongside a session you may see `<epoch-ms>.jsonl.partial`. That is the
+in-flight assistant response, checkpointed as it streams, because the completed
+message only reaches the JSONL when the turn ends — without it, a crash
+mid-response lost the whole answer. It is deleted the moment the real entry is
+written, so a sidecar sitting next to a session means exactly one thing: that
+run died mid-response. The next resume folds it back in, marked as cut off, and
+appends it to the JSONL so it survives.
+
+A turn that ends without storing a response — a provider error, an interrupt —
+gets the same treatment at `turn_finalize`.
+
+### Verify gate (`verify`)
+
+Off unless `cmd` is set. After any turn that edited a file, the configured
+command runs; on a non-zero exit its output is fed back as a follow-up so the
+agent fixes the break before declaring done. Bounded by `max-attempts`, and it
+flags edits to test files or to `settings.json` itself so a suite weakened into
+passing is visible.
+
+```json
+{ "verify": { "cmd": "bun test", "max-attempts": 2, "timeout-ms": 120000 } }
+```
+
+Project-scoped in practice — the command is repo-specific, so it belongs in
+`.nyma/settings.json` rather than the global file. See
+`src/agent/extensions/verify_gate/`.
 
 ## Extensions
 
