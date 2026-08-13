@@ -14,7 +14,7 @@
    byte constants, so they were green throughout. These use the encodings a
    real terminal actually sends."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [TUI]]
+            ["@mariozechner/pi-tui" :refer [TUI Editor]]
             [agent.ui.overlay-host :as oh :refer [printable-char install! enter-key?]]
             [agent.modes.interactive :refer [abort-on-escape?]]))
 
@@ -208,3 +208,66 @@
                      (.handleInput tui (str ESC "[B"))
                      (.handleInput tui enter)
                      (-> (expect (js-await p)) (.toBe "Allow always (this project)"))))))))
+
+;;; ─── stacked overlays ────────────────────────────────────────────────────
+;;; "The overlay doesn't accept input SOMETIMES" — the sometimes is a second
+;;; overlay. pi-tui's hide() restores focus to the topmost REMAINING overlay
+;;; (tui.js:191-193), but the host then called restore-focus unconditionally
+;;; and yanked it to the editor. The surviving overlay stayed on screen and
+;;; silently stopped accepting input: arrows and Enter went to the editor.
+;;;
+;;; Two tool calls in one step both hitting the permission gate is enough, as
+;;; is a prompt arriving while a picker is already open.
+
+(defn- host-with-editor []
+  (let [tui    (new TUI (fake-terminal))
+        theme  (new js/Proxy #js {} #js {:get (fn [& _] (fn [s] s))})
+        editor (new Editor tui theme #js {:paddingX 1})
+        ui     #js {}]
+    (.addChild tui editor)
+    (.setFocus tui editor)
+    (install! ui tui {:restore-focus (fn [] (.setFocus tui editor))
+                      :request-render (fn [] nil)})
+    {:tui tui :ui ui :editor editor}))
+
+(describe "two overlays at once"
+          (fn []
+            (it "keeps the remaining overlay usable after the top one closes"
+                (^:async
+                 fn []
+                 (let [{:keys [tui ui]} (host-with-editor)
+                       first-p  (.select ui "Allow 'web_search'?" #js ["Allow once" "Deny"])
+                       second-p (.select ui "Allow 'web_fetch'?"  #js ["Allow once" "Deny"])]
+                   (-> (expect (.-length (.-overlayStack tui))) (.toBe 2))
+                   ;; Answer the focused (second) prompt.
+                   (.handleInput tui (str ESC "[13u"))
+                   (-> (expect (js-await second-p)) (.toBe "Allow once"))
+                   ;; The first is still up — and must still take input.
+                   (-> (expect (.-length (.-overlayStack tui))) (.toBe 1))
+                   (.handleInput tui (str ESC "[13u"))
+                   (-> (expect (js-await first-p)) (.toBe "Allow once")))))
+
+            (it "returns focus to the editor once the stack is empty"
+                (^:async
+                 fn []
+                 ;; The behaviour the unconditional refocus existed for; it must
+                 ;; survive the fix.
+                 (let [{:keys [tui ui editor]} (host-with-editor)
+                       p (.select ui "Pick" #js ["a" "b"])]
+                   (.handleInput tui (str ESC "[13u"))
+                   (js-await p)
+                   (-> (expect (.-length (.-overlayStack tui))) (.toBe 0))
+                   (-> (expect (identical? (.-focusedComponent tui) editor)) (.toBe true)))))
+
+            (it "leaves focus on the survivor, not the editor"
+                (^:async
+                 fn []
+                 (let [{:keys [tui ui editor]} (host-with-editor)
+                       _ (.select ui "outer" #js ["a"])
+                       inner (.select ui "inner" #js ["a"])]
+                   (.handleInput tui (str ESC "[13u"))
+                   (js-await inner)
+                   (-> (expect (identical? (.-focusedComponent tui) editor)) (.toBe false))
+                   (-> (expect (identical? (.-focusedComponent tui)
+                                           (.-component (aget (.-overlayStack tui) 0))))
+                       (.toBe true)))))))

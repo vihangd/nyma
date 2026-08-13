@@ -525,7 +525,18 @@
                            (reset! closed true)
                            (when-let [h @handle] (.hide h))
                            (when-let [d (.-dispose picker)] (d))
-                           (refocus)
+                           ;; Only take focus back to the editor when NOTHING is
+                           ;; left on the stack. pi-tui's own hide() already
+                           ;; restores focus to the topmost remaining overlay
+                           ;; (tui.js:191-193); overriding that unconditionally
+                           ;; left a still-VISIBLE overlay unfocused, so it
+                           ;; silently stopped accepting input — arrows and Enter
+                           ;; went to the editor instead. Reachable whenever two
+                           ;; overlays coexist: two tool calls in one step both
+                           ;; hitting the permission gate, or a prompt arriving
+                           ;; while a picker is already open.
+                           (when (zero? (.-length (.-overlayStack tui)))
+                             (refocus))
                            (rerender)))
                 comp   (adapt-component
                         picker
