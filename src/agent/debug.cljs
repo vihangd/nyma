@@ -190,6 +190,56 @@
   ([tag msg] (log "warn" tag msg nil))
   ([tag msg extras] (log "warn" tag msg extras)))
 
+(defn warn-quiet
+  "Warn straight to the sink, never mirroring to stderr.
+
+   `warn`/`error` deliberately mirror to stderr so a failed extension load
+   cannot go unnoticed. That is wrong for anything that fires DURING a render:
+   stderr writes land in the middle of the frame, and pi-tui's differential
+   renderer has no idea they happened — the same desynchronisation that the
+   width bugs caused, plus visible garbage through the overlay border.
+
+   Always emitted (no `enabled?` gate), because a warning nobody can see and
+   nobody logged is worse than a noisy one."
+  ([tag msg] (warn-quiet tag msg nil))
+  ([tag msg extras]
+   (@sink (format-line tag "warn" msg extras))))
+
+(defn install-sdk-warning-bridge!
+  "Send AI SDK warnings to the log instead of the terminal.
+
+   The SDK emits via `process.emitWarning` (ai/dist/index.js:602-611), which
+   writes to stderr with no knowledge of the TUI — that is why an
+   `unsupported reasoning metadata` warning appears spliced through the
+   overlay border. It also means the warnings reach no log at all: nyma never
+   reads `result.warnings` from streamText/generateText anywhere, so
+   `grep 'unsupported reasoning' ~/.nyma/debug.log` returned nothing while the
+   screen was full of them. Too visible and unlogged at the same time.
+
+   `globalThis.AI_SDK_LOG_WARNINGS` accepts `false` or a logger function
+   (ai/dist/index.js:612-623). Installing a function also suppresses the SDK's
+   one-time \"To turn off warning logging…\" notice, itself TUI noise.
+
+   Must run before the first model call — see the call site in cli.cljs."
+  []
+  (aset js/globalThis "AI_SDK_LOG_WARNINGS"
+        (fn [opts]
+          (try
+            (let [provider (str (or (some-> opts .-provider) "?"))
+                  model    (str (or (some-> opts .-model) "?"))
+                  ws       (or (some-> opts .-warnings) #js [])]
+              (doseq [w (vec ws)]
+                (warn-quiet "ai-sdk"
+                            (str provider " / " model ": "
+                                 (or (some-> w .-message)
+                                     (some-> w .-type)
+                                     "unknown warning"))
+                            w)))
+            ;; A logger that throws would take the turn with it.
+            (catch :default _ nil))
+          nil))
+  true)
+
 (defn error
   "Shortcut for (log \"error\" tag msg extras). Always emitted."
   ([msg] (log "error" nil msg nil))

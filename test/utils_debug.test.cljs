@@ -6,6 +6,7 @@
    Post-consolidation (was agent.utils.debug) — the module moved to
    agent.debug; all existing tests still apply."
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
+            ["node:fs" :as fs]
             [agent.debug :as d]))
 
 (def ^:dynamic *captured* nil)
@@ -263,3 +264,134 @@
                                                     (with-env "DEBUG" nil
                                                       (fn []
                                                         (-> (expect (d/enabled?)) (.toBe false))))))))))))
+
+;;; ─── AI SDK warning bridge ───────────────────────────────────────────────
+;;; The SDK emits via process.emitWarning, which writes to stderr with no idea
+;;; the TUI owns the screen — an "unsupported reasoning metadata" warning
+;;; appeared spliced through the overlay border, and pi-tui's differential
+;;; renderer cannot account for bytes it did not write. The same warnings
+;;; reached no log at all, because nyma never reads result.warnings anywhere.
+
+(describe "install-sdk-warning-bridge!"
+          (fn []
+            (it "logs every warning in the payload"
+                (fn []
+                  (let [captured (atom [])]
+                    (d/configure-logger! (fn [l] (swap! captured conj l)))
+                    (d/install-sdk-warning-bridge!)
+                    ((aget js/globalThis "AI_SDK_LOG_WARNINGS")
+                     #js {:provider "anthropic.messages" :model "claude-opus-5"
+                          :warnings #js [#js {:type "other" :message "unsupported reasoning metadata"}
+                                         #js {:type "other" :message "second one"}]})
+                    (-> (expect (count @captured)) (.toBe 2))
+                    (-> (expect (first @captured)) (.toContain "ai-sdk"))
+                    (-> (expect (first @captured)) (.toContain "claude-opus-5"))
+                    (-> (expect (first @captured)) (.toContain "unsupported reasoning metadata"))
+                    (d/reset-logger!))))
+
+            (it "never writes to stderr, where plain warn does"
+                (fn []
+                  ;; DIFFERENTIAL, and it has to be. `log`'s stderr mirror only
+                  ;; fires when the sink is the DEFAULT file sink, so a test
+                  ;; using configure-logger! cannot tell warn from warn-quiet —
+                  ;; an earlier version of this test passed with the fix
+                  ;; reverted. This one restores the default sink (costing two
+                  ;; lines in ~/.nyma/debug.log) and asserts the difference.
+                  (let [orig-write (.-write (.-stderr js/process))
+                        writes     (atom 0)]
+                    (d/reset-logger!)
+                    (set! (.-write (.-stderr js/process))
+                          (fn [& _] (swap! writes inc) true))
+                    (try
+                      (d/warn "bridge-test" "plain warn mirrors")
+                      (let [after-warn @writes]
+                        (d/warn-quiet "bridge-test" "quiet warn does not")
+                        (let [after-quiet @writes]
+                          ;; The mirror is live…
+                          (-> (expect (> after-warn 0)) (.toBe true))
+                          ;; …and warn-quiet skips it.
+                          (-> (expect after-quiet) (.toBe after-warn))))
+                      (finally
+                        (set! (.-write (.-stderr js/process)) orig-write))))))
+
+            (it "routes SDK warnings through the quiet path"
+                (fn []
+                  (let [orig-write (.-write (.-stderr js/process))
+                        writes     (atom 0)]
+                    (d/reset-logger!)
+                    (set! (.-write (.-stderr js/process))
+                          (fn [& _] (swap! writes inc) true))
+                    (try
+                      (d/install-sdk-warning-bridge!)
+                      ((aget js/globalThis "AI_SDK_LOG_WARNINGS")
+                       #js {:provider "anthropic.messages" :model "claude-opus-5"
+                            :warnings #js [#js {:type "other"
+                                                :message "unsupported reasoning metadata"}]})
+                      (-> (expect @writes) (.toBe 0))
+                      (finally
+                        (set! (.-write (.-stderr js/process)) orig-write))))))
+
+            (it "installs a function, which also silences the SDK's own notice"
+                (fn []
+                  ;; `false` would silence warnings entirely; a FUNCTION both
+                  ;; captures them and suppresses the one-time "to turn off
+                  ;; warning logging" line (ai/dist/index.js:624-630).
+                  (d/install-sdk-warning-bridge!)
+                  (-> (expect (fn? (aget js/globalThis "AI_SDK_LOG_WARNINGS"))) (.toBe true))))
+
+            (it "survives a malformed payload rather than killing the turn"
+                (fn []
+                  (let [captured (atom [])]
+                    (d/configure-logger! (fn [l] (swap! captured conj l)))
+                    (d/install-sdk-warning-bridge!)
+                    (let [f (aget js/globalThis "AI_SDK_LOG_WARNINGS")]
+                      (f nil)
+                      (f #js {})
+                      (f #js {:warnings #js [#js {}]}))
+                    ;; No throw; the empty warning still gets a line.
+                    (-> (expect (>= (count @captured) 1)) (.toBe true))
+                    (d/reset-logger!))))))
+
+(describe "warn-quiet"
+          (fn []
+            (it "reaches the sink without the stderr mirror"
+                (fn []
+                  (let [captured (atom [])
+                        emitted  (atom 0)
+                        orig     (.-emitWarning js/process)]
+                    (d/configure-logger! (fn [l] (swap! captured conj l)))
+                    (set! (.-emitWarning js/process) (fn [& _] (swap! emitted inc) nil))
+                    (d/warn-quiet "tag" "message")
+                    (set! (.-emitWarning js/process) orig)
+                    (-> (expect (count @captured)) (.toBe 1))
+                    (-> (expect @emitted) (.toBe 0))
+                    (d/reset-logger!))))
+
+            (it "is not gated on the debug env switch"
+                (fn []
+                  ;; A warning nobody can see and nobody logged is the worst of
+                  ;; both; warn-quiet is always emitted like warn/error.
+                  (let [captured (atom [])]
+                    (d/configure-logger! (fn [l] (swap! captured conj l)))
+                    (d/warn-quiet "untagged-namespace" "still logged")
+                    (-> (expect (count @captured)) (.toBe 1))
+                    (d/reset-logger!))))))
+
+;;; ─── wiring ──────────────────────────────────────────────────────────────
+;;; A bridge that is correct but installed after the first model call is
+;;; useless. Asserted on compiled source: driving cli/main needs a live
+;;; terminal, argv and provider credentials.
+
+(describe "the bridge is installed before anything can reach a model"
+          (fn []
+            (it "runs at the top of main, before mode dispatch"
+                (fn []
+                  (let [src      (str (fs/readFileSync "dist/agent/cli.mjs" "utf8"))
+                        install  (.indexOf src "install_sdk_warning_bridge")
+                        dispatch (.indexOf src "interactive.start")]
+                    ;; Both markers must EXIST — a `when` guard here would let
+                    ;; the ordering assertion silently skip itself, which is the
+                    ;; shape of test theatre.
+                    (-> (expect (> install -1)) (.toBe true))
+                    (-> (expect (> dispatch -1)) (.toBe true))
+                    (-> (expect (< install dispatch)) (.toBe true)))))))

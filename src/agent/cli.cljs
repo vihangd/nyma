@@ -342,6 +342,11 @@ Examples:
     (create-session-manager path)))
 
 (defn ^:async main []
+  ;; FIRST, before anything can reach a model. The AI SDK writes its warnings
+  ;; straight to stderr, which lands mid-frame once the TUI owns the screen and
+  ;; desynchronises pi-tui's differential renderer. Installed here rather than
+  ;; in interactive mode so print/json/rpc get it too.
+  (d/install-sdk-warning-bridge!)
   (let [{:keys [values positionals]}
         (parseArgs
          #js {:args    (clj->js (remove #(.startsWith % "--ext-")
