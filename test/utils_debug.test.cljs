@@ -303,9 +303,9 @@
                     (set! (.-write (.-stderr js/process))
                           (fn [& _] (swap! writes inc) true))
                     (try
-                      (d/warn "bridge-test" "plain warn mirrors")
+                      (d/warn "selftest" "SYNTHETIC selftest line, ignore")
                       (let [after-warn @writes]
-                        (d/warn-quiet "bridge-test" "quiet warn does not")
+                        (d/warn-quiet "selftest" "SYNTHETIC selftest line, ignore")
                         (let [after-quiet @writes]
                           ;; The mirror is live…
                           (-> (expect (> after-warn 0)) (.toBe true))
@@ -325,8 +325,14 @@
                       (d/install-sdk-warning-bridge!)
                       ((aget js/globalThis "AI_SDK_LOG_WARNINGS")
                        #js {:provider "anthropic.messages" :model "claude-opus-5"
+                            ;; NOT the real message. This test runs against the
+                            ;; DEFAULT sink, so whatever it writes lands in the
+                            ;; user's ~/.nyma/debug.log — and an earlier version
+                            ;; wrote a line byte-identical to the real warning we
+                            ;; were hunting, so grepping the log turned up three
+                            ;; decoys from this very test.
                             :warnings #js [#js {:type "other"
-                                                :message "unsupported reasoning metadata"}]})
+                                                :message "SYNTHETIC selftest warning, not a real SDK warning"}]})
                       (-> (expect @writes) (.toBe 0))
                       (finally
                         (set! (.-write (.-stderr js/process)) orig-write))))))
