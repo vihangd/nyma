@@ -108,6 +108,28 @@
   [tool-name]
   (= (str tool-name) "bash"))
 
+(defn with-arg
+  "A COPY of `args` with one key changed. Never mutates the original.
+
+   The args object handed to a tool is the same object the AI SDK keeps on the
+   assistant's tool-call content part, and it replays that part to the model on
+   the next step (ai/dist/index.js:2943 → input: toolCall.input). So mutating it
+   in place edits the model's record of what it asked for.
+
+   That is not hypothetical: cwd-manager used `aset` here and the model, reading
+   back its own call as `cd '/x' && ls`, imitated the shape — which cwd-manager
+   then prefixed again. Real sessions reached 25 stacked `cd` prefixes on one
+   command. middleware.cljs:268-271 already spells out the rule: `:args` aliases
+   the live object and handlers must treat it as read-only.
+
+   Copying the whole object matters too — building a fresh single-key object
+   silently drops every other argument, which is how bash `timeout` stopped
+   working."
+  [args k v]
+  (let [copy (js/Object.assign #js {} (or args #js {}))]
+    (aset copy k v)
+    copy))
+
 (defn glob-match?
   "Simple glob matching. Supports * as wildcard for any characters.
    'git log *' matches 'git log --oneline'.

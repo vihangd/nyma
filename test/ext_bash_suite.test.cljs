@@ -680,3 +680,111 @@
                                (let [long-cmd (str "echo " (str/join (repeat 10000 "x")))
                                      result (security-analysis/classify-command long-cmd (:security-analysis shared/default-config))]
                                  (-> (expect (some? (:level result))) (.toBe true)))))))
+
+;;; ─── args are the model's, not ours ──────────────────────────────────────
+;;; cwd-manager used `aset` on the args object. That object is aliased onto the
+;;; assistant's tool-call content part, and the AI SDK replays that part to the
+;;; model on the next step — so the mutation rewrote the model's record of its
+;;; own request. The model then imitated the prefix it "saw itself write", and
+;;; cwd-manager prefixed the imitation. Real sessions reached 25 stacked `cd`s
+;;; on one command. middleware.cljs:268-271 documents the rule: :args aliases
+;;; the live object; handlers must treat it as read-only.
+
+(defn- cwd-stub-api []
+  (let [registered (atom nil)]
+    {:api        #js {:addMiddleware    (fn [i] (reset! registered i))
+                      :removeMiddleware (fn [_] nil)}
+     :registered registered}))
+
+(describe "cwd-manager does not touch the caller's args"
+          (fn []
+            (it "leaves the original args object unmodified"
+                (fn []
+                  ;; THE test for this bug. Asserting on the executed command
+                  ;; alone passes just as happily on the broken version.
+                  (let [{:keys [api registered]} (cwd-stub-api)
+                        _    (cwd-manager/activate api)
+                        dir  (fs/realpathSync (os/tmpdir))
+                        _    (reset! cwd-manager/tracked-cwd dir)
+                        args #js {:command "ls"}
+                        ctx  #js {:tool-name "bash" :args args}
+                        out  ((.-enter @registered) ctx)]
+                    ;; The tool runs with the prefix …
+                    (-> (expect (.-command (.-args out))) (.toContain "cd "))
+                    (-> (expect (.-command (.-args out))) (.toContain "ls"))
+                    ;; … and the model's object still says what the model said.
+                    (-> (expect (.-command args)) (.toBe "ls"))
+                    (reset! cwd-manager/tracked-cwd nil))))
+
+            (it "carries other args through the rewrite"
+                (fn []
+                  (let [{:keys [api registered]} (cwd-stub-api)
+                        _    (cwd-manager/activate api)
+                        dir  (fs/realpathSync (os/tmpdir))
+                        _    (reset! cwd-manager/tracked-cwd dir)
+                        ctx  #js {:tool-name "bash"
+                                  :args #js {:command "ls" :timeout 5000}}
+                        out  ((.-enter @registered) ctx)]
+                    (-> (expect (.-timeout (.-args out))) (.toBe 5000))
+                    (reset! cwd-manager/tracked-cwd nil))))
+
+            (it "does not prefix a command that already cd's there"
+                (fn []
+                  ;; The reported symptom, directly.
+                  (let [{:keys [api registered]} (cwd-stub-api)
+                        _    (cwd-manager/activate api)
+                        dir  (fs/realpathSync (os/tmpdir))
+                        _    (reset! cwd-manager/tracked-cwd dir)]
+                    (doseq [cmd [(str "cd '" dir "' && ls")
+                                 (str "cd " dir " && ls")]]
+                      (let [ctx #js {:tool-name "bash" :args #js {:command cmd}}
+                            out ((.-enter @registered) ctx)
+                            n   (count (re-seq #"cd " (.-command (.-args out))))]
+                        (-> (expect n) (.toBe 1))))
+                    (reset! cwd-manager/tracked-cwd nil))))
+
+            (it "keeps two concurrent calls' cd tracking separate"
+                (fn []
+                  ;; original-cmd was one shared atom, so with two bash calls in
+                  ;; flight the second :enter clobbered the first's command
+                  ;; before its :leave read it. Tool calls in one step run
+                  ;; concurrently, so this is reachable.
+                  (let [{:keys [api registered]} (cwd-stub-api)
+                        _    (cwd-manager/activate api)
+                        base (fs/realpathSync (os/tmpdir))
+                        a    (path/join base (str "nyma-cwd-a-" (js/Date.now)))
+                        b    (path/join base (str "nyma-cwd-b-" (js/Date.now)))]
+                    (fs/mkdirSync a #js {:recursive true})
+                    (fs/mkdirSync b #js {:recursive true})
+                    (reset! cwd-manager/tracked-cwd nil)
+                    (let [ctx-a ((.-enter @registered)
+                                 #js {:tool-name "bash" :args #js {:command (str "cd " a)}})
+                          ctx-b ((.-enter @registered)
+                                 #js {:tool-name "bash" :args #js {:command (str "cd " b)}})]
+                      ;; B entered last; A leaving must still track A's target.
+                      ((.-leave @registered) ctx-a)
+                      (-> (expect @cwd-manager/tracked-cwd) (.toBe a))
+                      ((.-leave @registered) ctx-b)
+                      (-> (expect @cwd-manager/tracked-cwd) (.toBe b)))
+                    (reset! cwd-manager/tracked-cwd nil)
+                    (try (fs/rmSync a #js {:recursive true :force true})
+                         (fs/rmSync b #js {:recursive true :force true})
+                         (catch :default _ nil)))))))
+
+(describe "env-filter preserves arguments"
+          (fn []
+            (it "keeps timeout when adding the preamble"
+                (fn []
+                  ;; It rebuilt args as a fresh {:command ...} object, and since
+                  ;; before_tool_call REPLACES ctx args wholesale, every other
+                  ;; argument was discarded — so bash `timeout` never took
+                  ;; effect while env-filter was enabled, which is the default.
+                  (let [handlers (atom {})
+                        api #js {:on (fn [evt f _pri] (swap! handlers assoc evt f))}
+                        _   (env-filter/activate api)
+                        h   (get @handlers "before_tool_call")
+                        res (h #js {:name "bash"
+                                    :args #js {:command "ls" :timeout 5000}})]
+                    (when res
+                      (-> (expect (.-timeout (.-args res))) (.toBe 5000))
+                      (-> (expect (.-command (.-args res))) (.toContain "ls"))))))))

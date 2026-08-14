@@ -30,7 +30,12 @@
               (fn [s] (-> s
                           (update :vars-stripped + (count (:strip-vars env-config)))
                           (update :commands-filtered inc))))
-            #js {:args #js {:command (str preamble cmd)}})))
+            ;; Carry every other argument through. This built a fresh
+            ;; single-key object, and because before_tool_call REPLACES ctx args
+            ;; wholesale (middleware.cljs:134) that silently dropped the bash
+            ;; tool's `timeout` on every call — a timeout that never fires looks
+            ;; exactly like one that works, until something hangs.
+            #js {:args (shared/with-arg args "command" (str preamble cmd))})))
       80)
 
     (fn [] nil)))

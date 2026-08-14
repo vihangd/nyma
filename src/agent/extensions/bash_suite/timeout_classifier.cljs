@@ -20,16 +20,25 @@
         cfg    (:timeout-classifier config)]
     (.addMiddleware api
                     #js {:name  "bash-suite/timeout-classifier"
+                         ;; Replaces ctx args rather than `aset`-ing them: the
+                         ;; args object is aliased onto the model's own tool-call
+                         ;; part and replayed to it next step (see
+                         ;; shared/with-arg). Benign for a number, but it is the
+                         ;; same contract violation that stacked `cd` prefixes 25
+                         ;; deep in cwd-manager.
                          :enter (fn [ctx]
-                                  (when (and (:enabled cfg)
-                                             (shared/is-bash-tool? (aget ctx "tool-name")))
+                                  (if (and (:enabled cfg)
+                                           (shared/is-bash-tool? (aget ctx "tool-name")))
                                     (let [args     (.-args ctx)
                                           cmd      (or (.-command args) "")
                                           existing (.-timeout args)]
-                        ;; Only inject when no explicit timeout was provided
-                                      (when (nil? existing)
+                                      ;; Only inject when no explicit timeout was provided
+                                      (if (nil? existing)
                                         (let [classified (classify-timeout cmd config)]
-                                          (when (not= classified (:default-timeout-ms cfg))
-                                            (aset args "timeout" classified))))))
-                                  ctx)})
+                                          (if (not= classified (:default-timeout-ms cfg))
+                                            (assoc ctx :args
+                                                   (shared/with-arg args "timeout" classified))
+                                            ctx))
+                                        ctx))
+                                    ctx))})
     (fn [] (.removeMiddleware api "bash-suite/timeout-classifier"))))

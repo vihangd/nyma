@@ -110,21 +110,41 @@
                     (deactivate)
                     (-> (expect @removed?) (.toBe true)))))
 
-            (it "enter mutates args.timeout to 300000 for matching command"
+            (it "enter RETURNS a ctx carrying the classified timeout"
                 (fn []
+                  ;; Was "enter mutates args.timeout". It must not: the args
+                  ;; object is aliased onto the model's own tool-call part and
+                  ;; replayed to it, which is how cwd-manager's in-place `aset`
+                  ;; stacked `cd` prefixes 25 deep. The classifier now returns a
+                  ;; ctx with replaced args.
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool-name "bash" :args #js {:command "npm install"}}]
-                    ((.-enter @registered) ctx)
-                    (-> (expect (.-timeout (.-args ctx))) (.toBe 300000)))))
+                        args #js {:command "npm install"}
+                        ctx #js {:tool-name "bash" :args args}
+                        out ((.-enter @registered) ctx)]
+                    (-> (expect (.-timeout (.-args out))) (.toBe 300000))
+                    ;; The caller's object is untouched.
+                    (-> (expect (.-timeout args)) (.toBeUndefined)))))
+
+            (it "enter preserves the other args when it sets a timeout"
+                (fn []
+                  ;; Rebuilding args as a fresh single-key object is how
+                  ;; env-filter silently dropped `timeout` on every bash call.
+                  (let [{:keys [api registered]} (make-stub-api)
+                        _ (timeout-classifier/activate api)
+                        ctx #js {:tool-name "bash"
+                                 :args #js {:command "npm install" :description "install deps"}}
+                        out ((.-enter @registered) ctx)]
+                    (-> (expect (.-command (.-args out))) (.toBe "npm install"))
+                    (-> (expect (.-description (.-args out))) (.toBe "install deps")))))
 
             (it "enter leaves args.timeout unset for safe command"
                 (fn []
                   (let [{:keys [api registered]} (make-stub-api)
                         _ (timeout-classifier/activate api)
-                        ctx #js {:tool-name "bash" :args #js {:command "ls -la"}}]
-                    ((.-enter @registered) ctx)
-                    (-> (expect (.-timeout (.-args ctx))) (.toBeUndefined)))))
+                        ctx #js {:tool-name "bash" :args #js {:command "ls -la"}}
+                        out ((.-enter @registered) ctx)]
+                    (-> (expect (.-timeout (.-args out))) (.toBeUndefined)))))
 
             (it "enter respects an explicit user-provided timeout"
                 (fn []
