@@ -10,7 +10,7 @@
             [agent.resources.loader :refer [discover]]
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
             [agent.sessions.partial :as session-partial]
-            [agent.sessions.listing :refer [list-sessions]]
+            [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
@@ -192,6 +192,8 @@ Model selection:
 Session:
   -c, --continue         Resume the most recent session.
   -r, --resume           Pick a past session to resume (numbered prompt).
+                         Scoped to the current project; shows all if none match.
+      --all              With -r: list sessions from every project.
       --fork <path>      Branch a copy of an existing session into a new file.
       --session <path>   Use a specific session file (jsonl).
       --no-session       Don't read or write any session file.
@@ -290,20 +292,51 @@ Examples:
                                               :terminal false})]
        (.question rl question (fn [ans] (.close rl) (resolve ans)))))))
 
+(defn resume-listing
+  "Which sessions to offer, and how many were held back.
+
+   Returns {:shown [...] :hidden n}. Scoped to the current project unless
+   `all?`. Pure apart from `list-sessions`, so the scoping and the hidden count
+   are testable without a terminal."
+  [sessions-dir all?]
+  (let [sessions (list-sessions sessions-dir)]
+    (if all?
+      {:shown sessions :hidden 0}
+      (let [[mine other] (scope-to-project sessions (js/process.cwd))]
+        ;; Scoping to a project the user has never run in would otherwise show
+        ;; an empty list and look broken. Falling back to everything keeps -r
+        ;; useful there, and the footer still explains what is on screen.
+        (if (seq mine)
+          {:shown mine :hidden (count other)}
+          {:shown sessions :hidden 0})))))
+
 (defn- ^:async pick-resume-path
   "Print a numbered session list on stderr, read a choice, return the path
-   (or nil when there are no sessions)."
-  [sessions-dir]
-  (let [sessions (list-sessions sessions-dir)]
-    (when (seq sessions)
-      (.write (.-stderr js/process) "Resume which session?\n")
-      (doseq [[i s] (map-indexed vector sessions)]
-        (.write (.-stderr js/process)
-                (str "  " (inc i) ". " (:name s) "  (" (:entry-count s) " msgs)\n")))
-      (let [ans (js-await (prompt-line "Number [blank = most recent]: "))]
-        (:path (pick-session sessions ans))))))
+   (or nil when there are no sessions).
 
-(defn- ^:async resolve-session
+   Runs BEFORE the TUI starts (see prompt-line), so this is plain stderr text
+   rather than an overlay picker — `two-col-row` is passed in for layout but no
+   part of the rendering stack takes over stdin."
+  [sessions-dir all?]
+  (let [{:keys [shown hidden]} (resume-listing sessions-dir all?)
+        width (max 40 (min 100 (or (.-columns (.-stderr js/process)) 80)))]
+    (when (seq shown)
+      (.write (.-stderr js/process) "\nResume which session?\n\n")
+      (doseq [[i s] (map-indexed vector shown)]
+        (.write (.-stderr js/process)
+                (str "  " (.padStart (str (inc i)) 2) ". "
+                     (format-row s (- width 6)) "\n")))
+      (when (pos? hidden)
+        ;; Never hide work silently: a scoped list that does not say what it
+        ;; left out is how a session becomes unfindable.
+        (.write (.-stderr js/process)
+                (str "\n  … " hidden " session" (when (> hidden 1) "s")
+                     " from other projects — rerun with --all\n")))
+      (.write (.-stderr js/process) "\n")
+      (let [ans (js-await (prompt-line "Number [blank = most recent]: "))]
+        (:path (pick-session shown ans))))))
+
+(defn ^:async resolve-session
   "Pick a session file and return its manager. Precedence:
    - --session <path>     → that path (always wins)
    - --no-session         → ephemeral (nil path)
@@ -330,7 +363,7 @@ Examples:
                       (str "warning: --fork source not found: " src "; starting fresh\n")))
             dst)
           (and (:resume values) interactive?)
-          (or (js-await (pick-resume-path sessions-dir))
+          (or (js-await (pick-resume-path sessions-dir (:all values)))
               (new-session-path sessions-dir))
           (and (:continue values) interactive?)
           (or (:path (first (list-sessions sessions-dir)))
@@ -339,7 +372,18 @@ Examples:
           :else                nil)]
     (when path
       (fs/mkdirSync (npath/dirname path) #js {:recursive true}))
-    (create-session-manager path)))
+    (let [session (create-session-manager path)]
+      ;; Stamp the project on a session the first time its file is created, so
+      ;; `-r` can scope by it later. Sessions written before this existed have
+      ;; no marker and fall back to inference (sessions/project.cljs).
+      ;;
+      ;; Role "session-meta" is invisible to the model: both context builders
+      ;; filter to #{user assistant tool_call tool_result} (context.cljs:5,
+      ;; manager.cljs:105), so this never reaches a prompt or a replayed
+      ;; transcript.
+      (when (and path (not (fs/existsSync path)))
+        ((:append session) {:role "session-meta" :metadata {:cwd (js/process.cwd)}}))
+      session)))
 
 (defn ^:async main []
   ;; FIRST, before anything can reach a model. The AI SDK writes its warnings
@@ -358,6 +402,8 @@ Examples:
                             :print        #js {:type "boolean" :short "p"}
                             :continue     #js {:type "boolean" :short "c"}
                             :resume       #js {:type "boolean" :short "r"}
+                            ;; Widen -r past the current project.
+                            :all          #js {:type "boolean"}
                             :tools        #js {:type "string"}
                             :thinking     #js {:type "string"}
                             :session      #js {:type "string"}

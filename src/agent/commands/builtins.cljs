@@ -2,7 +2,7 @@
   (:require [agent.sessions.compaction :refer [compact]]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
-            [agent.sessions.listing :refer [list-sessions]]
+            [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
             [agent.extension-loader :refer [deactivate-all discover-and-load]]
@@ -609,7 +609,15 @@
           {:description "Resume a previous session"
            :handler (fn [_args ctx]
                       (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
-                            sessions (list-sessions dir)]
+                            all      (list-sessions dir)
+                            ;; Same scoping as `nyma -r`: this project first,
+                            ;; falling back to everything when none match so the
+                            ;; command never shows an empty list.
+                            scoped   (scope-to-project all (js/process.cwd))
+                            mine     (first scoped)
+                            other    (second scoped)
+                            sessions (if (seq mine) mine all)
+                            hidden   (if (seq mine) (count other) 0)]
                         (if (empty? sessions)
                           (notify ctx "No sessions found" "error")
                           (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
@@ -618,13 +626,11 @@
                                        (str "Available sessions:\n"
                                             (str/join "\n"
                                                       (map-indexed (fn [i s]
-                                                                     (str "  " (inc i) ". " (:name s)
-                                                                          " (" (:entry-count s) " entries)"))
+                                                                     (str "  " (inc i) ". "
+                                                                          (format-row s 76)))
                                                                    sessions))))
                        ;; Interactive: show selector
-                            (let [options (mapv (fn [s]
-                                                  (str (:name s) " (" (:entry-count s) " entries)"))
-                                                sessions)]
+                            (let [options (mapv (fn [s] (format-row s 76)) sessions)]
                               (.then (.select (.-ui ctx) "Resume session:" (clj->js options))
                                      (fn [choice]
                                        (when choice
