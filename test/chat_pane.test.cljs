@@ -2,6 +2,7 @@
   "Tests for create-chat-pane — covers appendChunk, setMessages, pushMessage,
    replaceMessage, getMessages, and the widget role used by thinking-renderer."
   (:require ["bun:test" :refer [describe it expect]]
+            ["@mariozechner/pi-tui" :refer [visibleWidth]]
             [agent.ui.chat-pane :refer [create-chat-pane]]))
 
 (def ^:private theme
@@ -189,3 +190,109 @@
                                            (.render p 80)
                                            (.invalidate p)
                                            (-> (expect (pos? (.-length (.render p 80)))) (.toBe true)))))))
+
+;;; ─── per-message render cache ────────────────────────────────────────────
+;;; pi-tui calls every child's render from scratch on every frame and requests
+;;; a frame on every keystroke, so the pane used to re-render the whole
+;;; transcript per keypress — 66ms at 900 messages against a 16ms budget, which
+;;; is why typing slowed down as a session grew. Finished messages are
+;;; immutable (add-chunk! rebuilds only the last one), so their lines are
+;;; computed once.
+
+(defn- md-msg [i]
+  {:role "assistant" :id (str "a" i)
+   :content (str "## Finding " i "\n\nIn `chat_pane.cljs`:\n\n```clojure\n(defn render [w] ...)\n```\n\n- one\n- two **bold**\n")})
+
+(defn- mixed-transcript [turns]
+  (vec (mapcat (fn [i]
+                 [{:role "user" :id (str "u" i) :content (str "Investigate issue " i)}
+                  (md-msg i)
+                  {:role "tool-result" :id (str "t" i) :content "  out 1\n  out 2\n  out 3"}])
+               (range turns))))
+
+(describe "render cache"
+          (fn []
+            (it "makes a warm render dramatically cheaper than a cold one"
+                (fn []
+                  ;; A perf fix needs a perf assertion: a correctness-only test
+                  ;; passes just as happily on the slow version. Threshold is
+                  ;; deliberately loose (10x) against a measured ~290x, so this
+                  ;; fails on regression without flaking on a loaded machine.
+                  (let [pane (create-chat-pane theme)
+                        _    (.setMessages pane (clj->js (mixed-transcript 300)))
+                        t0   (js/performance.now)
+                        _    (.render pane 100)
+                        cold (- (js/performance.now) t0)
+                        t1   (js/performance.now)
+                        _    (dotimes [_ 5] (.render pane 100))
+                        warm (/ (- (js/performance.now) t1) 5)]
+                    (-> (expect (> (/ cold warm) 10)) (.toBe true)))))
+
+            (it "returns identical output on a repeat render"
+                (fn []
+                  ;; The cache must not change a single byte.
+                  (let [pane (create-chat-pane theme)]
+                    (.setMessages pane (clj->js (mixed-transcript 12)))
+                    (let [a (vec (.render pane 100))
+                          b (vec (.render pane 100))]
+                      (-> (expect (count a)) (.toBe (count b)))
+                      (-> (expect (.join (to-array a) "\n"))
+                          (.toBe (.join (to-array b) "\n")))))))
+
+            (it "re-wraps when the width changes instead of serving stale lines"
+                (fn []
+                  ;; Width is part of the cache key. Serving lines measured for
+                  ;; a wider terminal is how pi-tui gets a line it throws on.
+                  ;;
+                  ;; The content MUST be long enough to wrap differently at the
+                  ;; two widths — an earlier version of this test used short
+                  ;; messages, so no line exceeded 40 columns even when rendered
+                  ;; at 100 and it passed with width dropped from the key.
+                  (let [pane (create-chat-pane theme)
+                        long-line (apply str (repeat 12 "wide content that must rewrap "))]
+                    (.setMessages pane
+                                  (clj->js [{:role "user" :id "u" :content long-line}
+                                            {:role "assistant" :id "a" :content long-line}]))
+                    (let [wide (vec (.render pane 100))]
+                      ;; Precondition: at 100 columns some line really is >40,
+                      ;; otherwise the assertion below proves nothing.
+                      (-> (expect (boolean (some #(> (visibleWidth %) 40) wide))) (.toBe true)))
+                    (let [narrow (vec (.render pane 40))]
+                      (doseq [l narrow]
+                        (-> (expect (<= (visibleWidth l) 40)) (.toBe true)))))))
+
+            (it "re-renders the streaming tail while earlier messages stay cached"
+                (fn []
+                  (let [pane (create-chat-pane theme)]
+                    (.setMessages pane (clj->js (mixed-transcript 4)))
+                    (let [before (vec (.render pane 100))]
+                      (.appendChunk pane " and more text")
+                      (let [after (vec (.render pane 100))]
+                        ;; The tail changed …
+                        (-> (expect (= (.join (to-array before) "\n")
+                                       (.join (to-array after) "\n")))
+                            (.toBe false))
+                        ;; … and the head did not.
+                        (-> (expect (first after)) (.toBe (first before))))))))
+
+            (it "drops cached lines on invalidate"
+                (fn []
+                  ;; invalidate clears the markdown caches, so the line cache
+                  ;; must go too — otherwise the next frame serves lines built
+                  ;; from caches just thrown away.
+                  ;;
+                  ;; Asserted by COST, not by output: the rebuilt lines are
+                  ;; byte-identical, so an equality check passes whether or not
+                  ;; the cache was cleared and proves nothing.
+                  (let [pane (create-chat-pane theme)]
+                    (.setMessages pane (clj->js (mixed-transcript 200)))
+                    (.render pane 100)
+                    (let [t0   (js/performance.now)
+                          _    (.render pane 100)
+                          warm (- (js/performance.now) t0)]
+                      (.invalidate pane)
+                      (let [t1    (js/performance.now)
+                            _     (.render pane 100)
+                            after (- (js/performance.now) t1)]
+                        ;; A render after invalidate must pay real work again.
+                        (-> (expect (> (/ after (max warm 0.001)) 5)) (.toBe true)))))))))
