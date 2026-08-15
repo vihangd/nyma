@@ -31,7 +31,7 @@
    {:content :color :id} entries that the bar prepends/appends.
    Errors in a render fn are isolated — a misbehaving segment can't
    blank the whole status bar."
-  [theme position]
+  [theme position seg-ctx]
   (let [reg (segs/segment-registry)]
     (->> (vals reg)
          (filter #(and (:auto-append? %)
@@ -39,7 +39,14 @@
          (sort-by :id)
          (keep (fn [seg]
                  (try
-                   (let [out ((:render seg) {:theme theme})]
+                   ;; Pass the bar's state, not just the theme. Segments got
+                   ;; `{:theme theme}` alone, so every built-in that reads state
+                   ;; rendered nothing unconditionally: activity-seg needs
+                   ;; :activity and role-seg needs :active-role
+                   ;; (status_line_segments.cljs:349-362) — the activity spinner
+                   ;; never appeared at all. Extension segments were unaffected
+                   ;; only because they close over their own atoms.
+                   (let [out ((:render seg) (assoc seg-ctx :theme theme))]
                      (when (:visible? out)
                        {:id      (:id seg)
                         :content (or (:content out) "")
@@ -63,7 +70,10 @@
    :auto-append? true; segments hide themselves via :visible? false
    when not relevant."
   [theme]
-  (let [state (atom {:model      "–"
+  (let [;; Advances once per frame so the spinner animates; renders are
+        ;; frequent while streaming, which is exactly when it is shown.
+        frame (atom 0)
+        state (atom {:model      "–"
                      :provider   nil
                      :role       nil
                      :streaming  false
@@ -77,7 +87,7 @@
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model provider streaming turn-count]} @state
+                   (let [{:keys [model provider streaming turn-count role]} @state
                          ;; Role/mode is shown by the model_roles status SEGMENT
                          ;; (color-coded), not inline here — see
                          ;; model_roles/status_segment.cljs.
@@ -123,8 +133,13 @@
                                                 (fg muted) DIM " " turn-count " turns" RESET))
                                          " ")
                          ;; Extension auto-append segments.
-                         left-segs  (render-extension-segments theme :left)
-                         right-segs (render-extension-segments theme :right)
+                         seg-ctx    {:activity      streaming
+                                     :spinner-frame (swap! frame inc)
+                                     :active-role   role
+                                     :model         model
+                                     :turn-count    turn-count}
+                         left-segs  (render-extension-segments theme :left seg-ctx)
+                         right-segs (render-extension-segments theme :right seg-ctx)
                          left  (str core-left
                                     (apply str (map #(format-segment % border) left-segs)))
                          right (str (apply str (map #(format-segment % border) right-segs))

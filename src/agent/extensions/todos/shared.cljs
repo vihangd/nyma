@@ -38,4 +38,14 @@
       (str "## Todo list\n"
            (str/join "\n" (map (fn [t] (str "- [" (marker (:status t)) "] " (:content t))) live))
            (when (pos? done)
-             (str (when (seq live) "\n") "_(" done " completed)_"))))))
+             (str (when (seq live) "\n") "_(" done " completed)_"))
+           ;; The list alone does not keep itself current. Across 26 real
+           ;; sessions only 4 ever called todo_write, and the longest went 634
+           ;; lines past its final write — the status counter was frozen for the
+           ;; back half of the session because nothing wrote to it. The only
+           ;; standing instruction to update lived in the tool description,
+           ;; which the model sees once at tool-listing time rather than per
+           ;; turn. This costs one line and no tool call, which matters for
+           ;; small models where an invalid call is expensive.
+           (when (seq live)
+             "\nKeep this current: mark items completed as you finish them, and keep exactly one in_progress.")))))

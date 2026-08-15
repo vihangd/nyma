@@ -6,11 +6,14 @@
    completed items collapsed (HIPIF).
 
    Always on; the injection/segment are no-ops until the agent writes a list."
-  (:require [agent.extensions.todos.shared :as shared]))
+  (:require [agent.extensions.todos.shared :as shared]
+            [agent.middleware.self-reminder :as reminder]))
 
 (defn ^:export default [api]
   (let [ledger   (atom [])            ; session-scoped [{:content :status}]
         handlers (atom [])
+        wrote?   (atom false)         ; set by todo_write, consumed by the reminder
+        stop-reminder (atom nil)
 
         plan-steps
         (fn []
@@ -36,6 +39,42 @@
 
     (.on api "before_agent_start" on-before-start)
     (swap! handlers conj ["before_agent_start" on-before-start])
+
+    ;; ── Nag reminder ──────────────────────────────────────────────────────
+    ;; Models write a list and then abandon it: across 26 real sessions only 4
+    ;; ever called todo_write, and the longest managed 5 writes across 1188 tool
+    ;; calls. A frozen counter is faithful rendering of an abandoned ledger, not
+    ;; a render bug. Known ecosystem failure (opencode #28961, #27560); the
+    ;; published fix is a periodic reminder, worth ~2x completion.
+    ;;
+    ;; Gated harder than the published pattern, because over-firing is its own
+    ;; documented harm (claude-code #56415: ~15 fires in one session, including
+    ;; straight after a write, producing performative churn instead of work):
+    ;;   - resets on any write, so it never fires right after one
+    ;;   - stays silent unless a list EXISTS with open items. Nagging a model
+    ;;     that never made one — 22 of those 26 sessions — means pushing tool
+    ;;     calls at models where a single invalid call costs ~30pp accuracy.
+    ;;     Nagging to maintain is defensible; nagging to create is not.
+    ;;   - silent while a plan executes; plan mode owns progress then.
+    (let [cfg     (let [s (when (.-getSettings api) (.getSettings api))]
+                    (or (:todos s) (get s "todos")))
+          every-n (let [v (or (:reminder-every-n-turns cfg)
+                              (get cfg "reminder-every-n-turns"))]
+                    (if (number? v) v 5))]
+      (when (pos? every-n)
+        (let [stop ((reminder/make-reminder
+                     {:every-n-steps every-n
+                      ;; Consume the flag: one write suppresses exactly one
+                      ;; window, so a stale list starts counting again.
+                      :action-predicate (fn [] (let [w @wrote?] (reset! wrote? false) w))
+                      :reminder-text-fn
+                      (fn []
+                        (let [live (remove #(= (:status %) :done) @ledger)]
+                          (when (and (seq live) (not (seq (plan-steps))))
+                            "<reminder>Your todo list is out of date — mark finished items completed and set the next one in_progress.</reminder>")))})
+                    {:on  (fn [evt f] (.on api evt f))
+                     :off (fn [evt f] (.off api evt f))})]
+          (reset! stop-reminder stop))))
 
     ;; Progress segment: ☐ open/total (hidden when empty)
     (when-let [reg (.-registerStatusSegment api)]
@@ -77,6 +116,7 @@
                         :execute
                         (fn [args]
                           (reset! ledger (shared/parse-todos (.-todos args)))
+                          (reset! wrote? true)
                           (let [{:keys [open total]} (shared/counts @ledger)]
                             (str "Todo list updated: " (- total open) "/" total " done.\n"
                                  (or (shared/render-ledger @ledger) "(empty)"))))})
@@ -89,6 +129,7 @@
                           (or (shared/render-ledger @ledger) "No todos yet."))})
 
     (fn []
+      (when-let [stop @stop-reminder] (stop))
       (.unregisterTool api "todo_write")
       (.unregisterTool api "todo_read")
       (when-let [unreg (.-unregisterStatusSegment api)]

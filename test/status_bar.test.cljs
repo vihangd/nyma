@@ -339,3 +339,49 @@
                     (doseq [w [20 10 5 1]]
                       (doseq [l (vec (.render bar w))]
                         (-> (expect (visibleWidth l)) (.toBeLessThanOrEqual w)))))))))
+
+;;; ─── segments get the bar's state, not just the theme ────────────────────
+;;; render-extension-segments passed `{:theme theme}` alone, so every built-in
+;;; reading state rendered nothing unconditionally — activity-seg needs
+;;; :activity, role-seg needs :active-role. The activity spinner therefore never
+;;; appeared at all. Extension segments were unaffected only because they close
+;;; over their own atoms, which is why this went unnoticed.
+
+(describe "status bar segment context"
+          (fn []
+            (it "renders a segment that depends on bar state"
+                (fn []
+                  (let [seen (atom nil)]
+                    (segs/register-segment
+                     "test.ctxprobe"
+                     {:category :agent :auto-append? true :position :left
+                      :render (fn [ctx]
+                                (reset! seen ctx)
+                                {:visible? (boolean (:activity ctx))
+                                 :content "PROBE"})})
+                    (let [bar (create-status-bar theme)]
+                      (.setState bar #js {:streaming true :role "build" :model "m"})
+                      (let [line (first (vec (.render bar 200)))]
+                        ;; The segment saw real state …
+                        (-> (expect (:activity @seen)) (.toBeTruthy))
+                        (-> (expect (:active-role @seen)) (.toBe "build"))
+                        ;; … and therefore rendered.
+                        (-> (expect (.includes line "PROBE")) (.toBe true))))
+                    (segs/unregister-segment "test.ctxprobe"))))
+
+            (it "advances the spinner frame between renders"
+                (fn []
+                  ;; A spinner stuck on frame 0 looks frozen, which is the same
+                  ;; complaint as a frozen todo counter.
+                  (let [frames (atom [])]
+                    (segs/register-segment
+                     "test.frameprobe"
+                     {:category :agent :auto-append? true :position :left
+                      :render (fn [ctx]
+                                (swap! frames conj (:spinner-frame ctx))
+                                {:visible? false :content ""})})
+                    (let [bar (create-status-bar theme)]
+                      (.render bar 200)
+                      (.render bar 200))
+                    (segs/unregister-segment "test.frameprobe")
+                    (-> (expect (> (count (distinct @frames)) 1)) (.toBe true)))))))
