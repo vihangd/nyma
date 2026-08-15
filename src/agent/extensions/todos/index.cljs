@@ -12,10 +12,27 @@
   (let [ledger   (atom [])            ; session-scoped [{:content :status}]
         handlers (atom [])
 
+        plan-steps
+        (fn []
+          ;; Plan mode's step list, when one is executing. Read through getState
+          ;; (extensions.cljs:79) rather than requiring plan_mode — two state
+          ;; keys is the whole coupling.
+          (let [st (when (.-getState api) (.getState api))]
+            (when (:plan-executing st)
+              (:plan-todos st))))
+
         on-before-start
         (fn [_data _ctx]
-          (when-let [block (shared/render-ledger @ledger)]
-            #js {:system-prompt-additions #js [block]}))]
+          ;; Silent while a plan is executing. Plan mode already re-injects the
+          ;; remaining steps every turn (plan_mode.cljs:222-228), and that
+          ;; per-turn reminder is the one intervention with evidence behind it
+          ;; (arXiv 2604.12147, 21k SWE-agent trajectories). Injecting this
+          ;; ledger as well put TWO independently-maintained lists in the same
+          ;; prompt, free to disagree — pure downside, and worst for the small
+          ;; local models least able to absorb contradictory instructions.
+          (when-not (seq (plan-steps))
+            (when-let [block (shared/render-ledger @ledger)]
+              #js {:system-prompt-additions #js [block]})))]
 
     (.on api "before_agent_start" on-before-start)
     (swap! handlers conj ["before_agent_start" on-before-start])
@@ -27,7 +44,15 @@
                 :autoAppend true
                 :position "left"
                 :render (fn [ctx]
-                          (let [{:keys [open total]} (shared/counts @ledger)
+                          ;; One visible tracker. While a plan runs this shows the
+                          ;; PLAN's progress, so the segment never contradicts the
+                          ;; list actually in the prompt.
+                          (let [plan  (plan-steps)
+                                {:keys [open total]}
+                                (if (seq plan)
+                                  {:open  (count (remove :completed plan))
+                                   :total (count plan)}
+                                  (shared/counts @ledger))
                                 theme (:theme ctx)]
                             #js {:content  (str "☐ " (- total open) "/" total)
                                  :color    (get-in theme [:colors :muted] "#565f89")

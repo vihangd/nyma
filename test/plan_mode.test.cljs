@@ -412,3 +412,38 @@
                     ((:on (:events agent)) "model_resolve" (fn [_] (swap! order conj "plan") nil) -10)
                     (-> ((:emit-collect (:events agent)) "model_resolve" #js {})
                         (.then (fn [_] (-> (expect (last @order)) (.toBe "plan"))))))))))
+
+;;; ─── did the plan actually get done? ─────────────────────────────────────
+;;; Nothing checked this before: the per-turn reminder stops once the step list
+;;; empties, and says nothing when it doesn't. A plan could stall silently.
+;;; Advisory by design — reported to the USER, not pushed back at the model,
+;;; because plan structure the model isn't following degrades results rather
+;;; than improving them (arXiv 2604.12147).
+
+(describe "plan-mode:outstanding-summary"
+          (fn []
+            (it "reports how many steps were left unfinished"
+                (fn []
+                  (-> (expect (pm/outstanding-summary
+                               {:plan-executing true
+                                :plan-todos [{:step 1 :completed true}
+                                             {:step 2 :completed false}
+                                             {:step 3 :completed false}]}))
+                      (.toBe "2 of 3 steps"))))
+
+            (it "is silent when every step was marked done"
+                (fn []
+                  (-> (expect (pm/outstanding-summary
+                               {:plan-executing true
+                                :plan-todos [{:step 1 :completed true}
+                                             {:step 2 :completed true}]}))
+                      (.toBeFalsy))))
+
+            (it "is silent when no plan was executing"
+                (fn []
+                  ;; A normal session must not get a plan warning.
+                  (-> (expect (pm/outstanding-summary
+                               {:plan-executing false
+                                :plan-todos [{:step 1 :completed false}]}))
+                      (.toBeFalsy))
+                  (-> (expect (pm/outstanding-summary {})) (.toBeFalsy))))))

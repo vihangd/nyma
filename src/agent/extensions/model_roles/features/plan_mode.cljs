@@ -285,6 +285,32 @@ the user will approve the plan before execution begins.")
       (when-let [text (step->text data)]
         (swap! (state-atom api) update :plan-todos mark-done text)))))
 
+(defn outstanding-summary
+  "Nil when a plan finished (or none ran); otherwise \"3 of 7 steps\".
+
+   Pure so the reporting rule is testable without a session."
+  [state]
+  (let [todos (:plan-todos state)]
+    (when (and (:plan-executing state) (seq todos))
+      (let [remaining (count (remove :completed todos))]
+        (when (pos? remaining)
+          (str remaining " of " (count todos) " steps"))))))
+
+(defn on-session-end
+  "Say so if the session ends with plan steps outstanding.
+
+   Advisory on purpose — no block, no re-prompt. Nothing checked this before, so
+   a plan could quietly stall: the per-turn reminder stops once the list empties
+   and says nothing when it does not. Told to the USER rather than pushed back at
+   the model, because plan structure the model is not following makes things
+   worse, not better (arXiv 2604.12147)."
+  [api _data]
+  (when-let [summary (outstanding-summary (cur-state api))]
+    (when-let [ui (.-ui api)]
+      (when (.-notify ui)
+        (.notify ui (str "Plan incomplete — " summary " were never marked done.")
+                 "warning")))))
+
 ;; ── opusplan: planning model override (model_resolve) + auth fallback ──
 
 (defn on-plan-resolve
@@ -352,7 +378,8 @@ the user will approve the plan before execution begins.")
               (if (:plan-mode s) (execute! api) (notify api "Not in plan mode." "info"))
               (or (= sub "cancel") (= sub "stop"))
               (if (:plan-mode s) (cancel! api) (notify api "Not in plan mode." "info"))
-              :else (if (:plan-mode s) (cancel! api) (enter! api)))))]
+              :else (if (:plan-mode s) (cancel! api) (enter! api)))))
+        on-send (fn [data] (on-session-end api data))]
 
     (.on api "before_agent_start" on-bas)
     (.on api "turn_finalize" on-final)
@@ -361,11 +388,13 @@ the user will approve the plan before execution begins.")
     ;; model_roles (priority 0) and is the last writer of config.model.
     (.on api "model_resolve" on-mres -10)
     (.on api "provider_error" on-perr)
+    (.on api "session_end" on-send)
     (swap! handlers into [["before_agent_start" on-bas]
                           ["turn_finalize" on-final]
                           ["turn_end" on-tend]
                           ["model_resolve" on-mres]
-                          ["provider_error" on-perr]])
+                          ["provider_error" on-perr]
+                          ["session_end" on-send]])
 
     ;; /planmode always works.
     (.registerCommand api "planmode"
