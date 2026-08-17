@@ -146,3 +146,51 @@
                            (fn [out]
                              (-> (expect out) (.toContain "<think>"))
                              (-> (expect out) (.toContain "</think>")))))))))
+
+;;; ─── a blank reasoning field is not reasoning ────────────────────────────
+;;; In squint "" is TRUTHY — only nil and false are falsy. yunwu's OpenAI shim
+;;; sends `reasoning_content: ""` on EVERY delta, so the rewriter treated each
+;;; frame as reasoning and overwrote `content` with "<think>" plus an empty
+;;; string. The model's answer was destroyed token by token and every assistant
+;;; turn rendered as `<think></think>` while tool calls kept working.
+
+(def ^:private blank-reasoning-chunks
+  ;; exactly what yunwu emits for deepseek-v4-pro
+  #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\",\"reasoning_content\":\"\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"!\",\"reasoning_content\":\"\"},\"index\":0}]}\n\n"
+       "data: [DONE]\n\n"])
+
+(def ^:private real-reasoning-chunks
+  #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"let me think\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" harder\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"Answer: 42\"},\"index\":0}]}\n\n"
+       "data: [DONE]\n\n"])
+
+(defn- assembled-content
+  "delta.content across the rewritten stream — the text a user actually sees."
+  [text]
+  (->> (.split (str text) "\n")
+       (filter #(.startsWith % "data: "))
+       (map #(.slice % 6))
+       (remove #(or (empty? (.trim %)) (= "[DONE]" (.trim %))))
+       (keep (fn [p] (try (some-> (js/JSON.parse p) .-choices (aget 0) .-delta .-content)
+                          (catch :default _ nil))))
+       (apply str)))
+
+(describe "reasoning-stream/wrap-response blank reasoning_content"
+          (fn []
+            (it "keeps the answer when reasoning_content is an empty string"
+                (^:async fn []
+                 (let [out (js-await (.text (wrap-response (sse-response blank-reasoning-chunks) false)))
+                       content (assembled-content out)]
+                   ;; The whole bug: this used to be "<think></think>".
+                   (-> (expect content) (.toBe "Hello!"))
+                   (-> (expect (.includes content "<think>")) (.toBe false)))))
+
+            (it "still wraps genuine reasoning"
+                (^:async fn []
+                 (let [out (js-await (.text (wrap-response (sse-response real-reasoning-chunks) false)))
+                       content (assembled-content out)]
+                   (-> (expect (.includes content "<think>let me think harder</think>")) (.toBe true))
+                   (-> (expect (.includes content "Answer: 42")) (.toBe true)))))))

@@ -13,10 +13,22 @@
    - `delta.reasoning_details[].text` / `.summary` (OpenRouter)"
   (:require [clojure.string :as str]))
 
+(defn- non-blank
+  "A reasoning field only counts when it actually carries text.
+
+   THE trap this file must not fall into: in squint, \"\" is TRUTHY — only nil
+   and false are falsy. yunwu's OpenAI shim sends `reasoning_content: \"\"` on
+   EVERY delta, so `(or (.-reasoning_content delta) ...)` returned \"\", the
+   rewriter treated each frame as reasoning, and overwrote `content` with
+   `<think>` plus an empty string. The model's actual answer was destroyed
+   token by token and the whole reply rendered as `<think></think>` — every
+   assistant turn blank while tool calls kept working."
+  [s]
+  (when (and (string? s) (pos? (count s))) s))
+
 (defn- extract-reasoning [delta]
-  (or (.-reasoning_content delta)
-      (let [r (.-reasoning delta)]
-        (when (string? r) r))
+  (or (non-blank (.-reasoning_content delta))
+      (non-blank (.-reasoning delta))
       (when-let [details (.-reasoning_details delta)]
         (when (and (.-length details) (pos? (.-length details)))
           (let [parts (atom [])]
