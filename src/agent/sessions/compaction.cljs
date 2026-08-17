@@ -204,6 +204,26 @@ with every section below present.
        "\n</errors>\n\n"
        "Output the complete corrected summary, keeping every section."))
 
+(def default-min-messages-between
+  "New messages required before compacting again.
+
+   Without this, compaction re-fires as soon as the trigger is true — and since
+   appending a summary does not shrink what the trigger measures, that is
+   immediately. A real session compacted 5 times, twice within 26 and 54
+   entries, each costing a summarization call and reducing nothing."
+  30)
+
+(defn messages-since-last-compaction
+  "How many messages follow the most recent compaction entry. The whole
+   context when there has never been one."
+  [context]
+  (let [v (vec context)
+        i (loop [i (dec (count v))]
+            (cond (< i 0) nil
+                  (= "compaction" (:role (nth v i))) i
+                  :else (recur (dec i))))]
+    (if (some? i) (- (count v) i 1) (count v))))
+
 (defn ^:async compact-with-retry
   "Call generateText with compact-system-prompt + user-prompt. Validate the
    result and run one fix-retry if validation fails. Always returns a string
@@ -347,10 +367,16 @@ with every section below present.
                   ((:context-window model-registry) lookup)
                   100000)]
 
-    (when (or force?
-              (should-compact? usage limit {:threshold threshold
-                                            :reserve   reserve
-                                            :enabled?  enabled?}))
+    (when (and (or force?
+                   ;; Enough new material to be worth summarizing. Appending a
+                   ;; summary does not shrink what `usage` measures, so without
+                   ;; this the trigger stays true and re-fires every turn.
+                   (>= (messages-since-last-compaction context)
+                       default-min-messages-between))
+               (or force?
+                   (should-compact? usage limit {:threshold threshold
+                                                 :reserve   reserve
+                                                 :enabled?  enabled?})))
       (let [split-point     (find-split-point context (* limit 0.3))
             slice           (vec (take split-point context))
             to-keep         (vec (drop split-point context))
@@ -377,13 +403,22 @@ with every section below present.
                       (aset evt-ctx "precompactTextPath" (:text-path dump)))]
         (js-await ((:emit-async events) "before_compact" evt-ctx))
 
-        (if (.-summary evt-ctx)
-          ;; Extension-provided summary path: validate and warn, but never block
-          (let [ext-summary (.-summary evt-ctx)
-                ext-errors  (validate-compaction ext-summary files-read files-modified)]
-            (when (seq ext-errors)
-              (d/warn "compaction" "extension-provided summary failed validation"
-                      #js {:errors (clj->js ext-errors)}))
+        (if (and (.-summary evt-ctx)
+                 ;; An extension summary is used only if it VALIDATES. It used
+                 ;; to be written regardless ("warn, but never block"), which in
+                 ;; practice meant token_suite's extraction summary — a
+                 ;; different template entirely — silently replaced the
+                 ;; six-section one. Observed result: 586 characters standing in
+                 ;; for ~900k tokens, with empty file lists, on every
+                 ;; compaction. The six-section template exists because artifact
+                 ;; tracking (which files changed, which calls ran) is the
+                 ;; least-solved problem in this area and the thing "did you
+                 ;; actually build anything?" is asking about. Falling back to
+                 ;; it costs one summarization call; accepting a summary that
+                 ;; drops the file lists costs the information.
+                 (empty? (validate-compaction (.-summary evt-ctx) files-read files-modified)))
+          (let [ext-summary (.-summary evt-ctx)]
+            (d/info "compaction" "using extension-provided summary")
             ((:append session)
              {:role     "compaction"
               :content  ext-summary
@@ -393,7 +428,15 @@ with every section below present.
                          :files-modified files-modified}})
             (cleanup-precompact-dump dump))
 
-          ;; Main path: use compact-with-retry (validates + one fix-retry)
+          ;; Main path: use compact-with-retry (validates + one fix-retry).
+          ;; Also reached when an extension offered a summary that did not
+          ;; validate — say so, or the fallback looks like the extension never
+          ;; ran.
+          (do
+            (when-let [rejected (.-summary evt-ctx)]
+              (d/warn "compaction" "extension summary rejected, using built-in summariser"
+                      #js {:errors (clj->js (validate-compaction rejected files-read files-modified))
+                           :length (count rejected)}))
           (let [user-prompt  (build-compact-user-prompt
                               {:custom-instructions custom-instructions
                                :previous-summary    (:content prev-compaction)
@@ -428,7 +471,7 @@ with every section below present.
               ((:emit events) "compact"
                               {:summary summary-text
                                :before  usage
-                               :after   after}))))))))
+                               :after   after})))))))))
 
 (def ^:private branch-summary-prompt
   "Summarize this conversation branch in a structured format. Include:

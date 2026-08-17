@@ -33,7 +33,7 @@
                     (do
                       (when (= event "before_compact")
                         (reset! captured ctx)
-                        (aset ctx "summary" "test summary from hook"))
+                        (aset ctx "summary" valid-hook-summary))
                       (doseq [h (get @handlers event [])]
                         (h ctx))
                       nil)))
@@ -94,6 +94,18 @@
                                   (it "compact still succeeds when get-file-path is missing" test-dump-graceful-fallback)))
 
 ;; ── Content assertions ──────────────────────────────────────────
+
+(def ^:private valid-hook-summary
+  "An extension-provided summary is now only used if it VALIDATES — it used to
+   be written regardless, which let token_suite's 586-char extraction summary
+   silently replace the six-section one in real sessions. These stubs therefore
+   have to supply a real summary, not a placeholder string."
+  (str "## 1. Previous Conversation\nHook-provided.\n\n"
+       "## 2. Current Work\nsrc/agent/foo.cljs:42\n\n"
+       "## 3. Key Technical Concepts\nSquint.\n\n"
+       "## 4. Relevant Files and Code\nsrc/agent/foo.cljs:42\n\n"
+       "## 5. Problem Solving\nNone.\n\n"
+       "## 6. Pending Tasks and Next Steps\n- finish\n  Quote: \"go\""))
 
 (def ^:private valid-gen-summary
   (str "## 1. Previous Conversation\nUser asked to implement a feature.\n\n"

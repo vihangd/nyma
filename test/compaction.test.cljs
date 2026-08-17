@@ -386,3 +386,122 @@
                     ;; …and the streak is both incremented and reset
                     (-> (expect (boolean (re-find #"no-op-turns\", squint_core\.fnil" src))) (.toBe true))
                     (-> (expect (boolean (re-find #"no-op-turns\", 0\)" src))) (.toBe true)))))))
+
+;;; ─── an extension summary must EARN its place ────────────────────────────
+;;; It used to be written regardless ("validate and warn, but never block"). In
+;;; practice token_suite's extraction summary — a different template — replaced
+;;; the six-section one on every compaction: 586 characters standing in for
+;;; ~900k tokens, with empty file lists. The six-section template exists for
+;;; artifact tracking, which is what "did you actually build anything?" asks.
+
+(def ^:private six-section
+  (str "## 1. Previous Conversation\nx\n\n## 2. Current Work\nsrc/a.cljs:1\n\n"
+       "## 3. Key Technical Concepts\nx\n\n## 4. Relevant Files and Code\nsrc/a.cljs:1\n\n"
+       "## 5. Problem Solving\nx\n\n## 6. Pending Tasks and Next Steps\n- x\n  Quote: \"y\""))
+
+(describe "extension summaries are validated, not trusted"
+          (fn []
+            (it "accepts one that carries the required sections"
+                (fn []
+                  (-> (expect (count (cmp/validate-compaction six-section [] []))) (.toBe 0))))
+
+            (it "rejects the shape token_suite actually produced"
+                (fn []
+                  ;; The real one, from the session: its own headings, no file
+                  ;; lists, 586 chars for ~900k tokens.
+                  (let [errs (cmp/validate-compaction
+                              (str "## Previous Context\nx\n\n## User Intent\nx\n\n"
+                                   "## Completed Work\nx\n\n## Key References\nx")
+                              [] [])]
+                    (-> (expect (> (count errs) 0)) (.toBe true))))))) 
+
+;;; ─── do not re-compact immediately ───────────────────────────────────────
+;;; Appending a summary does not shrink what the trigger measures, so once true
+;;; it stays true. A real session compacted 5 times — twice within 26 and 54
+;;; entries — each costing a summarization call and reducing nothing.
+
+(describe "messages-since-last-compaction"
+          (fn []
+            (it "counts everything when there has never been one"
+                (fn []
+                  (-> (expect (cmp/messages-since-last-compaction
+                               [{:role "user"} {:role "assistant"} {:role "user"}]))
+                      (.toBe 3))))
+
+            (it "counts only what followed the most recent one"
+                (fn []
+                  (-> (expect (cmp/messages-since-last-compaction
+                               [{:role "user"} {:role "compaction"} {:role "user"} {:role "assistant"}]))
+                      (.toBe 2))))
+
+            (it "is zero immediately after compacting"
+                (fn []
+                  ;; The guard's whole job: this must not compact again.
+                  (-> (expect (cmp/messages-since-last-compaction
+                               [{:role "user"} {:role "compaction"}]))
+                      (.toBe 0))))))
+
+;;; ─── integration: the helpers must actually be USED ──────────────────────
+;;; The unit tests above passed with `compact` still accepting any extension
+;;; summary and with the re-fire guard deleted. Testing a predicate proves the
+;;; predicate; only driving `compact` proves the behaviour.
+
+(defn- events-offering [summary]
+  "Events stub that offers `summary` via before_compact."
+  {:on         (fn [_e _h] nil)
+   :emit-async (fn [event ctx]
+                 (when (= event "before_compact") (aset ctx "summary" summary))
+                 (js/Promise.resolve nil))
+   :emit       (fn [_e _d] nil)})
+
+(defn- gen-stub [text] (fn [_opts] (js/Promise.resolve #js {:text text})))
+
+(defn- big-session []
+  (let [sm (create-session-manager nil)]
+    (dotimes [i 60]
+      ((:append sm) {:role "user" :content (str "q" i)})
+      ((:append sm) {:role "assistant" :content (apply str (repeat 1500 "padding "))}))
+    sm))
+
+(defn- last-compaction-content [sm]
+  (->> ((:get-tree sm))
+       (filter #(= "compaction" (:role %)))
+       last
+       :content))
+
+(defn ^:async test-invalid-extension-summary-is-not-used []
+  (let [sm (big-session)]
+    (js-await (compact sm "mock-model"
+                       (events-offering "## Previous Context\njunk\n\n## User Intent\njunk")
+                       {:gen-fn (gen-stub six-section)}))
+    (let [c (str (last-compaction-content sm))]
+      ;; The built-in summariser won, not the 586-char extraction shape.
+      (-> (expect (.includes c "## 1. Previous Conversation")) (.toBe true))
+      (-> (expect (.includes c "junk")) (.toBe false)))))
+
+(defn ^:async test-valid-extension-summary-is-used []
+  (let [sm (big-session)]
+    (js-await (compact sm "mock-model"
+                       (events-offering six-section)
+                       {:gen-fn (gen-stub "SHOULD NOT BE CALLED")}))
+    (-> (expect (.includes (str (last-compaction-content sm)) "## 1. Previous Conversation"))
+        (.toBe true))))
+
+(defn ^:async test-does-not-recompact-immediately []
+  (let [sm (big-session)]
+    (js-await (compact sm "mock-model" (events-offering nil) {:gen-fn (gen-stub six-section)}))
+    (let [n1 (count (filter #(= "compaction" (:role %)) ((:get-tree sm))))]
+      ;; Immediately again: nothing new has happened, so nothing to summarize.
+      (js-await (compact sm "mock-model" (events-offering nil) {:gen-fn (gen-stub six-section)}))
+      (let [n2 (count (filter #(= "compaction" (:role %)) ((:get-tree sm))))]
+        (-> (expect n1) (.toBe 1))
+        (-> (expect n2) (.toBe 1))))))
+
+(describe "compact uses its own rules"
+          (fn []
+            (it "falls back to the built-in summariser when the extension's is invalid"
+                (^:async fn [] (js-await (test-invalid-extension-summary-is-not-used))))
+            (it "uses a valid extension summary"
+                (^:async fn [] (js-await (test-valid-extension-summary-is-used))))
+            (it "does not compact twice in a row"
+                (^:async fn [] (js-await (test-does-not-recompact-immediately))))))
