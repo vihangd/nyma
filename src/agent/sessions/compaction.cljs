@@ -336,7 +336,7 @@ with every section below present.
    section. Until now the 0.85 was hardcoded here and that settings section was
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
-                                   model-key threshold reserve enabled?]}]]
+                                   model-key threshold reserve enabled? force?]}]]
   (let [context ((:build-context session))
         usage   (te/estimate-messages-tokens context)
         ;; `model-key` is the provider-qualified key; callers that have the
@@ -347,9 +347,10 @@ with every section below present.
                   ((:context-window model-registry) lookup)
                   100000)]
 
-    (when (should-compact? usage limit {:threshold threshold
-                                        :reserve   reserve
-                                        :enabled?  enabled?})
+    (when (or force?
+              (should-compact? usage limit {:threshold threshold
+                                            :reserve   reserve
+                                            :enabled?  enabled?}))
       (let [split-point     (find-split-point context (* limit 0.3))
             slice           (vec (take split-point context))
             to-keep         (vec (drop split-point context))
@@ -497,4 +498,48 @@ Keep the summary concise but preserve all actionable information.")
         ;; recoverable, a thrown one is not.
         (d/warn "[compaction] auto-compact failed:" (.-message e))
         nil))))
+
+;; ── Overflow recovery ──────────────────────────────────────────────────────
+
+(def ^:private overflow-patterns
+  ;; Providers phrase this a dozen ways and none of them is a stable code.
+  ["context length" "context_length" "maximum context" "context window"
+   "too many tokens" "prompt is too long" "input is too long"
+   "reduce the length" "exceeds the maximum" "max_tokens" "token limit"])
+
+(defn context-overflow-error?
+  "Is this provider error 'your prompt does not fit'?
+
+   Pure and string-matched on purpose: there is no portable error code for it
+   across the relay, local and first-party providers this talks to."
+  [e]
+  (let [msg (str/lower-case (str (or (some-> e .-message) e "")))]
+    (boolean (some #(str/includes? msg %) overflow-patterns))))
+
+(defn ^:async recover-from-overflow!
+  "Compact and rebuild `st-config`'s messages after a context-overflow error.
+
+   The safety net pi and OpenCode V2 both have and nyma did not. It matters
+   most where the declared context window is wrong or missing — relay and local
+   providers — because then the threshold trigger cannot know it should have
+   fired. Forced: the estimate already proved wrong by overflowing, so its
+   opinion is worthless here.
+
+   Mutating st-config in place is the documented contract for this object
+   (loop.cljs: 'extensions can MUTATE st-config in place'); it is nyma's own
+   request config, not the model's tool-call args."
+  [agent st-config]
+  (when-let [session (some-> (:session agent) deref)]
+    (js-await (compact session
+                       (:model (:config agent))
+                       (:events agent)
+                       (merge {:model-registry (:model-registry agent)
+                               :model-key (model-info/config-model-key (:config agent))}
+                              (settings->opts (:settings agent))
+                              {:force? true})))
+    (let [rebuilt ((:build-context session))]
+      (aset st-config "messages" (clj->js rebuilt))
+      (d/warn "[compaction] context overflow — compacted and retrying"
+              {:messages (count rebuilt)})
+      true)))
 

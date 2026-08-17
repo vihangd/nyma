@@ -3,7 +3,9 @@
             ["node:fs" :as fs]
             ["./agent/sessions/compaction.mjs" :as cmp]
             ["./agent/token_estimation.mjs" :as te]
-            ["./agent/sessions/manager.mjs" :refer [create-session-manager]]
+            ["./agent/sessions/manager.mjs" :refer [create-session-manager attach-session-persistence!]]
+            ["node:path" :as path]
+            ["node:os" :as os]
             ["./agent/events.mjs" :refer [create-event-bus]]
             ["./agent/sessions/compaction.mjs" :refer [compact format-messages
                                                        extract-files-read
@@ -306,3 +308,81 @@
                     (-> (expect (> finalize -1)) (.toBe true))
                     ;; Between turns, not mid-turn.
                     (-> (expect (> call finalize)) (.toBe true)))))))
+
+;;; ─── reasoning does not belong in the transcript ─────────────────────────
+;;; 73% of the failed session's assistant text (253 KB of 346 KB) was <think>
+;;; blocks, stored and replayed. Stripping is deterministic and loses nothing
+;;; of the answer.
+
+(describe "think-stripping at persistence"
+          (fn []
+            (it "removes <think> from a persisted assistant message"
+                (^:async fn []
+                 (let [dir  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-think-"))
+                       file (path/join dir "s.jsonl")
+                       sm   (create-session-manager file)
+                       ev   (create-event-bus)
+                       subs (atom nil)
+                       agent {:events ev
+                              :store {:subscribe (fn [f] (reset! subs f))}}]
+                   (attach-session-persistence! agent sm)
+                   (@subs :message-added
+                          {:messages [{:role "assistant"
+                                       :content "<think>private reasoning</think>The answer is 42."}]})
+                   (js-await (js/Promise. (fn [r] (js/setTimeout r 30))))
+                   (let [raw (str (fs/readFileSync file "utf8"))]
+                     (-> (expect (.includes raw "The answer is 42.")) (.toBe true))
+                     (-> (expect (.includes raw "private reasoning")) (.toBe false)))
+                   (try (fs/rmSync dir #js {:recursive true :force true})
+                        (catch :default _ nil)))))))
+
+;;; ─── overflow recovery ───────────────────────────────────────────────────
+;;; The net pi and OpenCode V2 both have. It matters where the declared window
+;;; is wrong or missing — relay and local providers — because there the
+;;; threshold trigger cannot know it should have fired.
+
+(describe "context-overflow-error?"
+          (fn []
+            (it "recognises how providers phrase it"
+                (fn []
+                  (doseq [m ["This model's maximum context length is 32768 tokens"
+                             "prompt is too long: 250000 tokens > 200000"
+                             "input length and max_tokens exceed context limit"
+                             "Please reduce the length of the messages"]]
+                    (-> (expect (cmp/context-overflow-error? #js {:message m})) (.toBe true)))))
+
+            (it "does not fire on unrelated failures"
+                (fn []
+                  ;; Retrying a rate limit by compacting would throw away
+                  ;; context for nothing.
+                  (doseq [m ["429 rate limit exceeded" "ECONNREFUSED" "invalid api key"]]
+                    (-> (expect (cmp/context-overflow-error? #js {:message m})) (.toBe false)))))
+
+            (it "survives a nil or string error"
+                (fn []
+                  (-> (expect (cmp/context-overflow-error? nil)) (.toBe false))
+                  (-> (expect (cmp/context-overflow-error? "maximum context length")) (.toBe true))))))
+
+(describe "loop wiring"
+          (fn []
+            (it "recovers from overflow and retries"
+                (fn []
+                  (let [src (str (fs/readFileSync "dist/agent/loop.mjs" "utf8"))]
+                    (-> (expect (.includes src "context_overflow_error")) (.toBe true))
+                    (-> (expect (.includes src "recover_from_overflow")) (.toBe true))
+                    ;; Once per turn, never a loop.
+                    (-> (expect (.includes src "overflow_recovered")) (.toBe true)))))
+
+            (it "tracks turns that ran no tools"
+                (fn []
+                  ;; Assert the BEHAVIOUR, not a string that survives its
+                  ;; removal: an earlier version matched "no-op-turns" in the
+                  ;; notify branch and passed with the counting deleted.
+                  (let [src (str (fs/readFileSync "dist/agent/loop.mjs" "utf8"))]
+                    ;; the per-turn counter is incremented from step results
+                    (-> (expect (.includes src "tools_this_turn")) (.toBe true))
+                    ;; …and it is actually tested for zero
+                    (-> (expect (boolean (re-find #"tools_this_turn\d*\)?\s*===\s*0" src))) (.toBe true))
+                    ;; …and the streak is both incremented and reset
+                    (-> (expect (boolean (re-find #"no-op-turns\", squint_core\.fnil" src))) (.toBe true))
+                    (-> (expect (boolean (re-find #"no-op-turns\", 0\)" src))) (.toBe true)))))))

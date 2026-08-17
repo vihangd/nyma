@@ -261,6 +261,8 @@
                                                          (fn [t] (-> t
                                                                      (update :input + (or (.-inputTokens u) 0))
                                                                      (update :output + (or (.-outputTokens u) 0))))))
+                                                (when-let [tc (.-toolCalls step)]
+                                                  (swap! tools-this-turn + (count tc)))
                                                 (emit "turn_end" step)
                                                 (inject-steer-messages! agent))}
 
@@ -274,6 +276,10 @@
           ;; re-surface it. Without this, a flaky planning turn skipped
           ;; turn_finalize and left plan mode silently stuck ON.
           (let [turn-error (atom nil)
+                ;; One overflow recovery per turn — a second is a real error.
+                overflow-recovered? (atom false)
+                ;; Tool calls this turn — a turn that runs none did no work.
+                tools-this-turn (atom 0)
                 ;; A block is NOT a real turn outcome (no plan/answer produced) —
                 ;; flag it so turn_finalize carries error=true and the plan gate
                 ;; skips (notifies) instead of running its approval flow on the
@@ -301,15 +307,25 @@
                         (try
                           (js-await (streamText st-config))
                           (catch :default e
-                            (let [err-result (js-await
-                                              (emit-collect "provider_error"
-                                                            #js {:error   e
-                                                                 :message (.-message e)
-                                                                 :model   model-id
-                                                                 :config  st-config}))]
-                              (if (get err-result "retry")
-                                (js-await (streamText st-config))
-                                (throw e)))))
+                            ;; Context overflow: compact and retry ONCE. The
+                            ;; threshold trigger cannot help when the declared
+                            ;; window is wrong or missing, which is exactly the
+                            ;; case for relay and local providers. A second
+                            ;; overflow is a real error, never a loop.
+                            (if (and (compaction/context-overflow-error? e)
+                                     (not @overflow-recovered?))
+                              (do (reset! overflow-recovered? true)
+                                  (js-await (compaction/recover-from-overflow! agent st-config))
+                                  (js-await (streamText st-config)))
+                              (let [err-result (js-await
+                                                (emit-collect "provider_error"
+                                                              #js {:error   e
+                                                                   :message (.-message e)
+                                                                   :model   model-id
+                                                                   :config  st-config}))]
+                                (if (get err-result "retry")
+                                  (js-await (streamText st-config))
+                                  (throw e))))))
                         accumulated (atom "")
                         aborted     (atom false)]
 
@@ -444,6 +460,23 @@
            ;; the error path so a failed turn is not summarized as progress.
             (when-not @turn-error
               (js-await (compaction/maybe-auto-compact! agent)))
+
+           ;; A turn that ran no tools produced text and nothing else. One is
+           ;; normal (an answer, a question). A RUN of them is the signature of
+           ;; the context-rot collapse: in the session that prompted this work,
+           ;; 56% of turns did no work and the last 12 in a row did none, while
+           ;; the user typed "continue" 44 times.
+            (when-not @turn-error
+              (let [st (:state agent)]
+                (if (zero? @tools-this-turn)
+                  (swap! st update :no-op-turns (fnil inc 0))
+                  (swap! st assoc :no-op-turns 0))
+                (when (= 2 (:no-op-turns @st))
+                  (dbg/warn "[loop] two turns in a row ran no tools — the model may have stopped making progress")
+                  (when-let [ui (some-> (.-extension-api agent) .-ui)]
+                    (when (.-notify ui)
+                      (.notify ui "Two turns ran no tools — the model may have stopped making progress."
+                               "warning"))))))
 
             (if @turn-error
              ;; Surface the error after the gate had its chance (don't drain).
