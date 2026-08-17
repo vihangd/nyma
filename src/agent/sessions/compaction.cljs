@@ -356,9 +356,14 @@ with every section below present.
    section. Until now the 0.85 was hardcoded here and that settings section was
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
-                                   model-key threshold reserve enabled? force?]}]]
+                                   model-key threshold reserve enabled? force? observed-usage]}]]
   (let [context ((:build-context session))
-        usage   (te/estimate-messages-tokens context)
+        ;; Prefer the provider's own count of the last request. The estimate
+        ;; below walks the whole session tree; what is actually sent is pruned
+        ;; at context_assembly and capped by priority_assembly. A real session
+        ;; compacted five times off a tree estimate climbing 714k -> 956k while
+        ;; the requests themselves fit a 200k window fine.
+        usage   (or observed-usage (te/estimate-messages-tokens context))
         ;; `model-key` is the provider-qualified key; callers that have the
         ;; agent config should pass it, since a bare model id is ambiguous across
         ;; providers and resolves to whichever registered last.
@@ -549,7 +554,11 @@ Keep the summary concise but preserve all actionable information.")
                          (:model (:config agent))
                          (:events agent)
                          (merge {:model-registry (:model-registry agent)
-                                 :model-key (model-info/config-model-key (:config agent))}
+                                 :model-key (model-info/config-model-key (:config agent))
+                                 ;; What the provider actually counted last
+                                 ;; request. Preferred over the tree estimate,
+                                 ;; which measures a different thing entirely.
+                                 :observed-usage (:last-input-tokens @(:state agent))}
                                 (settings->opts (:settings agent)))))
       (catch :default e
         ;; Never let compaction take the turn with it — a failed summary is

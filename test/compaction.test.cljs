@@ -505,3 +505,41 @@
                 (^:async fn [] (js-await (test-valid-extension-summary-is-used))))
             (it "does not compact twice in a row"
                 (^:async fn [] (js-await (test-does-not-recompact-immediately))))))
+
+;;; ─── measure what was SENT, not the whole tree ───────────────────────────
+;;; The estimate walks the entire session tree; what actually goes to the
+;;; provider is pruned at context_assembly and capped by priority_assembly. A
+;;; real session compacted five times off a tree estimate climbing 714k -> 956k
+;;; while the requests themselves fit a 200k window. The provider's own input
+;;; count is ground truth.
+
+(defn ^:async test-observed-usage-wins []
+  (let [sm (big-session)]        ;; tree estimate is far over the threshold
+    ;; …but the provider says the request was small, so nothing should compact.
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:gen-fn (gen-stub six-section)
+                        :observed-usage 1000}))
+    (-> (expect (count (filter #(= "compaction" (:role %)) ((:get-tree sm))))) (.toBe 0))))
+
+(defn ^:async test-falls-back-to-the-estimate []
+  (let [sm (big-session)]
+    ;; No observation yet (first turn) — the estimate is all there is.
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:gen-fn (gen-stub six-section)}))
+    (-> (expect (count (filter #(= "compaction" (:role %)) ((:get-tree sm))))) (.toBe 1))))
+
+(describe "the trigger measures the request, not the tree"
+          (fn []
+            (it "does not compact when the provider reports a small request"
+                (^:async fn [] (js-await (test-observed-usage-wins))))
+            (it "falls back to the estimate when nothing has been observed yet"
+                (^:async fn [] (js-await (test-falls-back-to-the-estimate))))
+
+            (it "the loop records what the provider counted"
+                (fn []
+                  ;; Without this the observation never reaches the trigger and
+                  ;; it silently falls back to the tree estimate forever — the
+                  ;; behaviour being fixed. Asserted on compiled output because
+                  ;; driving a real provider turn needs credentials.
+                  (let [src (str (fs/readFileSync "dist/agent/loop.mjs" "utf8"))]
+                    (-> (expect (.includes src "last-input-tokens")) (.toBe true)))))))

@@ -423,6 +423,15 @@
                                                 :cache-write-tokens cache-write})]
                             ((:dispatch! store) :usage-updated
                                                 {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
+                          ;; Ground truth for the compaction trigger: what the
+                          ;; PROVIDER counted, not what we estimated. The estimate
+                          ;; walks the whole session tree, while what is actually
+                          ;; sent is pruned at context_assembly and capped by
+                          ;; priority_assembly — two different quantities.
+                          ;; Triggering off the tree meant firing on a 956k
+                          ;; estimate while the requests themselves fit fine.
+                            (when (and input-tokens (pos? input-tokens))
+                              (swap! state assoc :last-input-tokens input-tokens))
                           ;; after_provider_request — inform extensions of usage/cache metrics
                             (emit "after_provider_request"
                                   #js {:usage        #js {:inputTokens  input-tokens
