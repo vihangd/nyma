@@ -231,12 +231,22 @@ with every section below present.
    same `[Earlier conversation summary]` user message on resume — so the screen,
    the model and a later resume are describing the same conversation.
 
-   One deliberate asymmetry: the compaction entry is appended at the LEAF, i.e.
-   AFTER the kept span, so on resume the fold hits it last and resets to the
-   summary alone. A resumed session is therefore a subset of the live one — it
-   keeps the summary plus whatever came after the compaction, not the kept span.
-   Live keeping more is the right way round: the recent turns are the ones the
-   model is still working from."
+   KNOWN LIMITATION, measured not assumed. The compaction entry is appended at
+   the LEAF, i.e. AFTER the kept span, so on resume session->seed-messages folds
+   it last and resets to the summary ALONE — a real 309-entry session seeded
+   exactly one message and its transcript looked empty. The kept span is lost on
+   resume; the live session keeps it.
+
+   Two fixes were tried and rejected. Re-appending the kept span after the
+   summary compounds every compaction (a measured run grew the tree 120 -> 221
+   entries in one pass). Keeping a fixed tail in seed-messages re-expands the
+   SUMMARIZED span whenever the kept span is shorter than the tail, which
+   session_resume.test rightly forbids — a summary and the messages it
+   summarized must not both be present.
+
+   The correct fix is a :kept-count on the compaction entry, which
+   seed-messages cannot currently read because entry->core-message strips
+   :metadata before it ever sees the entry. That plumbing is the real work."
   [summary-text kept]
   (into [{:role "user"
           :content (str "[Earlier conversation summary]\n" summary-text)}]
@@ -256,7 +266,11 @@ with every section below present.
    every summarized entry stays on disk for later analysis."
   [state-atom summary-text kept]
   (when state-atom
-    (swap! state-atom assoc :messages (compacted-messages summary-text kept))
+    (let [msgs (compacted-messages summary-text kept)]
+      (swap! state-atom assoc
+             :messages msgs
+             ;; Where the next "30 new messages" is measured from.
+             :compacted-at-count (count msgs)))
     true))
 
 (defn ^:async compact-with-retry
@@ -409,10 +423,17 @@ with every section below present.
                   100000)]
 
     (when (and (or force?
-                   ;; Enough new material to be worth summarizing. Appending a
-                   ;; summary does not shrink what `usage` measures, so without
-                   ;; this the trigger stays true and re-fires every turn.
-                   (>= (messages-since-last-compaction context)
+                   ;; Enough NEW material to be worth summarizing.
+                   ;;
+                   ;; Counted against the live conversation when we have it, not
+                   ;; against entries after the compaction entry: re-anchoring
+                   ;; the kept span appends ~30 entries there, which made the
+                   ;; file-based count look like fresh work and defeated this
+                   ;; guard entirely.
+                   (>= (if state-atom
+                         (- (count (:messages @state-atom))
+                            (or (:compacted-at-count @state-atom) 0))
+                         (messages-since-last-compaction context))
                        default-min-messages-between))
                (or force?
                    (should-compact? usage limit {:threshold threshold

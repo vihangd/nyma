@@ -35,6 +35,12 @@
          (or (= role "user") (= role "assistant")) (conj acc m)
          (or (= role "compaction") (= role "branch-summary"))
          ;; Reset to the summary — discard everything it folded in.
+         ;;
+         ;; Deliberate, and covered by session_resume.test: the summarized span
+         ;; must NOT reappear alongside its own summary. The cost is that the
+         ;; KEPT span is dropped too, because the compaction entry is appended
+         ;; at the leaf and nothing here can tell kept from summarized — see the
+         ;; note in compaction.cljs.
          [{:role "user" :content (str "[Earlier conversation summary]\n"
                                       (:content m))}]
          :else acc)))
