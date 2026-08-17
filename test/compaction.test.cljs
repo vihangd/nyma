@@ -543,3 +543,105 @@
                   ;; driving a real provider turn needs credentials.
                   (let [src (str (fs/readFileSync "dist/agent/loop.mjs" "utf8"))]
                     (-> (expect (.includes src "last-input-tokens")) (.toBe true)))))))
+
+;;; ─── compaction must shrink the RUNNING conversation ─────────────────────
+;;; It never did. `compact` computed the split, appended the summary and
+;;; stopped — it never touched `state :messages`, which is what
+;;; agent.context/build-context reads every turn. The summary only took effect
+;;; at the next RESUME, so a live session kept growing: five compactions in one
+;;; real session, 714k -> 956k tokens, none of which shrank anything.
+
+(defn- tool-heavy-session []
+  "A session whose tool calls carry metadata, so file extraction has something
+   to find — `context` has none, which is why the real summaries recorded
+   files-read: 0."
+  (let [sm (create-session-manager nil)]
+    (dotimes [i 60]
+      ((:append sm) {:role "user" :content (str "q" i)})
+      ((:append sm) {:role "tool_call" :content "{}"
+                     :metadata {:tool-name "read" :args {:path (str "/repo/src/f" i ".rb")}}})
+      ((:append sm) {:role "tool_call" :content "{}"
+                     :metadata {:tool-name "edit" :args {:path (str "/repo/src/f" i ".rb")}}})
+      ((:append sm) {:role "assistant" :content (apply str (repeat 1500 "padding "))}))
+    sm))
+
+(defn ^:async test-live-context-shrinks []
+  (let [sm    (tool-heavy-session)
+        state (atom {:messages (vec ((:build-context sm)))})
+        before (count (:messages @state))]
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:gen-fn (gen-stub six-section) :state-atom state}))
+    (let [after (:messages @state)]
+      ;; It actually got smaller …
+      (-> (expect (< (count after) before)) (.toBe true))
+      ;; … and opens on the summary, the same marker resume produces.
+      (-> (expect (.includes (str (:content (first after))) "[Earlier conversation summary]"))
+          (.toBe true)))))
+
+(defn ^:async test-nothing-is-lost-from-disk []
+  (let [sm     (tool-heavy-session)
+        state  (atom {:messages (vec ((:build-context sm)))})
+        before (count ((:get-tree sm)))]
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:gen-fn (gen-stub six-section) :state-atom state}))
+    ;; The JSONL only ever grows — the summarized entries are still on disk for
+    ;; later analysis. That is what makes truncating the live context safe.
+    (-> (expect (> (count ((:get-tree sm))) before)) (.toBe true))))
+
+(defn ^:async test-file-lists-are-populated []
+  (let [sm    (tool-heavy-session)
+        state (atom {:messages (vec ((:build-context sm)))})
+        seen  (atom nil)]
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:state-atom state
+                        :gen-fn (fn [opts]
+                                  (reset! seen (str (.-prompt opts) (.-system opts)))
+                                  (js/Promise.resolve #js {:text six-section}))}))
+    (let [entry (->> ((:get-tree sm)) (filter #(= "compaction" (:role %))) last)]
+      ;; Sourced from the tree, where :metadata survives. From `context` these
+      ;; were ALWAYS empty — every real compaction recorded 0 and 0.
+      (-> (expect (pos? (count (get-in entry [:metadata :files-read])))) (.toBe true))
+      (-> (expect (pos? (count (get-in entry [:metadata :files-modified])))) (.toBe true)))))
+
+(describe "compaction shrinks the live session"
+          (fn []
+            (it "replaces state :messages with summary + kept span"
+                (^:async fn [] (js-await (test-live-context-shrinks))))
+            (it "leaves the full history on disk"
+                (^:async fn [] (js-await (test-nothing-is-lost-from-disk))))
+            (it "records the files it actually touched"
+                (^:async fn [] (js-await (test-file-lists-are-populated))))
+
+            (it "drops tool entries so live matches what a resume rebuilds"
+                (fn []
+                  ;; session->seed-messages keeps only user/assistant, so the
+                  ;; kept span must too or the two paths describe different
+                  ;; conversations.
+                  (let [out (cmp/compacted-messages
+                             "S" [{:role "user" :content "q"}
+                                  {:role "tool_call" :content "{}"}
+                                  {:role "assistant" :content "a"}])]
+                    (-> (expect (count out)) (.toBe 3))
+                    (-> (expect (some #(= "tool_call" (:role %)) out)) (.toBeFalsy)))))))
+
+;;; ─── the analysis paths must not notice ──────────────────────────────────
+;;; Truncating the live context is only safe because the file keeps everything.
+;;; These assert the things that read the file rather than the context.
+
+(defn ^:async test-export-still-sees-full-history []
+  (let [sm    (tool-heavy-session)
+        state (atom {:messages (vec ((:build-context sm)))})
+        before (count ((:build-context sm)))]
+    (js-await (compact sm "mock-model" (events-offering nil)
+                       {:gen-fn (gen-stub six-section) :state-atom state}))
+    ;; /export serializes ((:build-context sess)) — the TREE walk, not state —
+    ;; so it must still see everything. Export quietly losing history would be
+    ;; the worst possible side effect of this change.
+    (-> (expect (>= (count ((:build-context sm))) before)) (.toBe true))
+    ;; …while the live context is far smaller.
+    (-> (expect (< (count (:messages @state)) before)) (.toBe true))))
+
+(describe "truncation does not reach the archive"
+          (fn []
+            (it "keeps /export and the tree walk complete"
+                (^:async fn [] (js-await (test-export-still-sees-full-history))))))

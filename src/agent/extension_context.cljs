@@ -56,6 +56,7 @@
                                  ;; the model's real window entirely.
                                  (compact session (:model (:config agent)) (:events agent)
                                           (merge {:model-registry (:model-registry agent)
+                                                   :state-atom     (:state agent)
                                                   :model-key (model-info/config-model-key
                                                               (:config agent))}
                                                  (js->clj opts :keywordize-keys true)))))

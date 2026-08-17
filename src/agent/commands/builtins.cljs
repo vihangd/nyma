@@ -486,7 +486,9 @@
           {:description "Compact conversation context"
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
-                        (compact s (:model (:config agent)) (:events agent))
+                        (compact s (:model (:config agent)) (:events agent)
+                                  {:model-registry (:model-registry agent)
+                                   :state-atom     (:state agent)})
                         (notify ctx "Compaction complete")))}
 
           "debug"

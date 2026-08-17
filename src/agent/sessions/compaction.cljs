@@ -224,6 +224,41 @@ with every section below present.
                   :else (recur (dec i))))]
     (if (some? i) (- (count v) i 1) (count v))))
 
+(defn compacted-messages
+  "The live context after a compaction: the summary, then the kept span.
+
+   Mirrors `session->seed-messages` (manager.cljs:30-42), which produces the
+   same `[Earlier conversation summary]` user message on resume — so the screen,
+   the model and a later resume are describing the same conversation.
+
+   One deliberate asymmetry: the compaction entry is appended at the LEAF, i.e.
+   AFTER the kept span, so on resume the fold hits it last and resets to the
+   summary alone. A resumed session is therefore a subset of the live one — it
+   keeps the summary plus whatever came after the compaction, not the kept span.
+   Live keeping more is the right way round: the recent turns are the ones the
+   model is still working from."
+  [summary-text kept]
+  (into [{:role "user"
+          :content (str "[Earlier conversation summary]\n" summary-text)}]
+        (filter #(contains? #{"user" "assistant"} (:role %)) kept)))
+
+(defn apply-to-live-state!
+  "Replace the running conversation with the compacted form.
+
+   THE missing step. `compact` computed the split, appended the summary and
+   stopped — it never touched `state :messages`, which is what
+   agent.context/build-context reads on every turn (context.cljs:15). So the
+   summary only took effect at the next RESUME while the live session kept
+   growing: five compactions in one real session, 714k -> 956k tokens, none of
+   which shrank anything.
+
+   Nothing is lost: the JSONL is append-only with no delete or rewrite path, so
+   every summarized entry stays on disk for later analysis."
+  [state-atom summary-text kept]
+  (when state-atom
+    (swap! state-atom assoc :messages (compacted-messages summary-text kept))
+    true))
+
 (defn ^:async compact-with-retry
   "Call generateText with compact-system-prompt + user-prompt. Validate the
    result and run one fix-retry if validation fails. Always returns a string
@@ -356,7 +391,8 @@ with every section below present.
    section. Until now the 0.85 was hardcoded here and that settings section was
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
-                                   model-key threshold reserve enabled? force? observed-usage]}]]
+                                   model-key threshold reserve enabled? force? observed-usage
+                                   state-atom]}]]
   (let [context ((:build-context session))
         ;; Prefer the provider's own count of the last request. The estimate
         ;; below walks the whole session tree; what is actually sent is pruned
@@ -391,8 +427,15 @@ with every section below present.
             ;; previous-summary anchor that the LLM merges into.
             {:keys [span prev-compaction]} (new-span-after-last-compaction slice)
             to-summarize    span
-            files-read      (extract-files-read to-summarize)
-            files-modified  (extract-files-modified to-summarize)
+            ;; From the TREE, not from `context`: entry->core-message strips
+            ;; :metadata, and these filter on [:metadata :tool-name], so both
+            ;; lists were ALWAYS empty here. Every compaction in the last real
+            ;; session recorded files-read: 0, files-modified: 0 for exactly
+            ;; this reason, which gutted the one part of the summary aimed at
+            ;; artifact tracking.
+            tree-entries    (if-let [gt (:get-tree session)] (gt) [])
+            files-read      (extract-files-read tree-entries)
+            files-modified  (extract-files-modified tree-entries)
             evt-ctx #js {:context               context
                          :usage                 usage
                          :summary               nil
@@ -428,9 +471,9 @@ with every section below present.
              {:role     "compaction"
               :content  ext-summary
               :metadata {:tokens-before  usage
-                         :first-kept     (first to-keep)
                          :files-read     files-read
                          :files-modified files-modified}})
+            (apply-to-live-state! state-atom ext-summary to-keep)
             (cleanup-precompact-dump dump))
 
           ;; Main path: use compact-with-retry (validates + one fix-retry).
@@ -455,10 +498,10 @@ with every section below present.
              {:role     "compaction"
               :content  summary-text
               :metadata {:tokens-before  usage
-                         :first-kept     (first to-keep)
                          :files-read     files-read
                          :files-modified files-modified}})
             (cleanup-precompact-dump dump)
+            (apply-to-live-state! state-atom summary-text to-keep)
 
             ;; Log every compaction. It is a HARD semantic break for prompt
             ;; caching — the cached prefix is a prefix match, so replacing early
@@ -558,7 +601,10 @@ Keep the summary concise but preserve all actionable information.")
                                  ;; What the provider actually counted last
                                  ;; request. Preferred over the tree estimate,
                                  ;; which measures a different thing entirely.
-                                 :observed-usage (:last-input-tokens @(:state agent))}
+                                 :observed-usage (:last-input-tokens @(:state agent))
+                                 ;; Without this the compaction is recorded but
+                                 ;; the running conversation never shrinks.
+                                 :state-atom (:state agent)}
                                 (settings->opts (:settings agent)))))
       (catch :default e
         ;; Never let compaction take the turn with it — a failed summary is
@@ -601,7 +647,8 @@ Keep the summary concise but preserve all actionable information.")
                        (:model (:config agent))
                        (:events agent)
                        (merge {:model-registry (:model-registry agent)
-                               :model-key (model-info/config-model-key (:config agent))}
+                               :model-key (model-info/config-model-key (:config agent))
+                               :state-atom (:state agent)}
                               (settings->opts (:settings agent))
                               {:force? true})))
     (let [rebuilt ((:build-context session))]
