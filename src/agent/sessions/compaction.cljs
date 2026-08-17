@@ -412,8 +412,23 @@ with every section below present.
                          :files-modified files-modified}})
             (cleanup-precompact-dump dump)
 
-            ((:emit events) "compact"
-                            {:summary summary-text})))))))
+            ;; Log every compaction. It is a HARD semantic break for prompt
+            ;; caching — the cached prefix is a prefix match, so replacing early
+            ;; history invalidates everything after it and the next request is a
+            ;; guaranteed full miss. That is a cost, not a bug, but it is
+            ;; invisible without a record, and an unexplained cost spike or
+            ;; behaviour change after a silent compaction is exactly the kind of
+            ;; thing that burns an afternoon.
+            (let [after (te/estimate-messages-tokens
+                         (into [{:role "compaction" :content summary-text}] to-keep))]
+              (d/warn "compaction"
+                      (str "compacted " usage " -> " after " tokens")
+                      #js {:before usage :after after :splitPoint split-point
+                           :summarized (count to-summarize) :kept (count to-keep)})
+              ((:emit events) "compact"
+                              {:summary summary-text
+                               :before  usage
+                               :after   after}))))))))
 
 (def ^:private branch-summary-prompt
   "Summarize this conversation branch in a structured format. Include:

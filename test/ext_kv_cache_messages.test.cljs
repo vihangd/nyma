@@ -146,3 +146,54 @@
 
 (describe "kv-cache/preservation" (fn []
                                     (it "merges with existing providerOptions instead of overwriting" test-preserves-existing-options)))
+
+;;; ─── compaction invalidates the cache, and that is expected ──────────────
+;;; The prompt cache is a PREFIX match: compaction replaces early history, so
+;;; everything after the change is invalidated and the next request is a
+;;; guaranteed full miss. Recording that as a :cache-miss reports a problem
+;;; that is really just the price of compacting — and a diagnostic that cries
+;;; wolf costs more than no diagnostic.
+
+(defn ^:async test-compaction-clears-the-miss-expectation []
+  (let [agent  (make-agent "claude-sonnet-4-6")
+        api    (create-extension-api agent)
+        _d     (kv-cache/activate api)
+        events (:events agent)
+        msgs   #js [#js {:role "user" :content "one"}
+                    #js {:role "assistant" :content "a long enough assistant reply to anchor on"}]]
+    (reset-stats!)
+    ;; Two annotated requests: the second expects a hit.
+    (js-await ((:emit-collect events) "before_provider_request"
+                                      (make-config "claude-sonnet-4-6" msgs)))
+    (js-await ((:emit-collect events) "before_provider_request"
+                                      (make-config "claude-sonnet-4-6" msgs)))
+    ;; Compaction happens — prefix is gone.
+    ((:emit events) "compact" {:summary "..." :before 100 :after 10})
+    ;; The next response reads no cache. That is the compaction, not a fault.
+    (js-await ((:emit-collect events) "after_provider_request"
+                                      #js {:cachedTokens 0 :turnCount 3}))
+    (-> (expect (get-in @shared/suite-stats [:kv-cache :cache-misses] 0)) (.toBe 0))))
+
+(defn ^:async test-real-miss-is-still-recorded []
+  ;; The control: without a compaction, an unserved breakpoint IS a miss.
+  (let [agent  (make-agent "claude-sonnet-4-6")
+        api    (create-extension-api agent)
+        _d     (kv-cache/activate api)
+        events (:events agent)
+        msgs   #js [#js {:role "user" :content "one"}
+                    #js {:role "assistant" :content "a long enough assistant reply to anchor on"}]]
+    (reset-stats!)
+    (js-await ((:emit-collect events) "before_provider_request"
+                                      (make-config "claude-sonnet-4-6" msgs)))
+    (js-await ((:emit-collect events) "before_provider_request"
+                                      (make-config "claude-sonnet-4-6" msgs)))
+    (js-await ((:emit-collect events) "after_provider_request"
+                                      #js {:cachedTokens 0 :turnCount 3}))
+    (-> (expect (> (get-in @shared/suite-stats [:kv-cache :cache-misses] 0) 0)) (.toBe true))))
+
+(describe "compaction and the prompt cache"
+          (fn []
+            (it "does not record the post-compaction miss as a fault"
+                (^:async fn [] (js-await (test-compaction-clears-the-miss-expectation))))
+            (it "still records a genuine unserved breakpoint"
+                (^:async fn [] (js-await (test-real-miss-is-still-recorded))))))

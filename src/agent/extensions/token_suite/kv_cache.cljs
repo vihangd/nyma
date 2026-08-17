@@ -184,6 +184,13 @@
           ;; Mutations in place — no return value
           nil)
 
+        on-compact
+        (fn [_data _ctx]
+          (reset! expected-hit? false)
+          (reset! prev-annotated? false)
+          (reset! prev-hash nil)
+          nil)
+
         on-after
         (fn [event _ctx]
           (let [cached (.-cachedTokens event)
@@ -200,6 +207,14 @@
                                (update :cache-misses (fnil + 0) (if miss? 1 0))
                                (update :cache-hits + (if (and cached (pos? cached)) 1 0)))))))]
 
+    ;; Compaction replaces early history, and the cache is a PREFIX match — so
+    ;; everything after the change is invalidated and the next request is a
+    ;; guaranteed full miss. Expected, not anomalous. Clearing the expectation
+    ;; here keeps that miss out of :cache-misses, which otherwise reports a
+    ;; problem that is really just the cost of compacting. A diagnostic that
+    ;; cries wolf is worse than none.
+    (.on api "compact" on-compact)
+
     ;; before_provider_request — priority 100 (runs last so we see the
     ;; final form of messages from any earlier mutators).
     (.on api "before_provider_request" on-before 100)
@@ -215,4 +230,5 @@
     ;; handler double-annotates prompts and double-counts stats on reload.)
     (fn []
       (.off api "before_provider_request" on-before)
-      (.off api "after_provider_request" on-after))))
+      (.off api "after_provider_request" on-after)
+      (.off api "compact" on-compact))))
