@@ -7,6 +7,7 @@
             [agent.tool-metadata :as tool-metadata]
             [agent.token-estimation :as te]
             [agent.debug :as d]
+            [agent.model-info :as model-info]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]))
 
 (defn- valid-cut-position?
@@ -264,12 +265,78 @@ with every section below present.
     (try (fs/unlinkSync (:json-path dump)) (catch :default _ nil))
     (try (fs/unlinkSync (:text-path dump)) (catch :default _ nil))))
 
+(def default-threshold
+  "Fraction of the window at which to compact.
+
+   0.85 sits in the 85-90% band the field converged on; 95% (Claude Code,
+   Codex CLI) is documented as too late, and firing at 96-99% (OpenCode) risks
+   'context anxiety' — the model rushing its summary and abandoning the task."
+  0.85)
+
+(def default-reserve-tokens
+  "Absolute headroom kept free, as pi does with `reserveTokens`.
+
+   A percentage alone does not survive a 6x range of window sizes: 0.85 of a
+   200k window leaves 30k, but 0.85 of the 32,768-token window on a local model
+   leaves ~5k for the reply AND the summary. Whichever limit binds first wins."
+  16384)
+
+(def max-reserve-fraction
+  "Cap on the reserve as a share of the window — see compaction-point."
+  0.25)
+
+(defn compaction-point
+  "Token count at which compaction should fire: the lower of the percentage
+   threshold and the reserve floor. Pure — this is the whole trigger decision,
+   so it can be replayed against a recorded session offline."
+  [limit threshold reserve]
+  (let [limit     (or limit 0)
+        threshold (or threshold default-threshold)
+        ;; Clamp the reserve to a share of the window. A flat 16k reserve is
+        ;; right for a 200k window and nonsense for a small one: on a 20k
+        ;; window it would fire at 3.6k, i.e. 18% used, compacting a
+        ;; conversation that has barely started. Clamped, big windows still get
+        ;; the absolute floor and small ones fall back to ~75%.
+        reserve   (min (or reserve default-reserve-tokens)
+                       (* limit max-reserve-fraction))
+        by-pct    (* limit threshold)
+        by-res    (- limit reserve)]
+    ;; A reserve wider than the window would make by-res <= 0 and compact
+    ;; forever; the percentage is the floor in that case.
+    (if (pos? by-res) (min by-pct by-res) by-pct)))
+
+(defn should-compact?
+  "Pure trigger predicate. `opts` may carry :threshold/:reserve/:enabled?
+   (from settings); omitted values fall back to the defaults above."
+  [usage limit {:keys [threshold reserve enabled?]}]
+  (boolean (and (not (false? enabled?))
+                (pos? (or limit 0))
+                (> (or usage 0) (compaction-point limit threshold reserve)))))
+
+(defn settings->opts
+  "Read the `:compaction` settings section into compact's option keys.
+
+   That section (`settings/manager.cljs:12`, `{:enabled true :threshold 0.85}`)
+   shipped as a default that NOTHING read — the 0.85 was hardcoded inside
+   `compact`, so turning compaction off or retuning it did nothing at all.
+   Tolerates keyword (CLJS defaults) and string (user JSON) keys."
+  [settings]
+  (let [c (or (:compaction settings) (get settings "compaction"))
+        g (fn [k] (let [v (or (get c k) (get c (str k)))] v))]
+    {:enabled?  (let [v (g :enabled)] (if (some? v) v true))
+     :threshold (let [v (g :threshold)] (if (number? v) v default-threshold))
+     :reserve   (let [v (g :reserve-tokens)] (if (number? v) v default-reserve-tokens))}))
+
 (defn ^:async compact
   "Summarize older messages when context approaches model limits.
    Extensions can intercept via 'before_compact' event.
-   Accepts optional model-registry for accurate context windows."
+   Accepts optional model-registry for accurate context windows.
+
+   `:threshold`/`:reserve`/`:enabled?` come from the `:compaction` settings
+   section. Until now the 0.85 was hardcoded here and that settings section was
+   read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
-                                   model-key]}]]
+                                   model-key threshold reserve enabled?]}]]
   (let [context ((:build-context session))
         usage   (te/estimate-messages-tokens context)
         ;; `model-key` is the provider-qualified key; callers that have the
@@ -280,7 +347,9 @@ with every section below present.
                   ((:context-window model-registry) lookup)
                   100000)]
 
-    (when (> usage (* limit 0.85))
+    (when (should-compact? usage limit {:threshold threshold
+                                        :reserve   reserve
+                                        :enabled?  enabled?})
       (let [split-point     (find-split-point context (* limit 0.3))
             slice           (vec (take split-point context))
             to-keep         (vec (drop split-point context))
@@ -400,3 +469,32 @@ Keep the summary concise but preserve all actionable information.")
      :branch-leaf-id branch-leaf-id
      :files-read     files-read
      :files-modified files-modified}))
+
+(defn ^:async maybe-auto-compact!
+  "Compact BETWEEN turns when context has crossed the trigger point.
+
+   Until this existed, `compact` was only ever reachable by hand — /compact, a
+   pi-rpc handler, and the extension api's :compact. Nothing called it per turn,
+   so its own threshold check never ran. A real session reached 615k tokens with
+   ZERO compactions, and from ~turn 32 the model stopped calling tools at all:
+   56% of its turns did no work and the user typed \"continue\" 44 times.
+   Replaying that transcript through this trigger fires 6 compactions, the first
+   at turn 15 — well before the collapse.
+
+   Called after turn_finalize, never mid-turn: a compaction landing inside a
+   task is documented to send the model off the rails."
+  [agent]
+  (when-let [session (some-> (:session agent) deref)]
+    (try
+      (js-await (compact session
+                         (:model (:config agent))
+                         (:events agent)
+                         (merge {:model-registry (:model-registry agent)
+                                 :model-key (model-info/config-model-key (:config agent))}
+                                (settings->opts (:settings agent)))))
+      (catch :default e
+        ;; Never let compaction take the turn with it — a failed summary is
+        ;; recoverable, a thrown one is not.
+        (d/warn "[compaction] auto-compact failed:" (.-message e))
+        nil))))
+

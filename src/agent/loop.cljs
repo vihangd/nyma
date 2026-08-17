@@ -3,6 +3,7 @@
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.model-info :as model-info]
+            [agent.sessions.compaction :as compaction]
             [agent.pricing :refer [calculate-turn-cost model-cost-key]]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
@@ -437,6 +438,12 @@
            ;; (e.g. auto-execute) when the turn failed.
             (js-await ((:emit-async events) "turn_finalize"
                                             #js {:error (or (boolean @turn-error) blocked?)}))
+
+           ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
+           ;; mid-task is documented to send the model off the rails. Skipped on
+           ;; the error path so a failed turn is not summarized as progress.
+            (when-not @turn-error
+              (js-await (compaction/maybe-auto-compact! agent)))
 
             (if @turn-error
              ;; Surface the error after the gate had its chance (don't drain).
