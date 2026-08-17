@@ -1,5 +1,6 @@
 (ns compaction.test
   (:require ["bun:test" :refer [describe it expect]]
+            [clojure.string :as str]
             ["node:fs" :as fs]
             ["./agent/sessions/compaction.mjs" :as cmp]
             ["./agent/token_estimation.mjs" :as te]
@@ -693,3 +694,52 @@
                   (-> (expect (cmp/extension-summary-usable?
                                (apply str (repeat 600 "no headers here ")) nil [] []))
                       (.toBe false))))))
+
+;;; ─── the summarizer needs metadata, and the payload was stripping it ─────
+;;; token_suite's before_compact hook extracts file operations from
+;;; :metadata tool-name/args. It was handed messages-to-summarize, which is
+;;; built from build-context — and entry->core-message strips :metadata. So the
+;;; extraction silently found NOTHING: "[no edits yet]" for a session that
+;;; edited 159 files, 157 characters standing in for the whole thing.
+
+(defn ^:async test-payload-carries-metadata []
+  (let [sm (tool-heavy-session)
+        captured (atom nil)]
+    (js-await (compact sm "mock-model"
+                       {:on (fn [_ _] nil)
+                        :emit (fn [_ _] nil)
+                        :emit-async (fn [evt ctx]
+                                      (when (= evt "before_compact") (reset! captured ctx))
+                                      (js/Promise.resolve nil))}
+                       {:gen-fn (gen-stub six-section)}))
+    (let [entries (aget @captured "entries-to-summarize")
+          tools   (filter #(= "tool_call" (.-role %)) (vec entries))]
+      ;; The span is present …
+      (-> (expect (pos? (count tools))) (.toBe true))
+      ;; … and carries what an extractor needs.
+      (-> (expect (some? (aget (first tools) "metadata"))) (.toBe true))
+      (-> (expect (some? (aget (aget (first tools) "metadata") "tool-name"))) (.toBe true)))))
+
+(describe "before_compact payload"
+          (fn []
+            (it "includes a metadata-bearing span for extensions"
+                (^:async fn [] (js-await (test-payload-carries-metadata))))))
+
+;;; ─── validation must be satisfiable ──────────────────────────────────────
+;;; validate-compaction requires every listed path to appear in the summary.
+;;; Populating the file lists from the tree (which fixed files-read: 0) made
+;;; that strict for the first time — and a real session touches 244 files, so
+;;; every compaction would fail validation, burn a retry call, and then use the
+;;; unvalidated summary anyway.
+
+(describe "tracked file lists are bounded"
+          (fn []
+            (it "caps how many paths a summary must mention"
+                (fn []
+                  (-> (expect (<= cmp/max-tracked-files 50)) (.toBe true))))
+
+            (it "a summary listing the capped set validates"
+                (fn []
+                  (let [paths (mapv #(str "/repo/f" % ".rb") (range cmp/max-tracked-files))
+                        summary (str six-section "\n" (str/join "\n" paths))]
+                    (-> (expect (count (cmp/validate-compaction summary paths []))) (.toBe 0)))))))

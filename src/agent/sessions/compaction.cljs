@@ -204,6 +204,15 @@ with every section below present.
        "\n</errors>\n\n"
        "Output the complete corrected summary, keeping every section."))
 
+(def ^:private context-roles
+  "Roles build-context keeps — the projection the summarized span is aligned to."
+  #{"user" "assistant" "tool_call" "tool_result" "compaction" "branch-summary"})
+
+(def max-tracked-files
+  "Most-recent file paths carried into the summary prompt and required by
+   validation. Bounded because validate-compaction demands each one appear."
+  25)
+
 (def default-min-messages-between
   "New messages required before compacting again.
 
@@ -491,13 +500,29 @@ with every section below present.
             ;; this reason, which gutted the one part of the summary aimed at
             ;; artifact tracking.
             tree-entries    (if-let [gt (:get-tree session)] (gt) [])
-            files-read      (extract-files-read tree-entries)
-            files-modified  (extract-files-modified tree-entries)
+            ;; Capped to the most RECENT paths. validate-compaction requires
+            ;; every listed path to appear in the summary, and a real session
+            ;; touches hundreds — 244 in the one that prompted this. Demanding
+            ;; all of them guarantees a failed validation, a wasted retry call,
+            ;; and then "using unvalidated summary" anyway. Asking for the
+            ;; recent ones keeps the check meaningful and satisfiable.
+            files-read      (take-last max-tracked-files (extract-files-read tree-entries))
+            files-modified  (take-last max-tracked-files (extract-files-modified tree-entries))
             evt-ctx #js {:context               context
                          :usage                 usage
                          :summary               nil
                          :split-point           split-point
                          :messages-to-summarize (clj->js to-summarize)
+                         ;; Same span, WITH :metadata. Extensions that extract
+                         ;; file operations need tool-name/args, and
+                         ;; entry->core-message strips both — which is why
+                         ;; token_suite's summariser reported "[no edits yet]"
+                         ;; for a session that edited 159 files, and produced
+                         ;; 157 characters for a whole session of work.
+                         :entries-to-summarize
+                         (clj->js (vec (take (count to-summarize)
+                                             (filter #(contains? context-roles (:role %))
+                                                     tree-entries))))
                          :messages-to-keep      (clj->js to-keep)
                          :previous-summary      (:content prev-compaction)
                          :files-read            (clj->js files-read)

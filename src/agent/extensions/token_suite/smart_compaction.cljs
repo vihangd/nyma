@@ -269,8 +269,16 @@ with every section below present.
     ;; Hook C: Structured compaction (before_compact, priority 100)
     (.on api "before_compact"
          (fn [evt-ctx _ctx]
-           (let [;; Use enriched payload fields when available, fall back to full context
-                 to-summarize (or (aget evt-ctx "messages-to-summarize") (.-context evt-ctx))
+           (let [;; Prefer the metadata-bearing span. extract-file-ops needs
+                 ;; :metadata tool-name/args, and messages-to-summarize comes
+                 ;; from build-context, which entry->core-message has stripped —
+                 ;; so file extraction silently found NOTHING and this
+                 ;; summariser reported "[no edits yet]" for a session that
+                 ;; edited 159 files, producing 157 characters for an entire
+                 ;; session of work.
+                 to-summarize (or (aget evt-ctx "entries-to-summarize")
+                                  (aget evt-ctx "messages-to-summarize")
+                                  (.-context evt-ctx))
                  messages (if (sequential? to-summarize) to-summarize
                               (when (and to-summarize (.-length to-summarize))
                                 (vec (map (fn [i] (aget to-summarize i))
