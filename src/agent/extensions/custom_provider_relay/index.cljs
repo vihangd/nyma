@@ -68,6 +68,18 @@
     ;; that is the only variant where prompt caching works.
     :exclude   ["claude"]
     :models    [{:id "deepseek-v3.2"}
+                ;; Also declares the `anthropic` endpoint — the only DeepSeek id
+                ;; here that does — and it genuinely works. Kept on the OpenAI
+                ;; side anyway: probing showed cache_control is accepted and
+                ;; IGNORED (cache_creation_input_tokens was 0 on every call)
+                ;; because caching here is DeepSeek's own automatic prefix cache,
+                ;; and `thinking` returns no thinking blocks. Tagging it
+                ;; anthropic would only make kv_cache spend breakpoints and
+                ;; thinking.cljs attach a parameter, both for nothing.
+                ;;
+                ;; Caching still works — a cold prefix read 0, the identical
+                ;; request next read 7133 with no cache_control sent at all.
+                {:id "deepseek-v4-pro" :context-window 1048576}
                 {:id "glm-4.7"}
                 {:id "gemini-2.5-flash"}
                 {:id "gpt-5.2"}]}

@@ -743,3 +743,33 @@
                   (let [paths (mapv #(str "/repo/f" % ".rb") (range cmp/max-tracked-files))
                         summary (str six-section "\n" (str/join "\n" paths))]
                     (-> (expect (count (cmp/validate-compaction summary paths []))) (.toBe 0)))))))
+
+;;; ─── a percentage stops working at the top end ───────────────────────────
+;;; deepseek-v4-pro declares a 1,048,576-token window. 85% of that is 891k and a
+;;; 16k reserve is noise, so a purely proportional trigger would let context grow
+;;; far past the point where every measured model has degraded badly. The window
+;;; is what the model ACCEPTS; the ceiling is what it still works well within.
+
+(describe "compaction-point ceiling"
+          (fn []
+            (it "caps a 1M window well below its percentage"
+                (fn []
+                  (let [p (cmp/compaction-point 1048576 0.85 16384)]
+                    (-> (expect (<= p cmp/default-max-working-context)) (.toBe true))
+                    ;; the number it would have used
+                    (-> (expect (< p 891000)) (.toBe true)))))
+
+            (it "leaves ordinary windows exactly as they were"
+                (fn []
+                  ;; The Claude models in use must not change behaviour.
+                  (-> (expect (cmp/compaction-point 200000 0.85 16384)) (.toBe 170000))
+                  (-> (expect (< (cmp/compaction-point 32768 0.85 16384) 32768)) (.toBe true))))
+
+            (it "is settings-driven"
+                (fn []
+                  (-> (expect (cmp/compaction-point 1048576 0.85 16384 50000)) (.toBe 50000))))
+
+            (it "flows from the compaction settings section"
+                (fn []
+                  (let [o (cmp/settings->opts {:compaction {:max-working-context 12345}})]
+                    (-> (expect (:max-working o)) (.toBe 12345)))))))

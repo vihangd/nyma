@@ -395,6 +395,22 @@ with every section below present.
    leaves ~5k for the reply AND the summary. Whichever limit binds first wins."
   16384)
 
+(def default-max-working-context
+  "Hard ceiling on how much context is allowed to accumulate, whatever the
+   model's declared window.
+
+   A percentage stops making sense at the top end. deepseek-v4-pro declares
+   1,048,576 tokens, where 0.85 comes to 891k and a 16k reserve is noise — so a
+   purely proportional trigger would let context grow past the point where every
+   measured model has already degraded badly (30-50% accuracy loss well before
+   the documented limit). The window is what the model ACCEPTS; this is what it
+   still works well within.
+
+   200k matches the Claude models already in use here and the band the published
+   evidence covers. Settings-driven so a genuinely long-context workload can
+   raise it deliberately."
+  200000)
+
 (def max-reserve-fraction
   "Cap on the reserve as a share of the window — see compaction-point."
   0.25)
@@ -403,7 +419,7 @@ with every section below present.
   "Token count at which compaction should fire: the lower of the percentage
    threshold and the reserve floor. Pure — this is the whole trigger decision,
    so it can be replayed against a recorded session offline."
-  [limit threshold reserve]
+  [limit threshold reserve & [max-working]]
   (let [limit     (or limit 0)
         threshold (or threshold default-threshold)
         ;; Clamp the reserve to a share of the window. A flat 16k reserve is
@@ -417,15 +433,19 @@ with every section below present.
         by-res    (- limit reserve)]
     ;; A reserve wider than the window would make by-res <= 0 and compact
     ;; forever; the percentage is the floor in that case.
-    (if (pos? by-res) (min by-pct by-res) by-pct)))
+    ;; Whichever binds FIRST: the percentage, the reserve, or the absolute
+    ;; ceiling. Each covers a range the others get wrong — percentage for
+    ;; ordinary windows, reserve for small ones, ceiling for very large ones.
+    (min (if (pos? by-res) (min by-pct by-res) by-pct)
+         (or max-working default-max-working-context))))
 
 (defn should-compact?
   "Pure trigger predicate. `opts` may carry :threshold/:reserve/:enabled?
    (from settings); omitted values fall back to the defaults above."
-  [usage limit {:keys [threshold reserve enabled?]}]
+  [usage limit {:keys [threshold reserve enabled? max-working]}]
   (boolean (and (not (false? enabled?))
                 (pos? (or limit 0))
-                (> (or usage 0) (compaction-point limit threshold reserve)))))
+                (> (or usage 0) (compaction-point limit threshold reserve max-working)))))
 
 (defn settings->opts
   "Read the `:compaction` settings section into compact's option keys.
@@ -439,7 +459,9 @@ with every section below present.
         g (fn [k] (let [v (or (get c k) (get c (str k)))] v))]
     {:enabled?  (let [v (g :enabled)] (if (some? v) v true))
      :threshold (let [v (g :threshold)] (if (number? v) v default-threshold))
-     :reserve   (let [v (g :reserve-tokens)] (if (number? v) v default-reserve-tokens))}))
+     :reserve   (let [v (g :reserve-tokens)] (if (number? v) v default-reserve-tokens))
+     :max-working (let [v (g :max-working-context)]
+                    (if (number? v) v default-max-working-context))}))
 
 (defn ^:async compact
   "Summarize older messages when context approaches model limits.
@@ -451,7 +473,7 @@ with every section below present.
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
                                    model-key threshold reserve enabled? force? observed-usage
-                                   state-atom]}]]
+                                   state-atom max-working]}]]
   (let [context ((:build-context session))
         ;; Prefer the provider's own count of the last request. The estimate
         ;; below walks the whole session tree; what is actually sent is pruned
