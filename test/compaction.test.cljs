@@ -645,3 +645,51 @@
           (fn []
             (it "keeps /export and the tree walk complete"
                 (^:async fn [] (js-await (test-export-still-sees-full-history))))))
+
+;;; ─── a carried-forward summary is not a summary ──────────────────────────
+;;; Validation alone was not enough. token_suite's hook wraps the PREVIOUS
+;;; summary in a "## Previous Context" block, so its output inherits the six
+;;; required headers and validates regardless of what it adds. A real
+;;; compaction of a whole working session added exactly 157 characters:
+;;;
+;;;   ## User Intent
+;;;   yes
+;;;   ## Completed Work
+;;;   - [no edits yet]
+;;;
+;;; The prior summary rode along, so it looked well-formed while that session's
+;;; work — Kite SDK, NPS, the tests — was gone.
+
+(def ^:private prior-summary
+  (str six-section "\n" (apply str (repeat 400 "PRIOR DETAIL "))))
+
+(describe "extension-summary-usable?"
+          (fn []
+            (it "rejects the shape that actually lost a session's work"
+                (fn []
+                  (let [wrapper (str "## Previous Context\n" prior-summary
+                                     "\n\n## User Intent\nyes\n\n## Completed Work\n- [no edits yet]\n")]
+                    (-> (expect (cmp/extension-summary-usable? wrapper prior-summary [] []))
+                        (.toBe false)))))
+
+            (it "accepts a carry-forward that adds real content"
+                (fn []
+                  ;; Carrying context forward is correct and should not be
+                  ;; penalised — only carrying it forward INSTEAD of summarizing.
+                  (let [genuine (str "## Previous Context\n" prior-summary
+                                     "\n\n## User Intent\n"
+                                     (apply str (repeat 30 "genuinely new detail about the work ")))]
+                    (-> (expect (cmp/extension-summary-usable? genuine prior-summary [] []))
+                        (.toBe true)))))
+
+            (it "accepts a standalone valid summary with no prior"
+                (fn []
+                  (-> (expect (cmp/extension-summary-usable?
+                               (str six-section (apply str (repeat 400 "x"))) nil [] []))
+                      (.toBe true))))
+
+            (it "still rejects an invalid summary outright"
+                (fn []
+                  (-> (expect (cmp/extension-summary-usable?
+                               (apply str (repeat 600 "no headers here ")) nil [] []))
+                      (.toBe false))))))

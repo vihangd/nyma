@@ -273,6 +273,42 @@ with every section below present.
              :compacted-at-count (count msgs)))
     true))
 
+(def ^:private min-new-summary-chars
+  "New content an extension summary must add beyond the summary it carries
+   forward. Observed failure: 157 characters."
+  400)
+
+(defn extension-summary-usable?
+  "Does this extension summary say anything of its own?
+
+   Validation alone is not enough. token_suite's hook carries the PREVIOUS
+   summary forward inside a `## Previous Context` block, so its output inherits
+   the six required headers and validates no matter how little it adds. A real
+   compaction produced exactly this:
+
+     ## User Intent
+     yes
+     ## Completed Work
+     - [no edits yet]
+
+   157 characters of new content standing in for a whole session of work —
+   Kite SDK, NPS, the tests, all of it recorded as \"yes\" and \"[no edits yet]\".
+   The previous summary rode along, so the result looked well-formed and passed
+   every check while the session's own work was simply gone.
+
+   So: valid AND materially more than what it inherited."
+  [summary previous-summary files-read files-modified]
+  (let [s        (str summary)
+        carried? (boolean (and (seq (str previous-summary))
+                               (str/includes? s (str previous-summary))))
+        added    (if carried? (str/replace s (str previous-summary) "") s)]
+    (and (empty? (validate-compaction s files-read files-modified))
+         ;; The floor applies ONLY to a carry-forward. A short standalone
+         ;; summary is fine — the point is to catch a summary that INHERITED
+         ;; its structure rather than to demand verbosity.
+         (or (not carried?)
+             (>= (count (str/trim added)) min-new-summary-chars)))))
+
 (defn ^:async compact-with-retry
   "Call generateText with compact-system-prompt + user-prompt. Validate the
    result and run one fix-retry if validation fails. Always returns a string
@@ -485,7 +521,9 @@ with every section below present.
                  ;; actually build anything?" is asking about. Falling back to
                  ;; it costs one summarization call; accepting a summary that
                  ;; drops the file lists costs the information.
-                 (empty? (validate-compaction (.-summary evt-ctx) files-read files-modified)))
+                 (extension-summary-usable? (.-summary evt-ctx)
+                                            (:content prev-compaction)
+                                            files-read files-modified))
           (let [ext-summary (.-summary evt-ctx)]
             (d/info "compaction" "using extension-provided summary")
             ((:append session)
