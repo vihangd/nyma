@@ -550,7 +550,17 @@ Examples:
               (aset (:config agent) "active-provider-name"
                     (or (:provider late-resolved) ""))))
           (catch :default e
-            (d/warn (str "[nyma] " (.-message e))))))
+            ;; Say what WAS registered. "Unknown provider: yunwu" alone cannot
+            ;; distinguish a missing credential from an extension that never
+            ;; loaded — and those need opposite fixes. Chasing that distinction
+            ;; by inspection cost an afternoon; the provider list settles it in
+            ;; one line. (The answer that time: the bundled single-file binary
+            ;; loads 2 extensions and 3 providers, because builtin-extensions-dir
+            ;; resolves inside the bundle where the directories do not exist.
+            ;; The dist entry point loads 40 and 17.)
+            (d/warn "nyma" (.-message e)
+                    #js {:registered (clj->js (vec (sort (keys ((:list (:provider-registry agent)))))))
+                         :extensions (count loaded-extensions)}))))
 
       ;; Resolve --ext-* CLI flags against registered extension flags
       (resolve-ext-flags agent)
