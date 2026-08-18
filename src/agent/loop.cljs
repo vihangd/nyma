@@ -343,19 +343,24 @@
                                   evt-type  (event-type chunk-val)]
                               (if (= evt-type "message_update")
                                 (do
-                                  (swap! accumulated str (or (.-textDelta chunk-val) ""))
+                                  ;; AI SDK v7 fullStream: the text-delta part
+                                  ;; carries `text`. `textDelta` is the OBJECT
+                                  ;; stream's field — reading it here made every
+                                  ;; delta "", so stream_filter never saw text.
+                                  (let [piece (or (.-text chunk-val) (.-textDelta chunk-val) "")]
+                                  (swap! accumulated str piece)
                                   (let [filter-result
                                         (js-await
                                          (emit-collect "stream_filter"
                                                        #js {:delta @accumulated
-                                                            :chunk (or (.-textDelta chunk-val) "")
+                                                            :chunk piece
                                                             :type  evt-type}))]
                                     (when (get filter-result "abort")
                                       (reset! aborted true)
                                       (reset! (:retry-state agent)
                                               {:reason (get filter-result "reason")
                                                :inject (or (get filter-result "inject") [])})))
-                                  (when-not @aborted (emit evt-type chunk-val)))
+                                  (when-not @aborted (emit evt-type chunk-val))))
                                 (emit evt-type chunk-val)))
                             (when-not @aborted (recur))))))
 

@@ -11,7 +11,9 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.sessions.partial :as p]
-            [agent.sessions.manager :refer [create-session-manager session->seed-messages]]))
+            [agent.sessions.manager :refer [create-session-manager session->seed-messages
+                                            attach-session-persistence!]]
+            [test-util.agent-harness :refer [make-test-agent]]))
 
 ;;; ─── fakes ───────────────────────────────────────────────────────────────
 
@@ -281,3 +283,27 @@
                       (-> (expect (:role (last ctx))) (.toBe "assistant"))
                       (-> (expect (.includes text "half an answer")) (.toBe true))
                       (-> (expect (.includes text "cut off")) (.toBe true))))))))
+
+;; ── the streaming checkpoint actually records ────────────────────────────
+;; It read `textDelta` off message_update, but that event carries the raw AI
+;; SDK part whose field is `text` — so the accumulator stayed "" and the whole
+;; crash-recovery path silently protected nothing.
+(defn ^:async test-checkpoint-records-streamed-text []
+  (let [dir  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-partial-"))
+        file (path/join dir "s.jsonl")
+        _    (fs/writeFileSync file "" "utf8")
+        agent (make-test-agent)
+        session {:get-file-path (fn [] file)
+                 :append (fn [_e] nil)}]
+    (attach-session-persistence! agent session)
+    (js-await ((:emit-async (:events agent)) "message_update" #js {:text "hel"}))
+    (js-await ((:emit-async (:events agent)) "message_update" #js {:text "lo"}))
+    ;; note! throttles; flush-all! is what the exit path calls.
+    (p/flush-all!)
+    (let [saved (p/read-partial file)]
+      (-> (expect (str (or saved ""))) (.toContain "hello")))))
+
+(describe "session-partial:streaming-checkpoint"
+          (fn []
+            (it "accumulates the deltas the SDK actually emits"
+                test-checkpoint-records-streamed-text)))

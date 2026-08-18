@@ -503,9 +503,10 @@ with every section below present.
                          (messages-since-last-compaction context))
                        default-min-messages-between))
                (or force?
-                   (should-compact? usage limit {:threshold threshold
-                                                 :reserve   reserve
-                                                 :enabled?  enabled?})))
+                   (should-compact? usage limit {:threshold   threshold
+                                                 :reserve     reserve
+                                                 :enabled?    enabled?
+                                                 :max-working max-working})))
       (let [split-point     (find-split-point context (* limit 0.3))
             slice           (vec (take split-point context))
             to-keep         (vec (drop split-point context))
@@ -580,7 +581,16 @@ with every section below present.
                          :files-read     files-read
                          :files-modified files-modified}})
             (apply-to-live-state! state-atom ext-summary to-keep)
-            (cleanup-precompact-dump dump))
+            (cleanup-precompact-dump dump)
+            ;; Both paths must announce it: subscribers (kv_cache's cache-miss
+            ;; reset) treat "compact" as the point where a full cache miss is
+            ;; expected, and only the built-in path was emitting.
+            (let [after (te/estimate-messages-tokens
+                         (into [{:role "compaction" :content ext-summary}] to-keep))]
+              ((:emit events) "compact"
+                              {:summary ext-summary
+                               :before  usage
+                               :after   after})))
 
           ;; Main path: use compact-with-retry (validates + one fix-retry).
           ;; Also reached when an extension offered a summary that did not

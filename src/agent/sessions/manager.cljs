@@ -220,7 +220,14 @@
       (when events
         ((:on events) "message_update"
                       (fn [data]
-                        (swap! acc str (or (and data (.-textDelta data)) ""))
+                        ;; message_update carries the RAW AI SDK part, whose
+                        ;; text-delta field is `text` (ai/index.d.ts:2818-2822).
+                        ;; `textDelta` belongs to the OBJECT stream, so reading
+                        ;; it accumulated "" and the sidecar saved nothing. The
+                        ;; UI reads `.text` here too (interactive.cljs:223).
+                        (swap! acc str (or (and data (.-text data))
+                                           (and data (.-textDelta data))
+                                           ""))
                         ((:note! ckpt) @acc)
                         nil))
 

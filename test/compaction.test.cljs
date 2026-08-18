@@ -772,4 +772,18 @@
             (it "flows from the compaction settings section"
                 (fn []
                   (let [o (cmp/settings->opts {:compaction {:max-working-context 12345}})]
-                    (-> (expect (:max-working o)) (.toBe 12345)))))))
+                    (-> (expect (:max-working o)) (.toBe 12345)))))
+
+            ;; settings->opts read the ceiling and `compact` accepted it, but the
+            ;; should-compact? call in between never passed it on, so the
+            ;; built-in default applied no matter what the user configured.
+            (it "a configured ceiling actually changes the decision"
+                (fn []
+                  (let [o (cmp/settings->opts {:compaction {:max-working-context 50000}})
+                        ;; 60k used against a 1M window: far under the percentage
+                        ;; threshold, over the configured ceiling.
+                        opts {:threshold (:threshold o) :reserve (:reserve o)
+                              :enabled? true :max-working (:max-working o)}]
+                    (-> (expect (cmp/should-compact? 60000 1000000 opts)) (.toBe true))
+                    (-> (expect (cmp/should-compact? 60000 1000000 (dissoc opts :max-working)))
+                        (.toBe false)))))))

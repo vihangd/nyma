@@ -56,7 +56,12 @@
     ;;     calls at models where a single invalid call costs ~30pp accuracy.
     ;;     Nagging to maintain is defensible; nagging to create is not.
     ;;   - silent while a plan executes; plan mode owns progress then.
-    (let [cfg     (let [s (when (.-getSettings api) (.getSettings api))]
+    ;; getSettings delegates into the settings manager, which throws when the
+    ;; host handed the agent a plain object instead of one. An exception here
+    ;; aborts activation of the WHOLE extension — todo_write/todo_read never get
+    ;; registered — over an optional reminder cadence. Not worth it.
+    (let [cfg     (let [s (try (when (.-getSettings api) (.getSettings api))
+                               (catch :default _e nil))]
                     (or (:todos s) (get s "todos")))
           every-n (let [v (or (:reminder-every-n-turns cfg)
                               (get cfg "reminder-every-n-turns"))]
