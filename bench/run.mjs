@@ -27,7 +27,7 @@ const DEFAULT_AGENT = ["bun", path.join(ROOT, "dist", "agent", "cli.mjs")];
 function parseArgs(argv) {
   const a = { count: 20, seed: 7, label: "run", trials: 1, timeoutMs: 300000,
               maxSteps: 40, only: null, model: null, agentCmd: null, diff: null,
-              tasksDir: path.join(ROOT, "bench", "tasks"), dryRun: false };
+              tasksDir: path.join(ROOT, "bench", "tasks"), keep: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], next = () => argv[++i];
     if (k === "--count") a.count = Number(next());
@@ -42,6 +42,7 @@ function parseArgs(argv) {
     else if (k === "--tasks-dir") a.tasksDir = next();
     else if (k === "--diff") a.diff = [next(), next()];
     else if (k === "--all") a.count = null;
+    else if (k === "--keep") a.keep = true;
     else if (k === "--help" || k === "-h") a.help = true;
   }
   return a;
@@ -57,6 +58,7 @@ const HELP = `bench/run.mjs — Aider-Polyglot subset runner
   --label NAME     goes in the result filename
   --timeout-ms N   wall-clock cap per task (default 300000)
   --agent-cmd CMD  override the agent (used by the stub-agent dry run)
+  --keep           keep each task's working dir for inspection
   --diff A B       print what changed between two result files and exit
 `;
 
@@ -170,15 +172,19 @@ async function runTask(task, opts) {
     if (opts.modelSpec) agentArgs.push("--model", opts.modelSpec);
     agentArgs.push(PROMPT(task, readInstructions(task.dir)));
 
+    // The stub agent needs to be told which files it may touch and where the
+    // reference solution is. A REAL agent must never be handed either: an env
+    // var naming the answer-key directory is a leak, whether or not a given
+    // model happens to look at it.
+    const agentEnv = opts.isStub
+      ? { ...process.env,
+          NYMA_BENCH_STUB_FILE: path.join(work, task.stub),
+          NYMA_BENCH_TEST_FILE: path.join(work, task.testFile),
+          NYMA_BENCH_META: path.join(task.dir, ".meta") }
+      : process.env;
+
     const agent = await run(cmd, agentArgs, {
-      cwd: work,
-      timeoutMs: opts.timeoutMs,
-      env: {
-        ...process.env,
-        NYMA_BENCH_STUB_FILE: path.join(work, task.stub),
-        NYMA_BENCH_TEST_FILE: path.join(work, task.testFile),
-        NYMA_BENCH_META: path.join(task.dir, ".meta"),
-      },
+      cwd: work, timeoutMs: opts.timeoutMs, env: agentEnv,
     });
     if (agent.timedOut) {
       return { id: task.id, status: STATUS.timeout, durationMs: Date.now() - started };
@@ -211,7 +217,8 @@ async function runTask(task, opts) {
     return { id: task.id, status: STATUS.error, reason: String(e.message),
              durationMs: Date.now() - started };
   } finally {
-    fs.rmSync(work, { recursive: true, force: true });
+    if (opts.keep) console.log(`      kept ${work}`);
+    else fs.rmSync(work, { recursive: true, force: true });
   }
 }
 
@@ -273,6 +280,7 @@ async function main() {
   const agentCmd = opts.agentCmd ?? DEFAULT_AGENT;
   opts.agentCmd = agentCmd;
   const isStub = Boolean(opts.agentCmd && opts.agentCmd.join(" ").includes("stub-agent"));
+  opts.isStub = isStub;
 
   let build = { ok: true, extensionCount: null, stub: isStub };
   if (!isStub) {
