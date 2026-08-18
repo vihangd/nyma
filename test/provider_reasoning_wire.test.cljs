@@ -13,7 +13,8 @@
             [agent.extensions.custom-provider-openrouter.index :as openrouter]
             [agent.extensions.custom-provider-groq.index :as groq]
             [agent.extensions.custom-provider-minimax.index :as minimax]
-            [agent.extensions.custom-provider-kimi.index :as kimi]))
+            [agent.extensions.custom-provider-kimi.index :as kimi]
+            [agent.extensions.custom-provider-relay.index :as relay]))
 
 (def ^:private base-body
   (js/JSON.stringify #js {:model "m" :messages #js [#js {:role "user" :content "hi"}]}))
@@ -82,19 +83,13 @@
 ;; ── MiniMax ───────────────────────────────────────────────────────
 (describe "wire/minimax"
           (fn []
-            (it "sends thinking as an OBJECT — the string form is rejected with 2013"
+            (it "does NOT send a thinking field — measured as unwired on purpose"
+        ;; the string form is rejected on both models; {type:"enabled"} is
+        ;; rejected on M3 (allowed: adaptive, disabled); {type:"disabled"} is
+        ;; accepted but not honoured. Nothing to gain, a role to break.
                 (fn []
-                  (reset! minimax/level-fn-atom (fn [] "high"))
-                  (let [b (js/JSON.parse (minimax/splice-reasoning-split base-body))]
-                    (-> (expect (.-type (.-thinking b))) (.toBe "enabled"))
-                    (-> (expect (.-reasoning_split b)) (.toBe true)))))
-
-            (it "omits thinking when off, because disabled is not honoured on M2.5"
-                (fn []
-                  (reset! minimax/level-fn-atom (fn [] "off"))
                   (let [b (js/JSON.parse (minimax/splice-reasoning-split base-body))]
                     (-> (expect (.-thinking b)) (.toBeUndefined))
-            ;; reasoning_split is unrelated and stays on
                     (-> (expect (.-reasoning_split b)) (.toBe true)))))))
 
 ;; ── Kimi ──────────────────────────────────────────────────────────
@@ -111,3 +106,35 @@
                   (reset! kimi/level-fn-atom (fn [] "medium"))
                   (let [b (rewrite (kimi/make-request-rewriter "kimi-k2.6") nil)]
                     (-> (expect (.-thinking (.-chat_template_kwargs b))) (.toBe true)))))))
+
+;; ── Relay (yunwu and other New-API gateways) ──────────────────────
+(describe "wire/relay"
+          (fn []
+            (it "sends reasoning_effort on the chat path"
+        ;; measured: yunwu deepseek-v4-pro returns no reasoning by default and
+        ;; answers 17*23 as 403; with reasoning_effort it answers 391
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "medium"))
+                  (let [b (rewrite (relay/chat-request-rewriter) nil)]
+                    (-> (expect (.-reasoning_effort b)) (.toBe "medium")))))
+
+            (it "clamps to the OpenAI scale the relay speaks"
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "xhigh"))
+                  (-> (expect (.-reasoning_effort (rewrite (relay/chat-request-rewriter) nil)))
+                      (.toBe "high"))
+                  (reset! relay/level-fn-atom (fn [] "minimal"))
+                  (-> (expect (.-reasoning_effort (rewrite (relay/chat-request-rewriter) nil)))
+                      (.toBe "low"))))
+
+            (it "sends nothing when off, and still lifts <think> as before"
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "off"))
+                  (let [body (js/JSON.stringify
+                              #js {:model "m"
+                                   :messages #js [#js {:role "assistant"
+                                                       :content "<think>plan</think>done"}]})
+                        b (rewrite (relay/chat-request-rewriter) body)]
+                    (-> (expect (.-reasoning_effort b)) (.toBeUndefined))
+                    ;; the pre-existing lift must survive the addition
+                    (-> (expect (.-reasoning_content (first (.-messages b)))) (.toBe "plan")))))))

@@ -83,6 +83,25 @@
   (when (active? level)
     {:thinking {:type "enabled"}}))
 
+;; ── Relay gateways (yunwu and other New-API style relays) ─────────
+;; Measured against yunwu:
+;;   deepseek-v4-pro, no param        → 0 reasoning chars, and answers
+;;                                      "17*23" as 403 (wrong)
+;;   deepseek-v4-pro, reasoning_effort → 73-90 reasoning chars, answers 391
+;;                                      (right)
+;;   deepseek-v4-flash                → already reasons by default; the param is
+;;                                      accepted and changes little
+;; The relay speaks the OpenAI dialect, which tops out at `high`.
+
+(defn relay
+  "Level → {:reasoning_effort …}, or nil for off."
+  [level]
+  (when-let [l (active? level)]
+    {:reasoning_effort (case l
+                         "minimal" "low"
+                         "xhigh"   "high"
+                         l)}))
+
 ;; ── Kimi / Moonshot ───────────────────────────────────────────────
 ;; Injected as chat_template_kwargs.thinking. The extension hardcoded `true`
 ;; for its thinking models, so `off` never turned it off.

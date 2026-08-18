@@ -39,7 +39,8 @@
             [agent.debug :as d]
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.credentials :as credentials]
-            [agent.utils.reasoning-stream :as rs]))
+            [agent.utils.reasoning-stream :as rs]
+            [agent.utils.reasoning-request :as rr]))
 
 ;; ── Presets ──────────────────────────────────────────────────
 ;; Both point at the same base URL. `createAnthropic` appends /messages and
@@ -206,6 +207,31 @@
            (not (contains? eps "openai")))  :responses
       :else                                 :chat)))
 
+(def level-fn-atom (atom nil))
+
+(defn chat-request-rewriter
+  "Lift <think> back into reasoning_content (as before), then add the relay's
+   reasoning effort.
+
+   Measured on yunwu: `deepseek-v4-pro` returns NO reasoning by default and got
+   17*23 wrong (403); with `reasoning_effort` it reasons and answers 391. The
+   level is read per request, since /thinking can change at any time.
+
+   Only the OpenAI-compatible chat path uses this — the Anthropic path already
+   gets thinking through `agent.thinking`, which recognises its provider tag."
+  []
+  (fn [body-str init]
+    (let [lifted (rs/lift-think-request-rewriter body-str init)]
+      (try
+        (if-let [r (rr/relay (when-let [f @level-fn-atom] (f)))]
+          (let [body (js/JSON.parse lifted)]
+            (if (nil? (.-reasoning_effort body))
+              (do (aset body "reasoning_effort" (:reasoning_effort r))
+                  (js/JSON.stringify body))
+              lifted))
+          lifted)
+        (catch :default _ lifted)))))
+
 (defn create-model-fn
   "`endpoints-of` maps a model id to its declared endpoint types. It's a
    function rather than a value because discovery re-registers the provider,
@@ -236,7 +262,7 @@
         (.chat (createOpenAI #js {:apiKey        key
                                   :baseURL       (:base-url entry)
                                   :compatibility "compatible"
-                                  :fetch         (rs/make-fetch rs/lift-think-request-rewriter)})
+                                  :fetch         (rs/make-fetch (chat-request-rewriter))})
                model-id)))))
 
 (defn- ->js-model [m]
@@ -320,6 +346,8 @@
             (register! api entry (merge-declared fresh declared) endpoints-box)))))))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (let [settings   (try (when (.-getSettings api) (.getSettings api))
                         (catch :default _ nil))
         user       (try (load-settings-entries settings)
