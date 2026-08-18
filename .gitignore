@@ -16,3 +16,6 @@ nyma
 docs/plan-*.md
 *.bak
 .claude/settings.local.json
+
+# benchmark task checkout (cloned, never vendored) — results ARE committed
+bench/tasks/
