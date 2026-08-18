@@ -50,7 +50,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | Core | `agent.core` | Agent factory, state management |
 | Loop | `agent.loop` | Execution loop via `streamText` |
 | Events | `agent.events` | Typed event bus (sync + async `emit-async`) |
-| Tools | `agent.tools` | Built-in tools: read, write, edit, bash |
+| Tools | `agent.tools` | Built-in tools: read, write, edit, bash, ls, glob, grep, think, view_image, web_fetch, web_search, deep_research |
 | Registry | `agent.tool-registry` | Tool activation/deactivation |
 | Extensions | `agent.extensions` | Extension API for plugins |
 | Extension Loader | `agent.extension-loader` | Dual .cljs/.ts loader with scoped APIs |
@@ -222,7 +222,7 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-**Total: 2,280+ tests across 127 test files** (run `bun test` to see live counts).
+**Total: 3,780+ assertions across 224 test files** (run `bun test` to see live counts).
 
 Coverage spans the full stack:
 
@@ -230,10 +230,28 @@ Coverage spans the full stack:
 - **Agent loop** — full run cycle, hook events (`before_agent_start`, `model_resolve`, `context_assembly`, `before_message_send`, `before_provider_request`, `after_provider_request`, `stream_filter`, `message_before_store`, `provider_error`), retry-state lifecycle
 - **Extensions** — extension loader, scope/capabilities, extension API surface, every built-in extension has its own `ext_<name>.test.cljs`
 - **Gateway** — config interpolation + validation, session pool with lane serialization, auth/approval pipelines, streaming policies, channel registry, allow-list checks
-- **UI** — Ink components (status line, header, welcome, dialogs, picker, autocomplete, editor modes, render layout)
+- **UI** — pi-tui components (status line, header, welcome, dialogs, picker, autocomplete, editor modes, render layout)
 - **Integration** — tool pipeline end-to-end, extension lifecycle, state+events, ACP agent shells
 
 See `test/` for the full list. New tests live alongside source code under matching names.
+
+### Benchmarking
+
+`bun test` proves the code does what it claims. It says nothing about whether the
+agent *solves problems*. `bench/` runs real Aider-Polyglot exercises and grades
+them with the exercises' own tests:
+
+```bash
+git clone --depth 1 https://github.com/Aider-AI/polyglot-benchmark bench/tasks
+bun bench/run.mjs --count 10 --seed 7 --model build --label baseline
+bun bench/run.mjs --diff bench/results/<old>.json bench/results/latest.json
+```
+
+Results are committed under `bench/results/` on purpose — the history is what
+makes "did that change help?" answerable. Scores are for nyma against itself: the
+runnable subset is Python-only and not comparable to published full-set numbers.
+See [`bench/README.md`](bench/README.md), particularly the list of things the
+harness refuses to score.
 
 ## Running the Agent
 

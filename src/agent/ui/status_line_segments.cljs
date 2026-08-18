@@ -1,5 +1,5 @@
 (ns agent.ui.status-line-segments
-  "Segment registry + 18 built-in segments for the status line.
+  "Segment registry + 20 built-in segments for the status line.
 
    A segment is a map of {:id :category :render} where :render is a
    function taking a context map and returning {:content :color :visible?}
