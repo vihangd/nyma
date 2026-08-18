@@ -1,0 +1,125 @@
+{
+  "harness": 1,
+  "label": "qwen3.6-35b-a3b",
+  "gitSha": "b2879e1",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "timeoutMs": 420000,
+  "seed": 7,
+  "taskIds": [
+    "python/dot-dsl",
+    "python/food-chain",
+    "python/grep",
+    "python/pig-latin",
+    "python/proverb",
+    "python/scale-generator",
+    "python/transpose",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 10,
+      "attempted": 10,
+      "passed": 0,
+      "failed": 10,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/dot-dsl",
+      "status": "fail",
+      "durationMs": 9599,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 18986
+    },
+    {
+      "id": "python/food-chain",
+      "status": "fail",
+      "durationMs": 9686,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 19246
+    },
+    {
+      "id": "python/grep",
+      "status": "fail",
+      "durationMs": 9243,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 18973
+    },
+    {
+      "id": "python/pig-latin",
+      "status": "fail",
+      "durationMs": 8353,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 19146
+    },
+    {
+      "id": "python/proverb",
+      "status": "fail",
+      "durationMs": 8153,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 18796
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "fail",
+      "durationMs": 9145,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 19576
+    },
+    {
+      "id": "python/transpose",
+      "status": "fail",
+      "durationMs": 8531,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 18830
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "fail",
+      "durationMs": 9049,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 19239
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "fail",
+      "durationMs": 8927,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 19134
+    },
+    {
+      "id": "python/zipper",
+      "status": "fail",
+      "durationMs": 8115,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 18962
+    }
+  ]
+}

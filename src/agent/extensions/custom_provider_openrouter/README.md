@@ -81,3 +81,37 @@ Free models are not intended for production workloads — expect 429s under sust
 - [OpenRouter free-models collection](https://openrouter.ai/collections/free-models)
 - [OpenRouter free-models router](https://openrouter.ai/docs/guides/routing/routers/free-models-router)
 - [`docs/extension-guide-cljs.md`](../../../../docs/extension-guide-cljs.md) — provider authoring guide
+
+## Backend routing (`openrouter.provider` / `openrouter.model-routing`)
+
+OpenRouter serves one model id from several backends and chooses per request.
+They are **not** equivalent. Measured here:
+
+| Model | Backend | Tool calls |
+|---|---|---|
+| `qwen/qwen3.6-35b-a3b` | Venice (default route) | **none** — `finish_reason: stop`, `tool_calls: null` |
+| `qwen/qwen3.6-35b-a3b` | Parasail | works |
+| `qwen/qwen3.5-9b` | Venice | works |
+| `qwen/qwen3.8-27b` | AkashML | works |
+
+A backend that ignores tools turns every agent turn into a no-op: the model
+narrates a plan, calls nothing, and the run ends. On a benchmark that scored
+**0/10 tasks**; the same model pinned to a working backend solves them.
+`supported_parameters` lists `tools` for both, and `provider.require_parameters`
+still routed to the broken one, so the metadata cannot be used to avoid this.
+
+So the routing block is exposed rather than guessed. It is passed to the API
+verbatim — anything OpenRouter's [provider routing](https://openrouter.ai/docs/features/provider-routing)
+accepts works here:
+
+```jsonc
+{ "openrouter": {
+    // applies to every openrouter model
+    "provider": { "only": ["parasail"] },
+    // per-model, wins over the above
+    "model-routing": {
+      "qwen/qwen3.6-35b-a3b": { "only": ["parasail"] }
+    } } }
+```
+
+With nothing configured, nothing changes — no routing block is sent.

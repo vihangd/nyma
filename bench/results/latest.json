@@ -1,116 +1,55 @@
 {
   "harness": 1,
-  "label": "small-nemotron-lightning",
-  "gitSha": "bfc64e7",
+  "label": "pin-probe",
+  "gitSha": "b2879e1",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 39,
-  "role": "opencode-zen/nemotron-3.5-lightning-free",
-  "model": "opencode-zen/nemotron-3.5-lightning-free",
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
   "modelSource": "explicit",
   "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
-  "timeoutMs": 420000,
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 300000,
   "seed": 7,
   "taskIds": [
-    "python/dot-dsl",
-    "python/food-chain",
-    "python/grep",
-    "python/pig-latin",
-    "python/proverb",
-    "python/scale-generator",
-    "python/transpose",
-    "python/two-bucket",
-    "python/variable-length-quantity",
-    "python/zipper"
+    "python/wordy"
   ],
   "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
   "trials": [
     {
-      "total": 10,
-      "attempted": 10,
-      "passed": 6,
-      "failed": 1,
-      "timeout": 3,
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
       "error": 0,
       "skipped": 0,
-      "pct": 60
+      "pct": 100
     }
   ],
   "summary": {
-    "mean": 60,
+    "mean": 100,
     "spread": null,
     "trials": 1
   },
   "results": [
     {
-      "id": "python/dot-dsl",
+      "id": "python/wordy",
       "status": "pass",
-      "durationMs": 144954,
+      "durationMs": 103429,
       "turns": null,
       "costUsd": 0,
-      "tokens": 239302
-    },
-    {
-      "id": "python/food-chain",
-      "status": "timeout",
-      "durationMs": 420017
-    },
-    {
-      "id": "python/grep",
-      "status": "pass",
-      "durationMs": 270344,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 244609
-    },
-    {
-      "id": "python/pig-latin",
-      "status": "pass",
-      "durationMs": 273172,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 240934
-    },
-    {
-      "id": "python/proverb",
-      "status": "pass",
-      "durationMs": 79110,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 298516
-    },
-    {
-      "id": "python/scale-generator",
-      "status": "timeout",
-      "durationMs": 420015
-    },
-    {
-      "id": "python/transpose",
-      "status": "fail",
-      "durationMs": 158446,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 101305
-    },
-    {
-      "id": "python/two-bucket",
-      "status": "pass",
-      "durationMs": 310645,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 417842
-    },
-    {
-      "id": "python/variable-length-quantity",
-      "status": "pass",
-      "durationMs": 289246,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 394333
-    },
-    {
-      "id": "python/zipper",
-      "status": "timeout",
-      "durationMs": 420023
+      "tokens": 161336
     }
   ]
 }

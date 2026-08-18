@@ -69,6 +69,48 @@
   (or (aget js/process.env "OPENROUTER_API_KEY")
       (credentials/read-credential provider-name)))
 
+;; ── Backend routing ────────────────────────────────────────────────────────
+;;
+;; OpenRouter serves one model id from several backends and picks per request.
+;; Those backends are not equivalent: `qwen/qwen3.6-35b-a3b` routed to Venice
+;; returns finish_reason=stop with NO tool_calls — every agent turn is a no-op —
+;; while the same id on Parasail emits tool calls normally. `supported_parameters`
+;; advertises "tools" either way, and `require_parameters: true` still routes to
+;; the broken one, so capability metadata cannot be trusted to avoid it.
+;;
+;; So the routing block is exposed instead of guessed at. Passed through to the
+;; API verbatim, either for every request or per model id:
+;;
+;;   {"openrouter": {"provider": {"only": ["parasail"]},
+;;                   "model-routing": {"qwen/qwen3.6-35b-a3b": {"only": ["parasail"]}}}}
+;;
+;; Absent config changes nothing.
+
+(defn routing-for
+  "Pure: settings + model id → the OpenRouter `provider` routing object, or nil.
+   A per-model entry wins over the global one; neither is merged into the other,
+   because a partial merge of routing rules is harder to reason about than a
+   replacement. Exposed for tests."
+  [settings model-id]
+  (let [cfg (or (:openrouter settings) (get settings "openrouter"))
+        per (or (:model-routing cfg) (get cfg "model-routing"))
+        one (or (get per model-id) (get per (str model-id)))
+        all (or (:provider cfg) (get cfg "provider"))]
+    (or one all)))
+
+(defn- make-request-rewriter [routing]
+  (when routing
+    (fn [body-str _init]
+      (try
+        (let [body (js/JSON.parse body-str)]
+          ;; Never override a routing block the caller already set.
+          (when (nil? (.-provider body))
+            (aset body "provider" (clj->js routing)))
+          (js/JSON.stringify body))
+        (catch :default _ body-str)))))
+
+(def ^:private settings-atom (atom nil))
+
 (defn- create-openrouter-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -80,10 +122,14 @@
                               :baseURL (resolve-base-url)
                               :headers #js {"HTTP-Referer" (resolve-referer)
                                             "X-Title"      (resolve-title)}
-                              :fetch   (rs/make-fetch)})
+                              :fetch   (rs/make-fetch
+                                        (make-request-rewriter
+                                         (routing-for @settings-atom id)))})
            id)))
 
 (defn ^:export default [api]
+  (reset! settings-atom (try (when (.-getSettings api) (.getSettings api))
+                             (catch :default _e nil)))
   (.registerProvider api provider-name
                      #js {:createModel create-openrouter-model
                           :baseUrl     default-base-url

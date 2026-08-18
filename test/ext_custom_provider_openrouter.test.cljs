@@ -217,3 +217,39 @@
                                                                                (aset js/process.env "OPENROUTER_API_KEY" orig-key)
                                                                                (js-delete js/process.env "OPENROUTER_API_KEY"))
                                                                              (fs/rmSync tmp-dir #js {:recursive true :force true}))))))))
+
+;; ── Backend routing ───────────────────────────────────────────────────────
+;; OpenRouter serves one model id from several backends and they are not
+;; equivalent: qwen3.6-35b-a3b on Venice returns finish_reason=stop with no
+;; tool_calls (every agent turn a no-op) while the same id on Parasail calls
+;; tools normally. `supported_parameters` claims tools either way, so the
+;; routing block has to be settable rather than inferred.
+(describe "openrouter/routing-for"
+          (fn []
+            (it "returns nothing when unconfigured, so behaviour is unchanged"
+                (fn []
+                  (-> (expect (or-ext/routing-for {} "qwen/qwen3.6-35b-a3b")) (.toBeFalsy))
+                  (-> (expect (or-ext/routing-for nil "x")) (.toBeFalsy))))
+
+            (it "applies a global routing block to any model"
+                (fn []
+                  (let [s {:openrouter {:provider {:only ["parasail"]}}}]
+                    (-> (expect (:only (or-ext/routing-for s "anything"))) (.toEqual ["parasail"])))))
+
+            (it "lets a per-model entry win over the global one"
+                (fn []
+                  (let [s {:openrouter {:provider {:only ["global"]}
+                                        :model-routing {"qwen/qwen3.6-35b-a3b" {:only ["parasail"]}}}}]
+                    (-> (expect (:only (or-ext/routing-for s "qwen/qwen3.6-35b-a3b"))) (.toEqual ["parasail"]))
+                    (-> (expect (:only (or-ext/routing-for s "other/model"))) (.toEqual ["global"])))))
+
+            (it "reads settings as they actually arrive — parsed JSON, not CLJS maps"
+                (fn []
+                  ;; settings come from settings.json via JSON.parse, so the
+                  ;; lookup has to work on plain objects with string keys
+                  (let [s #js {"openrouter" #js {"provider" #js {"only" #js ["parasail"]}}}]
+                    (-> (expect (or-ext/routing-for s "any")) (.toBeTruthy)))
+                  (let [s #js {"openrouter" #js {"model-routing"
+                                                 #js {"qwen/qwen3.6-35b-a3b" #js {"only" #js ["parasail"]}}}}]
+                    (-> (expect (or-ext/routing-for s "qwen/qwen3.6-35b-a3b")) (.toBeTruthy))
+                    (-> (expect (or-ext/routing-for s "other")) (.toBeFalsy)))))))

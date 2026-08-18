@@ -27,7 +27,8 @@ const DEFAULT_AGENT = ["bun", path.join(ROOT, "dist", "agent", "cli.mjs")];
 function parseArgs(argv) {
   const a = { count: 20, seed: 7, label: "run", trials: 1, timeoutMs: 300000,
               maxSteps: 40, only: null, model: null, agentCmd: null, diff: null,
-              tasksDir: path.join(ROOT, "bench", "tasks"), keep: false };
+              tasksDir: path.join(ROOT, "bench", "tasks"), keep: false,
+              agentSettings: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], next = () => argv[++i];
     if (k === "--count") a.count = Number(next());
@@ -43,6 +44,7 @@ function parseArgs(argv) {
     else if (k === "--diff") a.diff = [next(), next()];
     else if (k === "--all") a.count = null;
     else if (k === "--keep") a.keep = true;
+    else if (k === "--agent-settings") a.agentSettings = next();
     else if (k === "--help" || k === "-h") a.help = true;
   }
   return a;
@@ -59,6 +61,8 @@ const HELP = `bench/run.mjs — Aider-Polyglot subset runner
   --timeout-ms N   wall-clock cap per task (default 300000)
   --agent-cmd CMD  override the agent (used by the stub-agent dry run)
   --keep           keep each task's working dir for inspection
+  --agent-settings F  JSON written to <task>/.nyma/settings.json for the run,
+                   so a config can be A/B'd without touching your own settings
   --diff A B       print what changed between two result files and exit
 `;
 
@@ -162,6 +166,14 @@ async function runTask(task, opts) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), `nyma-bench-${task.name}-`));
   try {
     copyTask(task, work);
+    // Project settings resolve from the agent's CWD, which is this temp copy —
+    // the repo's own .nyma/settings.json never applies to a bench run. Writing
+    // them here is what makes per-run config (backend routing, extension
+    // toggles) possible without editing the user's global settings.
+    if (opts.agentSettings) {
+      fs.mkdirSync(path.join(work, ".nyma"), { recursive: true });
+      fs.copyFileSync(opts.agentSettings, path.join(work, ".nyma", "settings.json"));
+    }
     const before = fs.readFileSync(path.join(work, task.testFile), "utf8");
 
     const [cmd, ...base] = opts.agentCmd;
@@ -333,6 +345,8 @@ async function main() {
     model: opts.modelSpec ?? "(agent default)",
     modelSource: resolved.source,
     maxSteps: "agent default (no CLI flag); bounded by timeoutMs",
+    agentSettings: opts.agentSettings
+      ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : null,
     timeoutMs: opts.timeoutMs,
     seed: opts.seed,
     taskIds: tasks.map((t) => t.id),
