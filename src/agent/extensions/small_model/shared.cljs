@@ -84,10 +84,23 @@
          :no-progress    0
          :last-tool-sigs #{}    ; tool-name+args hashes this turn
          :all-tool-sigs  #{}    ; cumulative across turns
+         :tool-result-fps {}    ; sig → result fingerprint, so a repeat whose
+                                ; OUTPUT changed is progress, not a loop
          :evidence       []
          :interventions  0}))
 
 ;; ── Helpers ──────────────────────────────────────────────────────
+
+(defn result-fingerprint
+  "Cheap identity for a tool result — length plus a bounded head/tail slice.
+   Enough to tell \"the same command returned the same thing\" from \"the same
+   command returned something new\" without holding whole outputs. Pure."
+  [result]
+  (let [s (str (or result ""))
+        n (count s)]
+    (if (<= n 240)
+      (str n ":" s)
+      (str n ":" (subs s 0 120) "…" (subs s (- n 120))))))
 
 (defn tool-call-sig
   "Simple signature for a tool call — used to detect exact repeats."

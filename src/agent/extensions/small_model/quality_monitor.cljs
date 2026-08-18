@@ -126,11 +126,30 @@
                                          #js {:reason (str "hallucinated tool: " tool-name)
                                               :tier   (:hallucinated n)}))
 
-                          ;; Exact repeat call
-                          (contains? prev-sigs sig)
+                          ;; Exact repeat call whose result ALSO came back
+                          ;; unchanged. Both halves matter:
+                          ;;
+                          ;; A coding agent's fix→verify cycle re-runs the same
+                          ;; test command byte-for-byte every time; that is the
+                          ;; work, not a loop. Flagging on arguments alone made
+                          ;; the run that would reveal whether an edit worked
+                          ;; return a scolding instead of the test output —
+                          ;; qwen3.6-35b-a3b went 80% → 10% on the benchmark
+                          ;; with this extension on, and reported that "my
+                          ;; environment only has write and edit tools working".
+                          ;;
+                          ;; And the nudge always claimed "the result hasn't
+                          ;; changed" without ever looking at it.
+                          (and (contains? prev-sigs sig)
+                               (= (get (:tool-result-fps @state) sig)
+                                  (shared/result-fingerprint (.-result ctx))))
                           (let [n (swap! counters update :repeat inc)]
+                            ;; APPEND — never destroy a real result. The model
+                            ;; needs to see what the tool said AND that it has
+                            ;; seen it before.
                             (aset ctx "result"
-                                  (repeat-tool-msg tool-name (:repeat n)))
+                                  (str (.-result ctx)
+                                       "\n\n[nyma] " (repeat-tool-msg tool-name (:repeat n))))
                             (.emitGlobal api "small-model/quality-signal"
                                          #js {:reason (str "repeat tool call: " tool-name)
                                               :tier   (:repeat n)}))
@@ -142,8 +161,10 @@
                               ;; the whole session AND flags a legitimately
                               ;; repeated call hours later as a loop.
                               (when (> (count (:all-tool-sigs @state)) 200)
-                                (swap! state assoc :all-tool-sigs #{}))
-                              (swap! state update :all-tool-sigs conj sig)))
+                                (swap! state assoc :all-tool-sigs #{} :tool-result-fps {}))
+                              (swap! state update :all-tool-sigs conj sig)
+                              (swap! state assoc-in [:tool-result-fps sig]
+                                     (shared/result-fingerprint (.-result ctx)))))
                         ctx))}
 
         ;; ── after_provider_request: advance turn counter ──────────
