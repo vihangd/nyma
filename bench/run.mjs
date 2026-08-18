@@ -352,9 +352,19 @@ async function main() {
   fs.writeFileSync(out, JSON.stringify(record, null, 2));
   fs.writeFileSync(path.join(outDir, "latest.json"), JSON.stringify(record, null, 2));
 
-  const s = record.summary;
+  const s = record.summary, a = trials[0].aggregate;
+  // "80%" reads as "the model got two wrong". Here it was 0 wrong and 2 out of
+  // wall clock — a different problem with a different fix, so the headline says
+  // which.
   console.log(`\n${s.mean}%${s.spread === null ? "" : ` ± ${s.spread}`} ` +
-              `over ${s.trials} trial(s) — ${out}`);
+              `over ${s.trials} trial(s) — ` +
+              `${a.passed} pass, ${a.failed} fail, ${a.timeout} timeout, ` +
+              `${a.error} error, ${a.skipped} skipped`);
+  if (s.trials === 1) {
+    console.log("single trial: no spread measured. Use --trials 3 before " +
+                "comparing this against another run.");
+  }
+  console.log(out);
 }
 
 main();

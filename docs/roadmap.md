@@ -499,3 +499,27 @@ Landed: `/refine` (deterministic session mining), escalation (`/escalate` + prov
 - **Escalation is main-loop only.** Subagents run on their own bus with their own model objects
   (`subagent/index.cljs:133-160`), so neither the stall trigger nor provider failover applies to a
   child agent — the case where a cheap model flails unattended.
+
+## 2026-08-18 — first measured numbers (`bench/`)
+
+`bench/` now runs Aider-Polyglot exercises and grades them with the exercises' own tests. First clean
+baseline, 10 sampled Python tasks, role `build` (minimax/minimax-m2.5), 420s/task:
+
+**80% — 8 pass, 0 fail, 2 timeout, 0 error.** $0.218, 2.14M tokens.
+
+What the number teaches, beyond the number:
+
+- **Zero genuine failures.** Every non-pass was wall clock, not wrong code. The score currently
+  measures the latency budget as much as capability; `transpose` finished in 280s on one run and blew
+  through 420s on the next.
+- **Single-trial numbers swing.** The same command on the same seed scored 100% earlier and 80% here.
+  Nothing below ~3 trials should be used to compare two configurations, and the runner now says so
+  when it prints a one-trial result.
+- **Timeouts are reported separately from failures** in the headline for exactly this reason.
+- **Next:** a full 34-task run to find where the model actually breaks (the hard tasks become the
+  signal-bearing subset), then flip `small-model.enabled: true` and diff on the same seed. The
+  measurement rig now exists, so both are cheap.
+- **Blocked for the free tier:** the `fast` role points at `opencode-zen/north-mini-code-free`, which
+  the provider rejects ("Model north-mini-code-free is not supported") and which is absent from
+  nyma's own catalogue (`custom_provider_opencode_zen/index.cljs:27-31`). Benchmarking the cheap tier
+  needs that role repointed at a model that exists.

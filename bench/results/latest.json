@@ -1,0 +1,119 @@
+{
+  "harness": 1,
+  "label": "baseline-build",
+  "gitSha": "4735872",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "role": "build",
+  "model": "minimax/minimax-m2.5",
+  "modelSource": "global settings roles.build",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "timeoutMs": 420000,
+  "seed": 7,
+  "taskIds": [
+    "python/dot-dsl",
+    "python/food-chain",
+    "python/grep",
+    "python/pig-latin",
+    "python/proverb",
+    "python/scale-generator",
+    "python/transpose",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 10,
+      "attempted": 10,
+      "passed": 8,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 80
+    }
+  ],
+  "summary": {
+    "mean": 80,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/dot-dsl",
+      "status": "pass",
+      "durationMs": 25875,
+      "turns": null,
+      "costUsd": 0.011779139999999997,
+      "tokens": 96948
+    },
+    {
+      "id": "python/food-chain",
+      "status": "pass",
+      "durationMs": 23586,
+      "turns": null,
+      "costUsd": 0.011377920000000001,
+      "tokens": 82255
+    },
+    {
+      "id": "python/grep",
+      "status": "pass",
+      "durationMs": 43627,
+      "turns": null,
+      "costUsd": 0.021077159999999998,
+      "tokens": 202380
+    },
+    {
+      "id": "python/pig-latin",
+      "status": "pass",
+      "durationMs": 114491,
+      "turns": null,
+      "costUsd": 0.04108704,
+      "tokens": 415610
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 18187,
+      "turns": null,
+      "costUsd": 0.00979032,
+      "tokens": 75777
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "pass",
+      "durationMs": 220450,
+      "turns": null,
+      "costUsd": 0.08764272,
+      "tokens": 948517
+    },
+    {
+      "id": "python/transpose",
+      "status": "timeout",
+      "durationMs": 420010
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "timeout",
+      "durationMs": 419981
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "pass",
+      "durationMs": 40260,
+      "turns": null,
+      "costUsd": 0.0160659,
+      "tokens": 140851
+    },
+    {
+      "id": "python/zipper",
+      "status": "pass",
+      "durationMs": 41969,
+      "turns": null,
+      "costUsd": 0.019221659999999998,
+      "tokens": 178152
+    }
+  ]
+}
