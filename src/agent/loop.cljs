@@ -481,10 +481,10 @@
                   (swap! st update :no-op-turns (fnil inc 0))
                   (swap! st assoc :no-op-turns 0))
                 (when (= 2 (:no-op-turns @st))
-                  (dbg/warn "[loop] two turns in a row ran no tools — the model may have stopped making progress")
+                  (dbg/warn "[loop] two turns in a row ran no tools — the model may have stopped making progress (/refine)")
                   (when-let [ui (some-> (.-extension-api agent) .-ui)]
                     (when (.-notify ui)
-                      (.notify ui "Two turns ran no tools — the model may have stopped making progress."
+                      (.notify ui "Two turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."
                                "warning"))))))
 
             (if @turn-error

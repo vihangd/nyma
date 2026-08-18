@@ -528,6 +528,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `memory` | `memory` | Agent-maintained `MEMORY.md`, injected each run |
 | `todos` | `todos` | Persistent todo ledger for session-scoped task tracking |
 | `handoff` | `handoff` | `/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md` |
+| `refine` | `refine` | `/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools) |
 | `budget` | `budget` | Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set) |
 | `headroom` | `headroom` | ML context compression via the Headroom proxy (off by default) |
 | `openwiki` | `openwiki` | AI-maintained, git-aware living documentation for the repo (off by default) |
