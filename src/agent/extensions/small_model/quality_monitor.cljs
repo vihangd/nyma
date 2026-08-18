@@ -66,10 +66,27 @@
 (defn- blank? [s]
   (or (nil? s) (str/blank? (str s))))
 
+(defn tool-names
+  "The active tool NAMES as a set, from whatever shape the host hands over.
+
+   `api.getAllTools` returns `(clj->js (keys …))` — a JS **array of names**
+   (extensions.cljs:45). Calling `Object.keys` on that yields \"0\", \"1\", \"2\" …,
+   so every real tool name failed the membership check below and every tool
+   result was replaced with \"that tool doesn't exist\". The extension scored
+   10% against an 80% baseline on the benchmark until this was found.
+
+   Accepts an array or an object, because getActiveTools/getAllTools have
+   differed before and a silent mismatch here is catastrophic. Exposed for tests."
+  [tools]
+  (cond
+    (nil? tools)   nil
+    (array? tools) (set (map str (vec tools)))
+    (object? tools) (set (js/Object.keys tools))
+    :else          nil))
+
 (defn- get-active-tool-names [api]
   (try
-    (let [tools (.getAllTools api)]
-      (when tools (set (js/Object.keys tools))))
+    (tool-names (.getAllTools api))
     (catch :default _ nil)))
 
 ;; ── Activation ───────────────────────────────────────────────────

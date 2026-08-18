@@ -24,7 +24,12 @@
         api #js {:addMiddleware (fn [m] (reset! mw m))
                  :on            (fn [& _] nil)
                  :off           (fn [& _] nil)
-                 :getAllTools   (fn [] #js {:bash #js {} :read #js {} :write #js {}})
+                 ;; PRODUCTION SHAPE: extensions.cljs:45 returns (clj->js (keys …)),
+                 ;; i.e. a JS ARRAY of names — not an object. Mocking an object
+                 ;; here is what let the hallucination bug through: Object.keys
+                 ;; on an array yields ["0" "1" "2"], so every real tool name
+                 ;; failed the membership check and every result was destroyed.
+                 :getAllTools   (fn [] #js ["bash" "read" "write"])
                  :emitGlobal    (fn [ev data] (swap! signals conj [ev (.-reason data)]))
                  :sendUserMessage (fn [& _] nil)}]
     (qm/activate api {:quality-monitor {:enabled true}} state)
@@ -73,3 +78,35 @@
                   (let [h (harness)
                         r (call! h "nonexistent_tool" {} "")]
                     (-> (expect (str r)) (.toContain "nonexistent_tool")))))))
+
+(describe "small-model/quality-monitor tool-name recognition"
+  (fn []
+    (it "recognises a real tool from the array getAllTools actually returns"
+        ;; the whole extension scored 10% against an 80% baseline because this
+        ;; check inverted: every call looked like a hallucinated tool name
+        (fn []
+          (let [h (harness)
+                r (call! h "bash" {:command "ls"} "a.txt")]
+            (-> (expect r) (.toContain "a.txt"))
+            (-> (expect (str r)) (.not.toMatch #"(?i)doesn't exist|available tools")))))
+
+    (it "still catches a genuinely unknown tool name"
+        (fn []
+          (let [h (harness)
+                r (call! h "definitely_not_a_tool" {} "")]
+            (-> (expect (str r)) (.toContain "definitely_not_a_tool")))))
+
+    (it "tolerates an object-shaped tool map too"
+        ;; getActiveTools/getAllTools have differed before; accept both rather
+        ;; than depend on which one the host hands over
+        (fn []
+          (let [mw (atom nil)
+                st (shared/make-state)
+                api #js {:addMiddleware (fn [m] (reset! mw m))
+                         :on (fn [& _] nil) :off (fn [& _] nil)
+                         :getAllTools (fn [] #js {:bash #js {} :read #js {}})
+                         :emitGlobal (fn [& _] nil) :sendUserMessage (fn [& _] nil)}
+                _ (qm/activate api {:quality-monitor {:enabled true}} st)
+                ctx (js-obj "tool-name" "bash" "args" #js {} "result" "real output")]
+            ((.-leave @mw) ctx)
+            (-> (expect (.-result ctx)) (.toContain "real output")))))))

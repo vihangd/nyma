@@ -125,12 +125,22 @@
                                 :fetch         base-fetch})
              model-id))))
 
-(defn- active-tools-fn
-  "Returns a zero-arg fn that resolves the current active tool-name set."
+(defn active-tools-fn
+  "Returns a zero-arg fn that resolves the current active tool-name set.
+
+   `getAllTools` hands back `(clj->js (keys …))` — an ARRAY of names
+   (extensions.cljs:45). `Object.keys` on an array returns \"0\", \"1\", \"2\" …,
+   so every rescued tool call failed the `(contains? available tool-name)`
+   check in toolcall_adapter and the rescue silently produced nothing — on
+   exactly the local models it exists to support."
   [api]
   (fn []
     (let [tools (try (.getAllTools api) (catch :default _ nil))]
-      (if tools (set (js/Object.keys tools)) #{}))))
+      (cond
+        (nil? tools)    #{}
+        (array? tools)  (set (map str (vec tools)))
+        (object? tools) (set (js/Object.keys tools))
+        :else           #{}))))
 
 (defn- register-entry! [api entry]
   (let [name     (:name entry)
