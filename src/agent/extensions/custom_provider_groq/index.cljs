@@ -2,7 +2,8 @@
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [agent.utils.reasoning-stream :as rs]))
+            [agent.utils.reasoning-stream :as rs]
+            [agent.utils.reasoning-request :as rr]))
 
 (def ^:private provider-name "groq")
 (def ^:private default-base-url "https://api.groq.com/openai/v1")
@@ -77,6 +78,29 @@
   (or (aget js/process.env "GROQ_API_KEY")
       (read-credentials-file)))
 
+;; Groq publishes `reasoning_effort` for a subset of its models, and
+;; `reasoning_format` to choose where the chain lands. Measured on
+;; openai/gpt-oss-20b: no param → 70 reasoning chars, effort=low → 20. Honoured.
+;; Sending it to a model Groq does not list is an error rather than an ignored
+;; field, so the mapper gates on the model id.
+(def level-fn-atom (atom nil))
+
+(defn make-request-rewriter
+  "Per-request: read the live thinking level and inject Groq's reasoning fields."
+  [model-id]
+  (fn [body-str _init]
+    (try
+      (let [lvl  (when-let [f @level-fn-atom] (f))
+            r    (rr/groq lvl model-id)]
+        (if-not r
+          body-str
+          (let [body (js/JSON.parse body-str)]
+            (when (nil? (.-reasoning_effort body))
+              (aset body "reasoning_effort" (:reasoning_effort r))
+              (aset body "reasoning_format" (:reasoning_format r)))
+            (js/JSON.stringify body))))
+      (catch :default _ body-str))))
+
 (defn- create-groq-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -86,10 +110,12 @@
                    "Get a key at https://console.groq.com/keys"))))
     (.chat (createOpenAI #js {:apiKey  key
                               :baseURL (resolve-base-url)
-                              :fetch   (rs/make-fetch)})
+                              :fetch   (rs/make-fetch (make-request-rewriter id))})
            id)))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name
                      #js {:createModel create-groq-model
                           :baseUrl     default-base-url

@@ -1,5 +1,6 @@
 (ns agent.extensions.custom-provider-minimax.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+            [agent.utils.reasoning-request :as rr]
             ["node:fs" :as fs]
             ["node:path" :as path]))
 
@@ -58,14 +59,27 @@
 ;; If splice fails (non-JSON body, malformed, etc.) we fall through to
 ;; the original request rather than break the call.
 
+(def level-fn-atom (atom nil))
+
 (defn splice-reasoning-split
-  "Add `reasoning_split: true` to a JSON body string. Returns the
-   modified string, or the original on parse failure."
+  "Add `reasoning_split: true` to a JSON body string, plus MiniMax's
+   `thinking` config when a thinking level is set. Returns the modified string,
+   or the original on parse failure.
+
+   Measured against MiniMax-M2.5 — the docs describe `thinking` as a string and
+   that is rejected outright (status 2013, \"Mismatch type ThinkingConfig with
+   value string\"). The object form works: {type: \"enabled\"} took reasoning
+   from 498 to 1514 chars. {type: \"disabled\"} is accepted but NOT honoured, so
+   `off` sends nothing instead of pretending."
   [body-str]
   (try
     (let [obj (js/JSON.parse body-str)]
       (when (object? obj)
-        (aset obj "reasoning_split" true))
+        (aset obj "reasoning_split" true)
+        (when-let [lvl (when-let [f @level-fn-atom] (f))]
+          (when-let [t (rr/minimax lvl)]
+            (when (nil? (.-thinking obj))
+              (aset obj "thinking" (clj->js (:thinking t)))))))
       (js/JSON.stringify obj))
     (catch :default _ body-str)))
 
@@ -100,6 +114,8 @@
            id)))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name
                      #js {:createModel create-minimax-model
                           :baseUrl     default-base-url

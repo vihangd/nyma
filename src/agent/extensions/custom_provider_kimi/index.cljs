@@ -17,7 +17,8 @@
      turns."
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.utils.credentials :as credentials]
-            [agent.utils.reasoning-stream :as rs]))
+            [agent.utils.reasoning-stream :as rs]
+            [agent.utils.reasoning-request :as rr]))
 
 (def ^:private provider-name "kimi")
 (def ^:private default-base-url "https://api.moonshot.ai/v1")
@@ -60,16 +61,21 @@
 ;;; `agent.utils.reasoning-stream`; here we only add Moonshot's
 ;;; `chat_template_kwargs.thinking` / `preserve_thinking` injection.
 
-(defn- make-request-rewriter [model-id]
+(def level-fn-atom (atom nil))
+
+(defn make-request-rewriter [model-id]
   (fn [body-str init]
     (let [lifted (rs/lift-think-request-rewriter body-str init)]
       (if-not (thinking-model? model-id)
         lifted
         (try
           (let [body   (js/JSON.parse lifted)
-                kwargs (or (.-chat_template_kwargs body) #js {})]
+                kwargs (or (.-chat_template_kwargs body) #js {})
+                ;; Was hardcoded `true`, so `/thinking off` left Moonshot
+                ;; thinking anyway — the level now decides.
+                want   (:thinking (rr/kimi (when-let [f @level-fn-atom] (f))))]
             (when (nil? (.-thinking kwargs))
-              (aset kwargs "thinking" true))
+              (aset kwargs "thinking" want))
             (aset body "chat_template_kwargs" kwargs)
             (when (nil? (.-preserve_thinking body))
               (aset body "preserve_thinking" true))
@@ -89,6 +95,8 @@
            id)))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name
                      #js {:createModel create-kimi-model
                           :baseUrl     default-base-url

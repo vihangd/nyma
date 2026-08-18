@@ -1,7 +1,8 @@
 (ns agent.extensions.custom-provider-openrouter.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.utils.credentials :as credentials]
-            [agent.utils.reasoning-stream :as rs]))
+            [agent.utils.reasoning-stream :as rs]
+            [agent.utils.reasoning-request :as rr]))
 
 (def ^:private provider-name "openrouter")
 (def ^:private default-base-url "https://openrouter.ai/api/v1")
@@ -98,18 +99,37 @@
         all (or (:provider cfg) (get cfg "provider"))]
     (or one all)))
 
-(defn- make-request-rewriter [routing]
-  (when routing
+(defn make-request-rewriter
+  "Inject the backend routing block and the reasoning effort.
+
+   `level-fn` is read PER REQUEST, not captured: the rewriter is built once when
+   the model object is created, but `/thinking` can change at any time.
+
+   Reasoning is safe to send unconditionally — OpenRouter drops parameters a
+   backend does not support (the same mechanism that let Venice silently ignore
+   `tools`). Measured: `reasoning.exclude` is honoured (reasoning text withheld
+   while reasoning_tokens were still spent), and `effort` moves reasoning tokens
+   on models whose catalogue lists `reasoning_effort` (108 → 187 on
+   qwen3.8-27b); on models listing only `reasoning` it is dropped."
+  [routing level-fn]
+  (when (or routing level-fn)
     (fn [body-str _init]
       (try
         (let [body (js/JSON.parse body-str)]
-          ;; Never override a routing block the caller already set.
-          (when (nil? (.-provider body))
+          ;; Never override a block the caller already set.
+          (when (and routing (nil? (.-provider body)))
             (aset body "provider" (clj->js routing)))
+          (when (nil? (.-reasoning body))
+            (when-let [r (rr/openrouter (when level-fn (level-fn)))]
+              (aset body "reasoning" (clj->js r))))
           (js/JSON.stringify body))
         (catch :default _ body-str)))))
 
 (def ^:private settings-atom (atom nil))
+;; The thinking level lives on the agent, and the API that reads it is only
+;; available once the extension is activated — so the provider closes over a
+;; thunk rather than a value.
+(def ^:private level-fn-atom (atom nil))
 
 (defn- create-openrouter-model [id]
   (let [key (resolve-api-key)]
@@ -124,12 +144,15 @@
                                             "X-Title"      (resolve-title)}
                               :fetch   (rs/make-fetch
                                         (make-request-rewriter
-                                         (routing-for @settings-atom id)))})
+                                         (routing-for @settings-atom id)
+                                         @level-fn-atom))})
            id)))
 
 (defn ^:export default [api]
   (reset! settings-atom (try (when (.-getSettings api) (.getSettings api))
                              (catch :default _e nil)))
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name
                      #js {:createModel create-openrouter-model
                           :baseUrl     default-base-url
