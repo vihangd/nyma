@@ -44,6 +44,18 @@
       (js/console.error (str "[full-load-sweep] BAD: " (:name b) " — " (:err b))))
     (-> (expect (count @bad)) (.toBe 0))
     (-> (expect (pos? (count loaded))) (.toBe true))
+    ;; "Zero bad schemas" is also what you get when an extension THREW during
+    ;; activation and registered no tools at all — which is precisely what a
+    ;; `todos` settings read did here, silently dropping todo_write/todo_read
+    ;; from the sweep while the test kept reporting pass. Two floors so a
+    ;; shrinking sweep fails instead of passing quietly.
+    (let [names (set (js-keys all))]
+      (-> (expect #js ["tool count" (>= (count names) 35)])
+          (.toEqual #js ["tool count" true]))
+      ;; extension tools are namespace-prefixed; natives are not
+      (doseq [t ["read" "write" "edit" "bash"
+                 "todos__todo_write" "todos__todo_read" "advisor__advisor"]]
+        (-> (expect #js [t (contains? names t)]) (.toEqual #js [t true]))))
     (doseq [e loaded]
       (when-let [d (:deactivate e)]
         (try (d) (catch :default _e nil))))))

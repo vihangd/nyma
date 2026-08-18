@@ -488,6 +488,32 @@
     (-> (expect (.includes (str (last-compaction-content sm)) "## 1. Previous Conversation"))
         (.toBe true))))
 
+;; Both summary paths must announce the compaction. Subscribers treat "compact"
+;; as the moment the prompt cache is knowingly invalidated (kv_cache resets its
+;; miss counter there), and the extension-summary branch used to apply the new
+;; context silently — so that reset never ran and the guaranteed full cache miss
+;; was counted as a real one.
+(defn- events-recording [summary emitted]
+  {:on         (fn [_e _h] nil)
+   :emit-async (fn [event ctx]
+                 (when (= event "before_compact") (aset ctx "summary" summary))
+                 (js/Promise.resolve nil))
+   :emit       (fn [e d] (swap! emitted conj [e d]) nil)})
+
+(defn ^:async test-extension-summary-emits-compact []
+  (let [emitted (atom [])]
+    (js-await (compact (big-session) "mock-model"
+                       (events-recording six-section emitted)
+                       {:gen-fn (gen-stub "SHOULD NOT BE CALLED")}))
+    (-> (expect (mapv first @emitted)) (.toContain "compact"))))
+
+(defn ^:async test-builtin-summary-emits-compact []
+  (let [emitted (atom [])]
+    (js-await (compact (big-session) "mock-model"
+                       (events-recording nil emitted)
+                       {:gen-fn (gen-stub six-section)}))
+    (-> (expect (mapv first @emitted)) (.toContain "compact"))))
+
 (defn ^:async test-does-not-recompact-immediately []
   (let [sm (big-session)]
     (js-await (compact sm "mock-model" (events-offering nil) {:gen-fn (gen-stub six-section)}))
@@ -504,6 +530,10 @@
                 (^:async fn [] (js-await (test-invalid-extension-summary-is-not-used))))
             (it "uses a valid extension summary"
                 (^:async fn [] (js-await (test-valid-extension-summary-is-used))))
+            (it "announces the compaction on the extension-summary path"
+                (^:async fn [] (js-await (test-extension-summary-emits-compact))))
+            (it "announces the compaction on the built-in path"
+                (^:async fn [] (js-await (test-builtin-summary-emits-compact))))
             (it "does not compact twice in a row"
                 (^:async fn [] (js-await (test-does-not-recompact-immediately))))))
 

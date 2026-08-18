@@ -84,12 +84,22 @@
         counters  (atom {:empty 0 :hallucinated 0 :repeat 0})
 
         ;; ── stream_filter: empty turns ───────────────────────────
+        ;; Deltas seen this turn. Until the loop was fixed to read the AI SDK's
+        ;; `text` field, every chunk arrived as "" and the predicate below was
+        ;; true on the FIRST delta of every single turn — this aborted and
+        ;; re-prompted healthy responses whenever small-model was enabled. With
+        ;; real text flowing, the remaining false positive is a provider that
+        ;; opens with an empty delta, so the first event no longer counts.
+        deltas-seen (atom 0)
+
         on-stream-filter
         (fn [data _ctx]
           (let [delta (str (.-delta data))
-                chunk (str (.-chunk data))]
-            ;; Abort when stream ends with nothing (chunk="" and accumulated blank)
-            (when (and (= chunk "") (blank? delta))
+                chunk (str (.-chunk data))
+                n     (swap! deltas-seen inc)]
+            ;; Abort when the stream is still empty after it has actually
+            ;; started producing events (chunk="" and accumulated blank).
+            (when (and (> n 1) (= chunk "") (blank? delta))
               (let [n (swap! counters update :empty inc)]
                 #js {:abort  true
                      :reason "empty-turn"
@@ -141,6 +151,7 @@
         (fn [data _ctx]
           ;; Reset empty-turn counter on any successful turn
           (swap! counters assoc :empty 0)
+          (reset! deltas-seen 0)
           (let [tc (swap! state update :turn-count inc)]
             (when (>= (:turn-count tc) max-turns)
               (.sendUserMessage api
