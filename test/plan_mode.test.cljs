@@ -293,6 +293,21 @@
                         r  (pm/on-plan-provider-error api #js {:message "401 Unauthorized: invalid api key"})]
                     (-> (expect (:plan-planner-unusable @st)) (.toBe true))
                     (-> (expect (and r (.-retry r))) (.toBe true)))))
+            (it "points the RETRY at the restored model, not just config"
+                ;; st-config is re-sent as-is on retry; setModel alone would
+                ;; re-issue against the same dead planner model.
+                (fn []
+                  (let [st  (atom {:plan-mode true})
+                        api #js {:__state_atom st
+                                 :getState    (fn [] @st)
+                                 :getSettings (fn [] oc-settings)
+                                 :setModel    (fn [_m] nil)
+                                 :resolveModel (fn [p m] #js {:id (str p "/" m)})
+                                 :ui #js {:available false}}
+                        cfg #js {:model #js {:id "planner"}}
+                        _   (pm/on-plan-provider-error api #js {:message "401 unauthorized" :config cfg})]
+                    (-> (expect (.-id (.-model cfg))) (.toBe "anthropic/claude-opus-plan")))))
+
             (it "ignores a non-auth error (does not disable the planner)"
                 (fn []
                   (let [st (atom {:plan-mode true})

@@ -44,18 +44,37 @@
       {:visible? false}
       {:content r :color (themed theme :muted color-role) :visible? true})))
 
+(defn render-escalated
+  "Pure: the escalated 'provider/model' spec (or nil) → a status segment map.
+   Shows the MODEL, not a role name: escalation overrides config.model without
+   touching :active-role, so the role badge would keep showing the old role."
+  [spec & [theme]]
+  (let [s (str (or spec ""))]
+    (if (= s "")
+      {:visible? false}
+      (let [i    (.lastIndexOf s "/")
+            name (if (pos? i) (.substring s (inc i)) s)]
+        {:content (str "\u26a1 " name)
+         :color   (themed theme :warning color-accept)
+         :visible? true}))))
+
 (defn register!
   "Register the role + mode segments. `role-fn`/`mode-fn` are thunks returning
    the current model role / permission mode at render time. The render ctx
    carries {:theme}, threaded into the renderers for theme-aware colors.
    Returns a no-arg cleanup thunk."
-  [api role-fn mode-fn]
+  [api role-fn mode-fn & [esc-fn]]
   (when-let [reg (.-registerStatusSegment api)]
     (reg "model-roles.role"
          #js {:category   "role"
               :autoAppend true
               :position   "left"
               :render     (fn [ctx] (render-role (role-fn) (:theme ctx)))})
+    (reg "model-roles.escalated"
+         #js {:category   "role"
+              :autoAppend true
+              :position   "left"
+              :render     (fn [ctx] (render-escalated (when esc-fn (esc-fn)) (:theme ctx)))})
     (reg "model-roles.mode"
          #js {:category   "mode"
               :autoAppend true
@@ -64,4 +83,5 @@
   (fn []
     (when-let [unreg (.-unregisterStatusSegment api)]
       (try (unreg "model-roles.role") (catch :default _ nil))
-      (try (unreg "model-roles.mode") (catch :default _ nil)))))
+      (try (unreg "model-roles.mode") (catch :default _ nil))
+      (try (unreg "model-roles.escalated") (catch :default _ nil)))))

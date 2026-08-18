@@ -351,6 +351,20 @@ the user will approve the plan before execution begins.")
       (swap! (state-atom api) assoc :plan-planner-unusable true)
       ;; restore the :plan role's model for the retry
       (restore-role-model! api :plan)
+      ;; ...and put it where the RETRY will actually look. st-config is built
+      ;; once per outer loop iteration (loop.cljs:238) and re-sent as-is on
+      ;; retry, so setModel alone would re-issue on the same dead planner model.
+      ;; Tolerates a missing :config — tests call this handler without one.
+      (when-let [st-config (.-config data)]
+        (when-let [spec (effective-model-spec api :plan)]
+          (let [i (.indexOf (str spec) "/")]
+            (when (pos? i)
+              (try
+                (when-let [obj ((.-resolveModel api) (.substring (str spec) 0 i)
+                                                     (.substring (str spec) (inc i)))]
+                  (aset st-config "model" obj)
+                  (aset st-config "providerOptions" #js {}))
+                (catch :default _e nil))))))
       #js {:retry true})))
 
 ;; ---------------------------------------------------------------------------

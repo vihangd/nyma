@@ -5,7 +5,8 @@
             [agent.events :as events]
             [agent.extensions.model-roles.policy :as policy]
             [agent.extensions.model-roles.status-segment :as status-seg]
-            [agent.extensions.model-roles.features.plan-mode :as plan-mode]))
+            [agent.extensions.model-roles.features.plan-mode :as plan-mode]
+            [agent.extensions.model-roles.features.escalate :as escalate]))
 
 ;; Permission MODES are roles too (modes-as-roles): a role may carry a :policy
 ;; mapping a tool CATEGORY (exec|write|read|network — from categorize-tool, the
@@ -185,6 +186,7 @@
 (defn ^:export default [api]
   (let [handlers (atom [])
         plan-deactivate (atom nil)
+        esc-deactivate  (atom nil)
         seg-deactivate  (atom nil)
 
         ;; Subscribe to model_resolve — ensure config.model reflects the active role.
@@ -279,7 +281,7 @@
                                  (or (= role-name "reset") (= role-name "default"))
                                  (let [spec (plan-mode/default-model-spec api)]
                                    (.dispatch api "role-changed" {:role :default})
-                                   (swap! (.-__state-atom api) assoc :active-role :default)
+                                   (swap! (.-__state-atom api) assoc :active-role :default :escalated-to nil)
                                    (when spec (.setModel api spec))
                                    (.notify (.-ui ctx) (str "Role: default → " (or spec "default model")) "info"))
 
@@ -289,7 +291,7 @@
                                  (let [role-cfg (get roles role-name)
                                        model-id (or (:model role-cfg) (get role-cfg "model"))
                                        provider (or (:provider role-cfg) (get role-cfg "provider"))]
-                                   (swap! (.-__state-atom api) assoc :active-role role-name)
+                                   (swap! (.-__state-atom api) assoc :active-role role-name :escalated-to nil)
                                    (when (and provider model-id)
                                      (.setModel api (str provider "/" model-id)))
                                    (.notify (.-ui ctx) (str "Role: " role-name " → " provider "/" model-id)))
@@ -322,7 +324,7 @@
                (let [role-cfg (get roles next-r)
                      model-id (or (:model role-cfg) (get role-cfg "model"))
                      provider (or (:provider role-cfg) (get role-cfg "provider"))]
-                 (swap! (.-__state-atom api) assoc :active-role next-r)
+                 (swap! (.-__state-atom api) assoc :active-role next-r :escalated-to nil)
                  (when (and provider model-id)
                    (.setModel api (str provider "/" model-id)))
                  (when (.-ui api)
@@ -365,12 +367,16 @@
     ;; Native plan mode (layered on the :plan role).
     (reset! plan-deactivate (plan-mode/activate api))
 
+    ;; Escalation: stall → stronger model, provider error → next in the chain.
+    (reset! esc-deactivate (escalate/activate api))
+
     ;; Status-line segments: the model role (plain) + the permission mode
     ;; (color-coded), shown together — replaces the core inline [role].
     (reset! seg-deactivate
             (status-seg/register! api
                                   (fn [] (current-role api))
-                                  (fn [] (current-mode api))))
+                                  (fn [] (current-mode api))
+                                  (fn [] (:escalated-to (.getState api)))))
 
     ;; Cleanup
     (fn []
@@ -385,4 +391,5 @@
         (when (and (seq k) (.-unregisterShortcut api))
           (.unregisterShortcut api k)))
       (when @plan-deactivate (@plan-deactivate))
+      (when @esc-deactivate (@esc-deactivate))
       (when @seg-deactivate (@seg-deactivate)))))

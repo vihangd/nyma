@@ -511,7 +511,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
 | `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
 | `lsp_suite` | `lsp-suite` | Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics |
-| `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.) |
+| `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain |
 | `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
 | `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
 | `questionnaire` | `questionnaire` | Structured user input flows for extensions |

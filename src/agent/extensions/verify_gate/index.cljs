@@ -96,7 +96,13 @@
                          #js {:deliverAs "followUp"}))
                     ;; Cap reached and still red: stop the loop, but don't lie
                     ;; by staying silent — report without asking for edits.
-                    (do (end-episode!)
+                    ;; The exhausted signal is separate from `verify-fail` above:
+                    ;; that one fires on the FIRST red, while this gate is still
+                    ;; fixing. Only here is the worker actually out of road.
+                    (do (when (.-emitGlobal api)
+                          (.emitGlobal api "small-model/verify-exhausted"
+                                       #js {:reason "cmd" :output (shared/tail-lines output 40)}))
+                        (end-episode!)
                         ((.-sendUserMessage api)
                          (str "Verification still failing after the attempt cap (`" (:cmd cfg)
                               "` exited " exit-code "). Do NOT edit further — summarize the "
