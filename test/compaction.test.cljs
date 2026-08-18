@@ -514,6 +514,35 @@
                        {:gen-fn (gen-stub six-section)}))
     (-> (expect (mapv first @emitted)) (.toContain "compact"))))
 
+;; The pure should-compact? test passes whether or not `compact` forwards the
+;; setting — which is exactly how the ceiling stayed dead. Drive `compact`.
+(defn ^:async test-ceiling-drives-real-compaction []
+  (let [sm      (big-session)
+        emitted (atom [])
+        ;; 1M window: the percentage threshold is nowhere near. The session is
+        ;; ~90k tokens of padding, so only a configured ceiling can trigger.
+        ;; 1M window: 90k is nowhere near the 85% threshold, so only a
+        ;; configured ceiling can trigger. The window comes from the model
+        ;; registry, not from opts — a missing registry defaults to 100k, which
+        ;; 90k already exceeds and would have made this test prove nothing.
+        opts    {:gen-fn (gen-stub six-section)
+                 :model-key "test" :threshold 0.85 :reserve 0 :enabled? true
+                 :observed-usage 90000
+                 :model-registry {:context-window (fn [_k] 1000000)}}]
+    (js-await (compact sm "mock-model" (events-recording nil emitted)
+                       (assoc opts :max-working 50000)))
+    (-> (expect (mapv first @emitted)) (.toContain "compact"))))
+
+(defn ^:async test-no-ceiling-no-compaction []
+  (let [sm      (big-session)
+        emitted (atom [])
+        opts    {:gen-fn (gen-stub six-section)
+                 :model-key "test" :threshold 0.85 :reserve 0 :enabled? true
+                 :observed-usage 90000
+                 :model-registry {:context-window (fn [_k] 1000000)}}]
+    (js-await (compact sm "mock-model" (events-recording nil emitted) opts))
+    (-> (expect (mapv first @emitted)) (.not.toContain "compact"))))
+
 (defn ^:async test-does-not-recompact-immediately []
   (let [sm (big-session)]
     (js-await (compact sm "mock-model" (events-offering nil) {:gen-fn (gen-stub six-section)}))
@@ -532,6 +561,10 @@
                 (^:async fn [] (js-await (test-valid-extension-summary-is-used))))
             (it "announces the compaction on the extension-summary path"
                 (^:async fn [] (js-await (test-extension-summary-emits-compact))))
+            (it "a configured ceiling drives a real compaction"
+                (^:async fn [] (js-await (test-ceiling-drives-real-compaction))))
+            (it "without a ceiling the same session does not compact"
+                (^:async fn [] (js-await (test-no-ceiling-no-compaction))))
             (it "announces the compaction on the built-in path"
                 (^:async fn [] (js-await (test-builtin-summary-emits-compact))))
             (it "does not compact twice in a row"
