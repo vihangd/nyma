@@ -86,10 +86,24 @@
             (it "rethrows (returns nothing) once every chain entry is spent"
                 (fn []
                   (let [c   (collector)
-                        st  (atom {:model "zen/cheap-1" :escalate-tried ["mm/m2.5" "yun/opus-5"]})
+                        st  (atom {:model "zen/cheap-1"
+                                   :escalate-tried ["mm/m2.5" "yun/opus-5"]
+                                   :escalate-tried-at (js/Date.now)})
                         r   (esc/on-provider-error (fake-api st c)
                                                    #js {:message "429" :config #js {}})]
-                    (-> (expect r) (.toBeFalsy)))))))
+                    (-> (expect r) (.toBeFalsy)))))
+
+            (it "a spent chain becomes usable again once the cooldown lapses"
+                ;; a provider that 429'd an hour ago has probably recovered
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1"
+                                   :escalate-tried ["mm/m2.5" "yun/opus-5"]
+                                   :escalate-tried-at (- (js/Date.now) 3600000)})
+                        r   (esc/on-provider-error (fake-api st c)
+                                                   #js {:message "429" :config #js {}})]
+                    (-> (expect (and r (.-retry r))) (.toBe true))
+                    (-> (expect (vec @(:set-calls c))) (.toEqual ["mm/m2.5"])))))))
 
 ;; ── stall detection ───────────────────────────────────────────────────────
 (describe "escalate:stall-reason"
@@ -206,6 +220,23 @@
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBeFalsy))))
 
+(defn ^:async t-revert-restores-the-cheap-model []
+  ;; Not just clearing the slot: config.model must actually go back, or the
+  ;; session keeps spending on the expensive model silently. Settings here have
+  ;; NO :base-model-spec and NO roles.default, so a role-table lookup returns
+  ;; nil and only :escalated-from can answer.
+  (let [c   (collector)
+        bare {:roles {:advisor {:provider "yun" :model "opus-5"}}}
+        st  (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
+        api (fake-api st (assoc c :settings bare
+                                  :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+    (js-await (esc/escalate! api "stalled" false))
+    (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
+    (reset! (:set-calls c) [])
+    (esc/on-user-message api nil)
+    (-> (expect (:escalated-to @st)) (.toBeFalsy))
+    (-> (expect (vec @(:set-calls c))) (.toEqual ["zen/cheap-1"]))))
+
 (defn ^:async t-permissions-untouched []
   (let [c   (collector)
         st  (atom {:model "zen/cheap-1" :active-role "default"
@@ -247,6 +278,22 @@
                 api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
             (esc/on-turn-finalize api nil)
             (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+
+    (it "revert puts the ORIGINAL model back, not just the flag"
+        t-revert-restores-the-cheap-model)
+
+    (it "an unresolvable chain entry is skipped, not counted as a fallback"
+        ;; setModel would fire and the retry would re-run on the same model
+        ;; while the toast claimed a swap.
+        (fn []
+          (let [c   (collector)
+                bad {:roles {:default {:provider "zen" :model "cheap-1"}}
+                     :escalate {:fallback {:default ["typo-role"]}}}
+                st  (atom {:model "zen/cheap-1"})
+                r   (esc/on-provider-error (fake-api st (assoc c :settings bad))
+                                           #js {:message "429" :config #js {}})]
+            (-> (expect r) (.toBeFalsy))
+            (-> (expect (count @(:set-calls c))) (.toBe 0)))))
 
     (it "reverts on the next user request (the task is the episode)"
         (fn []

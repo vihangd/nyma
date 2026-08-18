@@ -248,9 +248,10 @@
           (prune-tail msgs (stall-note (current-spec api) reason))
           {:messages msgs :request nil})]
     (swap! st assoc
-           :messages     messages
-           :escalated-to spec
-           :escalations  (inc (or (:escalations @st) 0)))
+           :messages       messages
+           :escalated-to   spec
+           :escalated-from (current-spec api)
+           :escalations    (inc (or (:escalations @st) 0)))
     (try (.setModel api spec) (catch :default _e nil))
     (notify api (str "⚡ escalated to " spec " — " reason
                      ". /escalate off to go back.") "warning")
@@ -303,11 +304,17 @@
   "Drop back to the configured model. Also the /role hook: a manual choice must
    never be silently re-overridden on the next turn."
   [api]
-  (let [st (state-atom api)]
+  (let [st   (state-atom api)
+        ;; What we escalated FROM is the only spec guaranteed to exist. Deriving
+        ;; it from the role table can come back nil (no :base-model-spec, no
+        ;; roles.default entry), which would strand config.model on the
+        ;; expensive model for the rest of the session — the exact cost leak
+        ;; this feature promises not to have.
+        back (or (:escalated-from @st)
+                 (plan-mode/effective-model-spec api (or (:active-role @st) "default")))]
     (when (:escalated-to @st)
-      (swap! st dissoc :escalated-to)
-      (when-let [spec (plan-mode/effective-model-spec api (or (:active-role @st) "default"))]
-        (try (.setModel api spec) (catch :default _e nil)))
+      (swap! st dissoc :escalated-to :escalated-from)
+      (when back (try (.setModel api back) (catch :default _e nil)))
       true)))
 
 ;; ---------------------------------------------------------------------------
@@ -334,12 +341,20 @@
                        (when-let [e (.-error data)] (.-message e))
                        (.-error data)))
         kind  (error-kind msg)
-        chain (map (fn [e] (or (target-spec api e) (str e)))
-                   (chain-for cfg (or (:active-role s) "default")))
-        tried (conj (set (:escalate-tried s)) (str (current-spec api)))
+        chain (filter (fn [spec] (and spec (.includes (str spec) "/")))
+                      (map (fn [e] (target-spec api e))
+                           (chain-for cfg (or (:active-role s) "default"))))
+        ;; cooldown: a provider that 429'd an hour ago has probably recovered,
+        ;; so stop excluding it once the window lapses.
+        cool  (or (:cooldown-ms (:fallback cfg)) 300000)
+        fresh (and (:escalate-tried-at s)
+                   (< (- (js/Date.now) (:escalate-tried-at s)) cool))
+        tried (conj (set (when fresh (:escalate-tried s))) (str (current-spec api)))
         nxt   (next-fallback chain tried)]
     (when (and kind nxt (.-config data))
-      (swap! st assoc :escalate-tried (vec (conj tried (str nxt))))
+      (swap! st assoc
+             :escalate-tried    (vec (conj tried (str nxt)))
+             :escalate-tried-at (js/Date.now))
       (swap-model! api nxt (.-config data))
       (notify api (str "⚡ " (name kind) " on " (current-spec api)
                        " — falling back to " nxt) "warning")
