@@ -544,3 +544,37 @@ Python half is solved, which means:
      first, Terminal-Bench once Polyglot stopped discriminating.
 - Timeouts are the only variance source, and they are latency, not capability: `transpose` took 280s,
   400s and >420s across three runs of the same task.
+
+### small_model measured: 10% → 100% after two one-line shape bugs
+
+Same ten tasks, same seed, `openrouter/qwen/qwen3.6-35b-a3b` pinned to Parasail, 420s/task:
+
+| Config | Score | Breakdown | Wall | Tokens |
+|---|---|---|---|---|
+| extension OFF | 80% | 8 pass, 0 fail, 1 timeout, 1 error | 31 min | 1.8M |
+| ON, before fixes | 10% | 1 pass, 5 fail, 4 timeout | 58 min | 4.9M |
+| ON, after fixes | **100%** | 10 pass, 0 fail, **0 timeout** | **13 min** | 1.5M |
+
+The cause was `getAllTools` returning an ARRAY of names while two consumers ran `Object.keys` on it,
+producing `#{"0" "1" "2" …}`:
+
+- `quality_monitor` treated every real tool as hallucinated and replaced every tool result with a
+  scolding message listing "available tools: 0, 1, 10…".
+- `custom_provider_local` fed the same set to the tool-call rescue parser, which validates rescued
+  calls against it — so the rescue silently discarded everything, on the local models it exists for.
+
+Lessons worth keeping:
+
+- **The repeat-call fix committed just before this was unreachable code** — the hallucination branch
+  matched first, and its `:else` (which populates the signature set) never ran. A fix can be correct,
+  tested, and still dead.
+- **Its test passed because the mock was an object and production returns an array.** The harness
+  disagreed with production on exactly the value that was broken.
+- Two independent consumers made the same mistake against the same ambiguous return shape. Either
+  `getAllTools` should return one documented shape, or every consumer needs the tolerant helper both
+  now use.
+
+**Caveat on the 100%:** single trial, and the OFF baseline's misses were timeouts on tasks that pass
+in other runs — so the honest claim is "the layer is no longer harmful and is now at least at
+parity", not "+20pp". The task set is also saturated for this model again, so Part B (tool/prompt
+compression) cannot be measured here: it needs a weaker model or a harder set.

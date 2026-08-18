@@ -1,7 +1,7 @@
 {
   "harness": 1,
-  "label": "A0-smallmodel-on-after-fixes",
-  "gitSha": "49c7bb5",
+  "label": "qwen3.6-smallmodel-on",
+  "gitSha": "c89ff08",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 39,
   "role": "openrouter/qwen/qwen3.6-35b-a3b",
@@ -41,99 +41,87 @@
     {
       "total": 10,
       "attempted": 10,
-      "passed": 10,
-      "failed": 0,
-      "timeout": 0,
+      "passed": 1,
+      "failed": 5,
+      "timeout": 4,
       "error": 0,
       "skipped": 0,
-      "pct": 100
+      "pct": 10
     }
   ],
   "summary": {
-    "mean": 100,
+    "mean": 10,
     "spread": null,
     "trials": 1
   },
   "results": [
     {
       "id": "python/dot-dsl",
-      "status": "pass",
-      "durationMs": 90819,
+      "status": "fail",
+      "durationMs": 358097,
       "turns": null,
       "costUsd": 0,
-      "tokens": 192540
+      "tokens": 851285
     },
     {
       "id": "python/food-chain",
-      "status": "pass",
-      "durationMs": 62524,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 131113
+      "status": "timeout",
+      "durationMs": 420017
     },
     {
       "id": "python/grep",
-      "status": "pass",
-      "durationMs": 19767,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 112785
+      "status": "timeout",
+      "durationMs": 420021
     },
     {
       "id": "python/pig-latin",
       "status": "pass",
-      "durationMs": 146259,
+      "durationMs": 195767,
       "turns": null,
       "costUsd": 0,
-      "tokens": 153646
+      "tokens": 662578
     },
     {
       "id": "python/proverb",
-      "status": "pass",
-      "durationMs": 38407,
+      "status": "fail",
+      "durationMs": 197032,
       "turns": null,
       "costUsd": 0,
-      "tokens": 120384
+      "tokens": 588123
     },
     {
       "id": "python/scale-generator",
-      "status": "pass",
-      "durationMs": 126626,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 228381
+      "status": "timeout",
+      "durationMs": 420024
     },
     {
       "id": "python/transpose",
-      "status": "pass",
-      "durationMs": 114095,
+      "status": "fail",
+      "durationMs": 352211,
       "turns": null,
       "costUsd": 0,
-      "tokens": 183368
+      "tokens": 623463
     },
     {
       "id": "python/two-bucket",
-      "status": "pass",
-      "durationMs": 84307,
+      "status": "fail",
+      "durationMs": 406860,
       "turns": null,
       "costUsd": 0,
-      "tokens": 112591
+      "tokens": 787770
     },
     {
       "id": "python/variable-length-quantity",
-      "status": "pass",
-      "durationMs": 37234,
+      "status": "fail",
+      "durationMs": 282828,
       "turns": null,
       "costUsd": 0,
-      "tokens": 83008
+      "tokens": 1357182
     },
     {
       "id": "python/zipper",
-      "status": "pass",
-      "durationMs": 82062,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 150649
+      "status": "timeout",
+      "durationMs": 420027
     }
   ]
 }
