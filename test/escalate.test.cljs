@@ -75,6 +75,15 @@
                     (-> (expect (vec @(:set-calls c))) (.toEqual ["mm/m2.5"]))
             ;; stale thinking options from the old provider would 400 the retry
                     (-> (expect (.-thinking (.-providerOptions cfg))) (.toBeUndefined)))))
+            (it "names the model that FAILED, not the one it fell back to"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1"})
+                        api (fake-api st (assoc c :ui #js {:available true
+                                                           :notify (fn [m _l] (swap! (:notes c) conj m))}))]
+                    (esc/on-provider-error api #js {:message "429" :config #js {}})
+                    (-> (expect (first @(:notes c))) (.toContain "on zen/cheap-1")))))
+
             (it "leaves a non-retryable error alone"
                 (fn []
                   (let [c   (collector)
@@ -106,6 +115,23 @@
                     (-> (expect (vec @(:set-calls c))) (.toEqual ["mm/m2.5"])))))))
 
 ;; ── stall detection ───────────────────────────────────────────────────────
+;; A state read lagged the event payload by a turn, so escalation fired on the
+;; 4th consecutive no-op turn instead of the 3rd. auto mode so the assertion is
+;; about the count, not the prompt. Awaited: turn_finalize handlers that return
+;; a promise are awaited by the loop, which is what orders the prune before the
+;; follow-queue drain.
+(defn ^:async t-payload-count-wins []
+  (let [c    (collector)
+        auto (assoc settings :escalate {:mode "auto"})
+        st   (atom {:model "zen/cheap-1" :no-op-turns 0
+                    :messages [{:role "user" :content "fix X"}
+                               {:role "tool_call" :content "read"}]})
+        api  (fake-api st (assoc c :settings auto))]
+    (js-await (esc/on-turn-finalize api #js {:noOpTurns 3}))
+    (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
+    ;; and the request was re-delivered for the strong model to pick up
+    (-> (expect (count @(:sent c))) (.toBe 1))))
+
 (describe "escalate:stall-reason"
           (fn []
             (it "does NOT fire on a plain conversation (the false-positive case)"
@@ -124,6 +150,20 @@
                                                             {:role "assistant" :content "sure"}]}
                                                 (esc/config {})))
                       (.toBeFalsy))))
+            (it "uses the count the loop reports, not the stale state read"
+                t-payload-count-wins)
+
+            (it "a payload below the threshold escalates nothing"
+                (fn []
+                  (let [c    (collector)
+                        auto (assoc settings :escalate {:mode "auto"})
+                        st   (atom {:model "zen/cheap-1" :no-op-turns 9
+                                    :messages [{:role "user" :content "fix X"}
+                                               {:role "tool_call" :content "read"}]})
+                        api  (fake-api st (assoc c :settings auto))]
+                    (esc/on-turn-finalize api #js {:noOpTurns 1})
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+
             (it "fires at 3 no-op turns with a task in flight"
                 (fn []
                   (-> (expect (esc/stall-reason {:no-op-turns 3

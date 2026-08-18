@@ -352,31 +352,40 @@
         tried (conj (set (when fresh (:escalate-tried s))) (str (current-spec api)))
         nxt   (next-fallback chain tried)]
     (when (and kind nxt (.-config data))
-      (swap! st assoc
-             :escalate-tried    (vec (conj tried (str nxt)))
-             :escalate-tried-at (js/Date.now))
-      (swap-model! api nxt (.-config data))
-      (notify api (str "⚡ " (name kind) " on " (current-spec api)
-                       " — falling back to " nxt) "warning")
+      ;; Capture BEFORE the swap: setModel updates state, so reading it after
+      ;; reports the fallback as the model that failed.
+      (let [failed (current-spec api)]
+        (swap! st assoc
+               :escalate-tried    (vec (conj tried (str nxt)))
+               :escalate-tried-at (js/Date.now))
+        (swap-model! api nxt (.-config data))
+        (notify api (str "⚡ " (name kind) " on " failed
+                         " — falling back to " nxt) "warning"))
       (d/info "escalate" (str "failover → " nxt) #js {:kind (name kind)})
       #js {:retry true})))
 
 (defn on-turn-finalize
   "turn_finalize: the stall check. Runs before auto-compaction and before the
-   follow-queue drain, so a prune lands before anything reads the messages."
-  [api _data]
+   follow-queue drain, so a prune lands before anything reads the messages.
+   Prefers the count carried in the event payload — it is authoritative for the
+   turn that just ended."
+  [api data]
   (let [s   (cur-state api)
         cfg (config (settings api))]
     (when (and (not= (mode cfg) "off")
                (not (:escalate-disarmed s))
                (not (:plan-mode s))        ; opusplan already owns the model there
                (not (:escalated-to s)))
-      (when-let [reason (stall-reason {:no-op-turns (:no-op-turns s)
+      ;; Returned, not fired and forgotten: turn_finalize is awaited
+      ;; (emit-async awaits handlers that return promises), so returning it is
+      ;; what guarantees the prune lands BEFORE the follow-queue drain re-enters
+      ;; the loop. Dropping the promise races the prune against the next turn.
+      (when-let [reason (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
+                                                       (:no-op-turns s))
                                        :messages    (:messages s)
                                        :verify-exhausted (:escalate-verify-exhausted s)}
                                       cfg)]
-        (escalate! api reason false))))
-  nil)
+        (escalate! api reason false)))))
 
 (defn on-user-message
   "Episode boundary. The routing unit for an agent is the task, not the turn:

@@ -235,6 +235,12 @@
               ;; backoff (2s initial, 2× factor) + respect for retry-after
               ;; headers from the provider. Matches :retry :max-retries in
               ;; settings defaults.
+              ;; Tool calls this turn — a turn that runs none did no work. Bound
+              ;; HERE, not in the inner let: :onStepFinish below closes over it,
+              ;; and a binding introduced after st-config is not in that closure's
+              ;; scope (a bare ReferenceError on every step that ran a tool).
+              tools-this-turn (atom 0)
+
               st-config #js {:model           active-model
                              :system          effective-prompt
                              :messages        (clj->js messages)
@@ -278,8 +284,6 @@
           (let [turn-error (atom nil)
                 ;; One overflow recovery per turn — a second is a real error.
                 overflow-recovered? (atom false)
-                ;; Tool calls this turn — a turn that runs none did no work.
-                tools-this-turn (atom 0)
                 ;; A block is NOT a real turn outcome (no plan/answer produced) —
                 ;; flag it so turn_finalize carries error=true and the plan gate
                 ;; skips (notifies) instead of running its approval flow on the
@@ -461,20 +465,15 @@
            ;; (e.g. plan-mode's approval gate) can enqueue a follow-up that the
            ;; drain then picks up. {:error bool} lets handlers skip side effects
            ;; (e.g. auto-execute) when the turn failed.
-            (js-await ((:emit-async events) "turn_finalize"
-                                            #js {:error (or (boolean @turn-error) blocked?)}))
-
-           ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
-           ;; mid-task is documented to send the model off the rails. Skipped on
-           ;; the error path so a failed turn is not summarized as progress.
-            (when-not @turn-error
-              (js-await (compaction/maybe-auto-compact! agent)))
-
            ;; A turn that ran no tools produced text and nothing else. One is
            ;; normal (an answer, a question). A RUN of them is the signature of
            ;; the context-rot collapse: in the session that prompted this work,
            ;; 56% of turns did no work and the last 12 in a row did none, while
            ;; the user typed "continue" 44 times.
+           ;;
+           ;; Counted BEFORE turn_finalize, not after: handlers that react to a
+           ;; stall (escalation) read this on the very turn that finished, and
+           ;; updating afterwards made every one of them a turn stale.
             (when-not @turn-error
               (let [st (:state agent)]
                 (if (zero? @tools-this-turn)
@@ -486,6 +485,17 @@
                     (when (.-notify ui)
                       (.notify ui "Two turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."
                                "warning"))))))
+
+            (js-await ((:emit-async events) "turn_finalize"
+                                            #js {:error     (or (boolean @turn-error) blocked?)
+                                                 :toolCalls @tools-this-turn
+                                                 :noOpTurns (:no-op-turns @(:state agent))}))
+
+           ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
+           ;; mid-task is documented to send the model off the rails. Skipped on
+           ;; the error path so a failed turn is not summarized as progress.
+            (when-not @turn-error
+              (js-await (compaction/maybe-auto-compact! agent)))
 
             (if @turn-error
              ;; Surface the error after the gate had its chance (don't drain).
