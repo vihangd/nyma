@@ -2,7 +2,7 @@
 
 A living document for anything that's been **built but not yet wired up**, or **deliberately deferred**, so nothing falls through the cracks between sessions. Distinct from `plan-*.md` files, which are per-feature plans. This is the "don't forget" ledger.
 
-Last updated: 2026-04-20 (after LSP suite + submit-guard fixes).
+Last updated: 2026-08-18 (after escalation + /refine).
 
 ---
 
@@ -472,3 +472,30 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
   Esc-cancel downstream; a loop hook letting extensions contribute stopWhen predicates would give
   clean finishes (finishReason set, turn_finalize normal). Note: /tokens "misses" now counts only
   annotated-prefix-not-served misses (changed semantics, intentional).
+
+## 2026-08-18 — escalation + refine leftovers
+
+Landed: `/refine` (deterministic session mining), escalation (`/escalate` + provider failover in
+`model_roles/features/escalate.cljs`), and the review fixes around them. Deferred:
+
+- **Empty-turn detection is hooked where it cannot see the case it names.**
+  `quality_monitor`'s empty-turn abort rides `stream_filter`, which only fires on `text-delta`
+  parts (`loop.cljs:12-20`) — a turn that emits no text at all never reaches it. Until the
+  `textDelta`→`text` fix it was firing on the FIRST delta of every turn instead (both fields were
+  empty), so this was masked by being catastrophically wrong in the other direction. The real home
+  is the turn boundary, where `:no-op-turns` now counts correctly; moving it there trades the
+  stream-abort-and-retry capability for a follow-up message.
+- **`escalate.revert: "cooldown"` is failover-only.** The capability tier implements
+  `next-request` and `never`; a `cooldown` value at the top level would silently behave as `never`.
+  Either implement it or reject the value at config read.
+- **opusplan is invisible in the status line.** `plan_mode` swaps the planner model via `setModel`
+  while the badge renders the *role* name, so you cannot tell which model answered a planning turn.
+  Escalation added `model-roles.escalated` (a segment fed by the overridden model spec) — plan mode
+  should reuse that pattern.
+- **`escalate` defaults live in the extension, not `settings/manager.cljs`.** Deliberate (one
+  source, no drift), but it means the README's "source of truth is `defaults` in manager.cljs" note
+  does not cover this section. If a settings-section reader helper is ever extracted (see the
+  2026-07-22 leftovers), fold this in.
+- **Escalation is main-loop only.** Subagents run on their own bus with their own model objects
+  (`subagent/index.cljs:133-160`), so neither the stall trigger nor provider failover applies to a
+  child agent — the case where a cheap model flails unattended.

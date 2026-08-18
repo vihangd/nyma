@@ -442,6 +442,12 @@ Larger maps omitted above because they are long, not because they are optional:
 `roles` (11 model/permission presets), `plan-mode`, `subagent`. Read them in
 `manager.cljs`.
 
+One exception to "source of truth is `manager.cljs`": `escalate` keeps its
+defaults in the extension that owns it
+(`extensions/model_roles/features/escalate.cljs`), so there is one place to
+change rather than two to keep in sync. See
+[`model_roles`](src/agent/extensions/model_roles/README.md#escalation).
+
 Keys are accepted in either kebab-case or camelCase — `load-json` normalizes
 camelCase to kebab before merging, so `maxHeight` and `max-height` are the same
 key.
