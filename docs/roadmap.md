@@ -523,3 +523,24 @@ What the number teaches, beyond the number:
   the provider rejects ("Model north-mini-code-free is not supported") and which is absent from
   nyma's own catalogue (`custom_provider_opencode_zen/index.cljs:27-31`). Benchmarking the cheap tier
   needs that role repointed at a model that exists.
+
+### Full Python subset: 97.1% — the local loop has no headroom on this model
+
+Whole set, 34 tasks, role `build` (minimax/minimax-m2.5), 420s/task: **33 pass, 0 fail, 1 timeout**
+(`zebra-puzzle`). $0.98, 9.5M tokens, 46 min wall, median 40s/task.
+
+**Zero genuine failures across the entire subset.** The 80% sampled baseline an hour earlier was two
+tasks running out of wall clock, not two tasks the model got wrong. For minimax-m2.5, Aider-Polyglot's
+Python half is solved, which means:
+
+- The fast local loop can detect **regressions** and nothing else. Turning `small-model.enabled` on
+  and re-running it would measure nothing, because there is no room above 97%.
+- Measuring an improvement needs an un-saturated subject. In order of cost:
+  1. **A weaker model** — blocked until the `fast` role points at a model that exists.
+  2. **The local models** (`local-models` ds4 / vllm) — the population the small-model layer was
+     written for, and the one where its predicates actually fire.
+  3. **Terminal-Bench Core via Harbor** — deliberately deferred when the plan was written; this is the
+     evidence that it is now the right next investment. little-coder's own progression was Polyglot
+     first, Terminal-Bench once Polyglot stopped discriminating.
+- Timeouts are the only variance source, and they are latency, not capability: `transpose` took 280s,
+  400s and >420s across three runs of the same task.
