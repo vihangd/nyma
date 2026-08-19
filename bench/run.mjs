@@ -223,7 +223,18 @@ async function runTask(task, opts) {
       fs.mkdirSync(path.join(work, ".nyma"), { recursive: true });
       fs.copyFileSync(opts.agentSettings, path.join(work, ".nyma", "settings.json"));
     }
-    const before = fs.readFileSync(path.join(work, task.testFile), "utf8");
+    // Exercism's JS track ships every case after the first as `xtest`, for a
+    // student to unskip as they go. Graded as delivered, a solution that
+    // satisfies one assertion passes a suite of thirty — javascript/say scored
+    // a pass on 1 of 16. Activate them before hashing, so the integrity guard
+    // covers the file the run is actually graded against.
+    const testPath = path.join(work, task.testFile);
+    if (task.lang === "javascript") {
+      const spec = fs.readFileSync(testPath, "utf8");
+      const activated = spec.replace(/\bxtest\(/g, "test(").replace(/\bxit\(/g, "it(");
+      if (activated !== spec) fs.writeFileSync(testPath, activated);
+    }
+    const before = fs.readFileSync(testPath, "utf8");
 
     const [cmd, ...base] = opts.agentCmd;
     // No --max-steps flag exists (it is settings-only, default 100), so the
