@@ -1,0 +1,287 @@
+{
+  "harness": 1,
+  "label": "vllm-83set-20",
+  "gitSha": "85ab050",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "model": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    },
+    "verify": {
+      "cmd": "python3 -m unittest discover -s . -p '*_test.py'",
+      "max-attempts": 2,
+      "timeout-ms": 60000
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "javascript/beer-song",
+    "javascript/bowling",
+    "javascript/grade-school",
+    "javascript/parallel-letter-frequency",
+    "javascript/phone-number",
+    "javascript/rational-numbers",
+    "javascript/react",
+    "javascript/say",
+    "javascript/tournament",
+    "javascript/wordy",
+    "javascript/zebra-puzzle",
+    "python/book-store",
+    "python/bottle-song",
+    "python/paasio",
+    "python/phone-number",
+    "python/poker",
+    "python/pov",
+    "python/proverb",
+    "python/sgf-parsing",
+    "python/wordy"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 20,
+      "attempted": 20,
+      "passed": 10,
+      "failed": 0,
+      "timeout": 10,
+      "error": 0,
+      "skipped": 0,
+      "pct": 50
+    }
+  ],
+  "summary": {
+    "mean": 50,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/beer-song",
+      "status": "timeout",
+      "durationMs": 600382,
+      "editedStub": true,
+      "stubBytes": 950,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/bowling",
+      "status": "timeout",
+      "durationMs": 600020,
+      "editedStub": false,
+      "stubBytes": 351,
+      "wouldHavePassed": null,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/grade-school",
+      "status": "timeout",
+      "durationMs": 600404,
+      "editedStub": true,
+      "stubBytes": 1017,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/parallel-letter-frequency",
+      "status": "timeout",
+      "durationMs": 600450,
+      "editedStub": true,
+      "stubBytes": 721,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/phone-number",
+      "status": "timeout",
+      "durationMs": 600405,
+      "editedStub": true,
+      "stubBytes": 1153,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/rational-numbers",
+      "status": "timeout",
+      "durationMs": 600403,
+      "editedStub": true,
+      "stubBytes": 1906,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/react",
+      "status": "timeout",
+      "durationMs": 600392,
+      "editedStub": true,
+      "stubBytes": 2012,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/say",
+      "status": "pass",
+      "durationMs": 456461,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 275810,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 266437
+    },
+    {
+      "id": "javascript/tournament",
+      "status": "pass",
+      "durationMs": 399168,
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 306174,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 297494
+    },
+    {
+      "id": "javascript/wordy",
+      "status": "timeout",
+      "durationMs": 600397,
+      "editedStub": true,
+      "stubBytes": 1220,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/zebra-puzzle",
+      "status": "timeout",
+      "durationMs": 600367,
+      "editedStub": true,
+      "stubBytes": 4280,
+      "wouldHavePassed": true,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/book-store",
+      "status": "pass",
+      "durationMs": 335065,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 182721,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 176130
+    },
+    {
+      "id": "python/bottle-song",
+      "status": "pass",
+      "durationMs": 143505,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 199914,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 196966
+    },
+    {
+      "id": "python/paasio",
+      "status": "timeout",
+      "durationMs": 600013,
+      "editedStub": false,
+      "stubBytes": 1159,
+      "wouldHavePassed": null,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/phone-number",
+      "status": "pass",
+      "durationMs": 173167,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 224057,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 220172
+    },
+    {
+      "id": "python/poker",
+      "status": "pass",
+      "durationMs": 156829,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 179267,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 175910
+    },
+    {
+      "id": "python/pov",
+      "status": "pass",
+      "durationMs": 243869,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 159956,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 154820
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 62818,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 142749,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 141866
+    },
+    {
+      "id": "python/sgf-parsing",
+      "status": "pass",
+      "durationMs": 599832,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 319051,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 306300
+    },
+    {
+      "id": "python/wordy",
+      "status": "pass",
+      "durationMs": 373547,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 264527,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 256324
+    }
+  ]
+}

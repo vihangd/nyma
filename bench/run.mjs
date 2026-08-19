@@ -262,8 +262,13 @@ async function runTask(task, opts) {
       // whether the work was already finished. This does NOT change the score —
       // a task that could not stop did not succeed — but it separates "needs a
       // stop condition" from "needs more capability", which are different fixes.
+      // Grade the leftovers with the same integrity guard the normal path uses:
+      // a suite that passes because the agent rewrote the suite is not evidence
+      // the work was finished.
+      const tamperedTest =
+        fs.readFileSync(path.join(work, task.testFile), "utf8") !== before;
       let wouldHavePassed = null;
-      if (edited && spec) {
+      if (edited && spec && !tamperedTest) {
         const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
         wouldHavePassed = classifyTestRun(late) === STATUS.pass;
       }
@@ -271,7 +276,7 @@ async function runTask(task, opts) {
                durationMs: Date.now() - started,
                editedStub: edited,
                stubBytes: stubAfter === null ? null : stubAfter.length,
-               wouldHavePassed,
+               wouldHavePassed, tamperedTest,
                ...partial };
     }
 
