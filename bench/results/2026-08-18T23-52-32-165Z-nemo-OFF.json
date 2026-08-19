@@ -1,18 +1,14 @@
 {
   "harness": 1,
-  "label": "nemo-ON",
-  "gitSha": "b8b09f9",
+  "label": "nemo-OFF",
+  "gitSha": "6288da9",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 39,
   "role": "opencode-zen/nemotron-3.5-lightning-free",
   "model": "opencode-zen/nemotron-3.5-lightning-free",
   "modelSource": "explicit",
   "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
-  "agentSettings": {
-    "small-model": {
-      "enabled": true
-    }
-  },
+  "agentSettings": {},
   "timeoutMs": 420000,
   "seed": 7,
   "taskIds": [
@@ -33,9 +29,9 @@
       "total": 10,
       "attempted": 10,
       "passed": 5,
-      "failed": 1,
-      "timeout": 2,
-      "error": 2,
+      "failed": 0,
+      "timeout": 5,
+      "error": 0,
       "skipped": 0,
       "pct": 50
     }
@@ -49,72 +45,67 @@
     {
       "id": "python/dot-dsl",
       "status": "pass",
-      "durationMs": 155105,
+      "durationMs": 192128,
       "turns": null,
       "costUsd": 0,
-      "tokens": 1404280
+      "tokens": 696217
     },
     {
       "id": "python/food-chain",
-      "status": "pass",
-      "durationMs": 51885,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 186841
+      "status": "timeout",
+      "durationMs": 420028
     },
     {
       "id": "python/grep",
-      "status": "timeout",
-      "durationMs": 420059
+      "status": "pass",
+      "durationMs": 312145,
+      "turns": null,
+      "costUsd": 0,
+      "tokens": 5910724
     },
     {
       "id": "python/pig-latin",
       "status": "timeout",
-      "durationMs": 420013
+      "durationMs": 420010
     },
     {
       "id": "python/proverb",
       "status": "pass",
-      "durationMs": 49479,
+      "durationMs": 38618,
       "turns": null,
       "costUsd": 0,
-      "tokens": 200243
+      "tokens": 96343
     },
     {
       "id": "python/scale-generator",
-      "status": "error",
-      "reason": "agent: Error: Streaming response failed: [504] Upstream idle timeout exceeded",
-      "durationMs": 328054
+      "status": "timeout",
+      "durationMs": 420024
     },
     {
       "id": "python/transpose",
-      "status": "error",
-      "reason": "agent: Error: Streaming response failed: [504] Upstream idle timeout exceeded",
-      "durationMs": 329503
+      "status": "timeout",
+      "durationMs": 420024
     },
     {
       "id": "python/two-bucket",
-      "status": "fail",
-      "durationMs": 196866,
-      "turns": null,
-      "costUsd": 0,
-      "tokens": 44457
+      "status": "timeout",
+      "durationMs": 420011
     },
     {
       "id": "python/variable-length-quantity",
       "status": "pass",
-      "durationMs": 162456,
+      "durationMs": 47171,
       "turns": null,
       "costUsd": 0,
-      "tokens": 178640
+      "tokens": 147346
     },
     {
       "id": "python/zipper",
       "status": "pass",
-      "durationMs": 181242,
+      "durationMs": 195942,
       "turns": null,
       "costUsd": 0,
-      "tokens": 352498
+      "tokens": 2380461
     }
   ]
 }

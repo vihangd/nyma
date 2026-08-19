@@ -578,3 +578,55 @@ Lessons worth keeping:
 in other runs — so the honest claim is "the layer is no longer harmful and is now at least at
 parity", not "+20pp". The task set is also saturated for this model again, so Part B (tool/prompt
 compression) cannot be measured here: it needs a weaker model or a harder set.
+
+### The small-model layer helps the capable model, not the flaky one
+
+Same ten tasks, seed 7, 420s/task, after the getAllTools fixes:
+
+| Model | OFF | ON |
+|---|---|---|
+| `openrouter/qwen/qwen3.6-35b-a3b` (pinned) | 80% (8 pass, 1 timeout, 1 error) | **100%** (10 pass), 13 min, 1.5M tokens |
+| `opencode-zen/nemotron-3.5-lightning-free` | 50% (5 pass, **5 timeout**), 48 min | 50% (5 pass, 1 fail, 2 timeout, **2 provider 504**), 38 min |
+
+Nemotron's score did not move, but the failure composition did: five of our own 420s timeouts became two
+timeouts, two upstream 504s ("Streaming response failed: [504] Upstream idle timeout exceeded") and one
+wrong answer. Two of the four non-passes are the provider dropping a quiet stream, not the scaffold.
+Single trial; treat the equality as "no measurable effect on this model", not as proof of none.
+
+Standing conclusions for timeout work:
+
+- **Timeouts are the dominant failure for weak models, and they are not all ours.** Our 420s cap,
+  opencode-zen's upstream idle timeout, the provider's own request timeout and per-tool timeouts are
+  four unsynchronised clocks. The 504s are only visible at all because the runner now records a reason.
+- **Token grinding is real**: on the OFF baseline `grep` PASSED while burning 5.9M tokens, `zipper`
+  2.4M. ProjDevBench reports ~4.81M tokens per problem at *project* level; these are 40-line katas.
+- **`quality-monitor.max-turns` is the reminder without the cap.** It nags "summarise and stop" every
+  turn past 40 and never stops anything. [More with Less](https://arxiv.org/html/2510.16786) measures
+  the shape that works: a fixed cap at the 75th percentile of that model's own baseline turn count cuts
+  cost 23-68% for 0-5% accuracy, and a dynamic cap (start at the 25th, one-time extension to the 50th)
+  saves a further 12-24% at equal or better solve rates — with "you have N turns left" reminders.
+- **[BAGEN](https://arxiv.org/html/2606.00198v1)**: agents are systematically optimistic about
+  remaining budget (>70% confidence after burning 60%), but acting on a self-declared "impossible"
+  saves 28-64% of tokens on failed trajectories for 1.6-4.2pp of success.
+- **[Timely Machine](https://arxiv.org/pdf/2601.16486)**: time awareness alone is modest; awareness
+  coupled to a real cap is what changes behaviour. So do not ship the injection without the budget.
+- Setting percentile-based caps needs per-model turn counts, and **print mode does not report a turn
+  count at all** — that is the first blocker.
+
+### Prompt caching: the untested lever, and a number nyma reports as a lie
+
+[Don't Break the Cache](https://arxiv.org/pdf/2601.06007) names three cache killers: system prompts
+modified between turns, unstable message formatting, dynamic tool definitions. nyma does all three —
+`lsp_suite` diagnostics, `repo_map` (`reindex-on-edit`), `todos`, `memory`, `handoff`, `evidence`,
+`self_tune`, `knowledge_inject`, `add_dir`, `bash_suite` and `context_folding` all append to the
+**system prompt**, which is the cached prefix (`loop.cljs:117-128`), and `profiles`/`plan_mode`/
+`token_suite` reshape the tool list per turn. Reported hit rates elsewhere: Claude Code 92.7%,
+OpenClaw 23.8%; typical savings 40-55% of input cost.
+
+**`print.cljs:70` hardcodes `cache_read_input_tokens: 0`** in the result object while `loop.cljs:424`
+reads the real figure. So the benchmark cannot see cache activity at all, and any `-p --output-format
+json` consumer is told there is none. Fix that before drawing any conclusion about caching.
+
+Design constraint this puts on the timeout work: an elapsed/remaining line injected into the SYSTEM
+prompt every turn would break the cache on every turn. Volatile content goes after the cache
+breakpoint, at the end of the messages.

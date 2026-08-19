@@ -72,13 +72,23 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
+    // SIGKILL discards everything the agent was about to report — a timed-out
+    // task recorded no tokens, no cost and no hint of what it was doing. Ask
+    // first, insist after: SIGTERM lets print mode flush its result object,
+    // SIGKILL follows if it does not.
+    let hardTimer = null;
     const timer = timeoutMs
-      ? setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs)
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+          hardTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
+        }, timeoutMs)
       : null;
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
       resolve({ exitCode: code, stdout, stderr, timedOut });
     });
     child.on("error", (e) => {
@@ -88,6 +98,10 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
     if (input !== undefined) { child.stdin.write(input); }
     child.stdin.end();
   });
+}
+
+function readIfExists(p) {
+  try { return fs.readFileSync(p, "utf8"); } catch { return null; }
 }
 
 function copyTask(task, dest) {
@@ -195,11 +209,24 @@ async function runTask(task, opts) {
           NYMA_BENCH_META: path.join(task.dir, ".meta") }
       : process.env;
 
+    const stubPath = path.join(work, task.stub);
+    const stubBefore = fs.readFileSync(stubPath, "utf8");
+
     const agent = await run(cmd, agentArgs, {
       cwd: work, timeoutMs: opts.timeoutMs, env: agentEnv,
     });
     if (agent.timedOut) {
-      return { id: task.id, status: STATUS.timeout, durationMs: Date.now() - started };
+      // A timeout is not one failure mode. "Never touched the file" and "wrote a
+      // solution but kept going" want opposite fixes, and the old record could
+      // not tell them apart.
+      const stubAfter = readIfExists(stubPath);
+      const edited = stubAfter !== null && stubAfter !== stubBefore;
+      const partial = parseUsage(agent.stdout);
+      return { id: task.id, status: STATUS.timeout,
+               durationMs: Date.now() - started,
+               editedStub: edited,
+               stubBytes: stubAfter === null ? null : stubAfter.length,
+               ...partial };
     }
 
     // An agent that never ran is not an agent that got it wrong.
