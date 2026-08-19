@@ -65,10 +65,17 @@
                            :else text)
          :session_id     (str (session-id agent))
          :total_cost_usd (or (:total-cost st) 0)
-         :usage          #js {:input_tokens            inp
-                              :output_tokens           out
-                              :cache_read_input_tokens 0
-                              :total_tokens            (+ inp out)}
+         ;; num_turns and the cache figures were absent or hardcoded to zero.
+         ;; Both are now read from the store: the cache split is the biggest
+         ;; cost lever there is, and a turn count is what a turn budget has to
+         ;; be calibrated against.
+         :num_turns      (or (:total-steps st) 0)
+         :num_runs       (or (:turn-count st) 0)
+         :usage          #js {:input_tokens                inp
+                              :output_tokens               out
+                              :cache_read_input_tokens     (or (:total-cache-read-tokens st) 0)
+                              :cache_creation_input_tokens (or (:total-cache-write-tokens st) 0)
+                              :total_tokens                (+ inp out)}
          :duration_ms    duration-ms}))
 
 (defn ^:async start-result

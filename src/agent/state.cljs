@@ -52,11 +52,23 @@
    :messages-cleared (fn [state _data] (assoc state :messages []))
    :tools-changed    (fn [state data] (assoc state :active-tools (:active-tools data)))
    :model-changed    (fn [state data] (assoc state :model (:model data)))
+   ;; Cache tokens are accumulated alongside the rest because they are the
+   ;; single largest cost lever on an agent loop and nothing was keeping a
+   ;; session total: the loop read them per turn for costing and dropped them,
+   ;; so `-p --output-format json` reported cache_read_input_tokens: 0 forever.
+   ;; NB input-tokens already INCLUDES cache reads and writes; these are a
+   ;; breakdown of that number, not an addition to it.
    :usage-updated    (fn [state data]
                        (-> state
                            (update :total-input-tokens (fnil + 0) (:input-tokens data))
                            (update :total-output-tokens (fnil + 0) (:output-tokens data))
+                           (update :total-cache-read-tokens (fnil + 0) (or (:cache-read-tokens data) 0))
+                           (update :total-cache-write-tokens (fnil + 0) (or (:cache-write-tokens data) 0))
                            (update :total-cost (fnil + 0.0) (:cost data))
+                           (update :total-steps (fnil + 0) (or (:steps data) 0))
+                           ;; NB counts RUNS, not model steps — usage is
+                           ;; dispatched once per run from result.totalUsage.
+                           ;; :total-steps is the per-step figure.
                            (update :turn-count (fnil inc 0))))
    :tool-execution-started (fn [state data]
                              (update state :active-executions (fnil conj #{}) (:exec-id data)))

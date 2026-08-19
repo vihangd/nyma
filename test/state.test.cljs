@@ -154,3 +154,33 @@
         (let [tc (:tool-calls ((:get-state store)))]
           (-> (expect (:status (get tc "a"))) (.toBe "done"))
           (-> (expect (:status (get tc "b"))) (.toBe "running"))))))))
+
+;; ── usage: the cache split ────────────────────────────────────────
+;; The loop read cacheReadTokens per turn for costing and then dropped them, so
+;; nothing kept a session total and `-p --output-format json` reported
+;; cache_read_input_tokens: 0 for every session ever run. Cache hit rate is the
+;; single largest cost lever on an agent loop; it has to be countable.
+(describe "state/usage-updated cache accounting"
+          (fn []
+            (it "accumulates cache reads and writes across turns"
+                (fn []
+                  (let [store (create-agent-store {})]
+                    ((:dispatch! store) :usage-updated
+                                        {:input-tokens 1000 :output-tokens 50
+                                         :cache-read-tokens 800 :cache-write-tokens 120 :cost 0.01})
+                    ((:dispatch! store) :usage-updated
+                                        {:input-tokens 1200 :output-tokens 60
+                                         :cache-read-tokens 1100 :cache-write-tokens 0 :cost 0.01})
+                    (let [st ((:get-state store))]
+                      (-> (expect (:total-cache-read-tokens st)) (.toBe 1900))
+                      (-> (expect (:total-cache-write-tokens st)) (.toBe 120))
+                      ;; input already includes them — a breakdown, not an addition
+                      (-> (expect (:total-input-tokens st)) (.toBe 2200))
+                      (-> (expect (:turn-count st)) (.toBe 2))))))
+
+            (it "treats a provider that reports no cache detail as zero, not nil"
+                (fn []
+                  (let [store (create-agent-store {})]
+                    ((:dispatch! store) :usage-updated
+                                        {:input-tokens 100 :output-tokens 10 :cost 0})
+                    (-> (expect (:total-cache-read-tokens ((:get-state store)))) (.toBe 0)))))))

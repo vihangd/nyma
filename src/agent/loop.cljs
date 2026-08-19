@@ -240,6 +240,8 @@
               ;; and a binding introduced after st-config is not in that closure's
               ;; scope (a bare ReferenceError on every step that ran a tool).
               tools-this-turn (atom 0)
+              ;; Model steps this run (tool call + response cycles).
+              steps-this-run  (atom 0)
 
               st-config #js {:model           active-model
                              :system          effective-prompt
@@ -262,6 +264,16 @@
                                                   #js {})
                              :onError         (fn [e] (throw (.-error e)))
                              :onStepFinish    (fn [step]
+                                                ;; Steps, not runs. `:turn-count`
+                                                ;; in the store counts agent
+                                                ;; invocations because usage is
+                                                ;; dispatched once from
+                                                ;; result.totalUsage — so it
+                                                ;; reads 1 for a whole -p task
+                                                ;; and cannot calibrate a turn
+                                                ;; budget. This is the number a
+                                                ;; budget is measured in.
+                                                (swap! steps-this-run inc)
                                                 (when-let [u (.-usage step)]
                                                   (swap! step-usage
                                                          (fn [t] (-> t
@@ -431,7 +443,10 @@
                                                 :cache-read-tokens  cache-read
                                                 :cache-write-tokens cache-write})]
                             ((:dispatch! store) :usage-updated
-                                                {:input-tokens input-tokens :output-tokens output-tokens :cost cost})
+                                                {:input-tokens input-tokens :output-tokens output-tokens
+                                                 :cache-read-tokens cache-read :cache-write-tokens cache-write
+                                                 :steps @steps-this-run
+                                                 :cost cost})
                           ;; Ground truth for the compaction trigger: what the
                           ;; PROVIDER counted, not what we estimated. The estimate
                           ;; walks the whole session tree, while what is actually

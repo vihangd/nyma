@@ -289,6 +289,11 @@ function parseUsage(stdout) {
         ? (j.usage.total_tokens
            ?? (j.usage.input_tokens ?? 0) + (j.usage.output_tokens ?? 0))
         : null,
+      // Cache hit rate is the largest cost lever on an agent loop, and until
+      // print mode stopped hardcoding zero there was no way to see it.
+      cacheRead: j.usage?.cache_read_input_tokens ?? null,
+      cacheWrite: j.usage?.cache_creation_input_tokens ?? null,
+      inputTokens: j.usage?.input_tokens ?? null,
     };
   } catch { return { turns: null, costUsd: null, tokens: null }; }
 }
