@@ -1,71 +1,62 @@
 {
   "harness": 1,
-  "label": "vllm-longcap",
-  "gitSha": "d3561d7",
-  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
-  "extensionCount": 39,
+  "label": "js-ctl",
+  "gitSha": "d8ab98b",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/bench/stub-agent.mjs",
+  "extensionCount": null,
   "ablation": null,
   "envVars": null,
-  "role": "vllm/unsloth/Qwen3.8-27B-NVFP4",
-  "model": "vllm/unsloth/Qwen3.8-27B-NVFP4",
-  "modelSource": "explicit",
+  "role": null,
+  "model": "(agent default)",
+  "modelSource": "agent default",
   "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
-  "agentSettings": {
-    "small-model": {
-      "enabled": true
-    },
-    "verify": {
-      "cmd": "python3 -m unittest discover -s . -p '*_test.py'",
-      "max-attempts": 2,
-      "timeout-ms": 60000
-    }
-  },
-  "timeoutMs": 1200000,
+  "agentSettings": null,
+  "timeoutMs": 300000,
   "seed": 7,
   "taskIds": [
-    "python/transpose",
-    "python/two-bucket"
+    "javascript/bowling",
+    "javascript/wordy"
   ],
   "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
   "trials": [
     {
       "total": 2,
       "attempted": 2,
-      "passed": 2,
-      "failed": 0,
+      "passed": 0,
+      "failed": 2,
       "timeout": 0,
       "error": 0,
       "skipped": 0,
-      "pct": 100
+      "pct": 0
     }
   ],
   "summary": {
-    "mean": 100,
+    "mean": 0,
     "spread": null,
     "trials": 1
   },
   "results": [
     {
-      "id": "python/transpose",
-      "status": "pass",
-      "durationMs": 395677,
-      "turns": 5,
+      "id": "javascript/bowling",
+      "status": "fail",
+      "durationMs": 546,
+      "turns": 1,
       "costUsd": 0,
-      "tokens": 126545,
-      "cacheRead": 0,
-      "cacheWrite": 0,
-      "inputTokens": 117754
+      "tokens": 0,
+      "cacheRead": null,
+      "cacheWrite": null,
+      "inputTokens": 0
     },
     {
-      "id": "python/two-bucket",
-      "status": "pass",
-      "durationMs": 232759,
-      "turns": 5,
+      "id": "javascript/wordy",
+      "status": "fail",
+      "durationMs": 538,
+      "turns": 1,
       "costUsd": 0,
-      "tokens": 114237,
-      "cacheRead": 0,
-      "cacheWrite": 0,
-      "inputTokens": 109399
+      "tokens": 0,
+      "cacheRead": null,
+      "cacheWrite": null,
+      "inputTokens": 0
     }
   ]
 }

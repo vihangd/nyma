@@ -37,20 +37,31 @@ const LANG_SPEC = {
   javascript: {
     stub: (name) => `${dashed(name)}.js`,
     test: (name) => `${dashed(name)}.spec.js`,
-    cmd: ["npm", "test", "--silent"],
+    // npx runs the jest binary from the shared toolchain; every one of the 49
+    // exercises declares an identical devDependency set, so one install serves
+    // all of them instead of 49 separate node_modules trees.
+    cmd: null,   // built lazily by langSpec: TOOLCHAIN is defined below
     probe: ["node", "--version"],
-    // jest + babel per exercise, and each exercise carries its own package.json.
-    // Runnable, but only after an install the runner will not do behind your
-    // back — tasks are skipped (never failed) until node_modules exists.
     needsInstall: true,
   },
 };
+
+// One shared install for all JavaScript exercises: bench/js-toolchain.
+export const TOOLCHAIN = path.join(import.meta.dirname, "js-toolchain");
+export const toolchainReady = () => fs.existsSync(path.join(TOOLCHAIN, "node_modules"));
 
 const snake = (s) => s.replace(/-/g, "_");
 const dashed = (s) => s;
 
 export function langSpec(lang) {
-  return LANG_SPEC[lang] ?? null;
+  const spec = LANG_SPEC[lang];
+  if (!spec) return null;
+  // jest comes from the shared toolchain rather than a per-exercise install.
+  if (lang === "javascript" && !spec.cmd) {
+    spec.cmd = [path.join(TOOLCHAIN, "node_modules", ".bin", "jest"),
+                "--silent", "--rootDir", "."];
+  }
+  return spec;
 }
 
 // ── discovery ─────────────────────────────────────────────────────────────
@@ -81,7 +92,7 @@ export function discoverTasks(tasksDir, langs = RUNNABLE_LANGS) {
         needsInstall: Boolean(spec?.needsInstall),
         runnable: Boolean(
           spec && testFile && fs.existsSync(path.join(dir, testFile)) &&
-          (!spec.needsInstall || fs.existsSync(path.join(dir, "node_modules")))),
+          (!spec.needsInstall || toolchainReady())),
       });
     }
   }

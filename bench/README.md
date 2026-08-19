@@ -24,8 +24,22 @@ git clone --depth 1 https://github.com/Aider-AI/polyglot-benchmark bench/tasks
 
 `bench/tasks/` is gitignored — nothing is vendored. Python exercises need only a
 `python3`: all 34 use stdlib `unittest`, so there is nothing to install.
-JavaScript exercises each carry their own jest + babel `package.json`; until you
-run `npm install` in one, it is reported **skipped**, never failed.
+
+JavaScript needs one install, not 49. All 49 exercises declare an identical
+devDependency set, so the toolchain is installed once in `bench/js-toolchain/`
+and symlinked into each working copy:
+
+```bash
+cd bench/js-toolchain && npm install
+```
+
+The symlink matters: babel resolves presets relative to the config file, which
+lives in the working copy, so without a local `node_modules` every JS task fails
+with `Cannot find module '@exercism/babel-preset-javascript'` — which the stub
+agent caught immediately. Until the toolchain is installed, JS tasks are
+reported **skipped**, never failed.
+
+Runnable set: **83 tasks** (34 Python + 49 JavaScript).
 
 ## Running
 

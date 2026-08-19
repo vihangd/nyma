@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import {
   STATUS, discoverTasks, selectTasks, readInstructions, langSpec,
   classifyTestRun, aggregate, summarizeTrials, diffRuns, checkAgentBuild, agentFailure,
-  agentScriptPath, isDistEntry, EXCLUDED_FROM_COPY,
+  agentScriptPath, isDistEntry, EXCLUDED_FROM_COPY, TOOLCHAIN, toolchainReady,
 } from "./scoring.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -92,7 +92,15 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
       ? setTimeout(() => {
           timedOut = true;
           killTree(child, "SIGTERM");
-          hardTimer = setTimeout(() => killTree(child, "SIGKILL"), 5000);
+          hardTimer = setTimeout(() => {
+            killTree(child, "SIGKILL");
+            // Resolve on our own schedule. 'close' waits for every inherited
+            // stdio handle, and a grandchild that escapes the process group can
+            // hold it open for minutes — tasks with a 420s cap were measured at
+            // 1119s and 1992s. The status is already decided; waiting only
+            // corrupts the duration and stalls the queue.
+            setTimeout(() => resolve({ exitCode: null, stdout, stderr, timedOut: true }), 2000);
+          }, 5000);
         }, timeoutMs)
       : null;
     child.stdout.on("data", (d) => { stdout += d; });
@@ -197,6 +205,16 @@ async function runTask(task, opts) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), `nyma-bench-${task.name}-`));
   try {
     copyTask(task, work);
+    // Babel resolves presets relative to the config file, i.e. the working copy,
+    // which has no node_modules of its own. One symlink to the shared toolchain
+    // makes jest and @exercism/babel-preset-javascript resolvable without 49
+    // separate installs.
+    if (task.needsInstall && toolchainReady()) {
+      try {
+        fs.symlinkSync(path.join(TOOLCHAIN, "node_modules"),
+                       path.join(work, "node_modules"), "dir");
+      } catch { /* already there */ }
+    }
     // Project settings resolve from the agent's CWD, which is this temp copy —
     // the repo's own .nyma/settings.json never applies to a bench run. Writing
     // them here is what makes per-run config (backend routing, extension
