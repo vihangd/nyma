@@ -28,7 +28,7 @@ function parseArgs(argv) {
   const a = { count: 20, seed: 7, label: "run", trials: 1, timeoutMs: 300000,
               maxSteps: 40, only: null, model: null, agentCmd: null, diff: null,
               tasksDir: path.join(ROOT, "bench", "tasks"), keep: false,
-              agentSettings: null };
+              agentSettings: null, noBuiltinExt: false, envVars: {} };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], next = () => argv[++i];
     if (k === "--count") a.count = Number(next());
@@ -45,6 +45,10 @@ function parseArgs(argv) {
     else if (k === "--all") a.count = null;
     else if (k === "--keep") a.keep = true;
     else if (k === "--agent-settings") a.agentSettings = next();
+    // Deliberately strip the agent for an ablation. Recorded in the result so a
+    // number from a 2-extension agent can never be read as a normal run.
+    else if (k === "--no-builtin-ext") a.noBuiltinExt = true;
+    else if (k === "--env") { const [ek, ...rest] = next().split("="); a.envVars[ek] = rest.join("="); }
     else if (k === "--help" || k === "-h") a.help = true;
   }
   return a;
@@ -61,6 +65,9 @@ const HELP = `bench/run.mjs — Aider-Polyglot subset runner
   --timeout-ms N   wall-clock cap per task (default 300000)
   --agent-cmd CMD  override the agent (used by the stub-agent dry run)
   --keep           keep each task's working dir for inspection
+  --no-builtin-ext ABLATION: run with NYMA_NO_BUILTIN_EXT=1 (12 native tools,
+                   no extension prompt injectors). Recorded in the result file.
+  --env K=V        extra env var for the agent process (repeatable)
   --agent-settings F  JSON written to <task>/.nyma/settings.json for the run,
                    so a config can be A/B'd without touching your own settings
   --diff A B       print what changed between two result files and exit
@@ -203,11 +210,11 @@ async function runTask(task, opts) {
     // var naming the answer-key directory is a leak, whether or not a given
     // model happens to look at it.
     const agentEnv = opts.isStub
-      ? { ...process.env,
+      ? { ...process.env, ...opts.envVars,
           NYMA_BENCH_STUB_FILE: path.join(work, task.stub),
           NYMA_BENCH_TEST_FILE: path.join(work, task.testFile),
           NYMA_BENCH_META: path.join(task.dir, ".meta") }
-      : process.env;
+      : { ...process.env, ...opts.envVars };
 
     const stubPath = path.join(work, task.stub);
     const stubBefore = fs.readFileSync(stubPath, "utf8");
@@ -327,7 +334,11 @@ async function main() {
   opts.isStub = isStub;
 
   let build = { ok: true, extensionCount: null, stub: isStub };
-  if (!isStub) {
+  if (opts.noBuiltinExt) {
+    opts.envVars.NYMA_NO_BUILTIN_EXT = "1";
+    build = { ok: true, extensionCount: 0, ablation: "no-builtin-ext" };
+    console.log("ABLATION: built-in extensions disabled — not a normal run");
+  } else if (!isStub) {
     build = verifyAgent(agentCmd);
     if (!build.ok) {
       console.error(`Refusing to benchmark: ${build.reason}`);
@@ -373,6 +384,8 @@ async function main() {
     gitSha,
     agent: agentCmd.join(" "),
     extensionCount: build.extensionCount ?? null,
+    ablation: build.ablation ?? null,
+    envVars: Object.keys(opts.envVars).length ? opts.envVars : null,
     role: opts.model ?? null,
     model: opts.modelSpec ?? "(agent default)",
     modelSource: resolved.source,

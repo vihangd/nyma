@@ -1,9 +1,13 @@
 {
   "harness": 1,
-  "label": "cache-probe2",
-  "gitSha": "d554d0b",
+  "label": "ablate-no-ext",
+  "gitSha": "53cb757",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
-  "extensionCount": 39,
+  "extensionCount": 0,
+  "ablation": "no-builtin-ext",
+  "envVars": {
+    "NYMA_NO_BUILTIN_EXT": "1"
+  },
   "role": "openrouter/qwen/qwen3.6-35b-a3b",
   "model": "openrouter/qwen/qwen3.6-35b-a3b",
   "modelSource": "explicit",
@@ -29,30 +33,25 @@
     {
       "total": 1,
       "attempted": 1,
-      "passed": 1,
+      "passed": 0,
       "failed": 0,
       "timeout": 0,
-      "error": 0,
+      "error": 1,
       "skipped": 0,
-      "pct": 100
+      "pct": 0
     }
   ],
   "summary": {
-    "mean": 100,
+    "mean": 0,
     "spread": null,
     "trials": 1
   },
   "results": [
     {
       "id": "python/wordy",
-      "status": "pass",
-      "durationMs": 70992,
-      "turns": 11,
-      "costUsd": 0,
-      "tokens": 258823,
-      "cacheRead": 195360,
-      "cacheWrite": 0,
-      "inputTokens": 252669
+      "status": "error",
+      "reason": "agent: Error: No model configured. Set ANTHROPIC_API_KEY or configure a provider via /login",
+      "durationMs": 338
     }
   ]
 }

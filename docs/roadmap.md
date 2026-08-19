@@ -630,3 +630,48 @@ json` consumer is told there is none. Fix that before drawing any conclusion abo
 Design constraint this puts on the timeout work: an elapsed/remaining line injected into the SYSTEM
 prompt every turn would break the cache on every turn. Volatile content goes after the cache
 breakpoint, at the end of the messages.
+
+### Cache hit rate: measured 76-88%, and the suspects were all innocent
+
+`print.cljs` hardcoded `cache_read_input_tokens: 0`, so this had never been looked at. With it wired:
+
+| Config (python/wordy, qwen3.6-35b-a3b pinned) | steps | hit rate |
+|---|---|---|
+| baseline | 11 | 77.3% |
+| via headroom proxy (CacheAligner + compression) | 11 | 76.4% |
+| baseline, repeat | 13 | 88.0% |
+
+Three hypotheses tested and dropped:
+
+1. **Headroom proxy mode does not help here.** It compressed 11 of 12 requests at **4.2% average** (its
+   README advertises 47-92% on search results and logs; our context is code and test output already
+   pruned by token_suite) and reported `cache_savings_usd: 0.0`. Its CacheAligner normalises
+   Anthropic-style `cache_control` breakpoints; OpenRouter's caching here is provider-side at Parasail
+   and not ours to align.
+2. **Compaction is not invalidating the prefix.** 650 compaction lines in the debug log look alarming
+   until you bucket them: exactly 11 per minute, at times matching `bun test` runs. They are the
+   compaction test suite. Zero real-session compactions.
+3. **The eleven system-prompt injectors are unproven as a cause.** The blunt ablation
+   (`NYMA_NO_BUILTIN_EXT=1`) cannot answer it — provider extensions die with them and the agent has no
+   model at all ("No model configured"). A targeted ablation needs per-extension disable, which nyma
+   does not have.
+
+Run-to-run variance (77.3 vs 88.0 on identical config) is larger than any effect measured so far, so
+nothing below ~10pp is worth acting on without `--trials 3`. And 76-88% may simply be the ceiling for
+an 11-step task: what cannot be cached is each turn's new tool output, and Claude Code's 92.7% comes
+from far longer sessions where the cached prefix dwarfs the new content.
+
+### On "matching little-coder"
+
+Not comparable yet, and no amount of tuning fixes that. Their 45.56% (Qwen3.5-9B) and 78.67%
+(Qwen3.6-35B-A3B) are the **full 225-task Aider Polyglot set across six languages**. Ours is a
+10-task Python sample on which qwen3.6-35b-a3b already scores 80-100%. To make the numbers mean the
+same thing:
+
+- **Python**: 34 tasks, runnable now (stdlib unittest, no install).
+- **JavaScript**: 49 tasks, needs `npm install` per exercise (jest + babel).
+- **Go, Java, C++**: toolchains present on this machine — adapter work only.
+- **Rust**: `rustc` MISSING — install or skip and say so.
+
+That is the honest next step for comparability: expand the runnable set, not tune against a saturated
+subset.
