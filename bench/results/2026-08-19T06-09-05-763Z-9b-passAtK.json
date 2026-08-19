@@ -1,0 +1,165 @@
+{
+  "harness": 1,
+  "label": "9b-passAtK",
+  "gitSha": "9fee143",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    },
+    "verify": {
+      "cmd": "python3 -m unittest discover -s . -p '*_test.py'",
+      "max-attempts": 3,
+      "timeout-ms": 60000
+    }
+  },
+  "timeoutMs": 420000,
+  "seed": 7,
+  "taskIds": [
+    "python/transpose",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 2,
+      "attempted": 2,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 0
+    },
+    {
+      "total": 2,
+      "attempted": 2,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 0
+    },
+    {
+      "total": 2,
+      "attempted": 2,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 1,
+      "error": 0,
+      "skipped": 0,
+      "pct": 50
+    }
+  ],
+  "summary": {
+    "mean": 16.7,
+    "spread": 25,
+    "trials": 3
+  },
+  "results": [
+    {
+      "id": "python/transpose",
+      "status": "timeout",
+      "durationMs": 420099,
+      "editedStub": true,
+      "stubBytes": 2839,
+      "wouldHavePassed": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/zipper",
+      "status": "timeout",
+      "durationMs": 1991506,
+      "editedStub": true,
+      "stubBytes": 2677,
+      "wouldHavePassed": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ],
+  "allTrialResults": [
+    [
+      {
+        "id": "python/transpose",
+        "status": "timeout",
+        "durationMs": 420099,
+        "editedStub": true,
+        "stubBytes": 2839,
+        "wouldHavePassed": false,
+        "turns": null,
+        "costUsd": null,
+        "tokens": null
+      },
+      {
+        "id": "python/zipper",
+        "status": "timeout",
+        "durationMs": 1991506,
+        "editedStub": true,
+        "stubBytes": 2677,
+        "wouldHavePassed": false,
+        "turns": null,
+        "costUsd": null,
+        "tokens": null
+      }
+    ],
+    [
+      {
+        "id": "python/transpose",
+        "status": "timeout",
+        "durationMs": 420080,
+        "editedStub": true,
+        "stubBytes": 994,
+        "wouldHavePassed": false,
+        "turns": null,
+        "costUsd": null,
+        "tokens": null
+      },
+      {
+        "id": "python/zipper",
+        "status": "timeout",
+        "durationMs": 420076,
+        "editedStub": true,
+        "stubBytes": 3311,
+        "wouldHavePassed": false,
+        "turns": null,
+        "costUsd": null,
+        "tokens": null
+      }
+    ],
+    [
+      {
+        "id": "python/transpose",
+        "status": "pass",
+        "durationMs": 158948,
+        "turns": 18,
+        "costUsd": 0,
+        "tokens": 510175,
+        "cacheRead": 312048,
+        "cacheWrite": 0,
+        "inputTokens": 497684
+      },
+      {
+        "id": "python/zipper",
+        "status": "timeout",
+        "durationMs": 540016,
+        "editedStub": true,
+        "stubBytes": 5004,
+        "wouldHavePassed": false,
+        "turns": null,
+        "costUsd": null,
+        "tokens": null
+      }
+    ]
+  ]
+}

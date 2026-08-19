@@ -10,6 +10,10 @@
            :build   {:provider "mm"  :model "m2.5"}}
    :escalate {:fallback {:default ["build" "advisor"]}}})
 
+;; The first trigger now RETRIES the same model; escalation is the second step.
+;; Tests that target escalation spend the retry budget up front.
+(defn- no-retry [s] (assoc s :escalate (merge (:escalate s) {:retries-before-escalate 0})))
+
 (defn- fake-api [st & [opts]]
   (let [opts (or opts {})]
     #js {:__state_atom st
@@ -122,7 +126,8 @@
 ;; follow-queue drain.
 (defn ^:async t-payload-count-wins []
   (let [c    (collector)
-        auto (assoc settings :escalate {:mode "auto"})
+        ;; targets escalation, so skip the retry step that now precedes it
+        auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
         st   (atom {:model "zen/cheap-1" :no-op-turns 0
                     :messages [{:role "user" :content "fix X"}
                                {:role "tool_call" :content "read"}]})
@@ -212,7 +217,7 @@
         st    (atom {:model "zen/cheap-1"
                      :messages [{:role "user" :content "fix X"}
                                 {:role "assistant" :content "hmm"}]})
-        api   (fake-api st (assoc c :ui (ui-with-select "No — keep going" (:notes c))))]
+        api   (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "No — keep going" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBeFalsy))
     (-> (expect (count (:messages @st))) (.toBe 2))
@@ -224,7 +229,7 @@
                    :messages [{:role "user" :content "fix X"}
                               {:role "tool_call" :content "read"}
                               {:role "assistant" :content "hmm"}]})
-        api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "3 turns ran no tools mid-task" false))
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
     (-> (expect (vec @(:set-calls c))) (.toEqual ["yun/opus-5"]))
@@ -238,7 +243,7 @@
 (defn ^:async t-never-disarms []
   (let [c   (collector)
         st  (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
-        api (fake-api st (assoc c :ui (ui-with-select "No, and don't ask again this session"
+        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "No, and don't ask again this session"
                                                       (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalate-disarmed @st)) (.toBe true))))
@@ -247,7 +252,7 @@
   ;; ManagerWorker: weak-directs-weak scored BELOW the weak model alone.
   (let [c   (collector)
         st  (atom {:model "yun/opus-5" :messages [{:role "user" :content "fix X"}]})
-        api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBeFalsy))
     (-> (expect (count (:messages @st))) (.toBe 1))))
@@ -256,7 +261,7 @@
   (let [c   (collector)
         st  (atom {:model "zen/cheap-1" :escalations 2
                    :messages [{:role "user" :content "fix X"}]})
-        api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBeFalsy))))
 
@@ -268,7 +273,7 @@
   (let [c   (collector)
         bare {:roles {:advisor {:provider "yun" :model "opus-5"}}}
         st  (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
-        api (fake-api st (assoc c :settings bare
+        api (fake-api st (assoc c :settings (no-retry bare)
                                   :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
@@ -282,7 +287,7 @@
         st  (atom {:model "zen/cheap-1" :active-role "default"
                    :permission-mode "accept-edits"
                    :messages [{:role "user" :content "fix X"}]})
-        api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:active-role @st)) (.toBe "default"))
     (-> (expect (:permission-mode @st)) (.toBe "accept-edits"))))
@@ -315,7 +320,7 @@
                 st  (atom {:model "zen/cheap-1" :plan-mode true :no-op-turns 9
                            :messages [{:role "user" :content "fix X"}
                                       {:role "tool_call" :content "read"}]})
-                api (fake-api st (assoc c :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+                api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
             (esc/on-turn-finalize api nil)
             (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
 
@@ -372,3 +377,46 @@
         (fn []
           (-> (expect (:visible? (seg/render-escalated nil))) (.toBeFalsy))
           (-> (expect (:visible? (seg/render-escalated ""))) (.toBeFalsy))))))
+
+;; ── retry before escalation (sequential refinement) ──────────────────────
+;; Measured: qwen3.5-9b failed `transpose` under three scaffold configurations
+;; and then passed it on the third independent attempt. Retrying the same model
+;; from a clean context is worth doing before paying for a bigger one.
+(defn ^:async t-retry-before-escalating []
+  (let [c   (collector)
+        auto (assoc settings :escalate {:mode "auto"})
+        st  (atom {:model "zen/cheap-1"
+                   :messages [{:role "user" :content "fix X"}
+                              {:role "tool_call" :content "read"}
+                              {:role "assistant" :content "broken"}]})
+        api (fake-api st (assoc c :settings auto))]
+    (js-await (esc/escalate! api "tests still failing" false))
+    ;; same model, request re-delivered, nothing escalated
+    (-> (expect (:escalated-to @st)) (.toBeFalsy))
+    (-> (expect (:escalate-retries @st)) (.toBe 1))
+    (-> (expect (count @(:set-calls c))) (.toBe 0))
+    (-> (expect (first (first @(:sent c)))) (.toBe "fix X"))
+    ;; the failed span is gone and the note explains why
+    (-> (expect (count (:messages @st))) (.toBe 1))
+    (-> (expect (:content (first (:messages @st)))) (.toContain "previous attempt failed"))))
+
+(defn ^:async t-escalates-once-retries-are-spent []
+  (let [c   (collector)
+        auto (assoc settings :escalate {:mode "auto"})
+        st  (atom {:model "zen/cheap-1" :escalate-retries 1
+                   :messages [{:role "user" :content "fix X"}]})
+        api (fake-api st (assoc c :settings auto))]
+    (js-await (esc/escalate! api "tests still failing" false))
+    (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))))
+
+(describe "escalate:retry-first"
+  (fn []
+    (it "retries the same model before escalating" t-retry-before-escalating)
+    (it "escalates once the retry budget is spent" t-escalates-once-retries-are-spent)
+    (it "a new user request refills the retry budget"
+        (fn []
+          (let [c  (collector)
+                st (atom {:model "zen/cheap-1" :escalate-retries 1})
+                api (fake-api st c)]
+            (esc/on-user-message api nil)
+            (-> (expect (:escalate-retries @st)) (.toBeFalsy)))))))

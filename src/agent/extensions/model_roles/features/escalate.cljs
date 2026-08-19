@@ -33,6 +33,14 @@
    :to              "advisor"
    :on              {:no-op-turns 3 :repeat-tool-calls 3 :verify-exhausted true}
    :prune           true
+   ;; Sequential refinement before escalation. Measured on this repo's
+   ;; benchmark: qwen3.5-9b failed `transpose` under three different scaffold
+   ;; configurations, then passed it on the third independent attempt — the task
+   ;; is within the model's reach about one try in three. Retrying the SAME
+   ;; model from a clean context is therefore worth doing before paying for a
+   ;; bigger one. This is the PDR half of arXiv 2604.16529 (70.9% -> 77.6% on
+   ;; SWE-Bench Verified for Claude-4.5-Opus).
+   :retries-before-escalate 1
    :revert          "next-request"  ; next-request | never
    :max-per-session 2
    :fallback        {:default [] :cooldown-ms 300000 :revert "cooldown"}})
@@ -235,6 +243,30 @@
       (= choice "No, and don't ask again this session") :no-never
       :else                                            :no)))
 
+(defn retry-note
+  "Pure: the note that replaces a failed attempt on a same-model retry."
+  [reason]
+  (str "[retry] The previous attempt failed: " reason
+       ". Start over from the current state of the files. Do not repeat the"
+       " approach that failed — read the tests first, then write the solution."))
+
+(defn apply-retry!
+  "Sequential refinement: prune the failed attempt and re-deliver the request to
+   the SAME model with a note about what went wrong. No model swap, no cost
+   beyond the retry itself."
+  [api reason]
+  (let [st   (state-atom api)
+        msgs (vec (:messages @st))
+        {:keys [messages request]} (prune-tail msgs (retry-note reason))]
+    (swap! st assoc
+           :messages       messages
+           :escalate-retries (inc (or (:escalate-retries @st) 0)))
+    (notify api (str "↻ retrying from a clean context — " reason) "info")
+    (d/info "escalate" (str "retry " (:escalate-retries @st)) #js {:reason reason})
+    (when (and request (.-sendUserMessage api))
+      (.sendUserMessage api request #js {:deliverAs "followUp"}))
+    true))
+
 (defn apply-escalation!
   "Prune, swap the model, and re-deliver the captured request as a follow-up.
    The follow-queue drain rebuilds context from the pruned state, so nothing
@@ -286,6 +318,12 @@
       (notify api (str "⚡ stalled again, but the escalation cap ("
                        (:max-per-session cfg) ") is used up. /escalate to override.")
               "warning")
+
+      ;; Retry the same model from a clean context before paying for a bigger
+      ;; one. A forced /escalate skips straight to the model swap.
+      (and (not forced?)
+           (< (or (:escalate-retries s) 0) (or (:retries-before-escalate cfg) 0)))
+      (apply-retry! api reason)
 
       :else
       (let [ask? (and (not forced?)
@@ -393,7 +431,7 @@
    the escalation lasts until the next request."
   [api _data]
   (let [st (state-atom api)]
-    (swap! st dissoc :escalate-verify-exhausted)
+    (swap! st dissoc :escalate-verify-exhausted :escalate-retries)
     (when (and (:escalated-to @st)
                (= (str (:revert (config (settings api)))) "next-request"))
       (revert! api)))

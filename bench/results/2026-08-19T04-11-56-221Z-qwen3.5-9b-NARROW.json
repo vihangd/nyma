@@ -1,0 +1,171 @@
+{
+  "harness": 1,
+  "label": "qwen3.5-9b-NARROW",
+  "gitSha": "9fee143",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    },
+    "roles": {
+      "default": {
+        "allowed-tools": [
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "ls",
+          "glob",
+          "grep"
+        ]
+      }
+    }
+  },
+  "timeoutMs": 420000,
+  "seed": 7,
+  "taskIds": [
+    "python/dot-dsl",
+    "python/food-chain",
+    "python/grep",
+    "python/pig-latin",
+    "python/proverb",
+    "python/scale-generator",
+    "python/transpose",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 10,
+      "attempted": 10,
+      "passed": 6,
+      "failed": 0,
+      "timeout": 4,
+      "error": 0,
+      "skipped": 0,
+      "pct": 60
+    }
+  ],
+  "summary": {
+    "mean": 60,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/dot-dsl",
+      "status": "pass",
+      "durationMs": 39317,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 45279,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 44161
+    },
+    {
+      "id": "python/food-chain",
+      "status": "pass",
+      "durationMs": 62944,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 51159,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 48971
+    },
+    {
+      "id": "python/grep",
+      "status": "pass",
+      "durationMs": 343218,
+      "turns": 28,
+      "costUsd": 0,
+      "tokens": 923205,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 909397
+    },
+    {
+      "id": "python/pig-latin",
+      "status": "pass",
+      "durationMs": 298797,
+      "turns": 21,
+      "costUsd": 0,
+      "tokens": 360482,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 347411
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 38423,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 39480,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 38637
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "timeout",
+      "durationMs": 420003,
+      "editedStub": true,
+      "stubBytes": 3697,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/transpose",
+      "status": "timeout",
+      "durationMs": 420013,
+      "editedStub": true,
+      "stubBytes": 1237,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "pass",
+      "durationMs": 194471,
+      "turns": 15,
+      "costUsd": 0,
+      "tokens": 193360,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 185900
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "timeout",
+      "durationMs": 419979,
+      "editedStub": true,
+      "stubBytes": 1356,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/zipper",
+      "status": "timeout",
+      "durationMs": 420012,
+      "editedStub": true,
+      "stubBytes": 3921,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ]
+}

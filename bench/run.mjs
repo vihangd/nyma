@@ -77,7 +77,11 @@ const HELP = `bench/run.mjs — Aider-Polyglot subset runner
 
 function run(cmd, args, { cwd, timeoutMs, input, env }) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    // detached: the agent spawns bash, which spawns test runners. Killing only
+    // the direct child leaves those grandchildren holding the stdout pipe, so
+    // 'close' never fires and a task with a 420s cap was measured at 1992s.
+    // Own process group => one kill reaches the whole tree.
+    const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
     let stdout = "", stderr = "", timedOut = false;
     // SIGKILL discards everything the agent was about to report — a timed-out
     // task recorded no tokens, no cost and no hint of what it was doing. Ask
@@ -87,8 +91,8 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
     const timer = timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGTERM");
-          hardTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
+          killTree(child, "SIGTERM");
+          hardTimer = setTimeout(() => killTree(child, "SIGKILL"), 5000);
         }, timeoutMs)
       : null;
     child.stdout.on("data", (d) => { stdout += d; });
@@ -105,6 +109,12 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
     if (input !== undefined) { child.stdin.write(input); }
     child.stdin.end();
   });
+}
+
+/** Signal the whole process group; fall back to the child if it already died. */
+function killTree(child, signal) {
+  try { process.kill(-child.pid, signal); }
+  catch { try { child.kill(signal); } catch { /* already gone */ } }
 }
 
 function readIfExists(p) {
@@ -229,10 +239,21 @@ async function runTask(task, opts) {
       const stubAfter = readIfExists(stubPath);
       const edited = stubAfter !== null && stubAfter !== stubBefore;
       const partial = parseUsage(agent.stdout);
+      // Grade what it left behind. Every 9B timeout had written a real solution
+      // (2-7 KB) before running out of clock, so the interesting question is
+      // whether the work was already finished. This does NOT change the score —
+      // a task that could not stop did not succeed — but it separates "needs a
+      // stop condition" from "needs more capability", which are different fixes.
+      let wouldHavePassed = null;
+      if (edited && spec) {
+        const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
+        wouldHavePassed = classifyTestRun(late) === STATUS.pass;
+      }
       return { id: task.id, status: STATUS.timeout,
                durationMs: Date.now() - started,
                editedStub: edited,
                stubBytes: stubAfter === null ? null : stubAfter.length,
+               wouldHavePassed,
                ...partial };
     }
 
