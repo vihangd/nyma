@@ -420,3 +420,33 @@
                 api (fake-api st c)]
             (esc/on-user-message api nil)
             (-> (expect (:escalate-retries @st)) (.toBeFalsy)))))))
+
+;; ── does the trigger actually reach the retry? ───────────────────────────
+;; The retry has unit tests, but in a real benchmark run arm A scored exactly
+;; what the no-retry control scored, on the same tasks. That is what this
+;; checks: the verify_gate -> bus -> turn_finalize -> retry wiring, end to end.
+(defn ^:async t-verify-exhausted-triggers-retry []
+  (let [c    (collector)
+        auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 1})
+        st   (atom {:model "zen/cheap-1"
+                    :messages [{:role "user" :content "fix X"}
+                               {:role "tool_call" :content "edit"}
+                               {:role "assistant" :content "done?"}]})
+        handlers (atom {})
+        api  (fake-api st (assoc c :settings auto))]
+    ;; capture handlers the way the real activation registers them
+    (aset api "on" (fn [ev h & _] (swap! handlers assoc ev h)))
+    (aset api "off" (fn [& _] nil))
+    (aset api "registerCommand" (fn [& _] nil))
+    (aset api "unregisterCommand" (fn [& _] nil))
+    (esc/activate api)
+    ;; verify_gate emits this once its fix attempts are spent
+    ((get @handlers "small-model/verify-exhausted") #js {:reason "cmd"} nil)
+    ;; the loop then finalises the turn
+    (js-await ((get @handlers "turn_finalize") #js {:error false :noOpTurns 0}))
+    (-> (expect (:escalate-retries @st)) (.toBe 1))
+    (-> (expect (count @(:sent c))) (.toBe 1))))
+
+(describe "escalate:trigger-wiring"
+  (fn []
+    (it "a spent verify gate reaches the retry" t-verify-exhausted-triggers-retry)))
