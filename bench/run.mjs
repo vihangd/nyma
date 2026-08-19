@@ -283,8 +283,14 @@ async function runTask(task, opts) {
         const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
         wouldHavePassed = classifyTestRun(late) === STATUS.pass;
       }
+      // A host that sleeps mid-run suspends the timer while the wall clock keeps
+      // going: a closed lid once turned a 600s cap into a 3272s "timeout" that
+      // read as a model being slow. Real elapsed far beyond the cap means the
+      // measurement is about the machine, not the agent.
+      const elapsed = Date.now() - started;
+      const suspectClock = elapsed > opts.timeoutMs * 1.5 ? Math.round(elapsed / 1000) : null;
       return { id: task.id, status: STATUS.timeout,
-               durationMs: Date.now() - started,
+               durationMs: elapsed, suspectClock,
                editedStub: edited,
                stubBytes: stubAfter === null ? null : stubAfter.length,
                wouldHavePassed, tamperedTest,
