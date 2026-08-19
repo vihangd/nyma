@@ -24,37 +24,42 @@
 
 ;; ── Profile lookup ───────────────────────────────────────────────
 
-(defn- current-model-id
-  "Return \"provider/model\" string for the currently active model."
-  [api]
+(defn model-keys
+  "Pure: every key a profile may be written under, most specific first.
+
+   The AI SDK sets `.provider` to a STRING (`\"openai.chat\"`) for every
+   OpenAI-compatible provider, so `.provider.providerId` is undefined and the
+   old single key collapsed to the bare modelId — meaning every profile key in
+   the docs (`\"omlx/Qwen3.6-27B-oQ4-mtp\"`) silently matched nothing and the
+   whole module was inert. nyma's own provider name lives on the config as
+   `active-provider-name`, set by setModel. Exposed for tests."
+  [provider-name model-id]
+  (let [mid  (str (or model-id ""))
+        prov (str (or provider-name ""))
+        tail (last (.split mid "/"))]
+    (vec (distinct (remove #(or (nil? %) (= "" %))
+                           [(when (and (seq prov) (seq mid)) (str prov "/" mid))
+                            mid
+                            tail])))))
+
+(defn- current-model-keys [api]
   (try
-    (let [st (when-let [a (.-__state_atom api)] @a)]
-      (when st
-        (let [cfg (:config st)
-              m   (:model cfg)]
-          ;; m is a Vercel AI SDK LanguageModel object with a modelId field
-          ;; plus a provider prefix in the parent provider object.
-          ;; We reconstruct the logical key as used in registerProvider.
-          (when m
-            (let [mid (or (.-modelId m) (.-id m) "")
-                  prov (or (some-> m .-provider .-providerId)
-                           (some-> m .-provider .-id)
-                           "")]
-              (if (and (seq prov) (seq mid))
-                (str prov "/" mid)
-                (str mid)))))))
-    (catch :default _ nil)))
+    (let [st  (when-let [a (.-__state_atom api)] @a)
+          cfg (:config st)
+          m   (:model cfg)
+          mid (or (some-> m .-modelId) (some-> m .-id) "")
+          prov (or (aget cfg "active-provider-name")
+                   (some-> m .-provider .-providerId)
+                   "")]
+      (model-keys prov mid))
+    (catch :default _ [])))
 
 (defn- profile-for
   "Look up a profile for the active model. Returns a CLJS map or nil."
   [config api]
-  (let [profiles (get-in config [:profiles :model-profiles])
-        model-id (current-model-id api)]
-    (when (and model-id (seq profiles))
-      (or (get profiles model-id)
-          ;; Try without provider prefix
-          (let [short (last (str/split model-id #"/"))]
-            (get profiles short))))))
+  (let [profiles (get-in config [:profiles :model-profiles])]
+    (when (seq profiles)
+      (some (fn [k] (get profiles k)) (current-model-keys api)))))
 
 ;; ── Edit-format routing (editStrategy) ───────────────────────────
 ;; Weak models loop on the brittle exact `edit` (string-not-found). Per-model
@@ -107,7 +112,12 @@
         (fn [data _ctx]
           (when-let [p (profile-for config api)]
             (let [temp (or (:temperature p) (get p "temperature"))]
+              ;; streamText reads a TOP-LEVEL temperature. providerOptions is
+              ;; namespaced per provider, so the value written there below never
+              ;; reached the wire — this module's temperature has always been a
+              ;; no-op. Write both: the top level is what actually applies.
               (when (number? temp)
+                (aset data "temperature" temp)
                 (let [po (or (.-providerOptions data) #js {})]
                   (aset po "temperature" temp)
                   (aset data "providerOptions" po)))))
