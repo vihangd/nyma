@@ -22,7 +22,7 @@ export const STATUS = {
 
 // Languages we can actually run. The polyglot set also ships cpp/go/java/rust;
 // those are discovered but marked unrunnable rather than quietly dropped.
-export const RUNNABLE_LANGS = ["python", "javascript"];
+export const RUNNABLE_LANGS = ["python", "javascript", "rust"];
 
 const LANG_SPEC = {
   python: {
@@ -43,6 +43,17 @@ const LANG_SPEC = {
     cmd: null,   // built lazily by langSpec: TOOLCHAIN is defined below
     probe: ["node", "--version"],
     needsInstall: true,
+  },
+  rust: {
+    // Every exercise is a cargo crate: the stub is always src/lib.rs and the
+    // suites live in tests/, which is why this is the first language needing
+    // more than one test file per task (forth has 2, doubly-linked-list 3).
+    stub: () => "src/lib.rs",
+    test: (name) => `tests/${name}.rs`,
+    testDir: "tests",
+    cmd: ["cargo", "test"],
+    probe: ["cargo", "--version"],
+    needsInstall: false,
   },
 };
 
@@ -70,6 +81,18 @@ export function langSpec(lang) {
  * Walk <tasksDir>/<lang>/exercises/practice/<name>/ and return one record per
  * exercise, sorted, so discovery order never depends on the filesystem.
  */
+/**
+ * Every file `cargo test` will compile and run. Hashing only one of them would
+ * leave the others rewritable without detection.
+ */
+export function testFilesFor(dir, spec, testFile) {
+  if (!spec?.testDir) return testFile ? [testFile] : [];
+  const abs = path.join(dir, spec.testDir);
+  if (!fs.existsSync(abs)) return [];
+  return fs.readdirSync(abs).filter((f) => f.endsWith(".rs")).sort()
+           .map((f) => path.join(spec.testDir, f));
+}
+
 export function discoverTasks(tasksDir, langs = RUNNABLE_LANGS) {
   const out = [];
   for (const lang of langs) {
@@ -87,11 +110,15 @@ export function discoverTasks(tasksDir, langs = RUNNABLE_LANGS) {
         dir,
         stub: spec ? spec.stub(name) : null,
         testFile,
+        testFiles: testFilesFor(dir, spec, testFile),
         // A task whose test file is missing cannot be scored, ever. Recorded so
         // the runner can skip it explicitly instead of "failing" it.
         needsInstall: Boolean(spec?.needsInstall),
         runnable: Boolean(
-          spec && testFile && fs.existsSync(path.join(dir, testFile)) &&
+          spec && testFile &&
+          (spec.testDir
+             ? testFilesFor(dir, spec, testFile).length > 0
+             : fs.existsSync(path.join(dir, testFile))) &&
           (!spec.needsInstall || toolchainReady())),
       });
     }

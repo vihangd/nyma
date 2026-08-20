@@ -13,6 +13,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 import {
   STATUS, discoverTasks, selectTasks, readInstructions, langSpec,
   classifyTestRun, aggregate, summarizeTrials, diffRuns, checkAgentBuild, agentFailure,
@@ -20,6 +22,25 @@ import {
 } from "./scoring.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+
+// cargo and rustc must be on PATH together — a rustup shim alone is not enough,
+// and this machine's ~/.cargo/bin shims point at a rustup that has moved, so
+// `cargo test` dies with "could not execute process `rustc -vV`". Resolve the
+// real toolchain bin once and prepend it, for the test run and the agent alike.
+function ensureRustOnPath() {
+  const { execFileSync } = require("node:child_process");
+  const has = (bin) => { try { execFileSync(bin, ["--version"], { stdio: "ignore" }); return true; } catch { return false; } };
+  if (has("cargo") && has("rustc")) return;
+  try {
+    const cargoPath = execFileSync("rustup", ["which", "cargo"], { encoding: "utf8" }).trim();
+    if (cargoPath) process.env.PATH = `${path.dirname(cargoPath)}:${process.env.PATH}`;
+  } catch { /* no rustup: rust tasks will report skip via the probe */ }
+}
+ensureRustOnPath();
+
+// One shared target dir instead of 30: every crate rebuilds the same handful of
+// dependencies otherwise, which is minutes of compile per task rather than one.
+process.env.CARGO_TARGET_DIR ||= path.join(ROOT, "bench", "rust-target");
 const DEFAULT_AGENT = ["bun", path.join(ROOT, "dist", "agent", "cli.mjs")];
 
 // ── args ──────────────────────────────────────────────────────────────────
@@ -228,13 +249,25 @@ async function runTask(task, opts) {
     // satisfies one assertion passes a suite of thirty — javascript/say scored
     // a pass on 1 of 16. Activate them before hashing, so the integrity guard
     // covers the file the run is actually graded against.
-    const testPath = path.join(work, task.testFile);
-    if (task.lang === "javascript") {
-      const spec = fs.readFileSync(testPath, "utf8");
-      const activated = spec.replace(/\bxtest\(/g, "test(").replace(/\bxit\(/g, "it(");
-      if (activated !== spec) fs.writeFileSync(testPath, activated);
+    // Rust ships 620 of its 650 cases behind #[ignore] for the same reason —
+    // 95% dormant, which would have inflated the Rust column exactly as xtest
+    // inflated JavaScript.
+    const testFiles = task.testFiles?.length ? task.testFiles : [task.testFile];
+    for (const rel of testFiles) {
+      const abs = path.join(work, rel);
+      const src = fs.readFileSync(abs, "utf8");
+      const activated = task.lang === "javascript"
+        ? src.replace(/\bxtest\(/g, "test(").replace(/\bxit\(/g, "it(")
+        : task.lang === "rust"
+          ? src.replace(/#\[ignore(\s*=\s*"[^"]*")?\]\s*\n\s*/g, "")
+          : src;
+      if (activated !== src) fs.writeFileSync(abs, activated);
     }
-    const before = fs.readFileSync(testPath, "utf8");
+    // Hash every file cargo/jest will run: hashing one of three would leave the
+    // other two rewritable without detection.
+    const readTests = () =>
+      testFiles.map((rel) => fs.readFileSync(path.join(work, rel), "utf8")).join("\u0000");
+    const before = readTests();
 
     const [cmd, ...base] = opts.agentCmd;
     // No --max-steps flag exists (it is settings-only, default 100), so the
@@ -276,8 +309,7 @@ async function runTask(task, opts) {
       // Grade the leftovers with the same integrity guard the normal path uses:
       // a suite that passes because the agent rewrote the suite is not evidence
       // the work was finished.
-      const tamperedTest =
-        fs.readFileSync(path.join(work, task.testFile), "utf8") !== before;
+      const tamperedTest = readTests() !== before;
       let wouldHavePassed = null;
       if (edited && spec && !tamperedTest) {
         const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
@@ -319,7 +351,7 @@ async function runTask(task, opts) {
     }
 
     // Tampering with the test file is not a pass, whatever the suite says.
-    const after = fs.readFileSync(path.join(work, task.testFile), "utf8");
+    const after = readTests();
     if (after !== before) {
       return { id: task.id, status: STATUS.error, reason: "agent modified the test file",
                durationMs: Date.now() - started };

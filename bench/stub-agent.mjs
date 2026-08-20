@@ -26,7 +26,7 @@ if (!stub) {
 if (mode === "solve") {
   // exercism keeps the reference solution as .meta/example.py (python) or
   // .meta/proof.ci.js (javascript).
-  const candidates = ["example.py", "proof.ci.js", "example.js"];
+  const candidates = ["example.py", "proof.ci.js", "example.js", "example.rs"];
   let written = false;
   for (const c of candidates) {
     const p = meta ? path.join(meta, c) : null;
@@ -41,10 +41,18 @@ if (mode === "solve") {
     process.exit(1);
   }
 } else if (mode === "break") {
-  fs.writeFileSync(stub, "raise NotImplementedError('stub-agent: deliberately unsolved')\n");
+  // Must fail the suite in every language: a python raise is a syntax error to
+  // rustc, which is still a failing test run, but say so explicitly.
+  const broken = stub.endsWith(".rs")
+    ? "// stub-agent: deliberately unsolved\ncompile_error!(\"stub-agent\");\n"
+    : "raise NotImplementedError('stub-agent: deliberately unsolved')\n";
+  fs.writeFileSync(stub, broken);
 } else if (mode === "cheat") {
   if (!testFile) { console.error("stub-agent: NYMA_BENCH_TEST_FILE not set"); process.exit(1); }
-  fs.writeFileSync(testFile, "def test_nothing():\n    assert True\n");
+  const faked = testFile.endsWith(".rs")
+    ? "#[test]\nfn nothing() { assert!(true); }\n"
+    : "def test_nothing():\n    assert True\n";
+  fs.writeFileSync(testFile, faked);
 }
 
 // print mode's JSON result shape, so parseUsage has something realistic to read
