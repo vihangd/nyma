@@ -1,0 +1,192 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "q9b-c03",
+  "gitSha": "9f45ce6",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 600000,
+  "concurrency": 4,
+  "seed": 7,
+  "taskIds": [
+    "javascript/affine-cipher",
+    "javascript/alphametics",
+    "python/scale-generator",
+    "python/sgf-parsing",
+    "python/simple-linked-list",
+    "python/transpose",
+    "python/tree-building",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/wordy",
+    "python/zebra-puzzle",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 12,
+      "attempted": 12,
+      "passed": 7,
+      "failed": 1,
+      "timeout": 4,
+      "error": 0,
+      "skipped": 0,
+      "pct": 58.3
+    }
+  ],
+  "summary": {
+    "mean": 58.3,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/affine-cipher",
+      "status": "pass",
+      "durationMs": 157253,
+      "turns": 20,
+      "costUsd": 0,
+      "tokens": 523563,
+      "cacheRead": 65472,
+      "cacheWrite": 0,
+      "inputTokens": 518301
+    },
+    {
+      "id": "javascript/alphametics",
+      "status": "pass",
+      "durationMs": 347032,
+      "turns": 42,
+      "costUsd": 0,
+      "tokens": 1485657,
+      "cacheRead": 1194336,
+      "cacheWrite": 0,
+      "inputTokens": 1471817
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "pass",
+      "durationMs": 316434,
+      "turns": 28,
+      "costUsd": 0,
+      "tokens": 1177934,
+      "cacheRead": 852192,
+      "cacheWrite": 0,
+      "inputTokens": 1153169
+    },
+    {
+      "id": "python/sgf-parsing",
+      "status": "timeout",
+      "durationMs": 600069,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 4834,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/simple-linked-list",
+      "status": "pass",
+      "durationMs": 405889,
+      "turns": 33,
+      "costUsd": 0,
+      "tokens": 1252965,
+      "cacheRead": 102960,
+      "cacheWrite": 0,
+      "inputTokens": 1232693
+    },
+    {
+      "id": "python/transpose",
+      "status": "timeout",
+      "durationMs": 600047,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 880,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/tree-building",
+      "status": "pass",
+      "durationMs": 112410,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 264185,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 260406
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "pass",
+      "durationMs": 116579,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 279923,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 275786
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "fail",
+      "durationMs": 379099,
+      "turns": 25,
+      "costUsd": 0,
+      "tokens": 883115,
+      "cacheRead": 180576,
+      "cacheWrite": 0,
+      "inputTokens": 863762
+    },
+    {
+      "id": "python/wordy",
+      "status": "pass",
+      "durationMs": 281645,
+      "turns": 25,
+      "costUsd": 0,
+      "tokens": 806401,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 794374
+    },
+    {
+      "id": "python/zebra-puzzle",
+      "status": "timeout",
+      "durationMs": 720019,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3552,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/zipper",
+      "status": "timeout",
+      "durationMs": 600074,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3067,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ]
+}

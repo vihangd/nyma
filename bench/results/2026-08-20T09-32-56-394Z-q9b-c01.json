@@ -1,0 +1,192 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "q9b-c01",
+  "gitSha": "be67d07",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 600000,
+  "concurrency": 4,
+  "seed": 7,
+  "taskIds": [
+    "python/affine-cipher",
+    "python/beer-song",
+    "python/book-store",
+    "python/bottle-song",
+    "python/bowling",
+    "python/connect",
+    "python/dominoes",
+    "python/dot-dsl",
+    "python/food-chain",
+    "python/forth",
+    "python/go-counting",
+    "python/grade-school"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 12,
+      "attempted": 12,
+      "passed": 7,
+      "failed": 1,
+      "timeout": 4,
+      "error": 0,
+      "skipped": 0,
+      "pct": 58.3
+    }
+  ],
+  "summary": {
+    "mean": 58.3,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/affine-cipher",
+      "status": "pass",
+      "durationMs": 73061,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 192180,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 190744
+    },
+    {
+      "id": "python/beer-song",
+      "status": "pass",
+      "durationMs": 111234,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 338034,
+      "cacheRead": 44352,
+      "cacheWrite": 0,
+      "inputTokens": 335254
+    },
+    {
+      "id": "python/book-store",
+      "status": "timeout",
+      "durationMs": 720030,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3008,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/bottle-song",
+      "status": "pass",
+      "durationMs": 172029,
+      "turns": 20,
+      "costUsd": 0,
+      "tokens": 522567,
+      "cacheRead": 79200,
+      "cacheWrite": 0,
+      "inputTokens": 519196
+    },
+    {
+      "id": "python/bowling",
+      "status": "timeout",
+      "durationMs": 600066,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 4038,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/connect",
+      "status": "timeout",
+      "durationMs": 600077,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 4573,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/dominoes",
+      "status": "pass",
+      "durationMs": 124702,
+      "turns": 14,
+      "costUsd": 0,
+      "tokens": 348148,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 343706
+    },
+    {
+      "id": "python/dot-dsl",
+      "status": "fail",
+      "durationMs": 343375,
+      "turns": 22,
+      "costUsd": 0,
+      "tokens": 625312,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 610128
+    },
+    {
+      "id": "python/food-chain",
+      "status": "pass",
+      "durationMs": 141261,
+      "turns": 15,
+      "costUsd": 0,
+      "tokens": 370077,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 366149
+    },
+    {
+      "id": "python/forth",
+      "status": "timeout",
+      "durationMs": 600103,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3075,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/go-counting",
+      "status": "pass",
+      "durationMs": 314240,
+      "turns": 22,
+      "costUsd": 0,
+      "tokens": 602029,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 589245
+    },
+    {
+      "id": "python/grade-school",
+      "status": "pass",
+      "durationMs": 174588,
+      "turns": 17,
+      "costUsd": 0,
+      "tokens": 474888,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 470557
+    }
+  ]
+}

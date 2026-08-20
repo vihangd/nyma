@@ -1,0 +1,190 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "q9b-c02",
+  "gitSha": "be67d07",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 600000,
+  "concurrency": 4,
+  "seed": 7,
+  "taskIds": [
+    "python/grep",
+    "python/hangman",
+    "python/list-ops",
+    "python/paasio",
+    "python/phone-number",
+    "python/pig-latin",
+    "python/poker",
+    "python/pov",
+    "python/proverb",
+    "python/react",
+    "python/rest-api",
+    "python/robot-name"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 12,
+      "attempted": 12,
+      "passed": 9,
+      "failed": 0,
+      "timeout": 3,
+      "error": 0,
+      "skipped": 0,
+      "pct": 75
+    }
+  ],
+  "summary": {
+    "mean": 75,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/grep",
+      "status": "pass",
+      "durationMs": 137222,
+      "turns": 15,
+      "costUsd": 0,
+      "tokens": 399965,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 395220
+    },
+    {
+      "id": "python/hangman",
+      "status": "pass",
+      "durationMs": 258977,
+      "turns": 25,
+      "costUsd": 0,
+      "tokens": 665276,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 654631
+    },
+    {
+      "id": "python/list-ops",
+      "status": "pass",
+      "durationMs": 47963,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 121319,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 120274
+    },
+    {
+      "id": "python/paasio",
+      "status": "timeout",
+      "durationMs": 600202,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3275,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/phone-number",
+      "status": "pass",
+      "durationMs": 170792,
+      "turns": 14,
+      "costUsd": 0,
+      "tokens": 357470,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 351679
+    },
+    {
+      "id": "python/pig-latin",
+      "status": "pass",
+      "durationMs": 145976,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 276408,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 271544
+    },
+    {
+      "id": "python/poker",
+      "status": "pass",
+      "durationMs": 342161,
+      "turns": 28,
+      "costUsd": 0,
+      "tokens": 994275,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 982008
+    },
+    {
+      "id": "python/pov",
+      "status": "pass",
+      "durationMs": 215200,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 268376,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 263795
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 62851,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 145814,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 144788
+    },
+    {
+      "id": "python/react",
+      "status": "timeout",
+      "durationMs": 600052,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 2304,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/rest-api",
+      "status": "timeout",
+      "durationMs": 600057,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3739,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/robot-name",
+      "status": "pass",
+      "durationMs": 91185,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 203643,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 202411
+    }
+  ]
+}

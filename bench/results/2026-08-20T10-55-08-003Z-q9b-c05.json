@@ -1,0 +1,188 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "q9b-c05",
+  "gitSha": "9f45ce6",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.5-9b",
+  "model": "openrouter/qwen/qwen3.5-9b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 600000,
+  "concurrency": 4,
+  "seed": 7,
+  "taskIds": [
+    "javascript/house",
+    "javascript/killer-sudoku-helper",
+    "javascript/ledger",
+    "javascript/list-ops",
+    "javascript/meetup",
+    "javascript/ocr-numbers",
+    "javascript/palindrome-products",
+    "javascript/parallel-letter-frequency",
+    "javascript/phone-number",
+    "javascript/pig-latin",
+    "javascript/poker",
+    "javascript/promises"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 12,
+      "attempted": 12,
+      "passed": 10,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 83.3
+    }
+  ],
+  "summary": {
+    "mean": 83.3,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/house",
+      "status": "timeout",
+      "durationMs": 600289,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 1691,
+      "wouldHavePassed": true,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/killer-sudoku-helper",
+      "status": "pass",
+      "durationMs": 73981,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 202450,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 200891
+    },
+    {
+      "id": "javascript/ledger",
+      "status": "pass",
+      "durationMs": 307468,
+      "turns": 30,
+      "costUsd": 0,
+      "tokens": 935952,
+      "cacheRead": 76032,
+      "cacheWrite": 0,
+      "inputTokens": 926655
+    },
+    {
+      "id": "javascript/list-ops",
+      "status": "pass",
+      "durationMs": 54672,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 146104,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 144970
+    },
+    {
+      "id": "javascript/meetup",
+      "status": "pass",
+      "durationMs": 352111,
+      "turns": 34,
+      "costUsd": 0,
+      "tokens": 1557978,
+      "cacheRead": 598752,
+      "cacheWrite": 0,
+      "inputTokens": 1544942
+    },
+    {
+      "id": "javascript/ocr-numbers",
+      "status": "pass",
+      "durationMs": 317379,
+      "turns": 29,
+      "costUsd": 0,
+      "tokens": 832891,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 821659
+    },
+    {
+      "id": "javascript/palindrome-products",
+      "status": "pass",
+      "durationMs": 170706,
+      "turns": 18,
+      "costUsd": 0,
+      "tokens": 428184,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 424224
+    },
+    {
+      "id": "javascript/parallel-letter-frequency",
+      "status": "pass",
+      "durationMs": 35670,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 112224,
+      "cacheRead": 67584,
+      "cacheWrite": 0,
+      "inputTokens": 111126
+    },
+    {
+      "id": "javascript/phone-number",
+      "status": "pass",
+      "durationMs": 259466,
+      "turns": 35,
+      "costUsd": 0,
+      "tokens": 1256094,
+      "cacheRead": 710688,
+      "cacheWrite": 0,
+      "inputTokens": 1247782
+    },
+    {
+      "id": "javascript/pig-latin",
+      "status": "pass",
+      "durationMs": 100016,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 165946,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 161770
+    },
+    {
+      "id": "javascript/poker",
+      "status": "timeout",
+      "durationMs": 600679,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 5515,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/promises",
+      "status": "pass",
+      "durationMs": 246404,
+      "turns": 17,
+      "costUsd": 0,
+      "tokens": 461941,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 454954
+    }
+  ]
+}
