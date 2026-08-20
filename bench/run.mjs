@@ -305,6 +305,19 @@ async function runTask(task, opts) {
                durationMs: Date.now() - started };
     }
 
+    // A model that answers without ever calling a tool leaves the skeleton
+    // untouched, and the skeleton throws — which graded as `fail`, the same
+    // status as a real wrong answer. An unpinned OpenRouter backend that drops
+    // `tools` scored exactly this: one turn, 86 output tokens, `fail` in 9s.
+    // Never having attempted the task is not the same as getting it wrong.
+    const stubNow = readIfExists(stubPath);
+    if (stubNow !== null && stubNow === stubBefore) {
+      return { id: task.id, status: STATUS.error,
+               reason: "agent never modified the stub (no tool call?)",
+               durationMs: Date.now() - started, editedStub: false,
+               ...parseUsage(agent.stdout) };
+    }
+
     // Tampering with the test file is not a pass, whatever the suite says.
     const after = fs.readFileSync(path.join(work, task.testFile), "utf8");
     if (after !== before) {

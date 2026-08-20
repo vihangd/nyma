@@ -39,6 +39,12 @@ with `Cannot find module '@exercism/babel-preset-javascript'` — which the stub
 agent caught immediately. Until the toolchain is installed, JS tasks are
 reported **skipped**, never failed.
 
+The JS suites also need activating. Exercism's track ships every case after the
+first as `xtest`, for a student to unskip as they go: graded as delivered, 855
+of 906 assertions never run and a solution satisfying one assertion passes a
+suite of thirty. The runner rewrites `xtest`/`xit` before hashing the file, so
+the integrity guard covers what is actually graded.
+
 Runnable set: **83 tasks** (34 Python + 49 JavaScript).
 
 ## Running
@@ -70,8 +76,13 @@ applies.
 - **Accept a rewritten test file.** The test file is hashed before and after; if
   the agent edited it, the task is `error`, not `pass`.
 - **Score what never ran.** Missing toolchain → `skip`. Timeout → `timeout`.
-  Agent crashed or the model was rejected → `error`. Only real attempts land in
-  the percentage denominator; skips are reported beside it, never inside it.
+  Agent crashed, the model was rejected, or the agent never touched the stub
+  (an unpinned backend that drops `tools` answers in one turn without calling
+  any) → `error`. Only `skip` leaves the denominator: an `error` counts against
+  the score, because a run that could not complete is not a run that passed.
+  When infrastructure is the cause — a provider throttling mid-run — re-run
+  those tasks and keep the retry as its own result file rather than folding it
+  into the first.
 - **Report one number for a stochastic process.** `--trials N` gives mean ±
   half-range; a single trial reports no spread rather than a fake zero.
 
