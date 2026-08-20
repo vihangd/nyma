@@ -453,7 +453,12 @@ async function main() {
   const gitSha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, timeoutMs: 5000 }))
     .stdout.trim();
   const record = {
-    harness: 1,
+    // Bump whenever grading semantics change, so two result files can never be
+    // merged as if one number. 2: JS xtest/xit activated before hashing; an
+    // agent that never modified the stub grades error, not fail; a timeout past
+    // 1.5x its cap records suspectClock.
+    harness: 2,
+    graderNotes: "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
     label: opts.label,
     gitSha,
     agent: agentCmd.join(" "),
