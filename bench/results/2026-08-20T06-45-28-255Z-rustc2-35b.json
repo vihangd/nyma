@@ -1,0 +1,125 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "rustc2-35b",
+  "gitSha": "78d79c1",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "rust/pig-latin",
+    "rust/poker",
+    "rust/react",
+    "rust/robot-name",
+    "rust/say",
+    "rust/scale-generator"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 6,
+      "attempted": 6,
+      "passed": 4,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 66.7
+    }
+  ],
+  "summary": {
+    "mean": 66.7,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/pig-latin",
+      "status": "pass",
+      "durationMs": 101296,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 184554,
+      "cacheRead": 122496,
+      "cacheWrite": 0,
+      "inputTokens": 179410
+    },
+    {
+      "id": "rust/poker",
+      "status": "pass",
+      "durationMs": 265411,
+      "turns": 21,
+      "costUsd": 0,
+      "tokens": 663229,
+      "cacheRead": 601920,
+      "cacheWrite": 0,
+      "inputTokens": 652120
+    },
+    {
+      "id": "rust/react",
+      "status": "timeout",
+      "durationMs": 600184,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 9148,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "rust/robot-name",
+      "status": "pass",
+      "durationMs": 99911,
+      "turns": 14,
+      "costUsd": 0,
+      "tokens": 316264,
+      "cacheRead": 253440,
+      "cacheWrite": 0,
+      "inputTokens": 310762
+    },
+    {
+      "id": "rust/say",
+      "status": "pass",
+      "durationMs": 91001,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 277106,
+      "cacheRead": 217536,
+      "cacheWrite": 0,
+      "inputTokens": 271120
+    },
+    {
+      "id": "rust/scale-generator",
+      "status": "timeout",
+      "durationMs": 601371,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3621,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ]
+}

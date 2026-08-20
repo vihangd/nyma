@@ -1,0 +1,123 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "rustc3-35b",
+  "gitSha": "78d79c1",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "rust/simple-cipher",
+    "rust/two-bucket",
+    "rust/variable-length-quantity",
+    "rust/word-count",
+    "rust/wordy",
+    "rust/xorcism"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 6,
+      "attempted": 6,
+      "passed": 5,
+      "failed": 0,
+      "timeout": 1,
+      "error": 0,
+      "skipped": 0,
+      "pct": 83.3
+    }
+  ],
+  "summary": {
+    "mean": 83.3,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/simple-cipher",
+      "status": "pass",
+      "durationMs": 106743,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 230023,
+      "cacheRead": 189024,
+      "cacheWrite": 0,
+      "inputTokens": 224875
+    },
+    {
+      "id": "rust/two-bucket",
+      "status": "pass",
+      "durationMs": 96514,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 266625,
+      "cacheRead": 203808,
+      "cacheWrite": 0,
+      "inputTokens": 261791
+    },
+    {
+      "id": "rust/variable-length-quantity",
+      "status": "pass",
+      "durationMs": 112473,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 194031,
+      "cacheRead": 135168,
+      "cacheWrite": 0,
+      "inputTokens": 188240
+    },
+    {
+      "id": "rust/word-count",
+      "status": "pass",
+      "durationMs": 99944,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 168530,
+      "cacheRead": 129888,
+      "cacheWrite": 0,
+      "inputTokens": 162728
+    },
+    {
+      "id": "rust/wordy",
+      "status": "pass",
+      "durationMs": 152865,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 294930,
+      "cacheRead": 230208,
+      "cacheWrite": 0,
+      "inputTokens": 286693
+    },
+    {
+      "id": "rust/xorcism",
+      "status": "timeout",
+      "durationMs": 601368,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3034,
+      "wouldHavePassed": true,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "rustc6-35b",
+  "gitSha": "78d79c1",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "rust/decimal",
+    "rust/dot-dsl",
+    "rust/doubly-linked-list",
+    "rust/fizzy"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 4,
+      "attempted": 4,
+      "passed": 2,
+      "failed": 0,
+      "timeout": 2,
+      "error": 0,
+      "skipped": 0,
+      "pct": 50
+    }
+  ],
+  "summary": {
+    "mean": 50,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/decimal",
+      "status": "timeout",
+      "durationMs": 720109,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 14644,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "rust/dot-dsl",
+      "status": "pass",
+      "durationMs": 108281,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 244850,
+      "cacheRead": 177408,
+      "cacheWrite": 0,
+      "inputTokens": 236555
+    },
+    {
+      "id": "rust/doubly-linked-list",
+      "status": "timeout",
+      "durationMs": 600021,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 2563,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "rust/fizzy",
+      "status": "pass",
+      "durationMs": 153930,
+      "turns": 19,
+      "costUsd": 0,
+      "tokens": 580709,
+      "cacheRead": 487872,
+      "cacheWrite": 0,
+      "inputTokens": 570389
+    }
+  ]
+}

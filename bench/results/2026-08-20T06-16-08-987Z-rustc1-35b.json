@@ -1,0 +1,121 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "rustc1-35b",
+  "gitSha": "78d79c1",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "rust/grep",
+    "rust/luhn-from",
+    "rust/macros",
+    "rust/nucleotide-codons",
+    "rust/ocr-numbers",
+    "rust/parallel-letter-frequency"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 6,
+      "attempted": 6,
+      "passed": 6,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/grep",
+      "status": "pass",
+      "durationMs": 77662,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 207651,
+      "cacheRead": 171072,
+      "cacheWrite": 0,
+      "inputTokens": 204842
+    },
+    {
+      "id": "rust/luhn-from",
+      "status": "pass",
+      "durationMs": 50423,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 105177,
+      "cacheRead": 57024,
+      "cacheWrite": 0,
+      "inputTokens": 103306
+    },
+    {
+      "id": "rust/macros",
+      "status": "pass",
+      "durationMs": 72312,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 209996,
+      "cacheRead": 152064,
+      "cacheWrite": 0,
+      "inputTokens": 207520
+    },
+    {
+      "id": "rust/nucleotide-codons",
+      "status": "pass",
+      "durationMs": 117520,
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 319065,
+      "cacheRead": 253440,
+      "cacheWrite": 0,
+      "inputTokens": 312348
+    },
+    {
+      "id": "rust/ocr-numbers",
+      "status": "pass",
+      "durationMs": 153276,
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 372528,
+      "cacheRead": 289344,
+      "cacheWrite": 0,
+      "inputTokens": 362612
+    },
+    {
+      "id": "rust/parallel-letter-frequency",
+      "status": "pass",
+      "durationMs": 82328,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 224263,
+      "cacheRead": 171072,
+      "cacheWrite": 0,
+      "inputTokens": 220399
+    }
+  ]
+}
