@@ -1,0 +1,613 @@
+{
+  "harness": 1,
+  "label": "js49-35b-pinned",
+  "gitSha": "f4beb4e",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "javascript/affine-cipher",
+    "javascript/alphametics",
+    "javascript/beer-song",
+    "javascript/binary",
+    "javascript/book-store",
+    "javascript/bottle-song",
+    "javascript/bowling",
+    "javascript/complex-numbers",
+    "javascript/connect",
+    "javascript/food-chain",
+    "javascript/forth",
+    "javascript/go-counting",
+    "javascript/grade-school",
+    "javascript/grep",
+    "javascript/house",
+    "javascript/killer-sudoku-helper",
+    "javascript/ledger",
+    "javascript/list-ops",
+    "javascript/meetup",
+    "javascript/ocr-numbers",
+    "javascript/palindrome-products",
+    "javascript/parallel-letter-frequency",
+    "javascript/phone-number",
+    "javascript/pig-latin",
+    "javascript/poker",
+    "javascript/promises",
+    "javascript/queen-attack",
+    "javascript/rational-numbers",
+    "javascript/react",
+    "javascript/rectangles",
+    "javascript/resistor-color-trio",
+    "javascript/rest-api",
+    "javascript/robot-name",
+    "javascript/say",
+    "javascript/scale-generator",
+    "javascript/simple-linked-list",
+    "javascript/space-age",
+    "javascript/state-of-tic-tac-toe",
+    "javascript/sum-of-multiples",
+    "javascript/tournament",
+    "javascript/transpose",
+    "javascript/triangle",
+    "javascript/twelve-days",
+    "javascript/two-bucket",
+    "javascript/variable-length-quantity",
+    "javascript/word-search",
+    "javascript/wordy",
+    "javascript/zebra-puzzle",
+    "javascript/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 49,
+      "attempted": 49,
+      "passed": 43,
+      "failed": 0,
+      "timeout": 1,
+      "error": 5,
+      "skipped": 0,
+      "pct": 87.8
+    }
+  ],
+  "summary": {
+    "mean": 87.8,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/affine-cipher",
+      "status": "pass",
+      "durationMs": 38785,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 135757,
+      "cacheRead": 82368,
+      "cacheWrite": 0,
+      "inputTokens": 132828
+    },
+    {
+      "id": "javascript/alphametics",
+      "status": "pass",
+      "durationMs": 81312,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 165252,
+      "cacheRead": 95040,
+      "cacheWrite": 0,
+      "inputTokens": 157294
+    },
+    {
+      "id": "javascript/beer-song",
+      "status": "pass",
+      "durationMs": 31345,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 207966,
+      "cacheRead": 140448,
+      "cacheWrite": 0,
+      "inputTokens": 206559
+    },
+    {
+      "id": "javascript/binary",
+      "status": "pass",
+      "durationMs": 24933,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 160246,
+      "cacheRead": 116160,
+      "cacheWrite": 0,
+      "inputTokens": 159202
+    },
+    {
+      "id": "javascript/book-store",
+      "status": "pass",
+      "durationMs": 81682,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 191582,
+      "cacheRead": 151008,
+      "cacheWrite": 0,
+      "inputTokens": 184344
+    },
+    {
+      "id": "javascript/bottle-song",
+      "status": "pass",
+      "durationMs": 41608,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 252014,
+      "cacheRead": 191136,
+      "cacheWrite": 0,
+      "inputTokens": 249940
+    },
+    {
+      "id": "javascript/bowling",
+      "status": "pass",
+      "durationMs": 108437,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 262443,
+      "cacheRead": 178464,
+      "cacheWrite": 0,
+      "inputTokens": 253106
+    },
+    {
+      "id": "javascript/complex-numbers",
+      "status": "pass",
+      "durationMs": 384216,
+      "turns": 25,
+      "costUsd": 0,
+      "tokens": 1045409,
+      "cacheRead": 861696,
+      "cacheWrite": 0,
+      "inputTokens": 1006612
+    },
+    {
+      "id": "javascript/connect",
+      "status": "pass",
+      "durationMs": 290904,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 275321,
+      "cacheRead": 144672,
+      "cacheWrite": 0,
+      "inputTokens": 245711
+    },
+    {
+      "id": "javascript/food-chain",
+      "status": "pass",
+      "durationMs": 81962,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 303046,
+      "cacheRead": 232320,
+      "cacheWrite": 0,
+      "inputTokens": 297083
+    },
+    {
+      "id": "javascript/forth",
+      "status": "pass",
+      "durationMs": 160456,
+      "turns": 20,
+      "costUsd": 0,
+      "tokens": 690245,
+      "cacheRead": 569184,
+      "cacheWrite": 0,
+      "inputTokens": 677553
+    },
+    {
+      "id": "javascript/go-counting",
+      "status": "pass",
+      "durationMs": 69693,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 164964,
+      "cacheRead": 101376,
+      "cacheWrite": 0,
+      "inputTokens": 158269
+    },
+    {
+      "id": "javascript/grade-school",
+      "status": "pass",
+      "durationMs": 29036,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 186112,
+      "cacheRead": 135168,
+      "cacheWrite": 0,
+      "inputTokens": 184522
+    },
+    {
+      "id": "javascript/grep",
+      "status": "pass",
+      "durationMs": 82643,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 298048,
+      "cacheRead": 223872,
+      "cacheWrite": 0,
+      "inputTokens": 292571
+    },
+    {
+      "id": "javascript/house",
+      "status": "pass",
+      "durationMs": 91258,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 264864,
+      "cacheRead": 186912,
+      "cacheWrite": 0,
+      "inputTokens": 258038
+    },
+    {
+      "id": "javascript/killer-sudoku-helper",
+      "status": "pass",
+      "durationMs": 18672,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 110285,
+      "cacheRead": 63360,
+      "cacheWrite": 0,
+      "inputTokens": 109260
+    },
+    {
+      "id": "javascript/ledger",
+      "status": "pass",
+      "durationMs": 351161,
+      "turns": 29,
+      "costUsd": 0,
+      "tokens": 1578098,
+      "cacheRead": 1384416,
+      "cacheWrite": 0,
+      "inputTokens": 1548026
+    },
+    {
+      "id": "javascript/list-ops",
+      "status": "pass",
+      "durationMs": 55374,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 215587,
+      "cacheRead": 156288,
+      "cacheWrite": 0,
+      "inputTokens": 212205
+    },
+    {
+      "id": "javascript/meetup",
+      "status": "pass",
+      "durationMs": 25345,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 109614,
+      "cacheRead": 82368,
+      "cacheWrite": 0,
+      "inputTokens": 108474
+    },
+    {
+      "id": "javascript/ocr-numbers",
+      "status": "pass",
+      "durationMs": 42808,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 106190,
+      "cacheRead": 79200,
+      "cacheWrite": 0,
+      "inputTokens": 104042
+    },
+    {
+      "id": "javascript/palindrome-products",
+      "status": "pass",
+      "durationMs": 124121,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 225208,
+      "cacheRead": 155232,
+      "cacheWrite": 0,
+      "inputTokens": 215613
+    },
+    {
+      "id": "javascript/parallel-letter-frequency",
+      "status": "pass",
+      "durationMs": 110033,
+      "turns": 16,
+      "costUsd": 0,
+      "tokens": 434873,
+      "cacheRead": 349536,
+      "cacheWrite": 0,
+      "inputTokens": 428519
+    },
+    {
+      "id": "javascript/phone-number",
+      "status": "pass",
+      "durationMs": 51863,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 173197,
+      "cacheRead": 121440,
+      "cacheWrite": 0,
+      "inputTokens": 170547
+    },
+    {
+      "id": "javascript/pig-latin",
+      "status": "pass",
+      "durationMs": 40894,
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 83918,
+      "cacheRead": 58080,
+      "cacheWrite": 0,
+      "inputTokens": 81931
+    },
+    {
+      "id": "javascript/poker",
+      "status": "pass",
+      "durationMs": 248826,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 343689,
+      "cacheRead": 281952,
+      "cacheWrite": 0,
+      "inputTokens": 327812
+    },
+    {
+      "id": "javascript/promises",
+      "status": "pass",
+      "durationMs": 91864,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 188109,
+      "cacheRead": 151008,
+      "cacheWrite": 0,
+      "inputTokens": 183052
+    },
+    {
+      "id": "javascript/queen-attack",
+      "status": "pass",
+      "durationMs": 95665,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 289203,
+      "cacheRead": 250272,
+      "cacheWrite": 0,
+      "inputTokens": 284530
+    },
+    {
+      "id": "javascript/rational-numbers",
+      "status": "pass",
+      "durationMs": 141221,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 225443,
+      "cacheRead": 161568,
+      "cacheWrite": 0,
+      "inputTokens": 216911
+    },
+    {
+      "id": "javascript/react",
+      "status": "pass",
+      "durationMs": 250397,
+      "turns": 15,
+      "costUsd": 0,
+      "tokens": 439548,
+      "cacheRead": 348480,
+      "cacheWrite": 0,
+      "inputTokens": 424534
+    },
+    {
+      "id": "javascript/rectangles",
+      "status": "pass",
+      "durationMs": 55860,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 166272,
+      "cacheRead": 117216,
+      "cacheWrite": 0,
+      "inputTokens": 163260
+    },
+    {
+      "id": "javascript/resistor-color-trio",
+      "status": "pass",
+      "durationMs": 48138,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 153004,
+      "cacheRead": 123552,
+      "cacheWrite": 0,
+      "inputTokens": 150217
+    },
+    {
+      "id": "javascript/rest-api",
+      "status": "timeout",
+      "durationMs": 600494,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 3403,
+      "wouldHavePassed": true,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/robot-name",
+      "status": "pass",
+      "durationMs": 68014,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 134618,
+      "cacheRead": 101376,
+      "cacheWrite": 0,
+      "inputTokens": 129674
+    },
+    {
+      "id": "javascript/say",
+      "status": "pass",
+      "durationMs": 39961,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 126538,
+      "cacheRead": 98208,
+      "cacheWrite": 0,
+      "inputTokens": 123910
+    },
+    {
+      "id": "javascript/scale-generator",
+      "status": "pass",
+      "durationMs": 167952,
+      "turns": 17,
+      "costUsd": 0,
+      "tokens": 519369,
+      "cacheRead": 418176,
+      "cacheWrite": 0,
+      "inputTokens": 505073
+    },
+    {
+      "id": "javascript/simple-linked-list",
+      "status": "pass",
+      "durationMs": 63363,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 208492,
+      "cacheRead": 148896,
+      "cacheWrite": 0,
+      "inputTokens": 205054
+    },
+    {
+      "id": "javascript/space-age",
+      "status": "pass",
+      "durationMs": 33368,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 172069,
+      "cacheRead": 120384,
+      "cacheWrite": 0,
+      "inputTokens": 170116
+    },
+    {
+      "id": "javascript/state-of-tic-tac-toe",
+      "status": "pass",
+      "durationMs": 40628,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 133570,
+      "cacheRead": 80256,
+      "cacheWrite": 0,
+      "inputTokens": 130632
+    },
+    {
+      "id": "javascript/sum-of-multiples",
+      "status": "pass",
+      "durationMs": 23257,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 101988,
+      "cacheRead": 57024,
+      "cacheWrite": 0,
+      "inputTokens": 101017
+    },
+    {
+      "id": "javascript/tournament",
+      "status": "pass",
+      "durationMs": 28574,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 154635,
+      "cacheRead": 100320,
+      "cacheWrite": 0,
+      "inputTokens": 153213
+    },
+    {
+      "id": "javascript/transpose",
+      "status": "pass",
+      "durationMs": 60497,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 188697,
+      "cacheRead": 125664,
+      "cacheWrite": 0,
+      "inputTokens": 183533
+    },
+    {
+      "id": "javascript/triangle",
+      "status": "pass",
+      "durationMs": 42033,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 201446,
+      "cacheRead": 172128,
+      "cacheWrite": 0,
+      "inputTokens": 199196
+    },
+    {
+      "id": "javascript/twelve-days",
+      "status": "pass",
+      "durationMs": 46973,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 181824,
+      "cacheRead": 132000,
+      "cacheWrite": 0,
+      "inputTokens": 179688
+    },
+    {
+      "id": "javascript/two-bucket",
+      "status": "pass",
+      "durationMs": 49855,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 149648,
+      "cacheRead": 104544,
+      "cacheWrite": 0,
+      "inputTokens": 147428
+    },
+    {
+      "id": "javascript/variable-length-quantity",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 244787
+    },
+    {
+      "id": "javascript/word-search",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 69632
+    },
+    {
+      "id": "javascript/wordy",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 68897
+    },
+    {
+      "id": "javascript/zebra-puzzle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 68902
+    },
+    {
+      "id": "javascript/zipper",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 69142
+    }
+  ]
+}

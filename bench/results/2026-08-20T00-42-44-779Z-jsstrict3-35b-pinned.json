@@ -1,0 +1,60 @@
+{
+  "harness": 1,
+  "label": "jsstrict3-35b-pinned",
+  "gitSha": "f4beb4e",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "javascript/beer-song"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/beer-song",
+      "status": "pass",
+      "durationMs": 36932,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 175568,
+      "cacheRead": 118272,
+      "cacheWrite": 0,
+      "inputTokens": 172824
+    }
+  ]
+}

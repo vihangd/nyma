@@ -1,6 +1,6 @@
 {
   "harness": 1,
-  "label": "js49-retry4",
+  "label": "js49-retry5",
   "gitSha": "f4beb4e",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 39,
@@ -27,70 +27,62 @@
     "javascript/variable-length-quantity",
     "javascript/word-search",
     "javascript/wordy",
-    "javascript/zebra-puzzle"
+    "javascript/zebra-puzzle",
+    "javascript/zipper"
   ],
   "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
   "trials": [
     {
-      "total": 4,
-      "attempted": 4,
-      "passed": 4,
+      "total": 5,
+      "attempted": 5,
+      "passed": 1,
       "failed": 0,
       "timeout": 0,
-      "error": 0,
+      "error": 4,
       "skipped": 0,
-      "pct": 100
+      "pct": 20
     }
   ],
   "summary": {
-    "mean": 100,
+    "mean": 20,
     "spread": null,
     "trials": 1
   },
   "results": [
     {
       "id": "javascript/variable-length-quantity",
-      "status": "pass",
-      "durationMs": 183921,
-      "turns": 18,
-      "costUsd": 0,
-      "tokens": 635307,
-      "cacheRead": 513216,
-      "cacheWrite": 0,
-      "inputTokens": 615700
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 279579
     },
     {
       "id": "javascript/word-search",
-      "status": "pass",
-      "durationMs": 49380,
-      "turns": 10,
-      "costUsd": 0,
-      "tokens": 263278,
-      "cacheRead": 183744,
-      "cacheWrite": 0,
-      "inputTokens": 259814
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 68981
     },
     {
       "id": "javascript/wordy",
-      "status": "pass",
-      "durationMs": 308420,
-      "turns": 28,
-      "costUsd": 0,
-      "tokens": 1170730,
-      "cacheRead": 1009536,
-      "cacheWrite": 0,
-      "inputTokens": 1141932
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 73404
     },
     {
       "id": "javascript/zebra-puzzle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Provider returned error",
+      "durationMs": 69044
+    },
+    {
+      "id": "javascript/zipper",
       "status": "pass",
-      "durationMs": 86711,
-      "turns": 4,
+      "durationMs": 105536,
+      "turns": 6,
       "costUsd": 0,
-      "tokens": 101596,
-      "cacheRead": 43296,
+      "tokens": 133324,
+      "cacheRead": 103488,
       "cacheWrite": 0,
-      "inputTokens": 92384
+      "inputTokens": 130641
     }
   ]
 }
