@@ -1,0 +1,240 @@
+{
+  "harness": 1,
+  "label": "py16-35b-pinned",
+  "gitSha": "ed60cf7",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (no CLI flag); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "parasail"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "seed": 7,
+  "taskIds": [
+    "python/poker",
+    "python/pov",
+    "python/proverb",
+    "python/react",
+    "python/rest-api",
+    "python/robot-name",
+    "python/scale-generator",
+    "python/sgf-parsing",
+    "python/simple-linked-list",
+    "python/transpose",
+    "python/tree-building",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/wordy",
+    "python/zebra-puzzle",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 16,
+      "attempted": 16,
+      "passed": 16,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/poker",
+      "status": "pass",
+      "durationMs": 84681,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 193631,
+      "cacheRead": 135168,
+      "cacheWrite": 0,
+      "inputTokens": 187885
+    },
+    {
+      "id": "python/pov",
+      "status": "pass",
+      "durationMs": 207059,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 221377,
+      "cacheRead": 140448,
+      "cacheWrite": 0,
+      "inputTokens": 210059
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 30446,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 121005,
+      "cacheRead": 76032,
+      "cacheWrite": 0,
+      "inputTokens": 119901
+    },
+    {
+      "id": "python/react",
+      "status": "pass",
+      "durationMs": 136357,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 286196,
+      "cacheRead": 198528,
+      "cacheWrite": 0,
+      "inputTokens": 274343
+    },
+    {
+      "id": "python/rest-api",
+      "status": "pass",
+      "durationMs": 241076,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 215894,
+      "cacheRead": 158400,
+      "cacheWrite": 0,
+      "inputTokens": 202051
+    },
+    {
+      "id": "python/robot-name",
+      "status": "pass",
+      "durationMs": 97025,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 195555,
+      "cacheRead": 160512,
+      "cacheWrite": 0,
+      "inputTokens": 190510
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "pass",
+      "durationMs": 228729,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 244964,
+      "cacheRead": 170016,
+      "cacheWrite": 0,
+      "inputTokens": 230522
+    },
+    {
+      "id": "python/sgf-parsing",
+      "status": "pass",
+      "durationMs": 466683,
+      "turns": 19,
+      "costUsd": 0,
+      "tokens": 695435,
+      "cacheRead": 515328,
+      "cacheWrite": 0,
+      "inputTokens": 671056
+    },
+    {
+      "id": "python/simple-linked-list",
+      "status": "pass",
+      "durationMs": 41819,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 122869,
+      "cacheRead": 76032,
+      "cacheWrite": 0,
+      "inputTokens": 121536
+    },
+    {
+      "id": "python/transpose",
+      "status": "pass",
+      "durationMs": 117507,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 183774,
+      "cacheRead": 89760,
+      "cacheWrite": 0,
+      "inputTokens": 167809
+    },
+    {
+      "id": "python/tree-building",
+      "status": "pass",
+      "durationMs": 106278,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 163302,
+      "cacheRead": 110880,
+      "cacheWrite": 0,
+      "inputTokens": 159390
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "pass",
+      "durationMs": 58667,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 150924,
+      "cacheRead": 102432,
+      "cacheWrite": 0,
+      "inputTokens": 146685
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "pass",
+      "durationMs": 94907,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 290504,
+      "cacheRead": 205920,
+      "cacheWrite": 0,
+      "inputTokens": 284628
+    },
+    {
+      "id": "python/wordy",
+      "status": "pass",
+      "durationMs": 98970,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 219454,
+      "cacheRead": 163680,
+      "cacheWrite": 0,
+      "inputTokens": 212681
+    },
+    {
+      "id": "python/zebra-puzzle",
+      "status": "pass",
+      "durationMs": 153922,
+      "turns": 14,
+      "costUsd": 0,
+      "tokens": 323616,
+      "cacheRead": 257664,
+      "cacheWrite": 0,
+      "inputTokens": 316672
+    },
+    {
+      "id": "python/zipper",
+      "status": "pass",
+      "durationMs": 101962,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 173595,
+      "cacheRead": 77088,
+      "cacheWrite": 0,
+      "inputTokens": 166531
+    }
+  ]
+}
