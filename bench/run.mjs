@@ -47,9 +47,9 @@ const DEFAULT_AGENT = ["bun", path.join(ROOT, "dist", "agent", "cli.mjs")];
 
 function parseArgs(argv) {
   const a = { count: 20, seed: 7, label: "run", trials: 1, timeoutMs: 300000,
-              maxSteps: 40, only: null, model: null, agentCmd: null, diff: null,
+              maxSteps: null, only: null, model: null, agentCmd: null, diff: null,
               tasksDir: path.join(ROOT, "bench", "tasks"), keep: false,
-              agentSettings: null, noBuiltinExt: false, envVars: {}, concurrency: 1 };
+              agentSettings: null, noBuiltinExt: false, envVars: {}, concurrency: 1, resumeFrom: null };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], next = () => argv[++i];
     if (k === "--count") a.count = Number(next());
@@ -67,6 +67,7 @@ function parseArgs(argv) {
     else if (k === "--keep") a.keep = true;
     else if (k === "--agent-settings") a.agentSettings = next();
     else if (k === "--concurrency") a.concurrency = Math.max(1, Number(next()));
+    else if (k === "--resume-from") a.resumeFrom = next();
     // Deliberately strip the agent for an ablation. Recorded in the result so a
     // number from a 2-extension agent can never be read as a normal run.
     else if (k === "--no-builtin-ext") a.noBuiltinExt = true;
@@ -241,9 +242,19 @@ async function runTask(task, opts) {
     // the repo's own .nyma/settings.json never applies to a bench run. Writing
     // them here is what makes per-run config (backend routing, extension
     // toggles) possible without editing the user's global settings.
-    if (opts.agentSettings) {
+    // Settings merge defaults <- global <- project, so this file only needs to
+    // carry what the run overrides; everything else still comes from the user's
+    // ~/.nyma/settings.json (which is why `thinking` and `headroom` apply here).
+    const projectSettings = opts.agentSettings
+      ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : {};
+    // A wall-clock cap only ends a grinding task after 600s of paid tokens. A
+    // step cap ends it at the point it stopped making progress, which frees the
+    // lane for the next task instead of holding it at the wall.
+    if (opts.maxSteps) projectSettings["max-steps"] = opts.maxSteps;
+    if (Object.keys(projectSettings).length) {
       fs.mkdirSync(path.join(work, ".nyma"), { recursive: true });
-      fs.copyFileSync(opts.agentSettings, path.join(work, ".nyma", "settings.json"));
+      fs.writeFileSync(path.join(work, ".nyma", "settings.json"),
+                       JSON.stringify(projectSettings, null, 2));
     }
     // Exercism's JS track ships every case after the first as `xtest`, for a
     // student to unskip as they go. Graded as delivered, a solution that
@@ -271,8 +282,9 @@ async function runTask(task, opts) {
     const before = readTests();
 
     const [cmd, ...base] = opts.agentCmd;
-    // No --max-steps flag exists (it is settings-only, default 100), so the
-    // wall-clock timeout is the bound. Recorded in the result file as such.
+    // --max-steps is injected through project settings (there is no CLI flag on
+    // the agent); without it the agent default of 100 applies and wall clock is
+    // the only bound.
     const agentArgs = [...base, "-p", "--output-format", "json", "--no-session",
                        "--permission-mode", "full-auto"];
     if (opts.modelSpec) agentArgs.push("--model", opts.modelSpec);
@@ -476,6 +488,7 @@ async function main() {
               (build.extensionCount ? ` (${build.extensionCount} extensions)` : ""));
 
   const trials = [];
+  let partialPath0 = null;
   for (let t = 0; t < opts.trials; t++) {
     // Against a remote provider a task is almost entirely waiting on the
     // network, so running them one at a time leaves the machine idle: 113 tasks
@@ -483,7 +496,20 @@ async function main() {
     // pull from a shared queue rather than running in fixed batches, so one
     // 600s timeout cannot stall the other lanes behind it.
     const results = [];
-    const queue = [...tasks];
+    // Resume: skip whatever a previous, killed run already finished.
+    const done = new Map();
+    if (opts.resumeFrom && fs.existsSync(opts.resumeFrom)) {
+      for (const line of fs.readFileSync(opts.resumeFrom, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try { const r = JSON.parse(line); done.set(r.id, r); } catch { /* partial line */ }
+      }
+      results.push(...done.values());
+      console.log(`  resumed ${done.size} completed task(s) from ${opts.resumeFrom}`);
+    }
+    const partialPath = opts.resumeFrom
+      || path.join(ROOT, "bench", "results", `${opts.label}.partial.jsonl`);
+    partialPath0 = partialPath;
+    const queue = tasks.filter((t) => !done.has(t.id));
     const lanes = Math.max(1, Math.min(opts.concurrency, tasks.length));
     const worker = async (lane) => {
       for (;;) {
@@ -491,6 +517,10 @@ async function main() {
         if (!task) return;
         const r = await runTask(task, { ...opts, lane });
         results.push(r);
+        // Append as we go. Three runs were killed mid-flight and lost every
+        // completed task with them; chunking capped the loss but forced a
+        // barrier between chunks, which is exactly what concurrency is for.
+        try { fs.appendFileSync(partialPath, JSON.stringify(r) + "\n"); } catch { /* best effort */ }
         const agg = aggregate(results);
         console.log(`  [${results.length}/${tasks.length}] ${r.status.padEnd(7)} ${r.id}` +
                     ` (${Math.round(r.durationMs / 1000)}s, running ${agg.pct ?? "-"}%)`);
@@ -503,6 +533,7 @@ async function main() {
     trials.push({ results, aggregate: aggregate(results) });
   }
 
+  try { if (fs.existsSync(partialPath0)) fs.unlinkSync(partialPath0); } catch { /* keep */ }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const gitSha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, timeoutMs: 5000 }))
     .stdout.trim();
@@ -522,7 +553,7 @@ async function main() {
     role: opts.model ?? null,
     model: opts.modelSpec ?? "(agent default)",
     modelSource: resolved.source,
-    maxSteps: "agent default (no CLI flag); bounded by timeoutMs",
+    maxSteps: opts.maxSteps ?? "agent default (100); bounded by timeoutMs",
     agentSettings: opts.agentSettings
       ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : null,
     timeoutMs: opts.timeoutMs,
