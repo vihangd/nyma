@@ -49,7 +49,7 @@ function parseArgs(argv) {
   const a = { count: 20, seed: 7, label: "run", trials: 1, timeoutMs: 300000,
               maxSteps: 40, only: null, model: null, agentCmd: null, diff: null,
               tasksDir: path.join(ROOT, "bench", "tasks"), keep: false,
-              agentSettings: null, noBuiltinExt: false, envVars: {} };
+              agentSettings: null, noBuiltinExt: false, envVars: {}, concurrency: 1 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i], next = () => argv[++i];
     if (k === "--count") a.count = Number(next());
@@ -66,6 +66,7 @@ function parseArgs(argv) {
     else if (k === "--all") a.count = null;
     else if (k === "--keep") a.keep = true;
     else if (k === "--agent-settings") a.agentSettings = next();
+    else if (k === "--concurrency") a.concurrency = Math.max(1, Number(next()));
     // Deliberately strip the agent for an ablation. Recorded in the result so a
     // number from a 2-extension agent can never be read as a normal run.
     else if (k === "--no-builtin-ext") a.noBuiltinExt = true;
@@ -287,6 +288,12 @@ async function runTask(task, opts) {
           NYMA_BENCH_TEST_FILE: path.join(work, task.testFile),
           NYMA_BENCH_META: path.join(task.dir, ".meta") }
       : { ...process.env, ...opts.envVars };
+    // One cargo target dir per lane, not one global: concurrent `cargo test`
+    // runs against a shared target block on cargo's file lock, which would
+    // serialise the lanes while still paying the wall clock for them.
+    if (task.lang === "rust" && opts.lane !== undefined) {
+      agentEnv.CARGO_TARGET_DIR = `${process.env.CARGO_TARGET_DIR}-${opts.lane}`;
+    }
 
     const stubPath = path.join(work, task.stub);
     const stubBefore = fs.readFileSync(stubPath, "utf8");
@@ -312,7 +319,7 @@ async function runTask(task, opts) {
       const tamperedTest = readTests() !== before;
       let wouldHavePassed = null;
       if (edited && spec && !tamperedTest) {
-        const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
+        const late = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000, env: agentEnv });
         wouldHavePassed = classifyTestRun(late) === STATUS.pass;
       }
       // A host that sleeps mid-run suspends the timer while the wall clock keeps
@@ -357,7 +364,7 @@ async function runTask(task, opts) {
                durationMs: Date.now() - started };
     }
 
-    const test = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000 });
+    const test = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000, env: agentEnv });
     const usage = parseUsage(agent.stdout);
     return {
       id: task.id,
@@ -470,14 +477,29 @@ async function main() {
 
   const trials = [];
   for (let t = 0; t < opts.trials; t++) {
+    // Against a remote provider a task is almost entirely waiting on the
+    // network, so running them one at a time leaves the machine idle: 113 tasks
+    // at ~153s each is over four hours of mostly-blocked wall clock. Workers
+    // pull from a shared queue rather than running in fixed batches, so one
+    // 600s timeout cannot stall the other lanes behind it.
     const results = [];
-    for (const task of tasks) {
-      const r = await runTask(task, opts);
-      results.push(r);
-      const agg = aggregate(results);
-      console.log(`  [${results.length}/${tasks.length}] ${r.status.padEnd(7)} ${r.id}` +
-                  ` (${Math.round(r.durationMs / 1000)}s, running ${agg.pct ?? "-"}%)`);
-    }
+    const queue = [...tasks];
+    const lanes = Math.max(1, Math.min(opts.concurrency, tasks.length));
+    const worker = async (lane) => {
+      for (;;) {
+        const task = queue.shift();
+        if (!task) return;
+        const r = await runTask(task, { ...opts, lane });
+        results.push(r);
+        const agg = aggregate(results);
+        console.log(`  [${results.length}/${tasks.length}] ${r.status.padEnd(7)} ${r.id}` +
+                    ` (${Math.round(r.durationMs / 1000)}s, running ${agg.pct ?? "-"}%)`);
+      }
+    };
+    await Promise.all(Array.from({ length: lanes }, (_, i) => worker(i)));
+    // Deterministic order regardless of which lane finished first, so two runs
+    // of the same task list diff cleanly.
+    results.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     trials.push({ results, aggregate: aggregate(results) });
   }
 
@@ -504,6 +526,7 @@ async function main() {
     agentSettings: opts.agentSettings
       ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : null,
     timeoutMs: opts.timeoutMs,
+    concurrency: opts.concurrency,
     seed: opts.seed,
     taskIds: tasks.map((t) => t.id),
     // Stated in every file so nobody reads it as a published-number comparison:

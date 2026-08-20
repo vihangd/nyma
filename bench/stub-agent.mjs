@@ -40,6 +40,16 @@ if (mode === "solve") {
     console.error(`stub-agent: no reference solution in ${meta}`);
     process.exit(1);
   }
+  // 7 of the 30 Rust exercises ship .meta/Cargo-example.toml: the reference
+  // solution pulls dependencies the student stub's manifest does not declare,
+  // so example.rs alone does not compile. Without this the solve guard reports
+  // `fail` on those tasks and looks like a grading bug rather than a stub that
+  // was handed half an answer.
+  const exampleManifest = meta ? path.join(meta, "Cargo-example.toml") : null;
+  if (exampleManifest && fs.existsSync(exampleManifest)) {
+    fs.writeFileSync(path.join(path.dirname(path.dirname(stub)), "Cargo.toml"),
+                     fs.readFileSync(exampleManifest, "utf8"));
+  }
 } else if (mode === "break") {
   // Must fail the suite in every language: a python raise is a syntax error to
   // rustc, which is still a failing test run, but say so explicitly.
