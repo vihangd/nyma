@@ -1,0 +1,142 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "hard-ON",
+  "gitSha": "cb605e0",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/laguna-s-2.1-free",
+  "model": "opencode-zen/laguna-s-2.1-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    }
+  },
+  "timeoutMs": 600000,
+  "concurrency": 3,
+  "seed": 7,
+  "taskIds": [
+    "javascript/book-store",
+    "javascript/forth",
+    "javascript/poker",
+    "javascript/react",
+    "javascript/rest-api",
+    "javascript/transpose",
+    "javascript/wordy",
+    "javascript/zebra-puzzle",
+    "python/bowling",
+    "python/connect",
+    "python/forth",
+    "python/paasio",
+    "python/sgf-parsing",
+    "python/transpose"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 14,
+      "attempted": 14,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 14,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/book-store",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69601
+    },
+    {
+      "id": "javascript/forth",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68572
+    },
+    {
+      "id": "javascript/poker",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 70384
+    },
+    {
+      "id": "javascript/react",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68445
+    },
+    {
+      "id": "javascript/rest-api",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68638
+    },
+    {
+      "id": "javascript/transpose",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69027
+    },
+    {
+      "id": "javascript/wordy",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68733
+    },
+    {
+      "id": "javascript/zebra-puzzle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68582
+    },
+    {
+      "id": "python/bowling",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 70602
+    },
+    {
+      "id": "python/connect",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68946
+    },
+    {
+      "id": "python/forth",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68666
+    },
+    {
+      "id": "python/paasio",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68776
+    },
+    {
+      "id": "python/sgf-parsing",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68603
+    },
+    {
+      "id": "python/transpose",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68913
+    }
+  ]
+}

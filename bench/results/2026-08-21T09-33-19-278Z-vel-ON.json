@@ -1,7 +1,7 @@
 {
   "harness": 2,
   "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
-  "label": "vel-OFF",
+  "label": "vel-ON",
   "gitSha": "fb61f87",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 39,
@@ -11,7 +11,11 @@
   "model": "velona/nvidia/nemotron-3-nano-30b-a3b",
   "modelSource": "explicit",
   "maxSteps": "agent default (100); bounded by timeoutMs",
-  "agentSettings": null,
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    }
+  },
   "timeoutMs": 600000,
   "concurrency": 3,
   "seed": 7,
@@ -28,16 +32,16 @@
     {
       "total": 6,
       "attempted": 6,
-      "passed": 3,
-      "failed": 3,
-      "timeout": 0,
+      "passed": 5,
+      "failed": 0,
+      "timeout": 1,
       "error": 0,
       "skipped": 0,
-      "pct": 50
+      "pct": 83.3
     }
   ],
   "summary": {
-    "mean": 50,
+    "mean": 83.3,
     "spread": null,
     "trials": 1
   },
@@ -45,68 +49,70 @@
     {
       "id": "javascript/book-store",
       "status": "pass",
-      "durationMs": 181616,
-      "turns": 12,
-      "costUsd": 0.026698600000000003,
-      "tokens": 442670,
+      "durationMs": 234534,
+      "turns": 17,
+      "costUsd": 0.032725300000000006,
+      "tokens": 576077,
       "cacheRead": 0,
       "cacheWrite": 0,
-      "inputTokens": 412236
+      "inputTokens": 549934
     },
     {
       "id": "javascript/transpose",
-      "status": "fail",
-      "durationMs": 236555,
-      "turns": 20,
-      "costUsd": 0.0429906,
-      "tokens": 765558,
+      "status": "pass",
+      "durationMs": 165058,
+      "turns": 18,
+      "costUsd": 0.030762150000000002,
+      "tokens": 557589,
       "cacheRead": 0,
       "cacheWrite": 0,
-      "inputTokens": 734140
+      "inputTokens": 538371
     },
     {
       "id": "javascript/wordy",
       "status": "pass",
-      "durationMs": 222660,
-      "turns": 23,
-      "costUsd": 0.06389605000000001,
-      "tokens": 1154204,
+      "durationMs": 266291,
+      "turns": 16,
+      "costUsd": 0.04315455,
+      "tokens": 740010,
       "cacheRead": 0,
       "cacheWrite": 0,
-      "inputTokens": 1112965
+      "inputTokens": 698983
     },
     {
       "id": "python/bowling",
-      "status": "fail",
-      "durationMs": 120647,
-      "turns": 13,
-      "costUsd": 0.0195794,
-      "tokens": 343696,
-      "cacheRead": 0,
-      "cacheWrite": 0,
-      "inputTokens": 327732
+      "status": "timeout",
+      "durationMs": 600117,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 1314,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
     },
     {
       "id": "python/connect",
-      "status": "fail",
-      "durationMs": 254778,
-      "turns": 22,
-      "costUsd": 0.03827245,
-      "tokens": 679835,
+      "status": "pass",
+      "durationMs": 242327,
+      "turns": 14,
+      "costUsd": 0.0352277,
+      "tokens": 584302,
       "cacheRead": 0,
       "cacheWrite": 0,
-      "inputTokens": 651297
+      "inputTokens": 544218
     },
     {
       "id": "python/transpose",
       "status": "pass",
-      "durationMs": 320103,
-      "turns": 23,
-      "costUsd": 0.04421765,
-      "tokens": 800566,
+      "durationMs": 354679,
+      "turns": 25,
+      "costUsd": 0.07958915000000001,
+      "tokens": 1417666,
       "cacheRead": 0,
       "cacheWrite": 0,
-      "inputTokens": 772637
+      "inputTokens": 1359627
     }
   ]
 }

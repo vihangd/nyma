@@ -1,0 +1,52 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "vel-probe",
+  "gitSha": "fb61f87",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "velona/nvidia/nemotron-3-nano-30b-a3b",
+  "model": "velona/nvidia/nemotron-3-nano-30b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 420000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "python/transpose"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 0,
+      "failed": 1,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/transpose",
+      "status": "fail",
+      "durationMs": 319947,
+      "turns": 25,
+      "costUsd": 0.06101190000000001,
+      "tokens": 1100526,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 1060622
+    }
+  ]
+}
