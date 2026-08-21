@@ -90,7 +90,7 @@
 ;; the turn rather than call a tool. A hand-rolled assertion on the emitted
 ;; bytes cannot catch that.
 
-(defn- rescue-fetch [chunks]
+(defn- rescue-fetch* [chunks tools]
   (adapter/wrap-fetch-with-rescue
    (fn [_url _init]
      (js/Promise.resolve
@@ -101,7 +101,9 @@
                         (doseq [c chunks] (.enqueue ctrl (.encode enc c)))
                         (.close ctrl)))})
        #js {:status 200 :headers #js {"content-type" "text/event-stream"}})))
-   (fn [] #{"read"})))
+   (fn [] tools)))
+
+(defn- rescue-fetch [chunks] (rescue-fetch* chunks #{"read"}))
 
 (describe "toolcall-adapter through @ai-sdk/openai" (fn []
 
@@ -135,3 +137,79 @@
            (-> (expect (.-toolName call)) (.toBe "read"))
            (-> (expect (.-input call)) (.toContain "main.go"))
            (-> (expect (.-unified (.-finishReason fin))) (.toBe "tool-calls"))))))))
+
+;; ── Withholding the raw markup ───────────────────────────────
+;;
+;; A rescued turn used to carry BOTH calls: the `<function=…>` markup had
+;; already streamed as assistant text, so it was persisted and replayed on the
+;; next turn — teaching the model the format it is being rescued from.
+
+(defn- content-chunks [contents]
+  (let [out (atom [])]
+    (doseq [[i c] (map-indexed vector contents)]
+      (swap! out conj
+             (str "data: "
+                  (js/JSON.stringify
+                   #js {:choices #js [#js {:delta (if (zero? i)
+                                                    #js {:role "assistant" :content c}
+                                                    #js {:content c})
+                                           :index 0}]})
+                  "\n\n")))
+    (swap! out conj (str "data: "
+                         (js/JSON.stringify
+                          #js {:choices #js [#js {:index 0 :finish_reason "stop"}]})
+                         "\n\n"))
+    (clj->js @out)))
+
+(defn ^:async drain [contents tools]
+  (let [model (.chat (createOpenAI #js {:apiKey "x"
+                                        :baseURL "http://local.test/v1"
+                                        :compatibility "compatible"
+                                        :fetch (rescue-fetch* (content-chunks contents) tools)})
+                     "m")
+        res   (js-await (.doStream model
+                                   #js {:prompt #js [#js {:role "user"
+                                                          :content #js [#js {:type "text" :text "hi"}]}]}))
+        parts (atom [])]
+    (js-await (.pipeTo (.-stream res)
+                       (js/WritableStream. #js {:write (fn [p] (swap! parts conj p))})))
+    {:text  (apply str (map (fn [p] (.-delta p))
+                            (filter (fn [p] (= "text-delta" (.-type p))) @parts)))
+     :calls (mapv (fn [p] (.-toolName p))
+                  (filter (fn [p] (= "tool-call" (.-type p))) @parts))}))
+
+(describe "toolcall-adapter — raw markup never reaches the message" (fn []
+
+  (it "keeps the prose and drops the markup when the rescue fires"
+      (^:async fn []
+       (let [r (js-await (drain ["Let me read it. "
+                                 "<function=read><parameter=path>main.go</parameter></function>"]
+                                #{"read"}))]
+         (-> (expect (:calls r)) (.toEqual #js ["read"]))
+         (-> (expect (:text r)) (.toBe "Let me read it. "))
+         ;; The whole point: it must not also be sitting in the text.
+         (-> (expect (.includes (:text r) "<function=")) (.toBe false)))))
+
+  (it "releases the held text unchanged when nothing rescues"
+      (^:async fn []
+       ;; `nope` is not an active tool, so this is ordinary text and must
+       ;; arrive in full — withholding may never lose content.
+       (let [r (js-await (drain ["Prose then "
+                                 "<function=nope><parameter=x>1</parameter></function>"]
+                                #{"read"}))]
+         (-> (expect (:calls r)) (.toEqual #js []))
+         (-> (expect (:text r)) (.toBe "Prose then <function=nope><parameter=x>1</parameter></function>")))))
+
+  (it "does not withhold a code block that merely contains a brace"
+      (^:async fn []
+       ;; The JSON rescue scans for `{` anywhere; holding on those would stall
+       ;; every code block until the turn ended.
+       (let [r (js-await (drain ["func main() {" "\n  fmt.Println(1)\n}"] #{"read"}))]
+         (-> (expect (:text r)) (.toBe "func main() {\n  fmt.Println(1)\n}")))))
+
+  (it "suppresses a message that is nothing but a bare JSON call"
+      (^:async fn []
+       (let [r (js-await (drain ["{\"name\":\"read\"," "\"arguments\":{\"path\":\"a.go\"}}"]
+                                #{"read"}))]
+         (-> (expect (:calls r)) (.toEqual #js ["read"]))
+         (-> (expect (:text r)) (.toBe "")))))))

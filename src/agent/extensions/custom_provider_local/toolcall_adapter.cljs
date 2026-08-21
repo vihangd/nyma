@@ -218,16 +218,59 @@
         (aset choice "finish_reason" "tool_calls"))))
   chunk-obj)
 
+
+;; ── Withholding the raw markup ───────────────────────────────────
+;;
+;; A rescued turn used to carry BOTH the malformed call and the rescued one:
+;; the `<function=…>` markup had already streamed as assistant text before the
+;; finish chunk arrived, so it landed in the message, was persisted, and got
+;; replayed on the next turn — teaching the model the very format it is being
+;; rescued from.
+;;
+;; Text is therefore held back from the point it starts looking like a tool
+;; call. If the rescue fires, the held text is dropped; if it does not, the
+;; text is released unchanged before the finish chunk. Either way nothing is
+;; lost, and the only cost is that a genuine message containing one of these
+;; markers arrives in one piece at the end instead of streaming.
+
+(def ^:private hold-markers
+  #js ["<function=" "[TOOL_CALLS]" "[ARGS]"])
+
+(defn- marker-index
+  "Index in `text` where it starts looking like a tool call, or -1.
+
+   Deliberately NOT every `{`: the JSON rescue scans for braces anywhere, but
+   holding on those would stall any code block until the turn ended. A bare
+   object or fence is only treated as a tool call when the message OPENS with
+   one — which is the shape a model emitting nothing but a call produces."
+  [text]
+  (let [idxs (atom [])]
+    (doseq [m (vec hold-markers)]
+      (let [i (.indexOf text m)]
+        (when (>= i 0) (swap! idxs conj i))))
+    (let [t (.trimStart text)]
+      (when (or (.startsWith t "{") (.startsWith t "```"))
+        (swap! idxs conj (- (.-length text) (.-length t)))))
+    (if (seq @idxs) (apply min @idxs) -1)))
+
+(defn- content-chunk
+  "An SSE event carrying `text` as an assistant content delta."
+  [text]
+  (str "data: "
+       (js/JSON.stringify
+        #js {:choices #js [#js {:delta #js {:content text} :index 0}]})
+       "\n\n"))
+
 (defn- transform-event
-  "One SSE event in, the event to emit out. Pure w.r.t. the stream apart from
-   the two atoms it advances.
+  "One SSE event in, the event(s) to emit out. Pure w.r.t. the stream apart
+   from the atoms it advances.
 
    Hoisted out of the transform because `:flush` needs it too: a stream whose
    last event arrives without a trailing blank line leaves that event in the
    buffer, and flushing it verbatim skips the rescue on the one chunk that
    carries the finish reason. `reasoning_stream` already routes its flush
    remainder through the per-event path; this now matches."
-  [line has-tc acc-text get-active-tools]
+  [line has-tc acc-text held get-active-tools]
   (let [out (atom line)]
     (let [data-line (first (filter #(.startsWith % "data: ") (.split line "\n")))]
       (when data-line
@@ -242,18 +285,48 @@
                     (when (and delta (.-tool_calls delta))
                       (reset! has-tc true))
                     (when (and delta (.-content delta))
-                      (swap! acc-text str (.-content delta)))
+                      (let [content (.-content delta)
+                            prior   (.-length @acc-text)]
+                        (swap! acc-text str content)
+                        (if (some? @held)
+                          ;; Already withholding: everything from here is part
+                          ;; of the suspected call.
+                          (do (swap! held str content)
+                              (aset delta "content" nil)
+                              (reset! out (str "data: " (js/JSON.stringify obj) "\n\n")))
+                          (let [i (marker-index @acc-text)]
+                            (when (>= i 0)
+                              ;; Split this chunk at the marker. If the marker
+                              ;; straddled a chunk boundary its first few
+                              ;; characters are already gone; hold the rest.
+                              (let [cut (max 0 (- i prior))]
+                                (reset! held (.slice content cut))
+                                (aset delta "content" (.slice content 0 cut))
+                                (reset! out (str "data: " (js/JSON.stringify obj) "\n\n"))))))))
                     ;; Finish chunk, no tool calls, but text that parses as one.
                     (when (and finish (not @has-tc) (seq @acc-text))
                       (let [active (try (get-active-tools) (catch :default _ #{}))
                             found  (rescue-tool-calls @acc-text active)]
-                        (when (seq found)
-                          (inject-tool-calls-into-chunk obj found)
-                          (aset choice "finish_reason" "tool_calls")
-                          ;; The rescue mutates the PARSED obj; without
-                          ;; re-serializing, the original `line` went out and
-                          ;; every rescued call was silently discarded.
-                          (reset! out (str "data: " (js/JSON.stringify obj) "\n\n"))))))))
+                        (if (seq found)
+                          (do (inject-tool-calls-into-chunk obj found)
+                              (aset choice "finish_reason" "tool_calls")
+                              ;; Held text is the markup itself — drop it.
+                              (reset! held nil)
+                              ;; The rescue mutates the PARSED obj; without
+                              ;; re-serializing, the original `line` went out
+                              ;; and every rescued call was silently discarded.
+                              (reset! out (str "data: " (js/JSON.stringify obj) "\n\n")))
+                          ;; No rescue: it was ordinary text after all.
+                          (when (some? @held)
+                            (let [h @held]
+                              (reset! held nil)
+                              (reset! out (str (content-chunk h) @out)))))))
+                    ;; A finish that DID carry tool calls still has to release
+                    ;; anything held, or the text vanishes.
+                    (when (and finish (some? @held))
+                      (let [h @held]
+                        (reset! held nil)
+                        (reset! out (str (content-chunk h) @out)))))))
               (catch :default _ nil))))))
     @out))
 
@@ -275,6 +348,9 @@
                      ;; Track accumulated text delta and whether we've seen any tool calls
                      acc-text (atom "")
                      has-tc   (atom false)
+                     ;; nil = passing text through; a string = withholding it
+                     ;; pending the rescue verdict.
+                     held     (atom nil)
                      ts (js/TransformStream.
                          #js {:transform
                               (fn [chunk ctrl]
@@ -286,13 +362,13 @@
                                   (doseq [evt done]
                                     (.enqueue ctrl (.encode encoder
                                                             (transform-event (str evt "\n\n")
-                                                                             has-tc acc-text
+                                                                             has-tc acc-text held
                                                                              get-active-tools))))))
                               :flush
                               (fn [ctrl]
                                 (when (seq @buffer)
                                   (.enqueue ctrl (.encode encoder
-                                                          (transform-event @buffer has-tc acc-text
+                                                          (transform-event @buffer has-tc acc-text held
                                                                            get-active-tools)))))})]
                  (js/Response. (.pipeThrough (.-body response) ts)
                                #js {:status     (.-status response)
