@@ -1,7 +1,8 @@
 (ns agent.extensions.custom-provider-opencode-zen.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.utils.credentials :as credentials]
-            [agent.utils.reasoning-stream :as rs]))
+            [agent.utils.reasoning-stream :as rs]
+            [agent.utils.toolcall-rescue :as rescue]))
 
 (def ^:private provider-name "opencode-zen")
 (def ^:private default-base-url "https://opencode.ai/zen/v1")
@@ -79,6 +80,11 @@
       (aget js/process.env "OPENCODE_API_KEY")
       (credentials/read-credential provider-name)))
 
+;; Set by `default` once the extension has `api`. Rescue parsing needs the
+;; live tool-name set, and the model factory is called without api.
+(def ^:private active-tools-atom (atom (fn [] #{})))
+(def ^:private rescue-enabled? (atom false))
+
 (defn- create-oc-zen-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -94,13 +100,35 @@
       ;; replayed on subsequent turns. The /responses path has native
       ;; reasoning handling and doesn't need this shim.
       (when (= protocol :chat)
-        (aset opts "fetch" (rs/make-fetch rs/lift-think-request-rewriter)))
+        ;; Natural-language tool calls. Measured on this gateway: a task that
+        ;; ends `agent never modified the stub (no tool call?)` is a model that
+        ;; described the call in prose instead of emitting JSON — 5 of 10 hard
+        ;; tasks, with respond-tool active. NLT (arXiv 2510.14453) reports
+        ;; +18.4pp tool-calling accuracy from treating prose as the tool-call
+        ;; channel rather than a malformation, with the largest gains on
+        ;; open-weight models, because the JSON schema itself competes for the
+        ;; capacity the task needs. The parser already exists for `local` and
+        ;; `relay`; this makes it reachable here, opt-in per settings.
+        (let [f (rs/make-fetch rs/lift-think-request-rewriter)]
+          (aset opts "fetch"
+                (if @rescue-enabled?
+                  (rescue/wrap-fetch-with-rescue f @active-tools-atom)
+                  f))))
       (let [provider (createOpenAI opts)]
         (case protocol
           :responses (.responses provider id)
           :chat      (.chat provider id))))))
 
 (defn ^:export default [api]
+  ;; Opt-in, settings-driven — the same shape `local` and `relay` already use,
+  ;; so this is one more provider honouring an existing switch rather than a
+  ;; new mechanism:  {"opencode-zen": {"rescue-parsing": true}}
+  (let [settings (try (when (.-getSettings api) (.getSettings api))
+                      (catch :default _ nil))
+        zen      (or (aget (or settings #js {}) "opencode-zen") #js {})]
+    (reset! rescue-enabled?
+            (boolean (or (aget zen "rescue-parsing") (aget zen "rescueParsing"))))
+    (reset! active-tools-atom (rescue/active-tools-fn api)))
   (.registerProvider api provider-name
                      #js {:createModel create-oc-zen-model
                           :baseUrl     default-base-url
