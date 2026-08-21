@@ -74,7 +74,9 @@ replace it.
 | `credentialName` | `name` | Which `/login` entry to read, for gateways registered twice. |
 | `api` | `openai-compatible` | Or `anthropic` (Messages API), or `openai-responses`. |
 | `discover` | `true` | Fetch the model list from `GET <baseUrl>/models`. |
+| `catalogUrl` | *(none)* | Absolute URL of a richer catalog to discover from instead. See below. |
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
+| `types` | *(any)* | Required `type`, any-of — keeps image/embedding models out of the picker. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |
@@ -152,6 +154,48 @@ context window nor pricing. Two consequences:
 - **Price** deliberately does *not* fall back. A relay charges its own rates, so showing the
   first-party number would be worse than showing none. `/model` leaves the column blank
   unless you declare `cost` explicitly.
+
+## Where the context windows come from
+
+Discovery reads whatever the catalog declares: a window from `context_window`,
+`context_length` or `max_model_len`, and a price from either `input_per_1m_usd` /
+`output_per_1m_usd` (already USD per 1M) or `prompt` / `completion` (USD per *token*,
+scaled up). New API declares neither, so for those relays the numbers still come from
+the `models` entry you write by hand.
+
+Where both exist, **discovery wins** and your declared entry fills only what the catalog
+left out. That way a hand-typed window is a fallback rather than a permanent override,
+and a stale one heals itself on the next refresh.
+
+### `catalogUrl`
+
+Some gateways publish a fuller catalog at a different path than their OpenAI surface.
+Velona is the shipped example: `https://velona.in/v1/models` lists ids and nothing else,
+while `https://velona.in/gateway/v1/models` carries real windows and prices. Point
+`catalogUrl` at the richer one.
+
+The key is sent **only when `catalogUrl` shares an origin with `baseUrl`**. `catalogUrl`
+comes from settings, so without that rule an entry naming another host would hand it this
+provider's credential — the same leak the redirect refusal exists to prevent, reached
+directly instead of through a 302. An off-origin catalog is still fetched, just
+unauthenticated.
+
+## Velona (India)
+
+Ships as a preset. [Velona](https://velona.in) bills in INR with UPI top-up and no
+international card, and fronts ~419 models under their vendors' own ids.
+
+```
+export VELONA_API_KEY=...      # or: /login velona
+nyma --model velona/qwen/qwen3.8-27b
+```
+
+Note the model spec splits on the **first** slash only, so `velona/qwen/qwen3.8-27b` is
+provider `velona`, model `qwen/qwen3.8-27b`.
+
+Discovery needs a key even though Velona's catalog endpoint is public — without one you
+get the seeded list. Velona reports `capabilities`, not `supported_endpoint_types`, so
+the preset filters on `types: ["text"]` instead of `endpointTypes`.
 
 ## Adding another New API relay
 

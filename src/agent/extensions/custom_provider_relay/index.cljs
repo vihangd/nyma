@@ -49,7 +49,10 @@
 ;; The seed lists are deliberately tiny — enough that `/model` is useful before
 ;; the first discovery call, not an attempt to mirror the catalogue.
 
-(def ^:private presets
+(def presets
+  ;; Public so tests can pin the shipped entries — notably that velona
+  ;; discovery points at the surface carrying windows/prices, and that it is
+  ;; same-origin so the key may travel with it.
   [{:name      "yunwu"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"
@@ -84,6 +87,41 @@
                 {:id "glm-4.7"}
                 {:id "gemini-2.5-flash"}
                 {:id "gpt-5.2"}]}
+   ;; Velona (https://velona.in) — an India-focused gateway: INR billing, UPI
+   ;; top-up, no international card. Fronts ~419 models under their vendors'
+   ;; own ids, so it is a gateway in exactly this namespace's sense.
+   ;;
+   ;; Its OpenAI surface (/v1/models) lists ids and NOTHING else — no window,
+   ;; no price. The gateway surface carries both, so discovery is pointed
+   ;; there. Same origin, so the key still goes with it.
+   ;;
+   ;; No :endpoint-types — Velona reports `capabilities` (["streaming","text"],
+   ;; plus "moderated" on some), never `supported_endpoint_types`. It does
+   ;; report `type`, which is what keeps its image (/images/render) and
+   ;; embedding (/inference/embed) models out of the picker.
+   {:name      "velona"
+    :base-url  "https://velona.in/v1"
+    :api-key-env "VELONA_API_KEY"
+    :api       "openai-compatible"
+    :discover  true
+    :catalog-url "https://velona.in/gateway/v1/models"
+    :types     ["text"]
+    ;; Seed: what a user sees before the first discovery lands, or with no key
+    ;; at all (discover! needs one). Verified against the live catalogue —
+    ;; several plausible ids are NOT carried here (no claude-sonnet-4-6, no
+    ;; gpt-oss, no qwen3-coder:free, no llama-3.3-70b:free). Discovery
+    ;; overrides these numbers, so drift is self-correcting.
+    :models    [{:id "poolside/laguna-s-2.1:free"           :context-window 262144  :cost {:input 0 :output 0}}
+                {:id "z-ai/glm-5.2:free"                    :context-window 256000  :cost {:input 0 :output 0}}
+                {:id "nvidia/nemotron-3-ultra-550b-a55b:free" :context-window 1000000 :cost {:input 0 :output 0}}
+                {:id "google/gemma-4-31b-it:free"           :context-window 262144  :cost {:input 0 :output 0}}
+                {:id "qwen/qwen3.8-27b"                     :context-window 1000000 :cost {:input 0.45 :output 3.2}}
+                {:id "qwen/qwen3.6-35b-a3b"                 :context-window 262144  :cost {:input 0.14 :output 1.0}}
+                {:id "z-ai/glm-5.3"                         :context-window 1048576 :cost {:input 1.4 :output 4.4}}
+                {:id "deepseek/deepseek-v4-pro-0813"        :context-window 1048576 :cost {:input 1.188 :output 3.564}}
+                {:id "google/gemini-3.7-flash"              :context-window 1048576 :cost {:input 0.375 :output 1.875}}
+                {:id "anthropic/claude-sonnet-5"            :context-window 1000000 :cost {:input 2.0 :output 10.0}}
+                {:id "x-ai/grok-4.6"                        :context-window 500000  :cost {:input 2.0 :output 6.0}}]}
    {:name      "yunwu-claude"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"
@@ -130,6 +168,10 @@
    :include     (->vec (entry-get e "include" "include"))
    :exclude     (->vec (entry-get e "exclude" "exclude"))
    :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
+   :types       (->vec (entry-get e "types" "types"))
+   ;; Absolute URL of a richer catalog than <baseUrl>/models. See
+   ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
+   :catalog-url (entry-get e "catalogUrl" "catalog-url")
    :overhead-tokens (let [n (entry-get e "overheadTokens" "overhead-tokens")]
                       (when (and (number? n) (pos? n)) n))
    :models      (mapv (fn [m]
@@ -308,12 +350,21 @@
 (defn- declared-by-id [entry]
   (into {} (map (fn [m] [(str (:id m)) m]) (:models entry))))
 
-(defn- merge-declared
-  "Discovered models carry only an id and a display name. Overlay any
-   contextWindow/cost the settings entry declared for that id — for a relay
-   whose /v1/models says nothing, that is the only way to get real numbers."
+(defn merge-declared
+  "Fill the gaps discovery left, using what the settings entry declared for that
+   id. DISCOVERY WINS where it has a value.
+
+   That direction matters now that a catalog can carry real windows and prices
+   (model-fetch/parse-models): the other way round, the handful of ids anyone
+   bothers to declare — which are exactly the ids they use most — would be
+   pinned to a hand-typed number forever, and a stale one could never
+   self-heal.
+
+   The case this was originally written for still works, because it turns on
+   ABSENCE rather than precedence: a relay whose /v1/models says nothing about
+   size produces no :context-window key at all, so the declared one survives."
   [discovered declared]
-  (mapv (fn [m] (merge m (dissoc (get declared (str (:id m))) :name))) discovered))
+  (mapv (fn [m] (merge (dissoc (get declared (str (:id m))) :name) m)) discovered))
 
 (defn discovery-disabled?
   "NYMA_NO_MODEL_DISCOVERY=1 suppresses every network call this extension makes.
@@ -341,7 +392,8 @@
     (when (and (not (:fresh? cached)) (not (discovery-disabled?)))
       (when-let [key (resolve-key entry)]
         (when-let [fresh (js-await (model-fetch/refresh!
-                                    (:name entry) (:base-url entry) key pred))]
+                                    (:name entry) (:base-url entry) key pred
+                                    (:catalog-url entry)))]
           (when (alive?)
             (register! api entry (merge-declared fresh declared) endpoints-box)))))))
 

@@ -563,7 +563,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `custom_provider_minimax` | `custom-provider-minimax` | MiniMax M2.x models via OpenAI-compatible API |
 | `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Qwen models via local CLI provider |
 | `custom_provider_local` | `local` | Any OpenAI-compatible local endpoint, registered from the `local-models` setting |
-| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider |
+| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona) |
 | `custom_provider_deepseek` | `custom-provider-deepseek` | DeepSeek models via `api.deepseek.com/v1` |
 | `custom_provider_groq` | `custom-provider-groq` | Groq models via OpenAI-compatible API |
 | `custom_provider_kimi` | `custom-provider-kimi` | Moonshot/Kimi models with thinking-model passthrough |

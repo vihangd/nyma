@@ -236,7 +236,7 @@
                    (js/Response. (js/JSON.stringify #js {:data #js [#js {:id "claude-opus-5"}]})
                                  #js {:status 200
                                       :headers #js {"content-type" "application/json"}})))
-    (let [models (js-await (mf/fetch-models "https://g.test/v1" "sk-1"))]
+    (let [models (js-await (mf/fetch-models "https://g.test/v1" "sk-1" nil))]
       (-> (expect (mapv :id models)) (.toEqual #js ["claude-opus-5"]))
       ;; Claude Code's discovery contract, borrowed wholesale.
       (-> (expect (:url @seen)) (.toContain "/models?limit=1000"))
@@ -248,7 +248,7 @@
   (stub-fetch! (fn [_url _opts]
                  (js/Response. "" #js {:status 302})))
   ;; Following it would hand the credential to whoever the gateway names.
-  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1"))) (.toBeNil)))
+  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1" nil))) (.toBeNil)))
 
 (defn ^:async test-fetch-handles-401 []
   (temp-home!)
@@ -256,20 +256,20 @@
     (stub-fetch! (fn [_url _opts]
                    (swap! calls inc)
                    (js/Response. "" #js {:status 401})))
-    (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "bad"))) (.toBeNil))
+    (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "bad" nil))) (.toBeNil))
     ;; No retry: gateways throttle repeated auth failures (yunwu: 120s 429).
     (-> (expect @calls) (.toBe 1))))
 
 (defn ^:async test-fetch-survives-throw []
   (temp-home!)
   (stub-fetch! (fn [_url _opts] (throw (js/Error. "network down"))))
-  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1"))) (.toBeNil)))
+  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1" nil))) (.toBeNil)))
 
 (defn ^:async test-fetch-survives-bad-json []
   (temp-home!)
   (stub-fetch! (fn [_url _opts]
                  (js/Response. "not json" #js {:status 200})))
-  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1"))) (.toBeNil)))
+  (-> (expect (js-await (mf/fetch-models "https://g.test/v1" "sk-1" nil))) (.toBeNil)))
 
 (describe "model-fetch/fetch-models" (fn []
                                        (afterEach restore!)
@@ -544,3 +544,241 @@
                                                    (-> (expect (fn [] ((:resolve (:provider-registry agent)) "yunwu" "gpt-5.2")))
                                                        (.toThrow #"/login yunwu"))
                                                    (cleanup))))))
+
+;; ── Catalogs that carry windows and prices ───────────────────
+;;
+;; New API says nothing but ids, so relay used to invent nothing and every
+;; discovered model fell to the 100k default. Velona's gateway surface and
+;; OpenRouter's both publish real numbers; these fixtures are trimmed from live
+;; responses, and the two pricing dialects below are the whole reason
+;; `entry-cost` reads key names rather than guessing from magnitude.
+
+(def ^:private velona-payload
+  #js {:data #js {:models #js [#js {:id "qwen/qwen3.8-27b"
+                                    :name "Qwen: Qwen3.8 27B"
+                                    :type "text"
+                                    :context_window 1000000
+                                    :capabilities #js ["streaming" "text"]
+                                    :pricing #js {:input_per_1m_usd 0.45
+                                                  :output_per_1m_usd 3.2}}
+                               #js {:id "poolside/laguna-s-2.1:free"
+                                    :name "Poolside: Laguna S 2.1 (free)"
+                                    :type "text"
+                                    :context_window 262144
+                                    :pricing #js {:input_per_1m_usd 0.0
+                                                  :output_per_1m_usd 0.0}}
+                               #js {:id "google/lyria-3-pro-preview"
+                                    :name "Lyria 3 Pro"
+                                    :type "image"
+                                    :context_window 8192}]}})
+
+(def ^:private openrouter-payload
+  #js {:data #js [#js {:id "z-ai/glm-5.3"
+                       :name "Z.AI: GLM 5.3"
+                       :context_length 1048576
+                       ;; USD per TOKEN, as strings.
+                       :pricing #js {:prompt "0.0000015" :completion "0.000006"}}]})
+
+(describe "model-fetch/parse-models — richer catalogues" (fn []
+
+  (it "unwraps Velona's data.models and reads window + USD/1M pricing"
+      (fn []
+        (let [ms (mf/parse-models velona-payload)
+              m  (first ms)]
+          (-> (expect (count ms)) (.toBe 3))
+          (-> (expect (:id m)) (.toBe "qwen/qwen3.8-27b"))
+          (-> (expect (:context-window m)) (.toBe 1000000))
+          (-> (expect (:cost m)) (.toEqual #js {:input 0.45 :output 3.2}))
+          (-> (expect (:type m)) (.toBe "text")))))
+
+  (it "keeps a declared price of zero rather than dropping it"
+      (fn []
+        ;; 0 is a real rate, and `or`-chains have eaten it before.
+        (-> (expect (:cost (second (mf/parse-models velona-payload))))
+            (.toEqual #js {:input 0 :output 0}))))
+
+  (it "scales OpenRouter's per-token string pricing to USD per 1M"
+      (fn []
+        (let [m (first (mf/parse-models openrouter-payload))]
+          (-> (expect (:context-window m)) (.toBe 1048576))
+          ;; "0.0000015"/token = $1.50 per 1M. A missing x1e6 or a missing
+          ;; parseFloat both show up right here, as money.
+          (-> (expect (:input (:cost m))) (.toBeCloseTo 1.5 6))
+          (-> (expect (:output (:cost m))) (.toBeCloseTo 6.0 6)))))
+
+  (it "leaves the bare OpenAI shape exactly as it was"
+      (fn []
+        ;; New API, and Velona's OWN /v1/models, carry ids and nothing else.
+        ;; The change has to be purely additive for them.
+        (let [m (first (mf/parse-models
+                        #js {:data #js [#js {:id "a" :object "model" :owned_by "x"}]}))]
+          (-> (expect (:id m)) (.toBe "a"))
+          (-> (expect (:name m)) (.toBe "a"))
+          (-> (expect (contains? m :context-window)) (.toBe false))
+          (-> (expect (contains? m :cost)) (.toBe false)))))
+
+  (it "drops a half-priced entry rather than reporting half a price"
+      (fn []
+        (-> (expect (contains? (first (mf/parse-models
+                                       #js {:data #js [#js {:id "a" :pricing #js {:prompt "0.000001"}}]}))
+                               :cost))
+            (.toBe false))))))
+
+(describe "model-fetch/make-filter — :types" (fn []
+
+  (it "keeps only the declared types when asked"
+      (fn []
+        (let [p  (mf/make-filter {:types ["text"]})
+              ms (mf/parse-models velona-payload)]
+          (-> (expect (mapv :id (filterv p ms)))
+              (.toEqual #js ["qwen/qwen3.8-27b" "poolside/laguna-s-2.1:free"])))))
+
+  (it "keeps a model that declares no type at all"
+      (fn []
+        ;; Same rule as :endpoint-types — a gateway that doesn't report the
+        ;; field must not be filtered down to nothing.
+        (-> (expect ((mf/make-filter {:types ["text"]}) {:id "a"})) (.toBe true))))
+
+  (it "filters nothing when :types is absent"
+      (fn []
+        (-> (expect ((mf/make-filter {}) {:id "a" :type "image"})) (.toBe true))))))
+
+(describe "model-fetch cache — fields discovery learns to carry" (fn []
+  (afterEach restore!)
+
+  (it "round-trips a window, a cost and a type"
+      (fn []
+        ;; read-cache is a whitelist. A field written but not read back is
+        ;; right on run one and wrong on every run after — and the cache is
+        ;; what a session reads before any refresh lands.
+        (temp-home!)
+        (mf/write-cache! "g" [{:id "a" :name "A" :context-window 262144
+                               :cost {:input 0.45 :output 3.2} :type "text"}])
+        (let [m (first (:models (mf/read-cache "g")))]
+          (-> (expect (:context-window m)) (.toBe 262144))
+          (-> (expect (:cost m)) (.toEqual #js {:input 0.45 :output 3.2}))
+          (-> (expect (:type m)) (.toBe "text")))))))
+
+;; ── catalogUrl override ──────────────────────────────────────
+
+(defn ^:async test-catalog-url-same-origin []
+  (temp-home!)
+  (let [seen (atom nil)]
+    (stub-fetch! (fn [url opts]
+                   (reset! seen {:url url :opts opts})
+                   (js/Response. (js/JSON.stringify velona-payload)
+                                 #js {:status 200
+                                      :headers #js {"content-type" "application/json"}})))
+    (let [ms (js-await (mf/fetch-models "https://velona.in/v1" "sk-1"
+                                        "https://velona.in/gateway/v1/models"))]
+      (-> (expect (:url @seen)) (.toBe "https://velona.in/gateway/v1/models"))
+      ;; Same origin as the provider, so the key still travels.
+      (-> (expect (aget (.-headers (:opts @seen)) "Authorization")) (.toBe "Bearer sk-1"))
+      (-> (expect (:context-window (first ms))) (.toBe 1000000)))))
+
+(defn ^:async test-catalog-url-off-origin-withholds-key []
+  (temp-home!)
+  (let [seen (atom nil)]
+    (stub-fetch! (fn [url opts]
+                   (reset! seen {:url url :opts opts})
+                   (js/Response. (js/JSON.stringify #js {:data #js []})
+                                 #js {:status 200
+                                      :headers #js {"content-type" "application/json"}})))
+    (js-await (mf/fetch-models "https://velona.in/v1" "sk-1"
+                               "https://evil.test/gateway/v1/models"))
+    ;; catalogUrl comes from settings. Sending the key to whatever host it
+    ;; names is the same leak the redirect refusal exists to prevent, just
+    ;; reached directly rather than through a 302.
+    (-> (expect (aget (.-headers (:opts @seen)) "Authorization")) (.toBeUndefined))))
+
+(defn ^:async test-catalog-url-still-refuses-redirect []
+  (temp-home!)
+  (stub-fetch! (fn [_url _opts] (js/Response. "" #js {:status 302})))
+  (-> (expect (js-await (mf/fetch-models "https://velona.in/v1" "sk-1"
+                                         "https://velona.in/gateway/v1/models")))
+      (.toBeNil)))
+
+(describe "model-fetch/fetch-models — catalogUrl" (fn []
+  (afterEach restore!)
+  (it "fetches the override verbatim and keeps the key on-origin" test-catalog-url-same-origin)
+  (it "withholds the key from an off-origin catalog" test-catalog-url-off-origin-withholds-key)
+  (it "still refuses a redirect on the override path" test-catalog-url-still-refuses-redirect)))
+
+;; ── merge-declared precedence ────────────────────────────────
+
+(describe "relay/merge-declared" (fn []
+
+  (it "lets a discovered window beat a declared one"
+      (fn []
+        ;; Otherwise the handful of ids anyone bothers to declare — exactly the
+        ;; ids they use most — stay pinned to a hand-typed number forever.
+        (let [got (relay/merge-declared
+                   [{:id "a" :name "A" :context-window 1000000}]
+                   {"a" {:id "a" :context-window 32768}})]
+          (-> (expect (:context-window (first got))) (.toBe 1000000)))))
+
+  (it "keeps a declared window when discovery supplies none"
+      (fn []
+        ;; The yunwu case: New API reports no size, so the key is absent and
+        ;; the settings entry is the only source of a real number.
+        (let [got (relay/merge-declared
+                   [{:id "a" :name "A"}]
+                   {"a" {:id "a" :context-window 200000 :cost {:input 1 :output 2}}})]
+          (-> (expect (:context-window (first got))) (.toBe 200000))
+          (-> (expect (:cost (first got))) (.toEqual #js {:input 1 :output 2})))))
+
+  (it "never lets a declared name override the discovered one"
+      (fn []
+        (let [got (relay/merge-declared [{:id "a" :name "Discovered"}]
+                                        {"a" {:id "a" :name "Declared"}})]
+          (-> (expect (:name (first got))) (.toBe "Discovered")))))))
+
+;; ── The velona preset ────────────────────────────────────────
+
+(describe "relay velona preset" (fn []
+  (afterEach restore!)
+
+  (it "registers as a gateway, so its prices stay its own"
+      (fn []
+        (temp-home!)
+        (let [agent (create-agent {:model "test" :system-prompt "test"})
+              api   (create-extension-api agent)
+              _     ((.-default relay) api)
+              entry ((:get (:provider-registry agent)) "velona")]
+          (-> (expect (some? entry)) (.toBe true))
+          (-> (expect (fn? (:create-model entry))) (.toBe true))
+          ;; Velona carries other vendors' ids. Without this, a velona model's
+          ;; cost falls back to the first-party rate the user is not paying.
+          (-> (expect (contains? @pricing/unpriced-providers "velona")) (.toBe true)))))
+
+  (it "seeds real context windows, not the 100k default"
+      (fn []
+        (temp-home!)
+        (let [agent (create-agent {:model "test" :system-prompt "test"})
+              api   (create-extension-api agent)
+              _     ((.-default relay) api)]
+          ;; Two slashes: `velona` + `qwen/qwen3.8-27b`. The qualified key is
+          ;; the only one a gateway writes.
+          (-> (expect ((:context-window (:model-registry agent)) "velona/qwen/qwen3.8-27b"))
+              (.toBe 1000000)))))
+
+  (it "points discovery at the surface that actually carries the numbers"
+      (fn []
+        ;; velona.in/v1/models lists ids and nothing else; the gateway surface
+        ;; carries windows and prices. Same origin, so the key still goes.
+        (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))]
+          (-> (expect (:catalog-url v)) (.toBe "https://velona.in/gateway/v1/models"))
+          (-> (expect (mf/same-origin? (:catalog-url v) (:base-url v))) (.toBe true))
+          (-> (expect (:types v)) (.toEqual #js ["text"])))))))
+
+(describe "relay/normalize-entry — catalogUrl and types" (fn []
+
+  (it "reads both spellings from a settings entry"
+      (fn []
+        (let [e (relay/normalize-entry #js {"name" "v"
+                                            "catalogUrl" "https://x.test/c"
+                                            "types" #js ["text"]})]
+          (-> (expect (:catalog-url e)) (.toBe "https://x.test/c"))
+          (-> (expect (:types e)) (.toEqual #js ["text"])))
+        (let [e (relay/normalize-entry #js {"name" "v" "catalog-url" "https://y.test/c"})]
+          (-> (expect (:catalog-url e)) (.toBe "https://y.test/c")))))))
