@@ -15,9 +15,16 @@
      3. Mistral bracket-tag         — [TOOL_CALLS]name{...}
      4. Rehearsal syntax            — tool_name[ARGS]{...}  (reasoning-model thinking leakage)
 
-   Activated per-provider by wrapping the :fetch function. Enable via:
+   Activated per-provider by wrapping the :fetch function, because only a
+   provider owns the fetch this has to intercept. `enabled-for?` below is the
+   shared policy; the per-entry flags remain as explicit overrides:
      settings.json → {\"local-models\": [{\"name\": \"ollama\", ..., \"rescueParsing\": true}]}
-   or globally: {\"small-model\": {\"toolcall-adapter\": {\"enabled\": true}}}
+                     {\"opencode-zen\": {\"rescue-parsing\": true}}
+     central       → {\"toolcall-rescue\": {\"providers\": [...], \"models\": [...]}}
+
+   This docstring used to advertise {\"small-model\": {\"toolcall-adapter\":
+   {\"enabled\": true}}}, which appeared nowhere in the code. It could not have
+   worked from there: an extension has no hook that reaches a provider's fetch.
   "
   (:require [agent.debug :as d]
             [clojure.string :as str]))
@@ -423,3 +430,37 @@
         (array? tools)  (set (map str (vec tools)))
         (object? tools) (set (js/Object.keys tools))
         :else           #{}))))
+
+
+;; ── Policy: which provider/model pairs speak prose ───────────────
+;; Measured across 759 graded tasks: `agent never modified the stub (no tool
+;; call?)` is 15% on opencode-zen/laguna and 11% on opencode-zen/nemotron, and
+;; 0% on openrouter (245 tasks on a NINE-billion-parameter model), 0% on
+;; minimax. So this is a property of the gateway, not of model size — which is
+;; why the switch is keyed by provider, with a model list only as an escape
+;; hatch for a gateway that fronts a mixed fleet.
+
+(defn- glob-match?
+  "Literal match, or a single trailing * as a prefix wildcard."
+  [pattern s]
+  (let [p (str pattern) s (str s)]
+    (if (str/ends-with? p "*")
+      (str/starts-with? s (subs p 0 (dec (count p))))
+      (= p s))))
+
+(defn enabled-for?
+  "Should prose tool calls be rescued for this provider/model?
+
+   `override` is the provider's own per-entry flag and always wins when true,
+   so nothing that works today stops working."
+  [settings provider model override]
+  (boolean
+   (or override
+       (let [cfg   (or (get settings "toolcall-rescue")
+                       (get settings :toolcall-rescue))
+             gets  (fn [k] (or (get cfg k) (get cfg (keyword k))))
+             provs (or (gets "providers") [])
+             mods  (or (gets "models") [])
+             spec  (str provider "/" model)]
+         (or (some #(glob-match? % (str provider)) (vec provs))
+             (some #(glob-match? % spec) (vec mods)))))))

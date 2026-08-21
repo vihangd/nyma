@@ -125,9 +125,13 @@
   ;; new mechanism:  {"opencode-zen": {"rescue-parsing": true}}
   (let [settings (try (when (.-getSettings api) (.getSettings api))
                       (catch :default _ nil))
-        zen      (or (aget (or settings #js {}) "opencode-zen") #js {})]
+        zen      (or (aget (or settings #js {}) "opencode-zen") #js {})
+        override (boolean (or (aget zen "rescue-parsing") (aget zen "rescueParsing")))]
+    ;; One shared policy rather than a fourth bespoke shape — see
+    ;; agent.utils.toolcall-rescue/enabled-for?. The per-entry flag above stays
+    ;; as an explicit override so nothing configured today stops working.
     (reset! rescue-enabled?
-            (boolean (or (aget zen "rescue-parsing") (aget zen "rescueParsing"))))
+            (rescue/enabled-for? (or settings #js {}) provider-name "*" override))
     (reset! active-tools-atom (rescue/active-tools-fn api)))
   (.registerProvider api provider-name
                      #js {:createModel create-oc-zen-model
