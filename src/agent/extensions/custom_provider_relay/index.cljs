@@ -132,7 +132,11 @@
                 {:id "deepseek/deepseek-v4-pro-0813"   :context-window 1048576 :cost {:input 1.188 :output 3.564}}
                 {:id "google/gemini-3.7-flash"         :context-window 1048576 :cost {:input 0.375 :output 1.875}}
                 {:id "anthropic/claude-sonnet-5"       :context-window 1000000 :cost {:input 2.0 :output 10.0}}
-                {:id "x-ai/grok-4.6"                   :context-window 500000  :cost {:input 2.0 :output 6.0}}]}
+                {:id "x-ai/grok-4.6"                   :context-window 500000  :cost {:input 2.0 :output 6.0}}
+                ;; Cheapest verified agent models here by a wide margin — an
+                ;; order of magnitude under the qwen/glm tier on input.
+                {:id "nvidia/nemotron-3-nano-30b-a3b"   :context-window 262144  :cost {:input 0.05 :output 0.2}}
+                {:id "nvidia/nemotron-3-super-120b-a12b" :context-window 1000000 :cost {:input 0.085 :output 0.4}}]}
    {:name      "yunwu-claude"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"

@@ -215,7 +215,11 @@ failure for this exact id on one of its backends.
 
 Verified emitting tool calls on Velona: `qwen/qwen3.8-27b`, `z-ai/glm-5.3`,
 `deepseek/deepseek-v4-pro-0813`, `google/gemini-3.7-flash`, `anthropic/claude-sonnet-5`,
-`x-ai/grok-4.6`.
+`x-ai/grok-4.6`, `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/nemotron-3.5-lightning`,
+`nvidia/nemotron-3-super-120b-a12b`, `nvidia/nemotron-3-ultra-550b-a55b`.
+
+The nemotron nano is the cheapest of these by an order of magnitude on input
+($0.05/1M, 262K context) and drove a real multi-file agent turn.
 
 ## Adding another New API relay
 
