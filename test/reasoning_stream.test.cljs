@@ -231,3 +231,23 @@
                    (-> (expect (.includes (.slice content 0 close) "340 + 51")) (.toBe true))
                    ;; What the user sees after the closer is the answer itself.
                    (-> (expect (.trim (.slice content (+ close 8)))) (.toBe "391")))))))
+
+(def ^:private own-opener-chunks
+  #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"<think>\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"weighing options\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"</think>answer\"},\"index\":0}]}\n\n"
+       "data: [DONE]\n\n"])
+
+(describe "reasoning-stream/wrap-response — model supplies its own opener"
+  (fn []
+    (it "adopts it instead of synthesizing a second one"
+        (^:async fn []
+         ;; Skipping prefill for just this delta postponed the duplicate to the
+         ;; next one: the state still said "not yet prefilled", so the very next
+         ;; content token got a <think> in front of it.
+         (let [out     (js-await (.text (wrap-response (sse-response own-opener-chunks) true)))
+               content (assembled-content out)]
+           (-> (expect (.-length (.split content "<think>"))) (.toBe 2))
+           (-> (expect (.-length (.split content "</think>"))) (.toBe 2))
+           (-> (expect content) (.toContain "<think>weighing options</think>")))))))

@@ -9,7 +9,8 @@
    The identical mistake was live in small_model/quality_monitor at the same
    time, where it destroyed every tool result instead. Two independent
    consumers, one ambiguous return shape; these tests pin both shapes."
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+            ["bun:test" :refer [describe it expect]]
             [agent.extensions.custom-provider-local.index :as local]
             [agent.extensions.custom-provider-local.toolcall-adapter :as adapter]))
 
@@ -79,3 +80,58 @@
                        out   (js-await (.text (js-await (fetch "http://x/v1/chat/completions" nil))))]
                    (-> (expect (.includes out "tool_calls")) (.toBe false))
                    (-> (expect (.includes out "\"finish_reason\":\"stop\"")) (.toBe true)))))))
+
+;; ── Through the real AI SDK ──────────────────────────────────
+;;
+;; The rescue's output has to satisfy @ai-sdk/openai's chunk schema, and only
+;; the real schema can tell us that. `index` is required on a tool_calls entry
+;; while every sibling field is .nullish(), so omitting it fails validation and
+;; the SDK converts a bad chunk into an ERRORED STREAM — the rescue would end
+;; the turn rather than call a tool. A hand-rolled assertion on the emitted
+;; bytes cannot catch that.
+
+(defn- rescue-fetch [chunks]
+  (adapter/wrap-fetch-with-rescue
+   (fn [_url _init]
+     (js/Promise.resolve
+      (js/Response.
+       (js/ReadableStream.
+        #js {:start (fn [ctrl]
+                      (let [enc (js/TextEncoder.)]
+                        (doseq [c chunks] (.enqueue ctrl (.encode enc c)))
+                        (.close ctrl)))})
+       #js {:status 200 :headers #js {"content-type" "text/event-stream"}})))
+   (fn [] #{"read"})))
+
+(describe "toolcall-adapter through @ai-sdk/openai" (fn []
+
+  (it "produces a real tool call from rescued prose"
+      (^:async fn []
+       ;; Deliberately the two shapes that used to kill the rescue silently:
+       ;; a terminal event with NO `delta` key, and no trailing blank line, so
+       ;; it arrives via :flush rather than :transform.
+       (let [chunks #js [(str "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":"
+                              "\"<function=read><parameter=path>main.go</parameter></function>\"},"
+                              "\"index\":0}]}\n\n")
+                         "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}"]
+             model  (.chat (createOpenAI #js {:apiKey "x"
+                                              :baseURL "http://local.test/v1"
+                                              :compatibility "compatible"
+                                              :fetch (rescue-fetch chunks)})
+                           "m")
+             res    (js-await (.doStream model
+                                         #js {:prompt #js [#js {:role "user"
+                                                                :content #js [#js {:type "text" :text "hi"}]}]}))
+             parts  (atom [])]
+         (js-await (.pipeTo (.-stream res)
+                            (js/WritableStream.
+                             #js {:write (fn [p] (swap! parts conj p))})))
+         (let [types (set (map (fn [p] (.-type p)) @parts))
+               call  (first (filter (fn [p] (= "tool-call" (.-type p))) @parts))
+               fin   (first (filter (fn [p] (= "finish" (.-type p))) @parts))]
+           ;; An `error` part here means the chunk failed schema validation.
+           (-> (expect (contains? types "error")) (.toBe false))
+           (-> (expect (some? call)) (.toBe true))
+           (-> (expect (.-toolName call)) (.toBe "read"))
+           (-> (expect (.-input call)) (.toContain "main.go"))
+           (-> (expect (.-unified (.-finishReason fin))) (.toBe "tool-calls"))))))))

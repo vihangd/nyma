@@ -187,7 +187,12 @@
 ;; ── OpenAI tool-call format builder ──────────────────────────────
 
 (defn- rescue->openai-tool-call [idx {:keys [tool args]}]
-  #js {:id       (str "rescue_" idx "_" (.floor js/Math (* 1000000 (js/Math.random))))
+  ;; `index` is REQUIRED by @ai-sdk/openai's chunk schema — every sibling field
+  ;; is .nullish(), that one is not. Omitting it fails validation, and the SDK
+  ;; turns a failed chunk into an errored stream, so the rescue would end the
+  ;; turn instead of producing a tool call.
+  #js {:index    idx
+       :id       (str "rescue_" idx "_" (.floor js/Math (* 1000000 (js/Math.random))))
        :type     "function"
        :function #js {:name      tool
                       :arguments (try (js/JSON.stringify args)
@@ -202,12 +207,55 @@
 (defn- inject-tool-calls-into-chunk [chunk-obj tool-calls]
   (let [choice (aget (.-choices chunk-obj) 0)]
     (when choice
-      (let [delta (.-delta choice)
+      ;; Many OpenAI-compatible servers omit `delta` entirely on the terminal
+      ;; event. Writing through it then throws, and the transform's catch eats
+      ;; the error — the rescue dies on exactly the chunk it exists for.
+      (let [delta (or (.-delta choice)
+                      (let [d #js {}] (aset choice "delta" d) d))
             tc-js (clj->js (vec (map-indexed rescue->openai-tool-call tool-calls)))]
         (aset delta "tool_calls" tc-js)
         (aset delta "content" nil)
         (aset choice "finish_reason" "tool_calls"))))
   chunk-obj)
+
+(defn- transform-event
+  "One SSE event in, the event to emit out. Pure w.r.t. the stream apart from
+   the two atoms it advances.
+
+   Hoisted out of the transform because `:flush` needs it too: a stream whose
+   last event arrives without a trailing blank line leaves that event in the
+   buffer, and flushing it verbatim skips the rescue on the one chunk that
+   carries the finish reason. `reasoning_stream` already routes its flush
+   remainder through the per-event path; this now matches."
+  [line has-tc acc-text get-active-tools]
+  (let [out (atom line)]
+    (let [data-line (first (filter #(.startsWith % "data: ") (.split line "\n")))]
+      (when data-line
+        (let [data (.slice data-line 6)]
+          (when-not (.startsWith data "[DONE]")
+            (try
+              (let [obj    (js/JSON.parse data)
+                    choice (when (.-choices obj) (aget (.-choices obj) 0))]
+                (when choice
+                  (let [delta  (.-delta choice)
+                        finish (.-finish_reason choice)]
+                    (when (and delta (.-tool_calls delta))
+                      (reset! has-tc true))
+                    (when (and delta (.-content delta))
+                      (swap! acc-text str (.-content delta)))
+                    ;; Finish chunk, no tool calls, but text that parses as one.
+                    (when (and finish (not @has-tc) (seq @acc-text))
+                      (let [active (try (get-active-tools) (catch :default _ #{}))
+                            found  (rescue-tool-calls @acc-text active)]
+                        (when (seq found)
+                          (inject-tool-calls-into-chunk obj found)
+                          (aset choice "finish_reason" "tool_calls")
+                          ;; The rescue mutates the PARSED obj; without
+                          ;; re-serializing, the original `line` went out and
+                          ;; every rescued call was silently discarded.
+                          (reset! out (str "data: " (js/JSON.stringify obj) "\n\n"))))))))
+              (catch :default _ nil))))))
+    @out))
 
 (defn wrap-fetch-with-rescue
   "Wrap a fetch function to intercept SSE and rescue malformed tool calls.
@@ -236,49 +284,16 @@
                                       rest- (aget parts (dec (.-length parts)))]
                                   (reset! buffer rest-)
                                   (doseq [evt done]
-                                    (let [line (str evt "\n\n")
-                                          ;; The rescue mutates the PARSED obj; without
-                                          ;; re-serializing here we enqueued the original
-                                          ;; `line` and every rescued tool call was silently
-                                          ;; discarded — the whole feature was dead code.
-                                          out  (atom line)]
-                                      ;; Parse SSE data line
-                                      (let [data-line (first (filter #(.startsWith % "data: ")
-                                                                     (.split line "\n")))]
-                                        (when data-line
-                                          (let [data (.slice data-line 6)]
-                                            (when-not (.startsWith data "[DONE]")
-                                              (try
-                                                (let [obj    (js/JSON.parse data)
-                                                      choice (when (.-choices obj)
-                                                               (aget (.-choices obj) 0))]
-                                                  (when choice
-                                                    (let [delta  (.-delta choice)
-                                                          finish (.-finish_reason choice)]
-                                                      ;; Track tool calls in this stream
-                                                      (when (and delta (.-tool_calls delta))
-                                                        (reset! has-tc true))
-                                                      ;; Accumulate text
-                                                      (when (and delta (.-content delta))
-                                                        (swap! acc-text str (.-content delta)))
-                                                      ;; On finish with no tool calls — attempt rescue
-                                                      (when (and finish
-                                                                 (not @has-tc)
-                                                                 (seq @acc-text))
-                                                        (let [active (try (get-active-tools)
-                                                                          (catch :default _ #{}))
-                                                              found  (rescue-tool-calls @acc-text active)]
-                                                          (when (seq found)
-                                                            ;; Replace this chunk with injected tool calls
-                                                            (inject-tool-calls-into-chunk obj found)
-                                                            (aset choice "finish_reason" "tool_calls")
-                                                            (reset! out (str "data: " (js/JSON.stringify obj) "\n\n"))))))))
-                                                (catch :default _ nil))))))
-                                      (.enqueue ctrl (.encode encoder @out))))))
+                                    (.enqueue ctrl (.encode encoder
+                                                            (transform-event (str evt "\n\n")
+                                                                             has-tc acc-text
+                                                                             get-active-tools))))))
                               :flush
                               (fn [ctrl]
                                 (when (seq @buffer)
-                                  (.enqueue ctrl (.encode encoder @buffer))))})]
+                                  (.enqueue ctrl (.encode encoder
+                                                          (transform-event @buffer has-tc acc-text
+                                                                           get-active-tools)))))})]
                  (js/Response. (.pipeThrough (.-body response) ts)
                                #js {:status     (.-status response)
                                     :statusText (.-statusText response)

@@ -109,12 +109,33 @@
                     ;; closed the block AFTER the answer. The whole turn parsed
                     ;; as one <think>…</think> block: answer in the reasoning
                     ;; pane, empty bubble, "" persisted. Require real text.
-                    ;; The startsWith guard is best-effort only — an opener
-                    ;; split across deltas ("<" then "think>") slips past it.
+                    ;;
+                    ;; A model that opened the block itself gets ADOPTED, not
+                    ;; guarded against: marking the state prefilled is what
+                    ;; stops a second <think> on the next delta. Merely
+                    ;; skipping this one postponed the duplicate rather than
+                    ;; preventing it.
+                    ;;
+                    ;; Still not total. An opener split across deltas ("<" then
+                    ;; "think>") reads as ordinary content and gets a
+                    ;; synthesized opener in front of it. Telling that apart
+                    ;; from a template-prefilled model's own "</think>" needs
+                    ;; two buffered characters ("<t" vs "</"), and the payoff
+                    ;; does not justify holding the first token back: the
+                    ;; result is a stray tag inside the reasoning pane, not a
+                    ;; lost answer — split-think-blocks still closes on the
+                    ;; real </think> and the answer renders.
+                    own-opener? (and (:think-prefill? @state)
+                                     (not (:prefilled? @state))
+                                     (non-blank content)
+                                     (not reasoning)
+                                     (not in-think?)
+                                     (.startsWith (str content) "<think"))
+                    _          (when own-opener?
+                                 (swap! state assoc :prefilled? true :prefill-open? true))
                     prefill    (when (and (:think-prefill? @state)
                                           (not (:prefilled? @state))
                                           (non-blank content)
-                                          (not (.startsWith (str content) "<think"))
                                           (not reasoning)
                                           (not in-think?))
                                  (swap! state assoc :prefilled? true :prefill-open? true)
