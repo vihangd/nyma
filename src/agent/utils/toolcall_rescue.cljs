@@ -1,4 +1,4 @@
-(ns agent.extensions.custom-provider-local.toolcall-adapter
+(ns agent.utils.toolcall-rescue
   "Rescue parser — normalize malformed tool-call formats to OpenAI JSON.
 
    Small local models emit tool calls in non-standard formats that the AI SDK
@@ -82,6 +82,23 @@
 (def ^:private qwen-param-re
   (js/RegExp. "<parameter=([^>\\s]+)>([\\s\\S]*?)(?:<\\/parameter>|(?=<parameter=)|(?=<\\/function>)|$)" "g"))
 
+(defn- coerce-param
+  "A parameter value as the type the tool schema expects.
+
+   Every XML parameter arrives as text, so a `range` of [1, 20] reached the
+   tool as the STRING \"[1, 20]\" and failed validation — the call was rescued
+   and then rejected, which looks the same to the user as not being rescued.
+
+   Only array- and object-shaped values are converted. Deliberately not bare
+   numbers or booleans: a path of `123` or a query of `true` is a string, and
+   coercing those would break a call that currently works."
+  [v]
+  (let [t (.trim (str v))]
+    (if (or (and (.startsWith t "[") (.endsWith t "]"))
+            (and (.startsWith t "{") (.endsWith t "}")))
+      (try (js/JSON.parse t) (catch :default _ v))
+      v)))
+
 (defn- parse-qwen-xml [text available]
   (let [results (atom [])]
     (aset qwen-fn-re "lastIndex" 0)
@@ -99,7 +116,7 @@
                   ;; Strip the first and last newline (matches Qwen's parser)
                   (let [v (if (.startsWith v "\n") (.slice v 1) v)
                         v (if (.endsWith v "\n") (.slice v 0 -1) v)]
-                    (aset args k v)))
+                    (aset args k (coerce-param v))))
                 (recur)))
             (swap! results conj {:tool tool-name :args args})))
         (recur)))
@@ -374,3 +391,21 @@
                                #js {:status     (.-status response)
                                     :statusText (.-statusText response)
                                     :headers    (.-headers response)})))))))))
+
+;; ── Active tool names ────────────────────────────────────────────
+
+(defn active-tools-fn
+  "A zero-arg fn resolving the current active tool-name set.
+
+   `getAllTools` hands back `(clj->js (keys …))` — an ARRAY of names
+   (extensions.cljs:45). `Object.keys` on an array returns \"0\", \"1\", \"2\" …,
+   so every rescued call failed the `(contains? available tool-name)` check and
+   the rescue silently produced nothing — on exactly the models it exists for."
+  [api]
+  (fn []
+    (let [tools (try (.getAllTools api) (catch :default _ nil))]
+      (cond
+        (nil? tools)    #{}
+        (array? tools)  (set (map str (vec tools)))
+        (object? tools) (set (js/Object.keys tools))
+        :else           #{}))))

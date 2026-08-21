@@ -38,6 +38,7 @@
             ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.debug :as d]
             [agent.providers.model-fetch :as model-fetch]
+            [agent.utils.toolcall-rescue :as rescue]
             [agent.utils.credentials :as credentials]
             [agent.utils.reasoning-stream :as rs]
             [agent.utils.reasoning-request :as rr]))
@@ -114,6 +115,10 @@
     :catalog-url "https://velona.in/gateway/v1/models"
     :types     ["text"]
     :paid-only true
+    ;; nemotron here emits a native tool call one turn and prints
+    ;; <function=read>…</function> as prose the next. Measured, and the reason a
+    ;; run stalls mid-task with the markup rendered as an answer.
+    :rescue-parsing true
     ;; Measured: this id reasons its way to "I should use the bash tool" and
     ;; then ends the turn with finish_reason=stop, no tool_calls and no
     ;; content — every agent turn a silent no-op. It is not the model: the
@@ -185,6 +190,7 @@
    :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
    :types       (->vec (entry-get e "types" "types"))
    :paid-only   (boolean (entry-get e "paidOnly" "paid-only"))
+   :rescue-parsing (boolean (entry-get e "rescueParsing" "rescue-parsing"))
    ;; Absolute URL of a richer catalog than <baseUrl>/models. See
    ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
    :catalog-url (entry-get e "catalogUrl" "catalog-url")
@@ -267,6 +273,11 @@
 
 (def level-fn-atom (atom nil))
 
+;; The active tool set lives on the agent and is only reachable once the
+;; extension is activated, so the provider closes over a thunk, same as the
+;; thinking level above.
+(def active-tools-atom (atom (fn [] #{})))
+
 (defn chat-request-rewriter
   "Lift <think> back into reasoning_content (as before), then add the relay's
    reasoning effort.
@@ -347,7 +358,18 @@
         (.chat (createOpenAI #js {:apiKey        key
                                   :baseURL       (:base-url entry)
                                   :compatibility "compatible"
-                                  :fetch         (rs/make-fetch (chat-request-rewriter))})
+                                  ;; Gateways relay models that sometimes emit a
+                                  ;; tool call as PROSE instead of tool_calls —
+                                  ;; observed on velona/nemotron, which called
+                                  ;; tools natively for a turn and then printed
+                                  ;; <function=read>…</function> as text, so the
+                                  ;; turn read as an answer and nothing ran.
+                                  ;; Same failure `local` has carried a rescue
+                                  ;; for; this is that rescue, opt-in per entry.
+                                  :fetch (let [f (rs/make-fetch (chat-request-rewriter))]
+                                           (if (:rescue-parsing entry)
+                                             (rescue/wrap-fetch-with-rescue f @active-tools-atom)
+                                             f))})
                model-id)))))
 
 (defn- ->js-model [m]
@@ -443,6 +465,7 @@
 (defn ^:export default [api]
   (reset! level-fn-atom (when (.-getThinkingLevel api)
                           (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
+  (reset! active-tools-atom (rescue/active-tools-fn api))
   (let [settings   (try (when (.-getSettings api) (.getSettings api))
                         (catch :default _ nil))
         user       (try (load-settings-entries settings)

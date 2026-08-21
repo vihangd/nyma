@@ -28,7 +28,7 @@
             ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [agent.extensions.custom-provider-local.toolcall-adapter :as adapter]
+            [agent.utils.toolcall-rescue :as adapter]
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.reasoning-stream :as rs]))
 
@@ -127,22 +127,10 @@
                                 :fetch         base-fetch})
              model-id))))
 
-(defn active-tools-fn
-  "Returns a zero-arg fn that resolves the current active tool-name set.
-
-   `getAllTools` hands back `(clj->js (keys …))` — an ARRAY of names
-   (extensions.cljs:45). `Object.keys` on an array returns \"0\", \"1\", \"2\" …,
-   so every rescued tool call failed the `(contains? available tool-name)`
-   check in toolcall_adapter and the rescue silently produced nothing — on
-   exactly the local models it exists to support."
-  [api]
-  (fn []
-    (let [tools (try (.getAllTools api) (catch :default _ nil))]
-      (cond
-        (nil? tools)    #{}
-        (array? tools)  (set (map str (vec tools)))
-        (object? tools) (set (js/Object.keys tools))
-        :else           #{}))))
+(def active-tools-fn
+  "Moved to agent.utils.toolcall-rescue so the relay provider can use the same
+   rescue; re-exported here because tests and callers already reach for it here."
+  adapter/active-tools-fn)
 
 ;; ── Server-declared context window ────────────────────────────────
 ;; A local server knows its own limits; a settings file only knows what someone

@@ -12,7 +12,7 @@
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             ["bun:test" :refer [describe it expect]]
             [agent.extensions.custom-provider-local.index :as local]
-            [agent.extensions.custom-provider-local.toolcall-adapter :as adapter]))
+            [agent.utils.toolcall-rescue :as adapter]))
 
 (defn- names-from [tools]
   ((local/active-tools-fn #js {:getAllTools (fn [] tools)})))
@@ -213,3 +213,43 @@
                                 #{"read"}))]
          (-> (expect (:calls r)) (.toEqual #js ["read"]))
          (-> (expect (:text r)) (.toBe "")))))))
+
+(describe "toolcall-rescue — XML parameter types" (fn []
+
+  (it "gives an array-shaped parameter to the tool as an array"
+      (fn []
+        ;; Every XML parameter arrives as text, so `range` reached the tool as
+        ;; the STRING "[1, 20]" and failed schema validation — the call was
+        ;; rescued and then rejected, which looks identical to not being
+        ;; rescued at all. Observed on velona/nemotron reading a line range.
+        (let [r (first (adapter/rescue-tool-calls
+                        (str "<function=read>\n<parameter=path>\nmain.go\n</parameter>\n"
+                             "<parameter=range>\n[1, 20]\n</parameter>\n</function>")
+                        #{"read"}))
+              a (:args r)]
+          (-> (expect (aget a "path")) (.toBe "main.go"))
+          (-> (expect (js/Array.isArray (aget a "range"))) (.toBe true))
+          (-> (expect (vec (aget a "range"))) (.toEqual #js [1 20])))))
+
+  (it "parses an object-shaped parameter"
+      (fn []
+        (let [r (first (adapter/rescue-tool-calls
+                        "<function=read><parameter=opts>{\"deep\": true}</parameter></function>"
+                        #{"read"}))]
+          (-> (expect (.-deep (aget (:args r) "opts"))) (.toBe true)))))
+
+  (it "leaves a bare number or word alone"
+      (fn []
+        ;; A path of `123` is a string; coercing scalars would break calls that
+        ;; work today.
+        (let [r (first (adapter/rescue-tool-calls
+                        "<function=read><parameter=path>123</parameter></function>"
+                        #{"read"}))]
+          (-> (expect (aget (:args r) "path")) (.toBe "123")))))
+
+  (it "keeps a malformed bracket value as text rather than dropping it"
+      (fn []
+        (let [r (first (adapter/rescue-tool-calls
+                        "<function=read><parameter=path>[not json</parameter></function>"
+                        #{"read"}))]
+          (-> (expect (aget (:args r) "path")) (.toBe "[not json")))))))

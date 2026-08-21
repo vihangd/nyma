@@ -78,6 +78,7 @@ replace it.
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `types` | *(any)* | Required `type`, any-of — keeps image/embedding models out of the picker. |
 | `paidOnly` | `false` | Drop models the catalog prices at zero on both sides. |
+| `rescueParsing` | `false` | Recover tool calls a model emits as prose instead of `tool_calls`. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |
@@ -212,6 +213,12 @@ is not the model: the same request with `tool_choice: "required"` calls tools no
 Velona's default `auto` path is dropping them. Forcing `required` would stop it ever
 giving a final answer, so there is no fix from this side. OpenRouter documents the same
 failure for this exact id on one of its backends.
+
+**`rescueParsing` is on for Velona.** Models here emit a native tool call one turn
+and print `<function=read>…</function>` as ordinary text the next — the run then stalls
+with the markup rendered as an answer. The rescue parses those back into real tool calls
+(Qwen XML, Mistral bracket, fenced JSON), withholds the markup so it never reaches the
+message, and releases the text untouched when nothing parses.
 
 Verified emitting tool calls on Velona: `qwen/qwen3.8-27b`, `z-ai/glm-5.3`,
 `deepseek/deepseek-v4-pro-0813`, `google/gemini-3.7-flash`, `anthropic/claude-sonnet-5`,

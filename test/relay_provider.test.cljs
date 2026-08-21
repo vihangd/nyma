@@ -830,6 +830,20 @@
 
 (describe "relay/normalize-entry — catalogUrl and types" (fn []
 
+  (it "reads rescueParsing"
+      (fn []
+        (-> (expect (:rescue-parsing (relay/normalize-entry #js {"name" "v" "rescueParsing" true})))
+            (.toBe true))
+        (-> (expect (:rescue-parsing (relay/normalize-entry #js {"name" "v"})))
+            (.toBe false))))
+
+  (it "turns the rescue on for velona"
+      (fn []
+        ;; nemotron there emits a native tool call one turn and prints
+        ;; <function=read>…</function> as prose the next.
+        (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))]
+          (-> (expect (:rescue-parsing v)) (.toBe true)))))
+
   (it "reads both spellings from a settings entry"
       (fn []
         (let [e (relay/normalize-entry #js {"name" "v"
