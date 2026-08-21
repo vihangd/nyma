@@ -286,6 +286,31 @@
           lifted)
         (catch :default _ lifted)))))
 
+(defn filtered-out-warning
+  "A line explaining why `model-id` is not in this provider's catalog, or nil.
+
+   The catalog filter only shapes the model LIST. `--model velona/<id>` goes
+   straight to create-model, so an id deliberately kept out of the picker still
+   runs — and the two reasons it gets kept out both fail quietly: Velona's free
+   tier answers /v1 with an opaque `model_not_supported`, and
+   qwen/qwen3.6-35b-a3b returns finish_reason=stop with no tool_calls and no
+   content, which renders as thinking followed by an empty reply.
+
+   The request is still honoured — a filtered id may be perfectly good for
+   non-agent use, and second-guessing an explicit --model is not this layer's
+   job. It just stops being a mystery."
+  [entry model-id]
+  (let [pred (model-fetch/make-filter entry)
+        ;; The filter reads :type and :cost, which a bare id does not carry, so
+        ;; this only catches the id-level rules — :include and :exclude. That is
+        ;; the deliberate case; the free-tier one surfaces as an API error with
+        ;; a message of its own.
+        id    (str model-id)]
+    (when-not (pred {:id id})
+      (str id " is excluded from the " (:name entry) " catalog and may not work "
+           "as an agent model — expect turns that think and then answer nothing. "
+           "Run `/model` for the ids this provider actually lists."))))
+
 (defn create-model-fn
   "`endpoints-of` maps a model id to its declared endpoint types. It's a
    function rather than a value because discovery re-registers the provider,
@@ -295,6 +320,8 @@
     (let [key (resolve-key entry)]
       (when-not key
         (throw (js/Error. (missing-key-message entry))))
+      (when-let [w (filtered-out-warning entry model-id)]
+        (d/warn "relay-provider" w))
       (case (pick-protocol entry (when endpoints-of (endpoints-of model-id)))
         ;; Native Messages API. This is the only path on which prompt caching
         ;; works: cache_control breakpoints survive it, and are dropped by the

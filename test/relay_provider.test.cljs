@@ -839,3 +839,26 @@
           (-> (expect (:types e)) (.toEqual #js ["text"])))
         (let [e (relay/normalize-entry #js {"name" "v" "catalog-url" "https://y.test/c"})]
           (-> (expect (:catalog-url e)) (.toBe "https://y.test/c")))))))
+
+(describe "relay/filtered-out-warning" (fn []
+
+  (it "explains an explicitly requested id that the catalog filter drops"
+      (fn []
+        ;; The filter shapes the model LIST only. `--model velona/<id>` goes
+        ;; straight to create-model, so an excluded id still runs — and the
+        ;; reason it was excluded is precisely that it fails silently.
+        (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))
+              w (relay/filtered-out-warning v "qwen/qwen3.6-35b-a3b")]
+          (-> (expect (some? w)) (.toBe true))
+          (-> (expect w) (.toContain "excluded"))
+          (-> (expect w) (.toContain "velona")))))
+
+  (it "says nothing about a model the provider does list"
+      (fn []
+        (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))]
+          (-> (expect (relay/filtered-out-warning v "qwen/qwen3.8-27b")) (.toBeNil))
+          (-> (expect (relay/filtered-out-warning v "z-ai/glm-5.3")) (.toBeNil)))))
+
+  (it "says nothing for an entry with no filters at all"
+      (fn []
+        (-> (expect (relay/filtered-out-warning {:name "plain"} "anything")) (.toBeNil))))))
