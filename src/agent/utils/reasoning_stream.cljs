@@ -101,9 +101,20 @@
                     ;; the closer. Synthesize the opening <think> on the first content
                     ;; delta so the stream is balanced and reasoning renders in place
                     ;; from the start instead of reflowing when </think> arrives.
+                    ;; `(some? content)` was the trap: the role-only opening
+                    ;; chunk carries `content: ""` (vLLM), which is `some?`, so
+                    ;; prefill fired before any real token. That left
+                    ;; :prefill-open? set with :in-think? false — `open` stayed
+                    ;; suppressed, `needs-close?` could never fire, and [DONE]
+                    ;; closed the block AFTER the answer. The whole turn parsed
+                    ;; as one <think>…</think> block: answer in the reasoning
+                    ;; pane, empty bubble, "" persisted. Require real text.
+                    ;; The startsWith guard is best-effort only — an opener
+                    ;; split across deltas ("<" then "think>") slips past it.
                     prefill    (when (and (:think-prefill? @state)
                                           (not (:prefilled? @state))
-                                          (some? content)
+                                          (non-blank content)
+                                          (not (.startsWith (str content) "<think"))
                                           (not reasoning)
                                           (not in-think?))
                                  (swap! state assoc :prefilled? true :prefill-open? true)

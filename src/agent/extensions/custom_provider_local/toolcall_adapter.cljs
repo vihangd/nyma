@@ -84,14 +84,14 @@
 
 (defn- parse-qwen-xml [text available]
   (let [results (atom [])]
-    (.lastIndex qwen-fn-re 0)
+    (aset qwen-fn-re "lastIndex" 0)
     (loop []
       (when-let [fn-m (.exec qwen-fn-re text)]
         (let [tool-name (str (.trim (aget fn-m 1)))
               body      (str (aget fn-m 2))
               args      #js {}]
           (when (contains? available tool-name)
-            (.lastIndex qwen-param-re 0)
+            (aset qwen-param-re "lastIndex" 0)
             (loop []
               (when-let [pm (.exec qwen-param-re body)]
                 (let [k (str (.trim (aget pm 1)))
@@ -113,7 +113,7 @@
 
 (defn- parse-mistral-bracket [text available]
   (let [results (atom [])]
-    (.lastIndex mistral-re 0)
+    (aset mistral-re "lastIndex" 0)
     (loop []
       (when-let [m (.exec mistral-re text)]
         (let [tool-name (str (aget m 1))
@@ -157,7 +157,7 @@
 
 (defn- parse-rehearsal [text available]
   (let [results (atom [])]
-    (.lastIndex rehearsal-re 0)
+    (aset rehearsal-re "lastIndex" 0)
     (loop []
       (when-let [m (.exec rehearsal-re text)]
         (let [tool-name (str (aget m 1))
@@ -236,7 +236,12 @@
                                       rest- (aget parts (dec (.-length parts)))]
                                   (reset! buffer rest-)
                                   (doseq [evt done]
-                                    (let [line (str evt "\n\n")]
+                                    (let [line (str evt "\n\n")
+                                          ;; The rescue mutates the PARSED obj; without
+                                          ;; re-serializing here we enqueued the original
+                                          ;; `line` and every rescued tool call was silently
+                                          ;; discarded — the whole feature was dead code.
+                                          out  (atom line)]
                                       ;; Parse SSE data line
                                       (let [data-line (first (filter #(.startsWith % "data: ")
                                                                      (.split line "\n")))]
@@ -266,9 +271,10 @@
                                                           (when (seq found)
                                                             ;; Replace this chunk with injected tool calls
                                                             (inject-tool-calls-into-chunk obj found)
-                                                            (aset choice "finish_reason" "tool_calls")))))))
+                                                            (aset choice "finish_reason" "tool_calls")
+                                                            (reset! out (str "data: " (js/JSON.stringify obj) "\n\n"))))))))
                                                 (catch :default _ nil))))))
-                                      (.enqueue ctrl (.encode encoder line))))))
+                                      (.enqueue ctrl (.encode encoder @out))))))
                               :flush
                               (fn [ctrl]
                                 (when (seq @buffer)

@@ -101,8 +101,10 @@
                 (fn []
                   (.then (.text (wrap-response (sse-response prefill-chunks) true))
                          (fn [out]
-                           ;; first content delta had "" → becomes "<think>"
-                           (-> (expect out) (.toContain "\"content\":\"<think>\""))))))
+                           ;; The opener rides the first delta carrying REAL text —
+                           ;; the role-only chunk's "" is not a content token.
+                           (-> (expect out)
+                               (.toContain "<think>weighing options</think>"))))))
 
             (it "does nothing when think-prefill is off"
                 (fn []
@@ -194,3 +196,38 @@
                        content (assembled-content out)]
                    (-> (expect (.includes content "<think>let me think harder</think>")) (.toBe true))
                    (-> (expect (.includes content "Answer: 42")) (.toBe true)))))))
+
+;;; ─── prefill must not fire on the role-only chunk ────────────────────────
+;;;
+;;; vLLM opens every stream with {"role":"assistant","content":""} and then
+;;; sends chain-of-thought via `delta.reasoning`. `""` is `some?`, so prefill
+;;; used to fire on that opener: :prefill-open? set with :in-think? false meant
+;;; `open` stayed suppressed, `needs-close?` could never fire, and [DONE] closed
+;;; the block AFTER the answer. The whole turn parsed as one <think>…</think>:
+;;; the answer rendered in the reasoning pane and the bubble was empty.
+
+(def ^:private vllm-reasoning-chunks
+  #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"reasoning\":\"17*23 = 340 + 51\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"reasoning\":\" = 391.\"},\"index\":0}]}\n\n"
+       "data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\n391\"},\"index\":0}]}\n\n"
+       "data: [DONE]\n\n"])
+
+(describe "reasoning-stream/wrap-response vLLM reasoning deltas under think-prefill"
+          (fn []
+            (it "closes the think block before the answer, not at [DONE]"
+                (^:async fn []
+                 (let [out     (js-await (.text (wrap-response
+                                                 (sse-response vllm-reasoning-chunks) true)))
+                       content (assembled-content out)
+                       close   (.indexOf content "</think>")
+                       ;; lastIndexOf: "391" also appears inside the reasoning.
+                       answer  (.lastIndexOf content "391")]
+                   ;; Exactly one block, and the answer lands OUTSIDE it.
+                   (-> (expect (.-length (.split content "<think>"))) (.toBe 2))
+                   (-> (expect (.-length (.split content "</think>"))) (.toBe 2))
+                   (-> (expect (> answer close)) (.toBe true))
+                   ;; Reasoning stayed inside.
+                   (-> (expect (.includes (.slice content 0 close) "340 + 51")) (.toBe true))
+                   ;; What the user sees after the closer is the answer itself.
+                   (-> (expect (.trim (.slice content (+ close 8)))) (.toBe "391")))))))
