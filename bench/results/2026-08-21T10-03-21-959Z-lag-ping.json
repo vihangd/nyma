@@ -1,0 +1,52 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "lag-ping",
+  "gitSha": "baa21db",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/laguna-s-2.1-free",
+  "model": "opencode-zen/laguna-s-2.1-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 300000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 47979,
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 136824,
+      "cacheRead": 57824,
+      "cacheWrite": 0,
+      "inputTokens": 135954
+    }
+  ]
+}
