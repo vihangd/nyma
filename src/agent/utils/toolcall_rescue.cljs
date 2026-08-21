@@ -19,7 +19,8 @@
      settings.json → {\"local-models\": [{\"name\": \"ollama\", ..., \"rescueParsing\": true}]}
    or globally: {\"small-model\": {\"toolcall-adapter\": {\"enabled\": true}}}
   "
-  (:require [clojure.string :as str]))
+  (:require [agent.debug :as d]
+            [clojure.string :as str]))
 
 ;; ── Think-tag stripping ──────────────────────────────────────────
 ;; Reasoning models leak tool calls inside <think> blocks; strip before parsing.
@@ -325,7 +326,10 @@
                       (let [active (try (get-active-tools) (catch :default _ #{}))
                             found  (rescue-tool-calls @acc-text active)]
                         (if (seq found)
-                          (do (inject-tool-calls-into-chunk obj found)
+                          (do (d/info "toolcall-rescue"
+                                      (str "recovered " (count found) " tool call(s) a model emitted as text")
+                                      #js {:tools (clj->js (mapv :tool found))})
+                              (inject-tool-calls-into-chunk obj found)
                               (aset choice "finish_reason" "tool_calls")
                               ;; Held text is the markup itself — drop it.
                               (reset! held nil)
@@ -334,10 +338,20 @@
                               ;; and every rescued call was silently discarded.
                               (reset! out (str "data: " (js/JSON.stringify obj) "\n\n")))
                           ;; No rescue: it was ordinary text after all.
-                          (when (some? @held)
-                            (let [h @held]
-                              (reset! held nil)
-                              (reset! out (str (content-chunk h) @out)))))))
+                          (do
+                            ;; Only interesting when the text LOOKED like a call
+                            ;; — that is the case where a user sees markup in
+                            ;; the answer and wants to know why nothing ran.
+                            (when (some? @held)
+                              (d/warn "toolcall-rescue"
+                                      (str "text looks like a tool call but did not parse into an active tool"
+                                           " — it will render as the answer")
+                                      #js {:preview (.slice @held 0 120)
+                                           :active  (clj->js (vec (take 20 (sort active))))}))
+                            (when (some? @held)
+                              (let [h @held]
+                                (reset! held nil)
+                                (reset! out (str (content-chunk h) @out))))))))
                     ;; A finish that DID carry tool calls still has to release
                     ;; anything held, or the text vanishes.
                     (when (and finish (some? @held))
