@@ -18,11 +18,13 @@
 (defn- harness []
   (let [mw     (atom nil)
         signals (atom [])
+        hooks  (atom {})
+        nudges (atom [])
         ;; the real state — :all-tool-sigs must start as a SET or `contains?`
         ;; silently never matches and the detector is inert
         state  (shared/make-state)
         api #js {:addMiddleware (fn [m] (reset! mw m))
-                 :on            (fn [& _] nil)
+                 :on            (fn [ev f] (swap! hooks assoc ev f) nil)
                  :off           (fn [& _] nil)
                  ;; PRODUCTION SHAPE: extensions.cljs:45 returns (clj->js (keys …)),
                  ;; i.e. a JS ARRAY of names — not an object. Mocking an object
@@ -31,9 +33,17 @@
                  ;; failed the membership check and every result was destroyed.
                  :getAllTools   (fn [] #js ["bash" "read" "write"])
                  :emitGlobal    (fn [ev data] (swap! signals conj [ev (.-reason data)]))
-                 :sendUserMessage (fn [& _] nil)}]
+                 :sendUserMessage (fn [msg & _] (swap! nudges conj (str msg)) nil)}]
     (qm/activate api {:quality-monitor {:enabled true}} state)
-    {:mw mw :signals signals :state state}))
+    {:mw mw :signals signals :state state :hooks hooks :nudges nudges}))
+
+(defn- turn!
+  "Run one turn through the hooks: text pieces streamed, then N tool calls."
+  [h pieces tool-calls]
+  (let [hk @(:hooks h)]
+    ((get hk "turn_start") #js {} nil)
+    (doseq [p pieces] ((get hk "stream_filter") #js {:chunk p :delta p} nil))
+    ((get hk "turn_finalize") #js {:toolCalls tool-calls :error false} nil)))
 
 (defn- call! [h tool args result]
   ;; the middleware reads ctx["tool-name"], not ctx.toolName
@@ -110,3 +120,44 @@
                 ctx (js-obj "tool-name" "bash" "args" #js {} "result" "real output")]
             ((.-leave @mw) ctx)
             (-> (expect (.-result ctx)) (.toContain "real output")))))))
+
+
+;; ── the abort that killed runs ───────────────────────────────────
+;; `stream_filter` fires only on TEXT deltas, so it cannot see tool calls. The
+;; empty-turn check aborted mid-stream on a blank delta, which is exactly what a
+;; turn that goes straight to a tool call looks like. Two aborts exhausted the
+;; loop's retry budget and ended the run with finishReason
+;; "stream-filter-aborted" — measured on python/bottle-song as 4 turns and 66k
+;; tokens with the stub never touched, a task that passes with this module off.
+;; This was the SECOND false positive from the same heuristic, and the first fix
+;; shipped without a test pinning the tool-call case.
+(describe "small-model/quality-monitor empty-turn detection"
+          (fn []
+            (it "does not nudge a silent turn that called a tool"
+        ;; the behaviour you WANT from a small model: no preamble, just act
+                (fn []
+                  (let [h (harness)]
+                    (turn! h [""] 1)
+                    (-> (expect (count @(:nudges h))) (.toBe 0)))))
+
+            (it "does not nudge a turn that produced real text"
+                (fn []
+                  (let [h (harness)]
+                    (turn! h ["Let me read the file"] 0)
+                    (-> (expect (count @(:nudges h))) (.toBe 0)))))
+
+            (it "nudges a turn that produced neither text nor a tool call"
+                (fn []
+                  (let [h (harness)]
+                    (turn! h ["" "  "] 0)
+                    (-> (expect (count @(:nudges h))) (.toBe 1)))))
+
+            (it "escalates the wording, and re-arms after a productive turn"
+                (fn []
+                  (let [h (harness)]
+                    (turn! h [""] 0)
+                    (turn! h [""] 0)
+                    (-> (expect (second @(:nudges h))) (.toContain "Empty response again"))
+                    (turn! h [""] 1)          ;; productive: resets the counter
+                    (turn! h [""] 0)
+                    (-> (expect (last @(:nudges h))) (.toContain "empty or only whitespace")))))))

@@ -12,7 +12,8 @@
      Tier 3 (third+ offence):  aggressive — ALL CAPS, hard constraint
 
    Hooks used:
-     stream_filter        — abort mid-stream on empty/blank turns
+     stream_filter        — observe whether any text arrived this turn
+     turn_finalize        — nudge when a turn produced neither text nor a tool call
      addMiddleware :leave — track tool-call signatures for repeat detection
                            and override hallucinated/repeat results with nudges
      after_provider_request — advance turn counter, emit quality-signal
@@ -100,28 +101,40 @@
         ;; Escalation counters (keyed by violation type)
         counters  (atom {:empty 0 :hallucinated 0 :repeat 0})
 
-        ;; ── stream_filter: empty turns ───────────────────────────
-        ;; Deltas seen this turn. Until the loop was fixed to read the AI SDK's
-        ;; `text` field, every chunk arrived as "" and the predicate below was
-        ;; true on the FIRST delta of every single turn — this aborted and
-        ;; re-prompted healthy responses whenever small-model was enabled. With
-        ;; real text flowing, the remaining false positive is a provider that
-        ;; opens with an empty delta, so the first event no longer counts.
-        deltas-seen (atom 0)
+        ;; ── empty turns: observed on the stream, judged at turn_finalize ──
+        ;; This check used to ABORT mid-stream whenever a text delta arrived
+        ;; empty with nothing accumulated. `stream_filter` fires only on text
+        ;; deltas, so it cannot see tool calls — and a turn that goes straight
+        ;; to a tool call with little or no prose is indistinguishable, at that
+        ;; point, from a dead turn. Two aborts exhausted the loop's retry budget
+        ;; and ended the run with finishReason "stream-filter-aborted": measured
+        ;; on python/bottle-song as 4 turns and 66k tokens with the stub never
+        ;; touched, a task that passes with this module off. It was the second
+        ;; false positive from the same heuristic; tightening the threshold
+        ;; again would only move the line.
+        ;;
+        ;; So: observe here, never abort. `turn_finalize` carries toolCalls, so
+        ;; a turn is only empty if it produced neither text nor a tool call.
+        text-seen? (atom false)
+
+        on-turn-start
+        (fn [_data _ctx] (reset! text-seen? false) nil)
 
         on-stream-filter
         (fn [data _ctx]
-          (let [delta (str (.-delta data))
-                chunk (str (.-chunk data))
-                n     (swap! deltas-seen inc)]
-            ;; Abort when the stream is still empty after it has actually
-            ;; started producing events (chunk="" and accumulated blank).
-            (when (and (> n 1) (= chunk "") (blank? delta))
-              (let [n (swap! counters update :empty inc)]
-                #js {:abort  true
-                     :reason "empty-turn"
-                     :inject [#js {:role    "user"
-                                   :content (empty-turn-msg (:empty n))}]}))))
+          (when-not (blank? (.-chunk data)) (reset! text-seen? true))
+          nil)
+
+        on-empty-turn-finalize
+        (fn [data _ctx]
+          (let [tool-calls (or (.-toolCalls data) 0)
+                acted?     (or (pos? tool-calls) @text-seen?)]
+            (if acted?
+              (swap! counters assoc :empty 0)
+              (let [n (:empty (swap! counters update :empty inc))]
+                (.sendUserMessage api (empty-turn-msg n)
+                                  #js {:deliverAs "followUp"})))
+            nil))
 
         ;; ── middleware :leave: hallucination + repeat checks ──────
         tool-checker
@@ -198,6 +211,10 @@
 
     (.on api "stream_filter" on-stream-filter)
     (swap! handlers conj ["stream_filter" on-stream-filter])
+    (.on api "turn_start" on-turn-start)
+    (swap! handlers conj ["turn_start" on-turn-start])
+    (.on api "turn_finalize" on-empty-turn-finalize)
+    (swap! handlers conj ["turn_finalize" on-empty-turn-finalize])
 
     (.addMiddleware api tool-checker)
 
