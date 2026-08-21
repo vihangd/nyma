@@ -1,5 +1,6 @@
 (ns agent.extension-context
-  (:require [agent.model-info :as model-info]
+  (:require [agent.utils.js-interop :as ji]
+            [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact]]
             [agent.token-estimation :as te]))
 
@@ -59,7 +60,9 @@
                                                    :state-atom     (:state agent)
                                                   :model-key (model-info/config-model-key
                                                               (:config agent))}
-                                                 (js->clj opts :keywordize-keys true)))))
+                                                 ;; squint has no js->clj — this threw for ANY extension
+                                                 ;; calling api.compact(opts).
+                                                 (ji/js->clj* opts)))))
 
          ;; System prompt
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))

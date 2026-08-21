@@ -10,7 +10,8 @@
    built-ins now do too). Entries carry ids and display names; the numbers are
    joined at read time from `agent.model-info` (context window) and
    `agent.pricing` (rates) so there's one source of truth for each."
-  (:require [agent.pricing :as pricing]
+  (:require [agent.utils.js-interop :as ji]
+            [agent.pricing :as pricing]
             [clojure.string :as str]))
 
 (defn- model-cost
@@ -28,7 +29,7 @@
 (defn- entry-models [provider-name entry context-window-fn]
   (let [models (or (:models entry) [])]
     (keep (fn [m]
-            (let [m    (if (map? m) m (js->clj m :keywordize-keys true))
+            (let [m    (if (map? m) m (ji/js->clj* m))
                   id   (or (:id m) (get m "id"))
                   ;; What the user types / what setModel expects.
                   spec (str provider-name "/" id)]

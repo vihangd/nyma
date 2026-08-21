@@ -1,6 +1,7 @@
 (ns agent.extensions.headroom.shared
   (:require ["node:fs" :as fs]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.utils.js-interop :as ji]))
 
 ;; ── Stats ────────────────────────────────────────────────────────
 
@@ -30,7 +31,16 @@
             (try
               (let [parsed (js/JSON.parse (fs/readFileSync p "utf8"))
                     h      (.-headroom parsed)]
-                (when h (js->clj h :keywordize-keys true)))
+                ;; `js->clj` does not exist in squint: this threw, the catch
+                ;; below ate it, and load-config returned the defaults every
+                ;; time — so `"enabled": true` never took effect and the
+                ;; extension could not be turned on by anyone.
+                ;;
+                ;; kebab-keys because the settings file is documented in
+                ;; camelCase (proxyUrl, compressionThreshold) while
+                ;; default-config keys are kebab-case, so even once the throw
+                ;; was fixed every key but `enabled` would still be ignored.
+                (when h (ji/kebab-keys h)))
               (catch :default _ nil))))
         global-path  (path/join (.. js/process -env -HOME) ".nyma" "settings.json")
         project-path (path/join (js/process.cwd) ".nyma" "settings.json")]

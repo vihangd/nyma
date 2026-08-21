@@ -36,7 +36,8 @@
 
    The approval pipeline integrates with gateway.middleware via
    `wire-approval-pipeline!` which registers a single composite check-fn
-   on the agent's middleware pipeline.")
+   on the agent's middleware pipeline."
+  (:require [agent.utils.js-interop :as ji]))
 
 (defn create-pipeline
   "Create an ordered pipeline of async check functions.
@@ -101,7 +102,7 @@
   [agent-middleware approval-pipeline]
   (let [check-fn (fn [tool-js]
                    (let [tool-map {:tool-name (.-toolName tool-js)
-                                   :args      (js->clj (.-args tool-js) :keywordize-keys true)}]
+                                   :args      (ji/js->clj* (.-args tool-js))}]
                      (.. ((:run! approval-pipeline) tool-map)
                          (then (fn [result]
                                  (if (:allow? result)

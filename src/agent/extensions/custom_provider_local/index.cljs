@@ -24,6 +24,7 @@
            nyma --model lmstudio/devstral-small
   "
   (:require [agent.debug :as d]
+            [agent.utils.js-interop :as ji]
             ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
@@ -72,7 +73,7 @@
     (when (and raw (not (empty? raw)))
       (if (array? raw)
         (vec raw)
-        (js->clj raw :keywordize-keys true)))))
+        (ji/js->clj* raw)))))
 
 (defn- js-obj->entry [o]
   {:name          (or (.-name o) (get o "name"))
@@ -95,7 +96,7 @@
         "local-no-key")))
 
 (defn- ->js-model [m]
-  (let [m (if (map? m) m (js->clj m :keywordize-keys true))]
+  (let [m (if (map? m) m (ji/js->clj* m))]
     #js {:id            (or (:id m) (get m "id") "")
          :name          (or (:name m) (get m "name") "")
          :contextWindow (or (:ctx m) (:context-window m)

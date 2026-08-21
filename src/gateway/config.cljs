@@ -52,7 +52,8 @@
 
    See docs/gateway.md for the full reference, including per-channel config keys
    and the behaviour of each streaming/session policy."
-  (:require ["node:fs/promises" :as fsp]
+  (:require [agent.utils.js-interop :as ji]
+            ["node:fs/promises" :as fsp]
             ["node:os" :as os]
             ["node:path" :as path]
             [clojure.string :as str]))
@@ -96,7 +97,10 @@
         raw    (js-await (.readFile fsp p "utf8"))
         parsed (js/JSON.parse raw)
         _      (interpolate-env parsed)]
-    (js->clj parsed :keywordize-keys true)))
+    ;; squint has no js->clj; this raised a ReferenceError, and since this fn
+    ;; documents itself as throwing on a bad file, it surfaced as a confusing
+    ;; crash rather than anything traceable to the missing builtin.
+    (ji/js->clj* parsed)))
 
 (defn validate-config
   "Check that a loaded config map has the required fields.

@@ -1,5 +1,6 @@
 (ns agent.extensions.small-model.shared
-  "Shared config loading, defaults, and state for the small-model extension.")
+  "Shared config loading, defaults, and state for the small-model extension."
+  (:require [agent.utils.js-interop :as ji]))
 
 ;; ── Default configuration ───────────────────────────────────────
 
@@ -64,7 +65,7 @@
                 (let [user-val (or (get raw k) (get raw (str k)))]
                   (if (and user-val (map? (get acc k)))
                     (update acc k merge (if (map? user-val) user-val
-                                            (js->clj user-val :keywordize-keys true)))
+                                            (ji/js->clj* user-val)))
                     (if (some? user-val)
                       (assoc acc k user-val)
                       acc))))

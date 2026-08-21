@@ -37,6 +37,11 @@
         min-tokens (or (:min-tokens-to-compress config) 8000)
         proxy-url  (or (:proxy-url config) "http://localhost:8787")
         algorithms (or (:algorithms config) ["SmartCrusher" "CodeCompressor" "Kompress"])
+        ;; Read, not hardcoded. The README documents setting
+        ;; "disableCcr": false to turn CCR markers on, and the literal below
+        ;; made that instruction impossible to follow. `some?` rather than
+        ;; `or`, so an explicit false is not coerced back to the default.
+        disable-ccr (let [v (:disable-ccr config)] (if (some? v) (boolean v) true))
         warn-once  (atom false)
 
         handler
@@ -62,7 +67,7 @@
                                             #js {:proxyUrl   proxy-url
                                                  :model      model-id
                                                  :algorithms (clj->js algorithms)
-                                                 :disableCcr true}))]
+                                                 :disableCcr disable-ccr}))]
                     (when result
                       (let [saved (or (.-tokensSaved result) 0)
                             r     (or (.-compressionRatio result) 1.0)]
