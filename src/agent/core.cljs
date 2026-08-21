@@ -112,6 +112,18 @@
                  :config            {:model                model
                                      :system-prompt        system-prompt
                                      :max-steps            max-steps
+                                     ;; The loop hardcoded maxRetries 5 while
+                                     ;; claiming to match this setting, so a
+                                     ;; user asking for 3 silently got 6
+                                     ;; attempts. Carry it through instead.
+                                     :max-retries          (let [r (or (get settings :retry)
+                                                                       (get settings "retry"))
+                                                                 on? (let [e (or (get r :enabled)
+                                                                                 (get r "enabled"))]
+                                                                       (if (some? e) (boolean e) true))
+                                                                 n   (or (get r :max-retries)
+                                                                         (get r "max-retries"))]
+                                                             (if on? (or n 5) 0))
                                      :require-capabilities require-capabilities
                                      :exclude-capabilities exclude-capabilities
                                      :modes                modes}

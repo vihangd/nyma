@@ -253,7 +253,15 @@
                              :allowSystemInMessages true
                              :tools           (reduce-kv (fn [acc k v] (doto acc (aset k v))) #js {} tools)
                              :abortSignal     (when-let [c (:abort-controller agent)] (.-signal @c))
-                             :maxRetries      5
+                             ;; Read from settings — this was hardcoded to 5
+                             ;; while the comment above claimed it matched
+                             ;; :retry :max-retries, so `{"retry":
+                             ;; {"max-retries": 3}}` silently got 6 attempts.
+                             ;; Rate limits are the single largest failure
+                             ;; category in the benchmark corpus (92 of them),
+                             ;; and each burns ~68s exhausting attempts that
+                             ;; cannot succeed while a quota is spent.
+                             :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        (stepCountIs (:max-steps config))
                              ;; Extended thinking is opt-in per request: with no
                              ;; `thinking` field a Claude model returns no
