@@ -77,6 +77,7 @@ replace it.
 | `catalogUrl` | *(none)* | Absolute URL of a richer catalog to discover from instead. See below. |
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `types` | *(any)* | Required `type`, any-of — keeps image/embedding models out of the picker. |
+| `paidOnly` | `false` | Drop models the catalog prices at zero on both sides. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |
@@ -174,11 +175,12 @@ Velona is the shipped example: `https://velona.in/v1/models` lists ids and nothi
 while `https://velona.in/gateway/v1/models` carries real windows and prices. Point
 `catalogUrl` at the richer one.
 
-The key is sent **only when `catalogUrl` shares an origin with `baseUrl`**. `catalogUrl`
-comes from settings, so without that rule an entry naming another host would hand it this
-provider's credential — the same leak the redirect refusal exists to prevent, reached
-directly instead of through a 302. An off-origin catalog is still fetched, just
-unauthenticated.
+`catalogUrl` **must share an origin with `baseUrl`**, and is refused otherwise. Two
+reasons: an entry naming another host would be handed this provider's credential (the leak
+the redirect refusal exists to prevent, reached directly instead of through a 302) — and,
+key or no key, whatever that host returned would be registered as this provider's context
+windows and prices. A 4096-token window makes compaction thrash every turn; a fabricated
+rate makes cost accounting lie.
 
 ## Velona (India)
 
@@ -196,6 +198,24 @@ provider `velona`, model `qwen/qwen3.8-27b`.
 Discovery needs a key even though Velona's catalog endpoint is public — without one you
 get the seeded list. Velona reports `capabilities`, not `supported_endpoint_types`, so
 the preset filters on `types: ["text"]` instead of `endpointTypes`.
+
+**Free-tier models are not available here.** `/v1` answers a zero-priced id with
+`model_not_supported` and points at the native `/gateway/v1/inference/run` surface, which
+is a different wire format. The preset therefore sets `paidOnly: true`. Note the marker is
+the price, not a `:free` suffix — `stealth/ox-alpha`, the two `lyria` ids and
+`openrouter/free` are all free without one.
+
+**`qwen/qwen3.6-35b-a3b` is excluded.** It reasons its way to *"I should use the bash
+tool"* and then ends the turn with `finish_reason: stop`, no `tool_calls` and no content —
+every agent turn a silent no-op, which renders as thinking followed by an empty reply. It
+is not the model: the same request with `tool_choice: "required"` calls tools normally, so
+Velona's default `auto` path is dropping them. Forcing `required` would stop it ever
+giving a final answer, so there is no fix from this side. OpenRouter documents the same
+failure for this exact id on one of its backends.
+
+Verified emitting tool calls on Velona: `qwen/qwen3.8-27b`, `z-ai/glm-5.3`,
+`deepseek/deepseek-v4-pro-0813`, `google/gemini-3.7-flash`, `anthropic/claude-sonnet-5`,
+`x-ai/grok-4.6`.
 
 ## Adding another New API relay
 

@@ -28,6 +28,7 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.extensions.custom-provider-local.toolcall-adapter :as adapter]
+            [agent.providers.model-fetch :as model-fetch]
             [agent.utils.reasoning-stream :as rs]))
 
 ;; ── Built-in presets ─────────────────────────────────────────────
@@ -152,12 +153,12 @@
 
 (defn model-window
   "Pure: the context window a /v1/models entry declares, or nil.
-   Handles vLLM's max_model_len and the context_length spelling others use."
+   Handles vLLM's max_model_len and the context_length spelling others use.
+
+   Delegates so there is one list of spellings, not two — this and
+   model-fetch/entry-window drifted apart the moment either grew a fourth."
   [m]
-  (let [n (or (some-> m .-max_model_len)
-              (some-> m .-context_length)
-              (some-> m .-context_window))]
-    (when (and (number? n) (pos? n)) n)))
+  (model-fetch/entry-window m))
 
 (defn merge-server-windows
   "Pure: models from settings + entries from /v1/models → models with the

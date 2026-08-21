@@ -95,6 +95,13 @@
    ;; no price. The gateway surface carries both, so discovery is pointed
    ;; there. Same origin, so the key still goes with it.
    ;;
+   ;; :paid-only, because Velona's free tier is not served here at all: /v1
+   ;; answers a zero-priced id with `model_not_supported` and points at the
+   ;; native /gateway/v1/inference/run surface, which is a different wire
+   ;; format nyma does not speak. Listing them would offer 21 models that
+   ;; cannot run. Note the marker is the PRICE, not a `:free` suffix — four of
+   ;; them (stealth/ox-alpha, the lyria pair, openrouter/free) carry no suffix.
+   ;;
    ;; No :endpoint-types — Velona reports `capabilities` (["streaming","text"],
    ;; plus "moderated" on some), never `supported_endpoint_types`. It does
    ;; report `type`, which is what keeps its image (/images/render) and
@@ -106,22 +113,26 @@
     :discover  true
     :catalog-url "https://velona.in/gateway/v1/models"
     :types     ["text"]
+    :paid-only true
+    ;; Measured: this id reasons its way to "I should use the bash tool" and
+    ;; then ends the turn with finish_reason=stop, no tool_calls and no
+    ;; content — every agent turn a silent no-op. It is not the model: the
+    ;; same request with tool_choice=required calls tools fine, so Velona's
+    ;; default `auto` path drops them. Forcing `required` would stop it ever
+    ;; answering, so there is no fix from here. Same failure OpenRouter
+    ;; documents for this exact id on the wrong backend.
+    :exclude   ["qwen/qwen3.6-35b-a3b"]
     ;; Seed: what a user sees before the first discovery lands, or with no key
-    ;; at all (discover! needs one). Verified against the live catalogue —
-    ;; several plausible ids are NOT carried here (no claude-sonnet-4-6, no
-    ;; gpt-oss, no qwen3-coder:free, no llama-3.3-70b:free). Discovery
-    ;; overrides these numbers, so drift is self-correcting.
-    :models    [{:id "poolside/laguna-s-2.1:free"           :context-window 262144  :cost {:input 0 :output 0}}
-                {:id "z-ai/glm-5.2:free"                    :context-window 256000  :cost {:input 0 :output 0}}
-                {:id "nvidia/nemotron-3-ultra-550b-a55b:free" :context-window 1000000 :cost {:input 0 :output 0}}
-                {:id "google/gemma-4-31b-it:free"           :context-window 262144  :cost {:input 0 :output 0}}
-                {:id "qwen/qwen3.8-27b"                     :context-window 1000000 :cost {:input 0.45 :output 3.2}}
-                {:id "qwen/qwen3.6-35b-a3b"                 :context-window 262144  :cost {:input 0.14 :output 1.0}}
-                {:id "z-ai/glm-5.3"                         :context-window 1048576 :cost {:input 1.4 :output 4.4}}
-                {:id "deepseek/deepseek-v4-pro-0813"        :context-window 1048576 :cost {:input 1.188 :output 3.564}}
-                {:id "google/gemini-3.7-flash"              :context-window 1048576 :cost {:input 0.375 :output 1.875}}
-                {:id "anthropic/claude-sonnet-5"            :context-window 1000000 :cost {:input 2.0 :output 10.0}}
-                {:id "x-ai/grok-4.6"                        :context-window 500000  :cost {:input 2.0 :output 6.0}}]}
+    ;; at all (discover! needs one). Every id verified against the live API to
+    ;; be reachable on /v1 AND to actually emit tool calls — an agent model
+    ;; that cannot is worse than absent. Discovery overrides these numbers, so
+    ;; drift is self-correcting.
+    :models    [{:id "qwen/qwen3.8-27b"                :context-window 1000000 :cost {:input 0.45 :output 3.2}}
+                {:id "z-ai/glm-5.3"                    :context-window 1048576 :cost {:input 1.4 :output 4.4}}
+                {:id "deepseek/deepseek-v4-pro-0813"   :context-window 1048576 :cost {:input 1.188 :output 3.564}}
+                {:id "google/gemini-3.7-flash"         :context-window 1048576 :cost {:input 0.375 :output 1.875}}
+                {:id "anthropic/claude-sonnet-5"       :context-window 1000000 :cost {:input 2.0 :output 10.0}}
+                {:id "x-ai/grok-4.6"                   :context-window 500000  :cost {:input 2.0 :output 6.0}}]}
    {:name      "yunwu-claude"
     :base-url  "https://yunwu.ai/v1"
     :api-key-env "YUNWU_API_KEY"
@@ -169,6 +180,7 @@
    :exclude     (->vec (entry-get e "exclude" "exclude"))
    :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
    :types       (->vec (entry-get e "types" "types"))
+   :paid-only   (boolean (entry-get e "paidOnly" "paid-only"))
    ;; Absolute URL of a richer catalog than <baseUrl>/models. See
    ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
    :catalog-url (entry-get e "catalogUrl" "catalog-url")

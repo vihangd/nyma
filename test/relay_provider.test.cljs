@@ -617,12 +617,45 @@
           (-> (expect (contains? m :context-window)) (.toBe false))
           (-> (expect (contains? m :cost)) (.toBe false)))))
 
+  (it "ignores a negative price sentinel"
+      (fn []
+        ;; OpenRouter publishes "-1" for variable/auto-routed pricing. Scaled
+        ;; up that is -$1,000,000 per 1M — and under merge-declared it would
+        ;; beat a hand-declared cost and show as a negative dollar rate.
+        (-> (expect (contains? (first (mf/parse-models
+                                       #js {:data #js [#js {:id "a" :pricing #js {:prompt "-1" :completion "-1"}}]}))
+                               :cost))
+            (.toBe false))))
+
   (it "drops a half-priced entry rather than reporting half a price"
       (fn []
         (-> (expect (contains? (first (mf/parse-models
                                        #js {:data #js [#js {:id "a" :pricing #js {:prompt "0.000001"}}]}))
                                :cost))
             (.toBe false))))))
+
+(describe "model-fetch/make-filter — :paid-only" (fn []
+
+  (it "drops a model the catalog prices at zero on both sides"
+      (fn []
+        ;; Velona serves its free tier ONLY from the native inference/run
+        ;; surface; /v1 answers a zero-priced id with model_not_supported.
+        ;; Listing them offers models that cannot run.
+        (let [p (mf/make-filter {:paid-only true})]
+          (-> (expect (p {:id "z-ai/glm-5.2:free" :cost {:input 0 :output 0}})) (.toBe false))
+          ;; The marker is the price, not the suffix — several free ids carry none.
+          (-> (expect (p {:id "stealth/ox-alpha" :cost {:input 0 :output 0}})) (.toBe false))
+          (-> (expect (p {:id "qwen/qwen3.8-27b" :cost {:input 0.45 :output 3.2}})) (.toBe true)))))
+
+  (it "keeps a model whose price is unknown"
+      (fn []
+        ;; Same absence rule as :types — a gateway reporting no pricing must
+        ;; not be filtered down to nothing.
+        (-> (expect ((mf/make-filter {:paid-only true}) {:id "a"})) (.toBe true))))
+
+  (it "filters nothing when :paid-only is absent"
+      (fn []
+        (-> (expect ((mf/make-filter {}) {:id "a" :cost {:input 0 :output 0}})) (.toBe true))))))
 
 (describe "model-fetch/make-filter — :types" (fn []
 
@@ -676,20 +709,23 @@
       (-> (expect (aget (.-headers (:opts @seen)) "Authorization")) (.toBe "Bearer sk-1"))
       (-> (expect (:context-window (first ms))) (.toBe 1000000)))))
 
-(defn ^:async test-catalog-url-off-origin-withholds-key []
+(defn ^:async test-catalog-url-off-origin-refused []
   (temp-home!)
-  (let [seen (atom nil)]
-    (stub-fetch! (fn [url opts]
-                   (reset! seen {:url url :opts opts})
-                   (js/Response. (js/JSON.stringify #js {:data #js []})
+  (let [called (atom 0)]
+    (stub-fetch! (fn [_url _opts]
+                   (swap! called inc)
+                   (js/Response. (js/JSON.stringify
+                                  #js {:data #js [#js {:id "claude-opus-5" :context_length 4096}]})
                                  #js {:status 200
                                       :headers #js {"content-type" "application/json"}})))
-    (js-await (mf/fetch-models "https://velona.in/v1" "sk-1"
-                               "https://evil.test/gateway/v1/models"))
-    ;; catalogUrl comes from settings. Sending the key to whatever host it
-    ;; names is the same leak the redirect refusal exists to prevent, just
-    ;; reached directly rather than through a 302.
-    (-> (expect (aget (.-headers (:opts @seen)) "Authorization")) (.toBeUndefined))))
+    ;; catalogUrl comes from settings, so an off-origin one is two problems:
+    ;; it would be handed this provider's key, AND whatever it returns would be
+    ;; registered as this provider's windows and prices. Withholding the key
+    ;; closes only the first. Refuse the request outright.
+    (-> (expect (js-await (mf/fetch-models "https://velona.in/v1" "sk-1"
+                                           "https://evil.test/gateway/v1/models")))
+        (.toBeNil))
+    (-> (expect @called) (.toBe 0))))
 
 (defn ^:async test-catalog-url-still-refuses-redirect []
   (temp-home!)
@@ -701,7 +737,7 @@
 (describe "model-fetch/fetch-models — catalogUrl" (fn []
   (afterEach restore!)
   (it "fetches the override verbatim and keeps the key on-origin" test-catalog-url-same-origin)
-  (it "withholds the key from an off-origin catalog" test-catalog-url-off-origin-withholds-key)
+  (it "refuses an off-origin catalog outright" test-catalog-url-off-origin-refused)
   (it "still refuses a redirect on the override path" test-catalog-url-still-refuses-redirect)))
 
 ;; ── merge-declared precedence ────────────────────────────────
@@ -769,7 +805,28 @@
         (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))]
           (-> (expect (:catalog-url v)) (.toBe "https://velona.in/gateway/v1/models"))
           (-> (expect (mf/same-origin? (:catalog-url v) (:base-url v))) (.toBe true))
-          (-> (expect (:types v)) (.toEqual #js ["text"])))))))
+          (-> (expect (:types v)) (.toEqual #js ["text"])))))
+
+  (it "offers no model that /v1 refuses to serve"
+      (fn []
+        ;; Velona's free tier 404s on the OpenAI surface. A seed entry that
+        ;; cannot run is a broken suggestion in the picker.
+        (let [v    (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))
+              free (filterv (fn [m] (= 0 (:input (:cost m)))) (:models v))]
+          (-> (expect (:paid-only v)) (.toBe true))
+          (-> (expect (count free)) (.toBe 0)))))
+
+  (it "keeps the id that reasons about tools and then calls none"
+      (fn []
+        ;; qwen/qwen3.6-35b-a3b ends its turn with finish_reason=stop, no
+        ;; tool_calls, no content. Measured, and the reason the user saw an
+        ;; empty bubble. Excluded rather than shipped as an agent model.
+        (let [v (first (filterv (fn [e] (= "velona" (:name e))) relay/presets))
+              p (mf/make-filter v)]
+          (-> (expect (p {:id "qwen/qwen3.6-35b-a3b" :type "text" :cost {:input 0.14 :output 1.0}}))
+              (.toBe false))
+          (-> (expect (p {:id "qwen/qwen3.8-27b" :type "text" :cost {:input 0.45 :output 3.2}}))
+              (.toBe true)))))))
 
 (describe "relay/normalize-entry — catalogUrl and types" (fn []
 

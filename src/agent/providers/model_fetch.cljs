@@ -69,12 +69,15 @@
                               (keep (fn [m]
                                       (let [id (or (.-id m) (aget m "id"))]
                                         (when (and (string? id) (seq id))
-                                          (cond-> {:id id :name (or (.-name m) id)}
-                                            (js/Array.isArray (aget m "endpoints"))
-                                            (assoc :endpoints (vec (aget m "endpoints")))
-                                            (cached-window m)   (assoc :context-window (cached-window m))
-                                            (cached-cost m)     (assoc :cost (cached-cost m))
-                                            (cached-type m)     (assoc :type (cached-type m)))))))
+                                          (let [w (cached-window m)
+                                                c (cached-cost m)
+                                                t (cached-type m)]
+                                            (cond-> {:id id :name (or (.-name m) id)}
+                                              (js/Array.isArray (aget m "endpoints"))
+                                              (assoc :endpoints (vec (aget m "endpoints")))
+                                              w (assoc :context-window w)
+                                              c (assoc :cost c)
+                                              t (assoc :type t)))))))
                               vec)
              :fetched-at (or (.-fetchedAt parsed) 0)}))
         (catch :default _ nil)))))
@@ -128,12 +131,20 @@
                       sells image and embedding models alongside chat ones
                       (Velona) states which is which, and nyma can only drive
                       the text ones.
+     :paid-only       drop models the catalog prices at zero on both sides.
+                      A free TIER is often not the same product as the paid
+                      one: Velona serves its free models only from the native
+                      /gateway/v1/inference/run surface and answers the
+                      OpenAI-compatible /v1 with `model_not_supported`, so
+                      listing them in the picker offers models that cannot
+                      run. Applied only to models whose price is known, so a
+                      gateway that reports no pricing keeps everything.
      :include         allow-list over the id; substrings or `/regex/`
      :exclude         subtracted from the above
 
    Endpoint types beat id patterns where available: they're the gateway's own
    statement of what it will serve, rather than a guess from the name."
-  [{:keys [include exclude endpoint-types types]}]
+  [{:keys [include exclude endpoint-types types paid-only]}]
   (let [inc-preds (mapv pattern->pred (or include []))
         exc-preds (mapv pattern->pred (or exclude []))
         wanted    (set (map str (or endpoint-types [])))
@@ -142,7 +153,11 @@
       (let [m   (if (map? m) m {:id m})
             s   (str (:id m))
             eps (:endpoints m)
-            typ (:type m)]
+            typ (:type m)
+            c   (:cost m)
+            free? (and c
+                       (= 0 (:input c))
+                       (= 0 (:output c)))]
         (boolean
          (and (or (empty? wanted)
                   (nil? eps)
@@ -150,6 +165,7 @@
               (or (empty? want-type)
                   (nil? typ)
                   (contains? want-type (str typ)))
+              (or (not paid-only) (not free?))
               (or (empty? inc-preds) (some (fn [p] (p s)) inc-preds))
               (not (some (fn [p] (p s)) exc-preds))))))))
 
@@ -166,10 +182,14 @@
       (and data (js/Array.isArray (aget data "models"))) (aget data "models")
       :else                                              nil)))
 
-(defn- entry-window
-  "The context window a catalog entry declares, or nil. Three spellings occur —
+(defn entry-window
+  "The context window a catalog entry declares, or nil. Three spellings occur:
    `context_window` (Velona), `context_length` (OpenRouter), `max_model_len`
-   (vLLM) — the same set `custom_provider_local/model-window` normalizes."
+   (vLLM).
+
+   Public and single-sourced on purpose — `custom_provider_local/model-window`
+   used to carry its own copy of the same list, so a gateway adding a fourth
+   spelling got fixed in one place and not the other."
   [m]
   (let [n (or (aget m "context_window") (aget m "context_length") (aget m "max_model_len"))]
     (when (and (number? n) (pos? n)) n)))
@@ -189,10 +209,14 @@
    the user reads as money, so both halves must come from the same dialect."
   [m]
   (when-let [p (aget m "pricing")]
-    (let [per-1m  (fn [v] (when (number? v) v))
+    ;; Non-negative only. OpenRouter publishes "-1" as a sentinel for
+    ;; variable/auto-routed pricing; scaled up that becomes -$1,000,000 per 1M,
+    ;; which now BEATS a hand-declared cost under merge-declared and shows the
+    ;; user a large negative rate while cost accounting subtracts money.
+    (let [ok      (fn [n] (when (and (number? n) (js/isFinite n) (>= n 0)) n))
+          per-1m  (fn [v] (ok v))
           per-tok (fn [v] (when (or (string? v) (number? v))
-                            (let [n (js/parseFloat v)]
-                              (when (js/isFinite n) (* n 1e6)))))
+                            (ok (* (js/parseFloat v) 1e6))))
           i (or (per-1m (aget p "input_per_1m_usd")) (per-tok (aget p "prompt")))
           o (or (per-1m (aget p "output_per_1m_usd")) (per-tok (aget p "completion")))]
       ;; Both or neither: half a price is worse than no price.
@@ -254,10 +278,14 @@
    ids while `/gateway/v1/models` carries real windows and prices — and a window
    nyma has to invent is one compaction plans against.
 
-   The key is sent ONLY to the provider's own origin. An override comes from
-   settings, so without that rule a `catalogUrl` naming another host would hand
-   it this provider's credential — the same leak the redirect refusal below
-   exists to prevent, reached directly instead of through a 302.
+   An override must share an origin with `base-url`, and is refused otherwise.
+   Two reasons, and the second is the one that is easy to miss: a `catalogUrl`
+   naming another host would be handed this provider's credential (the leak the
+   redirect refusal below exists to prevent, reached directly instead of through
+   a 302) — and, key or no key, whatever that host returns would be registered
+   as this provider's context windows and prices. A 4096-token window makes
+   compaction thrash every turn; a fabricated rate makes cost accounting lie.
+   Withholding the key alone closes the first hole and leaves the second.
 
    Never throws: every failure path returns nil so a caller can fall back to
    its cache. Also never retries — gateways commonly throttle repeated auth
@@ -270,21 +298,25 @@
           url       (if override?
                       override
                       (str (str/replace (str base-url) #"/+$" "") "/models?limit=1000"))
-          send-key? (and (seq (str (or api-key "")))
-                         (or (not override?) (same-origin? url base-url)))
-          _         (when (and override? (not send-key?))
-                      (d/info "model-fetch"
-                              (str "catalog " url " is off-origin for " base-url
-                                   " — fetching it without the key")))
-          resp (js-await
+          send-key? (seq (str (or api-key "")))
+          resp (when (and override? (not (same-origin? url base-url)))
+                 (d/warn "model-fetch"
+                         (str "refusing an off-origin catalogUrl: " url
+                              " does not share an origin with " base-url))
+                 :refused)
+          resp (if (= :refused resp)
+                 resp
+                 (js-await
                 (js/fetch url
                           #js {:method   "GET"
                                :redirect "manual"
                                :signal   (js/AbortSignal.timeout timeout-ms)
                                :headers  (if send-key?
                                            #js {"Authorization" (str "Bearer " api-key)}
-                                           #js {})}))]
+                                           #js {})})))]
       (cond
+        (= :refused resp) nil
+
         ;; A redirect would carry the credential to wherever it points.
         (or (zero? (.-status resp)) (and (>= (.-status resp) 300) (< (.-status resp) 400)))
         (do (d/warn "model-fetch" (str "refusing to follow a redirect from " url)) nil)
