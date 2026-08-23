@@ -217,11 +217,21 @@ export function agentFailure(printJson) {
  * skips are reported alongside, never folded into the denominator, so a missing
  * toolchain cannot masquerade as a low score.
  */
+/** A run that ended without the agent ever emitting a usable tool call. */
+export function isNoToolCall(r) {
+  return r.status === STATUS.error &&
+         /never modified the stub/.test(String(r.reason ?? ""));
+}
+
 export function aggregate(results) {
   const count = (s) => results.filter((r) => r.status === s).length;
   const passed = count(STATUS.pass);
   const skipped = count(STATUS.skip);
   const attempted = results.length - skipped;
+  const noToolCall = results.filter(isNoToolCall).length;
+  const infraError = count(STATUS.error) - noToolCall;
+  const reached = attempted - infraError;
+  const pc = (n) => (attempted === 0 ? null : round1((100 * n) / attempted));
   return {
     total: results.length,
     attempted,
@@ -230,7 +240,29 @@ export function aggregate(results) {
     timeout: count(STATUS.timeout),
     error: count(STATUS.error),
     skipped,
-    pct: attempted === 0 ? null : round1((100 * passed) / attempted),
+    pct: pc(passed),
+    // One number hides which half moved. Constrained/rescued tool calls trade
+    // structural validity against semantic accuracy in opposite directions —
+    // measured at -29.5 points of abstention accuracy against +17..+62 of tool
+    // selection, pooling to +7.7 (arXiv 2608.13959), and 91.5% -> 48.0%
+    // executable accuracy at unchanged 100% schema validity (arXiv 2605.26128).
+    // Both papers' explicit instruction is to report these separately, so a
+    // large loss and a large recovery cannot read as nothing.
+    metrics: {
+      // Did a usable tool call ever arrive, over the runs that actually
+      // reached the model. Infrastructure errors — rate limits, 504s — are
+      // excluded from this denominator: a request that never landed is
+      // neither valid nor invalid output, and counting it as valid was the
+      // first version of this metric.
+      schemaValidity:  reached === 0 ? null
+                       : round1((100 * (reached - noToolCall)) / reached),
+      // it ran and the suite passed
+      executableAccuracy: pc(passed),
+      // well-formed work, wrong answer
+      wrongValid:      pc(count(STATUS.fail)),
+      // the agent never acted
+      noToolCall:      pc(noToolCall),
+    },
   };
 }
 

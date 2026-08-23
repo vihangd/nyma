@@ -124,3 +124,49 @@
             (it "keeps the reference solution out of the agent's copy"
                 (fn []
                   (-> (expect b/EXCLUDED_FROM_COPY) (.toContain ".meta"))))))
+
+
+;; ── the four metrics ─────────────────────────────────────────────
+;; One pooled number hides which half moved. Enabling prose tool-call rescue on
+;; omlx fixed two Rust tasks and broke two others, netting zero — and the score
+;; alone could not show that. The literature says the same thing with numbers:
+;; abstention accuracy -29.5 against tool selection +17..+62, pooling to +7.7
+;; (arXiv 2608.13959); and 91.5% -> 48.0% executable accuracy at an unchanged
+;; 100% schema validity (arXiv 2605.26128). Both papers' practical instruction
+;; is to report validity and accuracy separately.
+(describe "bench/aggregate — validity vs accuracy"
+  (fn []
+    (it "splits a run into validity, accuracy, wrong-valid and no-tool-call"
+        (fn []
+          (let [m (.-metrics (b/aggregate
+                              #js [#js {:status "pass"}
+                                   #js {:status "fail"}
+                                   #js {:status "timeout"}
+                                   #js {:status "error"
+                                        :reason "agent never modified the stub (no tool call?)"}]))]
+            (-> (expect (.-executableAccuracy m)) (.toBe 25))
+            (-> (expect (.-wrongValid m))         (.toBe 25))
+            (-> (expect (.-noToolCall m))         (.toBe 25))
+            (-> (expect (.-schemaValidity m))     (.toBe 75)))))
+
+    (it "does not count a request that never landed as valid output"
+        ;; a rate limit is neither valid nor invalid output — 92 tasks died this
+        ;; way in the corpus, and folding them into validity would flatter it
+        (fn []
+          (let [m (.-metrics (b/aggregate
+                              #js [#js {:status "pass"}
+                                   #js {:status "error"
+                                        :reason "AI_APICallError: Rate limit exceeded"}]))]
+            (-> (expect (.-schemaValidity m)) (.toBe 100)))))
+
+    (it "distinguishes a silent agent from a wrong one"
+        ;; both score zero; only one is a wire-format problem
+        (fn []
+          (let [silent (.-metrics (b/aggregate
+                                   #js [#js {:status "error"
+                                             :reason "agent never modified the stub (no tool call?)"}]))
+                wrong  (.-metrics (b/aggregate #js [#js {:status "fail"}]))]
+            (-> (expect (.-schemaValidity silent)) (.toBe 0))
+            (-> (expect (.-schemaValidity wrong))  (.toBe 100))
+            (-> (expect (.-executableAccuracy silent)) (.toBe 0))
+            (-> (expect (.-executableAccuracy wrong))  (.toBe 0)))))))
