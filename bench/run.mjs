@@ -488,7 +488,7 @@ async function main() {
               (build.extensionCount ? ` (${build.extensionCount} extensions)` : ""));
 
   const trials = [];
-  let partialPath0 = null;
+  const partialPaths = [];
   for (let t = 0; t < opts.trials; t++) {
     // Against a remote provider a task is almost entirely waiting on the
     // network, so running them one at a time leaves the machine idle: 113 tasks
@@ -496,19 +496,24 @@ async function main() {
     // pull from a shared queue rather than running in fixed batches, so one
     // 600s timeout cannot stall the other lanes behind it.
     const results = [];
-    // Resume: skip whatever a previous, killed run already finished.
+    // Resume, PER TRIAL. A single shared file would let trial 2 find every task
+    // already done by trial 1 and copy its results — three identical trials,
+    // reported as pass^3 = 100%: a perfect reliability score for a measurement
+    // that never happened. The whole point of trials is that they differ.
+    const trialSuffix = opts.trials > 1 ? `.t${t}` : "";
+    const resumeFile = opts.resumeFrom ? `${opts.resumeFrom}${trialSuffix}` : null;
     const done = new Map();
-    if (opts.resumeFrom && fs.existsSync(opts.resumeFrom)) {
-      for (const line of fs.readFileSync(opts.resumeFrom, "utf8").split("\n")) {
+    if (resumeFile && fs.existsSync(resumeFile)) {
+      for (const line of fs.readFileSync(resumeFile, "utf8").split("\n")) {
         if (!line.trim()) continue;
         try { const r = JSON.parse(line); done.set(r.id, r); } catch { /* partial line */ }
       }
       results.push(...done.values());
-      console.log(`  resumed ${done.size} completed task(s) from ${opts.resumeFrom}`);
+      console.log(`  trial ${t + 1}: resumed ${done.size} completed task(s) from ${resumeFile}`);
     }
-    const partialPath = opts.resumeFrom
-      || path.join(ROOT, "bench", "results", `${opts.label}.partial.jsonl`);
-    partialPath0 = partialPath;
+    const partialPath = resumeFile
+      || path.join(ROOT, "bench", "results", `${opts.label}${trialSuffix}.partial.jsonl`);
+    partialPaths.push(partialPath);
     const queue = tasks.filter((t) => !done.has(t.id));
     const lanes = Math.max(1, Math.min(opts.concurrency, tasks.length));
     const worker = async (lane) => {
@@ -533,7 +538,10 @@ async function main() {
     trials.push({ results, aggregate: aggregate(results) });
   }
 
-  try { if (fs.existsSync(partialPath0)) fs.unlinkSync(partialPath0); } catch { /* keep */ }
+  // every trial's partial, not just the last — earlier ones used to be orphaned
+  for (const pp of partialPaths) {
+    try { if (fs.existsSync(pp)) fs.unlinkSync(pp); } catch { /* keep */ }
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const gitSha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, timeoutMs: 5000 }))
     .stdout.trim();
