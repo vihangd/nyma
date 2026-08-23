@@ -116,6 +116,11 @@
                                      ;; claiming to match this setting, so a
                                      ;; user asking for 3 silently got 6
                                      ;; attempts. Carry it through instead.
+                                     ;; Same carry as :max-retries — the loop
+                                     ;; must not hardcode what settings owns.
+                                     :temperature          (let [t (or (get settings :temperature)
+                                                                       (get settings "temperature"))]
+                                                             (if (number? t) t 0.2))
                                      :max-retries          (let [r (or (get settings :retry)
                                                                        (get settings "retry"))
                                                                  on? (let [e (or (get r :enabled)

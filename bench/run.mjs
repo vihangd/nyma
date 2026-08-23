@@ -566,6 +566,19 @@ async function main() {
       ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : null,
     timeoutMs: opts.timeoutMs,
     concurrency: opts.concurrency,
+    // Until 2026-08-23 nyma sent no temperature and every run sampled at the
+    // provider default, so files without this key are not comparable to files
+    // with it. Read from the same settings the agent will read.
+    temperature: (() => {
+      try {
+        const g = JSON.parse(fs.readFileSync(
+          path.join(os.homedir(), ".nyma", "settings.json"), "utf8"));
+        const p = opts.agentSettings
+          ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : {};
+        const t = p.temperature ?? g.temperature;
+        return typeof t === "number" ? t : 0.2;
+      } catch { return null; }
+    })(),
     seed: opts.seed,
     taskIds: tasks.map((t) => t.id),
     // Stated in every file so nobody reads it as a published-number comparison:

@@ -261,6 +261,10 @@
                              ;; category in the benchmark corpus (92 of them),
                              ;; and each burns ~68s exhausting attempts that
                              ;; cannot succeed while a quota is spent.
+                             ;; Sent explicitly. Absent, the provider picks —
+                             ;; and every benchmark in this repo was measured at
+                             ;; whatever that happened to be.
+                             :temperature     (:temperature config)
                              :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        (stepCountIs (:max-steps config))
                              ;; Extended thinking is opt-in per request: with no

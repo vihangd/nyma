@@ -20,6 +20,15 @@
    ;; this stops the AI SDK loop mid-task; bump it for projects where
    ;; the agent legitimately needs more iterations.
    :max-steps      100
+   ;; Sampling temperature. nyma sent NONE until now, so every request ran at
+   ;; whatever the provider defaulted to — typically 0.7-1.0. Measured cost of
+   ;; that: re-running five tasks three times each gave pass^3 0% against
+   ;; pass@3 60%, with one task recorded as timeout, error and pass at runtimes
+   ;; from 183s to 1149s. Low, not zero: temperature 0 does not buy determinism
+   ;; anyway (nondeterminism at 0 comes from batch-size-dependent reduction
+   ;; kernels, not sampling), and coding still needs some latitude.
+   ;; small-model model-profiles override this per model.
+   :temperature    0.2
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
    :transport              "auto"
