@@ -118,6 +118,9 @@
                                      ;; attempts. Carry it through instead.
                                      ;; Same carry as :max-retries — the loop
                                      ;; must not hardcode what settings owns.
+                                     :max-output-tokens    (let [n (or (get settings :max-output-tokens)
+                                                                       (get settings "max-output-tokens"))]
+                                                             (if (number? n) n 8000))
                                      :temperature          (let [t (or (get settings :temperature)
                                                                        (get settings "temperature"))]
                                                              (if (number? t) t 0.2))

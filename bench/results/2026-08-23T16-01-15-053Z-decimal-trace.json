@@ -1,0 +1,105 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "decimal-trace",
+  "gitSha": "432e813",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "rust/decimal"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 1,
+      "skipped": 0,
+      "pct": 0,
+      "metrics": {
+        "schemaValidity": 0,
+        "executableAccuracy": 0,
+        "wrongValid": 0,
+        "noToolCall": 100
+      }
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "rust/decimal": {
+        "passes": 0,
+        "trials": 1,
+        "verdict": "failing"
+      }
+    },
+    "passHatK": 0,
+    "passAtK": 0,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "rust/decimal",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 1081609,
+        "editedStub": false,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 2
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 141552,
+        "cacheRead": 81920,
+        "cacheWrite": 0,
+        "inputTokens": 108284
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "rust/decimal",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 1081609,
+      "editedStub": false,
+      "toolCalls": 6,
+      "toolsUsed": {
+        "read": 4,
+        "bash": 2
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 141552,
+      "cacheRead": 81920,
+      "cacheWrite": 0,
+      "inputTokens": 108284
+    }
+  ]
+}

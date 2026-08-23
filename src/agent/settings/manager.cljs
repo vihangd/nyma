@@ -29,6 +29,14 @@
    ;; kernels, not sampling), and coding still needs some latitude.
    ;; small-model model-profiles override this per model.
    :temperature    0.2
+   ;; Cap on OUTPUT tokens per turn. nyma set none, so the provider decided.
+   ;; Traced failure: on rust/decimal the model produced 70,565 characters of
+   ;; prose hand-simulating the arithmetic digit by digit — "For i=2: product =
+   ;; 0 * 10^18 + 0 = 0" — and was cut off mid-loop having never called a tool.
+   ;; 7/7 runs of that task ended `never modified the stub`. A turn that cannot
+   ;; ramble indefinitely has to act. Generous enough for real work: ~4k tokens
+   ;; is a large file write.
+   :max-output-tokens 8000
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
    :transport              "auto"

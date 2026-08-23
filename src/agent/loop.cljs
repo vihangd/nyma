@@ -265,6 +265,10 @@
                              ;; and every benchmark in this repo was measured at
                              ;; whatever that happened to be.
                              :temperature     (:temperature config)
+                             ;; Without this the provider decides, and a model
+                             ;; that plans in prose can spend an entire turn
+                             ;; without ever calling a tool.
+                             :maxOutputTokens (:max-output-tokens config)
                              :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        (stepCountIs (:max-steps config))
                              ;; Extended thinking is opt-in per request: with no

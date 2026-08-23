@@ -51,3 +51,36 @@
         (fn []
           (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
             (-> (expect src) (.toContain "temperature")))))))
+
+
+;; ── output cap ───────────────────────────────────────────────────
+;; Traced, not guessed: on rust/decimal the model emitted 70,565 characters of
+;; prose hand-simulating the arithmetic ("For i=2: product = 0 * 10^18 + 0 = 0")
+;; and was cut off mid-loop having never called a tool. That task failed 7/7 as
+;; "agent never modified the stub", and three earlier remedies — respond-tool,
+;; rescueParsing, temperature — all targeted a malformed or suppressed tool
+;; call. None could help: the model never reached the tool-calling stage.
+;;
+;; nyma set no output cap at all, so the provider decided.
+(defn- cap-for [settings]
+  (:max-output-tokens (:config (create-agent {:model #js {} :system-prompt "" :tools {}
+                                              :settings settings}))))
+
+(describe "max-output-tokens reaches the agent config"
+  (fn []
+    (it "defaults to a cap rather than leaving it to the provider"
+        (fn [] (-> (expect (cap-for {})) (.toBe 8000))))
+
+    (it "honours what the user set"
+        (fn [] (-> (expect (cap-for {:max-output-tokens 4000})) (.toBe 4000))))
+
+    (it "reads the string-keyed form settings.json produces"
+        (fn [] (-> (expect (cap-for {"max-output-tokens" 2000})) (.toBe 2000))))
+
+    (it "is actually sent, not merely carried"
+        ;; the thinking_budget failure: that module has always written
+        ;; providerOptions.thinkingBudget, a key nothing reads, so the cap it
+        ;; claimed to apply never existed
+        (fn []
+          (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
+            (-> (expect src) (.toContain "maxOutputTokens")))))))
