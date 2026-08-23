@@ -1,0 +1,108 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "arm0-baseline",
+  "gitSha": "597198d",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "javascript/bowling",
+    "rust/bowling",
+    "rust/decimal",
+    "rust/doubly-linked-list",
+    "rust/forth"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 5,
+      "attempted": 5,
+      "passed": 2,
+      "failed": 0,
+      "timeout": 1,
+      "error": 2,
+      "skipped": 0,
+      "pct": 40
+    }
+  ],
+  "summary": {
+    "mean": 40,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/bowling",
+      "status": "pass",
+      "durationMs": 1149623,
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 525979,
+      "cacheRead": 421888,
+      "cacheWrite": 0,
+      "inputTokens": 494637
+    },
+    {
+      "id": "rust/bowling",
+      "status": "pass",
+      "durationMs": 1460439,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 478570,
+      "cacheRead": 356352,
+      "cacheWrite": 0,
+      "inputTokens": 437963
+    },
+    {
+      "id": "rust/decimal",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 949024,
+      "editedStub": false,
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 119551,
+      "cacheRead": 61440,
+      "cacheWrite": 0,
+      "inputTokens": 86425
+    },
+    {
+      "id": "rust/doubly-linked-list",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 1030738,
+      "editedStub": false,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 177851,
+      "cacheRead": 110592,
+      "cacheWrite": 0,
+      "inputTokens": 144075
+    },
+    {
+      "id": "rust/forth",
+      "status": "timeout",
+      "durationMs": 1806373,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 5254,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    }
+  ]
+}

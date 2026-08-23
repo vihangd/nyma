@@ -268,6 +268,52 @@ export function aggregate(results) {
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
+/**
+ * Per-task reliability across repeated trials.
+ *
+ * A single trial cannot distinguish "cannot do this" from "does this most of
+ * the time". Measured here: of 109 same-config repeats in this repo's own
+ * result corpus, 34 disagreed — and a straight re-run of the five tasks one
+ * model had never solved changed the outcome of all five. Toolathlon reports
+ * the same shape at 22.5% of model x task pairs; tau-bench measures GPT-4o at
+ * 61% pass@1 against 25% pass^8.
+ *
+ * So two numbers, not one:
+ *   passAtK   — passed at least once. The capability ceiling.
+ *   passHatK  — passed EVERY time. What you can actually depend on.
+ * The gap between them is the reliability gap. At k=1 they are equal and this
+ * degenerates to the existing score.
+ */
+export function reliability(trialResults) {
+  const trials = (trialResults ?? []).filter(Array.isArray);
+  if (!trials.length) return null;
+  const perTask = {};
+  for (const results of trials) {
+    for (const r of results) {
+      const t = (perTask[r.id] ??= { passes: 0, trials: 0, verdict: null });
+      t.trials += 1;
+      if (r.status === STATUS.pass) t.passes += 1;
+    }
+  }
+  let all = 0, any = 0, flaky = 0;
+  for (const t of Object.values(perTask)) {
+    if (t.passes === t.trials) { t.verdict = "reliable"; all += 1; any += 1; }
+    else if (t.passes > 0)     { t.verdict = "flaky";    any += 1; flaky += 1; }
+    else                        t.verdict = "failing";
+  }
+  const n = Object.keys(perTask).length;
+  return {
+    trials: trials.length,
+    tasks: n,
+    perTask,
+    passHatK: n === 0 ? null : round1((100 * all) / n),
+    passAtK:  n === 0 ? null : round1((100 * any) / n),
+    flakyCount: flaky,
+    flaky: Object.entries(perTask).filter(([, t]) => t.verdict === "flaky")
+             .map(([id, t]) => `${id} (${t.passes}/${t.trials})`).sort(),
+  };
+}
+
 /** mean ± half-range across trials. One trial reports no spread, not zero spread. */
 export function summarizeTrials(trialPcts) {
   const xs = trialPcts.filter((n) => typeof n === "number");

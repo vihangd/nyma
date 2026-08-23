@@ -170,3 +170,55 @@
             (-> (expect (.-schemaValidity wrong))  (.toBe 100))
             (-> (expect (.-executableAccuracy silent)) (.toBe 0))
             (-> (expect (.-executableAccuracy wrong))  (.toBe 0)))))))
+
+
+;; ── reliability across trials ────────────────────────────────────
+;; A single trial cannot tell "cannot do this" from "does this most of the
+;; time". In this repo's own corpus, 34 of 109 same-config repeats disagreed,
+;; and re-running the five tasks one model had never solved flipped ALL FIVE
+;; with no intervention. tau-bench measures the same gap on GPT-4o: 61% pass@1
+;; against 25% pass^8.
+;;
+;; run.mjs also used to write `results: trials[0].results`, so trials 2..k were
+;; computed and thrown away — reliability was unmeasurable even when paid for.
+(describe "bench/reliability"
+  (fn []
+    (it "separates what a model can do from what it does every time"
+        (fn []
+          (let [r (b/reliability
+                   #js [#js [#js {:id "a" :status "pass"} #js {:id "b" :status "pass"} #js {:id "c" :status "fail"}]
+                        #js [#js {:id "a" :status "pass"} #js {:id "b" :status "fail"} #js {:id "c" :status "fail"}]
+                        #js [#js {:id "a" :status "pass"} #js {:id "b" :status "pass"} #js {:id "c" :status "timeout"}]])]
+            ;; a passes 3/3, b 2/3, c 0/3
+            (-> (expect (.-passHatK r)) (.toBe 33.3))
+            (-> (expect (.-passAtK r))  (.toBe 66.7))
+            (-> (expect (.-flakyCount r)) (.toBe 1)))))
+
+    (it "names the flaky tasks, because those are the rows to distrust"
+        (fn []
+          (let [r (b/reliability
+                   #js [#js [#js {:id "python/transpose" :status "fail"}]
+                        #js [#js {:id "python/transpose" :status "pass"}]])]
+            (-> (expect (first (.-flaky r))) (.toContain "python/transpose"))
+            (-> (expect (first (.-flaky r))) (.toContain "1/2")))))
+
+    (it "labels each task reliable, flaky or failing"
+        (fn []
+          (let [r (b/reliability
+                   #js [#js [#js {:id "a" :status "pass"} #js {:id "b" :status "pass"} #js {:id "c" :status "fail"}]
+                        #js [#js {:id "a" :status "pass"} #js {:id "b" :status "fail"} #js {:id "c" :status "fail"}]])
+                pt (.-perTask r)]
+            (-> (expect (.-verdict (aget pt "a"))) (.toBe "reliable"))
+            (-> (expect (.-verdict (aget pt "b"))) (.toBe "flaky"))
+            (-> (expect (.-verdict (aget pt "c"))) (.toBe "failing")))))
+
+    (it "degenerates to today's number at k=1, so nothing already reported moves"
+        (fn []
+          (let [r (b/reliability #js [#js [#js {:id "a" :status "pass"} #js {:id "b" :status "fail"}]])]
+            (-> (expect (.-passHatK r)) (.toBe (.-passAtK r)))
+            (-> (expect (.-passHatK r)) (.toBe 50))
+            (-> (expect (.-flakyCount r)) (.toBe 0)))))
+
+    (it "returns nil with no trials rather than a fake zero"
+        (fn []
+          (-> (expect (b/reliability #js [])) (.toBeNull))))))

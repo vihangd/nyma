@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 import {
   STATUS, discoverTasks, selectTasks, readInstructions, langSpec,
-  classifyTestRun, aggregate, summarizeTrials, diffRuns, checkAgentBuild, agentFailure,
+  classifyTestRun, aggregate, summarizeTrials, reliability, diffRuns, checkAgentBuild, agentFailure,
   agentScriptPath, isDistEntry, EXCLUDED_FROM_COPY, TOOLCHAIN, toolchainReady,
 } from "./scoring.mjs";
 
@@ -562,10 +562,16 @@ async function main() {
     taskIds: tasks.map((t) => t.id),
     // Stated in every file so nobody reads it as a published-number comparison:
     // this is a subset, scored against itself over time.
-    comparability: "python-only subset of Aider Polyglot; NOT comparable to " +
-                   "published full-set (225 task, 6 language) scores",
+    comparability: "python + javascript + rust subset of Aider Polyglot (113 of " +
+                   "225 tasks, 3 of 6 languages); NOT comparable to published " +
+                   "full-set scores. Single trial unless trials > 1.",
     trials: trials.map((t) => t.aggregate),
     summary: summarizeTrials(trials.map((t) => t.aggregate.pct)),
+    // Reliability needs every trial's per-task outcome. `results` kept as trial
+    // 1 so the 90 existing result files and --diff still parse; trialResults
+    // carries the rest, which used to be computed and then thrown away.
+    reliability: reliability(trials.map((t) => t.results)),
+    trialResults: trials.map((t) => t.results),
     results: trials[0].results,
     allTrialResults: opts.trials > 1 ? trials.map((t) => t.results) : undefined,
   };
@@ -587,6 +593,15 @@ async function main() {
   if (s.trials === 1) {
     console.log("single trial: no spread measured. Use --trials 3 before " +
                 "comparing this against another run.");
+  } else {
+    // The mean alone hides which tasks moved. 34 of 109 same-config repeats in
+    // this repo's corpus disagreed, and a re-run of five never-solved tasks
+    // flipped all five, so the flaky list is the part a reader needs.
+    const rel = record.reliability;
+    console.log(`pass^${rel.trials} ${rel.passHatK}% (passed every time)  ` +
+                `pass@${rel.trials} ${rel.passAtK}% (passed at least once)  ` +
+                `— ${rel.flakyCount} flaky`);
+    if (rel.flakyCount) console.log(`  flaky: ${rel.flaky.join(", ")}`);
   }
   console.log(out);
 }
