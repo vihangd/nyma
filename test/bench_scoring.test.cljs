@@ -222,3 +222,42 @@
     (it "returns nil with no trials rather than a fake zero"
         (fn []
           (-> (expect (b/reliability #js [])) (.toBeNull))))))
+
+
+;; ── what the agent actually did ──────────────────────────────────
+;; Three remedies were tried against "agent never modified the stub (no tool
+;; call?)" and two were falsified, because the harness recorded status,
+;; duration and turn count but never WHICH tools were called. "read five times,
+;; bash twice, never write" and "made no tool calls at all" are different bugs
+;; and were recorded identically.
+(describe "bench/summarizeTrace"
+  (fn []
+    (it "counts tool calls by name from a session transcript"
+        (fn []
+          (let [t (.join #js ["{\"role\":\"user\",\"content\":\"hi\"}"
+                              "{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"read\"}}"
+                              "{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"read\"}}"
+                              "{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"bash\"}}"]
+                          "\n")
+                r (b/summarizeTrace t)]
+            (-> (expect (.-toolCalls r)) (.toBe 3))
+            (-> (expect (aget (.-toolsUsed r) "read")) (.toBe 2))
+            (-> (expect (aget (.-toolsUsed r) "bash")) (.toBe 1)))))
+
+    (it "distinguishes an agent that read but never wrote"
+        ;; the whole point: this is NOT the same as making no tool calls
+        (fn []
+          (let [r (b/summarizeTrace "{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"read\"}}")]
+            (-> (expect (.-toolCalls r)) (.toBe 1))
+            (-> (expect (aget (.-toolsUsed r) "write")) (.toBeUndefined)))))
+
+    (it "reports zero for a silent agent rather than throwing"
+        (fn []
+          (-> (expect (.-toolCalls (b/summarizeTrace ""))) (.toBe 0))))
+
+    (it "skips a line truncated by a killed run instead of failing the task"
+        ;; runs get killed; a half-written last line must not lose the rest
+        (fn []
+          (let [t (.join #js ["{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"bash\"}}"
+                              "{\"role\":\"tool_ca"] "\n")]
+            (-> (expect (.-toolCalls (b/summarizeTrace t))) (.toBe 1)))))))

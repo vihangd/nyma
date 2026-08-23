@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 import {
   STATUS, discoverTasks, selectTasks, readInstructions, langSpec,
-  classifyTestRun, aggregate, summarizeTrials, reliability, diffRuns, checkAgentBuild, agentFailure,
+  classifyTestRun, aggregate, summarizeTrials, reliability, summarizeTrace, diffRuns, checkAgentBuild, agentFailure,
   agentScriptPath, isDistEntry, EXCLUDED_FROM_COPY, TOOLCHAIN, toolchainReady,
 } from "./scoring.mjs";
 
@@ -216,6 +216,23 @@ function verifyAgent(agentCmd) {
   return checkAgentBuild(count);
 }
 
+/** Trace summary, and the file kept only when the task did not pass. */
+function collectTrace(tracePath, task, opts, status) {
+  let summary = { toolCalls: null, toolsUsed: null };
+  let text = null;
+  try { text = fs.readFileSync(tracePath, "utf8"); } catch { return summary; }
+  summary = summarizeTrace(text);
+  if (status !== STATUS.pass) {
+    try {
+      const dir = path.join(ROOT, "bench", "traces", opts.label);
+      fs.mkdirSync(dir, { recursive: true });
+      const name = `${task.id.replace("/", "_")}.t${opts.trialIndex ?? 0}.jsonl`;
+      fs.writeFileSync(path.join(dir, name), text);
+    } catch { /* a missing trace must never fail the run */ }
+  }
+  return summary;
+}
+
 async function runTask(task, opts) {
   const started = Date.now();
   const spec = langSpec(task.lang);
@@ -285,7 +302,13 @@ async function runTask(task, opts) {
     // --max-steps is injected through project settings (there is no CLI flag on
     // the agent); without it the agent default of 100 applies and wall clock is
     // the only bound.
-    const agentArgs = [...base, "-p", "--output-format", "json", "--no-session",
+    // --session beats the print-mode default (cli.cljs resolve-session), and a
+    // transcript is the only record of WHICH tools the agent called. Without it
+    // "read five times, never wrote" and "made no tool calls at all" are the
+    // same result row — which is how three remedies were chosen blind.
+    const tracePath = path.join(work, "trace.jsonl");
+    const agentArgs = [...base, "-p", "--output-format", "json",
+                       "--session", tracePath,
                        "--permission-mode", "full-auto"];
     if (opts.modelSpec) agentArgs.push("--model", opts.modelSpec);
     agentArgs.push(PROMPT(task, readInstructions(task.dir)));
@@ -342,6 +365,7 @@ async function runTask(task, opts) {
       const suspectClock = elapsed > opts.timeoutMs * 1.5 ? Math.round(elapsed / 1000) : null;
       return { id: task.id, status: STATUS.timeout,
                durationMs: elapsed, suspectClock,
+               ...collectTrace(tracePath, task, opts, STATUS.timeout),
                editedStub: edited,
                stubBytes: stubAfter === null ? null : stubAfter.length,
                wouldHavePassed, tamperedTest,
@@ -353,7 +377,8 @@ async function runTask(task, opts) {
     const failure = agentFailure(printed);
     if (failure) {
       return { id: task.id, status: STATUS.error, reason: `agent: ${failure}`,
-               durationMs: Date.now() - started };
+               durationMs: Date.now() - started,
+               ...collectTrace(tracePath, task, opts, STATUS.error) };
     }
 
     // A model that answers without ever calling a tool leaves the skeleton
@@ -366,6 +391,7 @@ async function runTask(task, opts) {
       return { id: task.id, status: STATUS.error,
                reason: "agent never modified the stub (no tool call?)",
                durationMs: Date.now() - started, editedStub: false,
+               ...collectTrace(tracePath, task, opts, STATUS.error),
                ...parseUsage(agent.stdout) };
     }
 
@@ -373,15 +399,18 @@ async function runTask(task, opts) {
     const after = readTests();
     if (after !== before) {
       return { id: task.id, status: STATUS.error, reason: "agent modified the test file",
-               durationMs: Date.now() - started };
+               durationMs: Date.now() - started,
+               ...collectTrace(tracePath, task, opts, STATUS.error) };
     }
 
     const test = await run(spec.cmd[0], spec.cmd.slice(1), { cwd: work, timeoutMs: 120000, env: agentEnv });
     const usage = parseUsage(agent.stdout);
+    const status = classifyTestRun(test);
     return {
       id: task.id,
-      status: classifyTestRun(test),
+      status,
       durationMs: Date.now() - started,
+      ...collectTrace(tracePath, task, opts, status),
       ...usage,
     };
   } catch (e) {
@@ -520,7 +549,7 @@ async function main() {
       for (;;) {
         const task = queue.shift();
         if (!task) return;
-        const r = await runTask(task, { ...opts, lane });
+        const r = await runTask(task, { ...opts, lane, trialIndex: t });
         results.push(r);
         // Append as we go. Three runs were killed mid-flight and lost every
         // completed task with them; chunking capped the loss but forced a

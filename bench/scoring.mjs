@@ -217,6 +217,34 @@ export function agentFailure(printJson) {
  * skips are reported alongside, never folded into the denominator, so a missing
  * toolchain cannot masquerade as a low score.
  */
+/**
+ * What the agent actually DID, from a session transcript.
+ *
+ * Three remedies were tried against `agent never modified the stub (no tool
+ * call?)` and chosen blind, because the harness recorded status, duration and
+ * turn count but never which tools were called. Two were falsified.
+ * "called read five times and bash twice, never write" and "made no tool calls
+ * at all" are different bugs and were recorded identically.
+ *
+ * Session JSONL carries one record per tool call with the name under
+ * metadata["tool-name"]. Lines that do not parse are skipped rather than
+ * throwing: a trace from a killed run is legitimately truncated mid-line.
+ */
+export function summarizeTrace(text) {
+  const toolsUsed = {};
+  let toolCalls = 0;
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if ((d.role ?? d.type) !== "tool_call") continue;
+    toolCalls += 1;
+    const name = d.metadata?.["tool-name"] ?? d.metadata?.toolName ?? "unknown";
+    toolsUsed[name] = (toolsUsed[name] ?? 0) + 1;
+  }
+  return { toolCalls, toolsUsed };
+}
+
 /** A run that ended without the agent ever emitting a usable tool call. */
 export function isNoToolCall(r) {
   return r.status === STATUS.error &&

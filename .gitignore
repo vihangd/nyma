@@ -20,3 +20,4 @@ docs/plan-*.md
 # benchmark task checkout (cloned, never vendored) — results ARE committed
 bench/tasks/
 bench/js-toolchain/node_modules/
+bench/traces/
