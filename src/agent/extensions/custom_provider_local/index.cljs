@@ -28,6 +28,7 @@
             ["@ai-sdk/openai" :refer [createOpenAI]]
             ["node:fs" :as fs]
             ["node:path" :as path]
+            [agent.utils.credentials :as credentials]
             [agent.utils.toolcall-rescue :as adapter]
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.reasoning-stream :as rs]))
@@ -88,11 +89,22 @@
 
 ;; ── Provider registration ────────────────────────────────────────
 
-(defn- resolve-key [entry]
-  ;; Local servers typically don't require an API key.
-  ;; Try env var; fall back to a placeholder (openai-compatible ignores it).
-  (let [env-var (:api-key-env entry)]
+(defn resolve-key
+  "Key for a local entry: env var, then a saved credential, then a placeholder.
+
+   This was the only provider that never consulted credentials.json — relay and
+   opencode-zen both do — so a local server that DOES want a key could only be
+   reached by exporting an env var. An alias carrying `OMLX_API_KEY=abcd`
+   worked while a plain `nyma --model omlx/...` returned `Invalid API key`,
+   which is a confusing way to learn that.
+
+   The placeholder stays last: most local servers ignore the key entirely.
+   Exposed for tests."
+  [entry]
+  (let [env-var (:api-key-env entry)
+        nm      (str (:name entry))]
     (or (when (seq env-var) (aget js/process.env env-var))
+        (when (seq nm) (credentials/read-credential nm))
         "local-no-key")))
 
 (defn- ->js-model [m]
@@ -120,11 +132,28 @@
                                        {:think-prefill? (boolean prefill?)})
           base-fetch   (if rescue?
                          (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)
-                         (mk-fetch))]
+                         (mk-fetch))
+          ;; A local server that rejects the placeholder answers 401 and the
+          ;; user sees a bare "Invalid API key" — naming neither the provider
+          ;; nor the variable to set. Everything needed to say so is right here.
+          fetch-fn     (if (= key "local-no-key")
+                         (fn [url init]
+                           (-> (base-fetch url init)
+                               (.then (fn [res]
+                                        (if (or (= 401 (.-status res)) (= 403 (.-status res)))
+                                          (throw (js/Error.
+                                                  (str "No API key for local provider '"
+                                                       (:name entry) "' and it rejected the "
+                                                       "request. Set "
+                                                       (or (:api-key-env entry) "<apiKeyEnv>")
+                                                       " in your environment, or run /login "
+                                                       (:name entry) " to save one.")))
+                                          res)))))
+                         base-fetch)]
       (.chat (createOpenAI #js {:apiKey        key
                                 :baseURL       base-url
                                 :compatibility "compatible"
-                                :fetch         base-fetch})
+                                :fetch         fetch-fn})
              model-id))))
 
 (def active-tools-fn
