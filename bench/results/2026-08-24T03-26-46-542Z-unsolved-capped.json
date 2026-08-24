@@ -1,0 +1,777 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "unsolved-capped",
+  "gitSha": "2510284",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "javascript/bowling",
+    "rust/bowling",
+    "rust/decimal",
+    "rust/doubly-linked-list",
+    "rust/forth"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 5,
+      "attempted": 5,
+      "passed": 1,
+      "failed": 2,
+      "timeout": 0,
+      "error": 2,
+      "skipped": 0,
+      "pct": 20,
+      "metrics": {
+        "schemaValidity": 60,
+        "executableAccuracy": 20,
+        "wrongValid": 40,
+        "noToolCall": 40
+      }
+    },
+    {
+      "total": 5,
+      "attempted": 5,
+      "passed": 1,
+      "failed": 1,
+      "timeout": 0,
+      "error": 3,
+      "skipped": 0,
+      "pct": 20,
+      "metrics": {
+        "schemaValidity": 40,
+        "executableAccuracy": 20,
+        "wrongValid": 20,
+        "noToolCall": 60
+      }
+    },
+    {
+      "total": 5,
+      "attempted": 5,
+      "passed": 1,
+      "failed": 1,
+      "timeout": 0,
+      "error": 3,
+      "skipped": 0,
+      "pct": 20,
+      "metrics": {
+        "schemaValidity": 40,
+        "executableAccuracy": 20,
+        "wrongValid": 20,
+        "noToolCall": 60
+      }
+    }
+  ],
+  "summary": {
+    "mean": 20,
+    "spread": 0,
+    "trials": 3
+  },
+  "reliability": {
+    "trials": 3,
+    "tasks": 5,
+    "perTask": {
+      "javascript/bowling": {
+        "passes": 1,
+        "trials": 3,
+        "verdict": "flaky"
+      },
+      "rust/bowling": {
+        "passes": 0,
+        "trials": 3,
+        "verdict": "failing"
+      },
+      "rust/decimal": {
+        "passes": 1,
+        "trials": 3,
+        "verdict": "flaky"
+      },
+      "rust/doubly-linked-list": {
+        "passes": 0,
+        "trials": 3,
+        "verdict": "failing"
+      },
+      "rust/forth": {
+        "passes": 1,
+        "trials": 3,
+        "verdict": "flaky"
+      }
+    },
+    "passHatK": 0,
+    "passAtK": 60,
+    "flakyCount": 3,
+    "flaky": [
+      "javascript/bowling (1/3)",
+      "rust/decimal (1/3)",
+      "rust/forth (1/3)"
+    ]
+  },
+  "trialResults": [
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "fail",
+        "durationMs": 218362,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 3,
+          "bash": 2,
+          "write": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 151796,
+        "cacheRead": 108544,
+        "cacheWrite": 0,
+        "inputTokens": 142253
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 404702,
+        "editedStub": false,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 120322,
+        "cacheRead": 81920,
+        "cacheWrite": 0,
+        "inputTokens": 111853
+      },
+      {
+        "id": "rust/decimal",
+        "status": "pass",
+        "durationMs": 667290,
+        "toolCalls": 29,
+        "toolsUsed": {
+          "read": 9,
+          "bash": 10,
+          "think": 1,
+          "write": 2,
+          "edit": 7
+        },
+        "turns": 28,
+        "costUsd": 0,
+        "tokens": 1073030,
+        "cacheRead": 978944,
+        "cacheWrite": 0,
+        "inputTokens": 1057723
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 281563,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 3
+        },
+        "turns": 3,
+        "costUsd": 0,
+        "tokens": 78161,
+        "cacheRead": 40960,
+        "cacheWrite": 0,
+        "inputTokens": 69578
+      },
+      {
+        "id": "rust/forth",
+        "status": "fail",
+        "durationMs": 572620,
+        "toolCalls": 14,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 4,
+          "write": 3,
+          "edit": 2
+        },
+        "turns": 13,
+        "costUsd": 0,
+        "tokens": 409703,
+        "cacheRead": 344064,
+        "cacheWrite": 0,
+        "inputTokens": 392875
+      }
+    ],
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "fail",
+        "durationMs": 548867,
+        "toolCalls": 17,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 8,
+          "write": 2,
+          "think": 1,
+          "edit": 1
+        },
+        "turns": 15,
+        "costUsd": 0,
+        "tokens": 431935,
+        "cacheRead": 366592,
+        "cacheWrite": 0,
+        "inputTokens": 416330
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 284167,
+        "editedStub": false,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 145338,
+        "cacheRead": 108544,
+        "cacheWrite": 0,
+        "inputTokens": 136740
+      },
+      {
+        "id": "rust/decimal",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 282899,
+        "editedStub": false,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 2
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 114709,
+        "cacheRead": 75776,
+        "cacheWrite": 0,
+        "inputTokens": 106183
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 335912,
+        "editedStub": false,
+        "toolCalls": 15,
+        "toolsUsed": {
+          "read": 9,
+          "bash": 6
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 158688,
+        "cacheRead": 112640,
+        "cacheWrite": 0,
+        "inputTokens": 149185
+      },
+      {
+        "id": "rust/forth",
+        "status": "pass",
+        "durationMs": 745265,
+        "toolCalls": 36,
+        "toolsUsed": {
+          "glob": 1,
+          "read": 8,
+          "bash": 12,
+          "write": 4,
+          "edit": 11
+        },
+        "turns": 35,
+        "costUsd": 0,
+        "tokens": 1248233,
+        "cacheRead": 1144832,
+        "cacheWrite": 0,
+        "inputTokens": 1232687
+      }
+    ],
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "pass",
+        "durationMs": 378884,
+        "toolCalls": 14,
+        "toolsUsed": {
+          "read": 6,
+          "bash": 3,
+          "write": 3,
+          "edit": 2
+        },
+        "turns": 12,
+        "costUsd": 0,
+        "tokens": 361773,
+        "cacheRead": 307200,
+        "cacheWrite": 0,
+        "inputTokens": 353911
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 319861,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 6,
+          "bash": 1
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 95593,
+        "cacheRead": 59392,
+        "cacheWrite": 0,
+        "inputTokens": 87287
+      },
+      {
+        "id": "rust/decimal",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 333207,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 2
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 138766,
+        "cacheRead": 102400,
+        "cacheWrite": 0,
+        "inputTokens": 130109
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 342404,
+        "editedStub": false,
+        "toolCalls": 11,
+        "toolsUsed": {
+          "read": 7,
+          "bash": 4
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 98188,
+        "cacheRead": 61440,
+        "cacheWrite": 0,
+        "inputTokens": 89261
+      },
+      {
+        "id": "rust/forth",
+        "status": "fail",
+        "durationMs": 622321,
+        "toolCalls": 16,
+        "toolsUsed": {
+          "glob": 1,
+          "read": 5,
+          "bash": 5,
+          "write": 2,
+          "edit": 3
+        },
+        "turns": 15,
+        "costUsd": 0,
+        "tokens": 478868,
+        "cacheRead": 413696,
+        "cacheWrite": 0,
+        "inputTokens": 464784
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "javascript/bowling",
+      "status": "fail",
+      "durationMs": 218362,
+      "toolCalls": 6,
+      "toolsUsed": {
+        "read": 3,
+        "bash": 2,
+        "write": 1
+      },
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 151796,
+      "cacheRead": 108544,
+      "cacheWrite": 0,
+      "inputTokens": 142253
+    },
+    {
+      "id": "rust/bowling",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 404702,
+      "editedStub": false,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 4,
+        "bash": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 120322,
+      "cacheRead": 81920,
+      "cacheWrite": 0,
+      "inputTokens": 111853
+    },
+    {
+      "id": "rust/decimal",
+      "status": "pass",
+      "durationMs": 667290,
+      "toolCalls": 29,
+      "toolsUsed": {
+        "read": 9,
+        "bash": 10,
+        "think": 1,
+        "write": 2,
+        "edit": 7
+      },
+      "turns": 28,
+      "costUsd": 0,
+      "tokens": 1073030,
+      "cacheRead": 978944,
+      "cacheWrite": 0,
+      "inputTokens": 1057723
+    },
+    {
+      "id": "rust/doubly-linked-list",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 281563,
+      "editedStub": false,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 4,
+        "bash": 3
+      },
+      "turns": 3,
+      "costUsd": 0,
+      "tokens": 78161,
+      "cacheRead": 40960,
+      "cacheWrite": 0,
+      "inputTokens": 69578
+    },
+    {
+      "id": "rust/forth",
+      "status": "fail",
+      "durationMs": 572620,
+      "toolCalls": 14,
+      "toolsUsed": {
+        "read": 5,
+        "bash": 4,
+        "write": 3,
+        "edit": 2
+      },
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 409703,
+      "cacheRead": 344064,
+      "cacheWrite": 0,
+      "inputTokens": 392875
+    }
+  ],
+  "allTrialResults": [
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "fail",
+        "durationMs": 218362,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 3,
+          "bash": 2,
+          "write": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 151796,
+        "cacheRead": 108544,
+        "cacheWrite": 0,
+        "inputTokens": 142253
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 404702,
+        "editedStub": false,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 120322,
+        "cacheRead": 81920,
+        "cacheWrite": 0,
+        "inputTokens": 111853
+      },
+      {
+        "id": "rust/decimal",
+        "status": "pass",
+        "durationMs": 667290,
+        "toolCalls": 29,
+        "toolsUsed": {
+          "read": 9,
+          "bash": 10,
+          "think": 1,
+          "write": 2,
+          "edit": 7
+        },
+        "turns": 28,
+        "costUsd": 0,
+        "tokens": 1073030,
+        "cacheRead": 978944,
+        "cacheWrite": 0,
+        "inputTokens": 1057723
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 281563,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 3
+        },
+        "turns": 3,
+        "costUsd": 0,
+        "tokens": 78161,
+        "cacheRead": 40960,
+        "cacheWrite": 0,
+        "inputTokens": 69578
+      },
+      {
+        "id": "rust/forth",
+        "status": "fail",
+        "durationMs": 572620,
+        "toolCalls": 14,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 4,
+          "write": 3,
+          "edit": 2
+        },
+        "turns": 13,
+        "costUsd": 0,
+        "tokens": 409703,
+        "cacheRead": 344064,
+        "cacheWrite": 0,
+        "inputTokens": 392875
+      }
+    ],
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "fail",
+        "durationMs": 548867,
+        "toolCalls": 17,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 8,
+          "write": 2,
+          "think": 1,
+          "edit": 1
+        },
+        "turns": 15,
+        "costUsd": 0,
+        "tokens": 431935,
+        "cacheRead": 366592,
+        "cacheWrite": 0,
+        "inputTokens": 416330
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 284167,
+        "editedStub": false,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 145338,
+        "cacheRead": 108544,
+        "cacheWrite": 0,
+        "inputTokens": 136740
+      },
+      {
+        "id": "rust/decimal",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 282899,
+        "editedStub": false,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 4,
+          "bash": 2
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 114709,
+        "cacheRead": 75776,
+        "cacheWrite": 0,
+        "inputTokens": 106183
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 335912,
+        "editedStub": false,
+        "toolCalls": 15,
+        "toolsUsed": {
+          "read": 9,
+          "bash": 6
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 158688,
+        "cacheRead": 112640,
+        "cacheWrite": 0,
+        "inputTokens": 149185
+      },
+      {
+        "id": "rust/forth",
+        "status": "pass",
+        "durationMs": 745265,
+        "toolCalls": 36,
+        "toolsUsed": {
+          "glob": 1,
+          "read": 8,
+          "bash": 12,
+          "write": 4,
+          "edit": 11
+        },
+        "turns": 35,
+        "costUsd": 0,
+        "tokens": 1248233,
+        "cacheRead": 1144832,
+        "cacheWrite": 0,
+        "inputTokens": 1232687
+      }
+    ],
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "pass",
+        "durationMs": 378884,
+        "toolCalls": 14,
+        "toolsUsed": {
+          "read": 6,
+          "bash": 3,
+          "write": 3,
+          "edit": 2
+        },
+        "turns": 12,
+        "costUsd": 0,
+        "tokens": 361773,
+        "cacheRead": 307200,
+        "cacheWrite": 0,
+        "inputTokens": 353911
+      },
+      {
+        "id": "rust/bowling",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 319861,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 6,
+          "bash": 1
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 95593,
+        "cacheRead": 59392,
+        "cacheWrite": 0,
+        "inputTokens": 87287
+      },
+      {
+        "id": "rust/decimal",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 333207,
+        "editedStub": false,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 2
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 138766,
+        "cacheRead": 102400,
+        "cacheWrite": 0,
+        "inputTokens": 130109
+      },
+      {
+        "id": "rust/doubly-linked-list",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 342404,
+        "editedStub": false,
+        "toolCalls": 11,
+        "toolsUsed": {
+          "read": 7,
+          "bash": 4
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 98188,
+        "cacheRead": 61440,
+        "cacheWrite": 0,
+        "inputTokens": 89261
+      },
+      {
+        "id": "rust/forth",
+        "status": "fail",
+        "durationMs": 622321,
+        "toolCalls": 16,
+        "toolsUsed": {
+          "glob": 1,
+          "read": 5,
+          "bash": 5,
+          "write": 2,
+          "edit": 3
+        },
+        "turns": 15,
+        "costUsd": 0,
+        "tokens": 478868,
+        "cacheRead": 413696,
+        "cacheWrite": 0,
+        "inputTokens": 464784
+      }
+    ]
+  ]
+}

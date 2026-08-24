@@ -42,15 +42,41 @@
                             mid
                             tail])))))
 
-(defn- current-model-keys [api]
+(defn current-model-keys
+  "Keys to look a profile up under, resolved from the live agent.
+
+   This read `(:config @__state_atom)` and the state atom has no :config — it
+   carries :model, :active-tools, :active-role and friends, while :config lives
+   on the agent map. So cfg was nil, `(aget nil ...)` threw, the catch returned
+   [], and profile-for could never match ANYTHING. Every per-model profile —
+   editStrategy, temperature, resultCap, allowedTools — was inert, and the
+   symptom was invisible: a hidden tool that is never hidden looks exactly like
+   a model that chose not to call it.
+
+   Measured: with editStrategy \"whole\" configured, which hides `edit`, the
+   agent called `edit` 3 and 5 times on two tasks.
+
+   The model object IS in the state atom. The provider name is not — it lives
+   on the agent config as active-provider-name, which extensions cannot reach —
+   so the provider/model key only resolves when the model itself carries a
+   provider id. model-keys already falls back to the bare model id, which is
+   what makes a profile reachable either way."
+  [api]
   (try
-    (let [st  (when-let [a (.-__state_atom api)] @a)
-          cfg (:config st)
-          m   (:model cfg)
-          mid (or (some-> m .-modelId) (some-> m .-id) "")
-          prov (or (aget cfg "active-provider-name")
-                   (some-> m .-provider .-providerId)
-                   "")]
+    (let [st   (when-let [a (.-__state_atom api)] @a)
+          ;; :model is only populated when something calls setModel, which the
+          ;; CLI never does — it assigns (.-model (:config agent)) directly,
+          ;; and extensions cannot see the agent config. What the CLI DOES put
+          ;; in the state atom is :base-model-spec, the "<provider>/<model-id>"
+          ;; it resolved at startup (cli.cljs:461). That is the only place an
+          ;; extension can learn the active model, so it is the fallback.
+          m    (:model st)
+          mid  (cond
+                 (nil? m)    (str (:base-model-spec st) "")
+                 (string? m) m
+                 :else       (or (some-> m .-modelId) (some-> m .-id)
+                                 (str (:base-model-spec st) "")))
+          prov (or (some-> m .-provider .-providerId) "")]
       (model-keys prov mid))
     (catch :default _ [])))
 

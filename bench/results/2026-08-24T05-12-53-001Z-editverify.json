@@ -1,0 +1,123 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "editverify",
+  "gitSha": "2510284",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true,
+      "profiles": {
+        "enabled": true,
+        "model-profiles": {
+          "Qwen3.6-35B-A3B-OptiQ-4bit": {
+            "editStrategy": "whole"
+          }
+        }
+      },
+      "quality-monitor": {
+        "enabled": false
+      },
+      "evidence": {
+        "enabled": false
+      }
+    }
+  },
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "javascript/bowling"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "javascript/bowling": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "pass",
+        "durationMs": 1117090,
+        "toolCalls": 26,
+        "toolsUsed": {
+          "read": 5,
+          "bash": 9,
+          "write": 8,
+          "edit": 4
+        },
+        "turns": 26,
+        "costUsd": 0,
+        "tokens": 1174153,
+        "cacheRead": 1052672,
+        "cacheWrite": 0,
+        "inputTokens": 1146079
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "javascript/bowling",
+      "status": "pass",
+      "durationMs": 1117090,
+      "toolCalls": 26,
+      "toolsUsed": {
+        "read": 5,
+        "bash": 9,
+        "write": 8,
+        "edit": 4
+      },
+      "turns": 26,
+      "costUsd": 0,
+      "tokens": 1174153,
+      "cacheRead": 1052672,
+      "cacheWrite": 0,
+      "inputTokens": 1146079
+    }
+  ]
+}
