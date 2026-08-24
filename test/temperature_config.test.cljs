@@ -84,3 +84,36 @@
         (fn []
           (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
             (-> (expect src) (.toContain "maxOutputTokens")))))))
+
+
+;; ── the settings MANAGER, not a settings map ─────────────────────
+;; cli.cljs:445 passes `:settings settings`, where settings is the manager
+;; returned by create-settings-manager — a record of :get / :set-override /
+;; :apply-overrides. Reading a config key straight off it returns nil, so every
+;; value fell back to its default and NOTHING a user configured applied:
+;; retry {max-retries 3} still made 6 attempts, and a configured temperature or
+;; output cap was ignored. The unit tests missed it because they pass a plain
+;; map, which is the one shape production never uses.
+(describe "settings reach config through the manager"
+  (fn []
+    (it "resolves a manager via its :get, the shape cli.cljs actually passes"
+        (fn []
+          (let [mgr #js {:get (fn [] #js {"max-output-tokens" 1234
+                                          "temperature" 0.55
+                                          "retry" #js {"max-retries" 2}})}
+                cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
+                                            :settings mgr}))]
+            (-> (expect (:max-output-tokens cfg)) (.toBe 1234))
+            (-> (expect (:temperature cfg))       (.toBe 0.55))
+            (-> (expect (:max-retries cfg))       (.toBe 2)))))
+
+    (it "still accepts a plain map"
+        (fn []
+          (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
+                                            :settings {:temperature 0.9}}))]
+            (-> (expect (:temperature cfg)) (.toBe 0.9)))))
+
+    (it "survives no settings at all"
+        (fn []
+          (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}}))]
+            (-> (expect (:temperature cfg)) (.toBe 0.2)))))))

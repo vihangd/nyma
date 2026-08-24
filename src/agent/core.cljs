@@ -107,7 +107,15 @@
                                  :active-role         :default
                                  :permission-mode     "default"})
         ;; Event-sourced store shares the same atom as :state
-        store             (create-agent-store @state state)]
+        store             (create-agent-store @state state)
+        ;; cli.cljs passes the settings MANAGER here, not a settings map — it
+        ;; is a record of :get/:set-override/:apply-overrides. Reading a config
+        ;; key straight off it always returned nil, so every value below
+        ;; silently fell back to its default and nothing a user configured
+        ;; applied. Tests pass a plain map, so accept both.
+        merged-settings   (if (and settings (fn? (:get settings)))
+                            ((:get settings))
+                            (or settings {}))]
     (let [agent {:events            events
                  :config            {:model                model
                                      :system-prompt        system-prompt
@@ -118,14 +126,14 @@
                                      ;; attempts. Carry it through instead.
                                      ;; Same carry as :max-retries — the loop
                                      ;; must not hardcode what settings owns.
-                                     :max-output-tokens    (let [n (or (get settings :max-output-tokens)
-                                                                       (get settings "max-output-tokens"))]
+                                     :max-output-tokens    (let [n (or (get merged-settings :max-output-tokens)
+                                                                       (get merged-settings "max-output-tokens"))]
                                                              (if (number? n) n 8000))
-                                     :temperature          (let [t (or (get settings :temperature)
-                                                                       (get settings "temperature"))]
+                                     :temperature          (let [t (or (get merged-settings :temperature)
+                                                                       (get merged-settings "temperature"))]
                                                              (if (number? t) t 0.2))
-                                     :max-retries          (let [r (or (get settings :retry)
-                                                                       (get settings "retry"))
+                                     :max-retries          (let [r (or (get merged-settings :retry)
+                                                                       (get merged-settings "retry"))
                                                                  on? (let [e (or (get r :enabled)
                                                                                  (get r "enabled"))]
                                                                        (if (some? e) (boolean e) true))
