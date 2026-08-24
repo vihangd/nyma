@@ -548,7 +548,18 @@ Examples:
             (when-let [m (:model late-resolved)]
               (set! (.-model (:config agent)) m)
               (aset (:config agent) "active-provider-name"
-                    (or (:provider late-resolved) ""))))
+                    (or (:provider late-resolved) ""))
+              ;; The early path sets :base-model-spec; this one did not, so a
+              ;; run that resolved late left it nil. Extensions cannot see the
+              ;; agent config, and :base-model-spec is the ONLY record of the
+              ;; active model in the state atom — so small-model's per-model
+              ;; profiles silently went inert on exactly those runs. Measured:
+              ;; editStrategy "whole" hid `edit` on one task and not another in
+              ;; the same 3-trial run, which is how a half-applied profile
+              ;; looks from the outside.
+              (when-let [mid (:model-id late-resolved)]
+                (swap! (:state agent) assoc :base-model-spec
+                       (str (or (:provider late-resolved) "") "/" mid)))))
           (catch :default e
             ;; Say what WAS registered. "Unknown provider: yunwu" alone cannot
             ;; distinguish a missing credential from an extension that never

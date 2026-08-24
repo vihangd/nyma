@@ -19,7 +19,8 @@
      tool_access_check      — apply allowedTools allowlist
      addMiddleware :leave   — cap tool results to resultCap chars
   "
-  (:require [agent.extensions.small-model.shared :as shared]
+  (:require [agent.debug :as d]
+            [agent.extensions.small-model.shared :as shared]
             [clojure.string :as str]))
 
 ;; ── Profile lookup ───────────────────────────────────────────────
@@ -63,7 +64,8 @@
    what makes a profile reachable either way."
   [api]
   (try
-    (let [st   (when-let [a (.-__state_atom api)] @a)
+    (let [spec (try (when-let [f (.-getActiveModelSpec api)] (f)) (catch :default _ nil))
+          st   (when-let [a (.-__state_atom api)] @a)
           ;; :model is only populated when something calls setModel, which the
           ;; CLI never does — it assigns (.-model (:config agent)) directly,
           ;; and extensions cannot see the agent config. What the CLI DOES put
@@ -76,8 +78,17 @@
                  (string? m) m
                  :else       (or (some-> m .-modelId) (some-> m .-id)
                                  (str (:base-model-spec st) "")))
-          prov (or (some-> m .-provider .-providerId) "")]
-      (model-keys prov mid))
+          prov (or (some-> m .-provider .-providerId) "")
+          ;; getActiveModelSpec reads the agent config, which BOTH cli paths
+          ;; write; everything below it is a fallback for hosts that predate it.
+          ks   (if (seq (str spec))
+                 (model-keys "" (str spec))
+                 (model-keys prov mid))]
+      ;; 3-arity: (tag msg extras). Passing a map as msg logs "[object Object]"
+      ;; and tells you nothing, which is what the first version did.
+      (d/debug "small-model/profiles" "resolved model keys"
+               #js {:spec (str spec) :keys (clj->js (vec ks))})
+      ks)
     (catch :default _ [])))
 
 (defn- profile-for
@@ -155,6 +166,9 @@
         ;; composes with model_roles' role/mode restriction.
         on-tool-access
         (fn [data _ctx]
+          (d/debug "small-model/tool-access" "gate"
+                   #js {:profile (boolean (profile-for config api))
+                        :tools   (clj->js (vec (or (.-tools data) [])))})
           (when-let [p (profile-for config api)]
             (let [allowed (or (:allowed-tools p) (get p "allowedTools")
                               (:allowedTools p))

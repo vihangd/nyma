@@ -102,6 +102,7 @@
                     :unregisterProvider (gate capabilities :providers (.-unregisterProvider base-api))
                     ;; Model/thinking control
                     :setModel         (gate capabilities :model (.-setModel base-api))
+                    :getActiveModelSpec (gate capabilities :model (.-getActiveModelSpec base-api))
                     :getThinkingLevel (gate capabilities :model (.-getThinkingLevel base-api))
                     :setThinkingLevel (gate capabilities :model (.-setThinkingLevel base-api))
                     ;; Inter-extension events (namespace-prefixed)

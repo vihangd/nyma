@@ -451,6 +451,27 @@
                                      :model           model-id}))
 
        ;; ── Model info ─────────────────────────────────────────
+       ;; The active model as "<provider>/<model-id>", read from the agent
+       ;; config — the one place BOTH cli resolution paths write it. Extensions
+       ;; previously had to dig it out of the state atom, where the CLI records
+       ;; it only on the early path (:base-model-spec) and never as :model,
+       ;; because it assigns (.-model (:config agent)) directly rather than
+       ;; calling setModel. small-model's per-model profiles depended on that
+       ;; and went inert on any run that resolved late — editStrategy hid `edit`
+       ;; on one task and not another in the same 3-trial run.
+         :getActiveModelSpec (fn []
+                               (let [cfg  (:config agent)
+                                     m    (some-> cfg .-model)
+                                     mid  (cond
+                                            (nil? m)    nil
+                                            (string? m) m
+                                            :else       (or (some-> m .-modelId)
+                                                            (some-> m .-id)))
+                                     prov (aget cfg "active-provider-name")]
+                                 (cond
+                                   (and (seq (str prov)) (seq (str mid))) (str prov "/" mid)
+                                   (seq (str mid)) (str mid)
+                                   :else (str (:base-model-spec @(:state agent)) ""))))
          :getModelInfo      (fn [& [model-id]]
                               (let [m  (:model (:config agent))
                                     id (or model-id

@@ -240,6 +240,20 @@
   (when (string? s)
     (.toLowerCase (.replace s (js/RegExp. "([a-z0-9])([A-Z])" "g") "$1-$2"))))
 
+;; Maps whose KEYS are data (identifiers, ids) rather than config names.
+;; Normalizing these corrupts them — see normalize-keys.
+(def ^:private data-keyed-maps #{"model-profiles" "model-routing"})
+
+(defn- normalize-values
+  "Normalize the VALUES of a data-keyed map, leaving its keys untouched."
+  [v]
+  (if (object? v)
+    (let [out #js {}]
+      (doseq [k (js/Object.keys v)]
+        (aset out k (normalize-keys (aget v k))))
+      out)
+    v))
+
 (defn normalize-keys
   "Pure: walk a JS value and rewrite every string key from camelCase to
    kebab-case. Nested objects and array elements are normalized
@@ -247,6 +261,14 @@
    non-plain-object (function, Date, Map, Set, class instance) pass
    through as-is. squint's `object?` is strict: it's true only for
    plain `{}` objects, so arrays fall through the array branch below.
+
+   Some maps are keyed by DATA, not by config names, and rewriting those
+   destroys them: a model id is not camelCase to be tidied. `model-profiles`
+   is keyed by \"<provider>/<model-id>\", and normalization turned
+   \"omlx/Qwen3.6-35B-A3B-OptiQ-4bit\" into
+   \"omlx/qwen3.6-35-b-a3-b-opti-q-4bit\", which no lookup could ever match —
+   so every per-model profile silently did nothing. Their VALUES are still
+   normalized, so editStrategy → edit-strategy keeps working.
 
    Exported for testing."
   [v]
@@ -256,7 +278,10 @@
     (object? v)   (let [out #js {}]
                     (doseq [k (js/Object.keys v)]
                       (let [nk (camel->kebab k)
-                            nv (normalize-keys (aget v k))]
+                            raw (aget v k)
+                            nv  (if (contains? data-keyed-maps nk)
+                                  (normalize-values raw)
+                                  (normalize-keys raw))]
                         (aset out nk nv)))
                     out)
     :else         v))
