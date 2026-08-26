@@ -54,8 +54,14 @@
   ;; Public so tests can pin the shipped entries — notably that velona
   ;; discovery points at the surface carrying windows/prices, and that it is
   ;; same-origin so the key may travel with it.
+  ;; yunwu migrated to OpenLux in Aug 2026. Every endpoint on the old host now
+  ;; answers 403 with "Your account has been migrated to OpenLux. Please sign in
+  ;; at https://api.openlux.ai"; the new host speaks the same New-API dialect
+  ;; (same error shape) but does NOT accept the old key — it answers 401
+  ;; "无效的令牌". The provider keeps the `yunwu` name so existing settings,
+  ;; credentials and /model specs keep working; only the host moved.
   [{:name      "yunwu"
-    :base-url  "https://yunwu.ai/v1"
+    :base-url  "https://api.openlux.ai/v1"
     :api-key-env "YUNWU_API_KEY"
     :api       "openai-compatible"
     :discover  true
@@ -143,7 +149,7 @@
                 {:id "nvidia/nemotron-3-nano-30b-a3b"   :context-window 262144  :cost {:input 0.05 :output 0.2}}
                 {:id "nvidia/nemotron-3-super-120b-a12b" :context-window 1000000 :cost {:input 0.085 :output 0.4}}]}
    {:name      "yunwu-claude"
-    :base-url  "https://yunwu.ai/v1"
+    :base-url  "https://api.openlux.ai/v1"
     :api-key-env "YUNWU_API_KEY"
     ;; Same account as `yunwu`, so one /login covers both.
     :credential-name "yunwu"

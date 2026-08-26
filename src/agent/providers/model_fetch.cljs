@@ -322,7 +322,20 @@
         (do (d/warn "model-fetch" (str "refusing to follow a redirect from " url)) nil)
 
         (not (.-ok resp))
-        (do (d/warn "model-fetch" (str url " returned " (.-status resp))) nil)
+        ;; The status alone is not actionable. yunwu answered every request with
+        ;; 403 and a body reading "Your account has been migrated to OpenLux.
+        ;; Please sign in at https://api.openlux.ai" — the fix, discarded. On a
+        ;; 4xx the provider is usually telling you exactly what is wrong, so say
+        ;; it. Capped, because a body can be an HTML error page.
+        (do (let [msg (try
+                        (let [t (js-await (.text resp))]
+                          (when (seq t)
+                            (let [parsed (try (js/JSON.parse t) (catch :default _ nil))
+                                  m (some-> parsed .-error .-message)]
+                              (str " — " (subs (str (or m t)) 0 300)))))
+                        (catch :default _ nil))]
+              (d/warn "model-fetch" (str url " returned " (.-status resp) (or msg ""))))
+            nil)
 
         :else
         (parse-models (js-await (.json resp)))))
