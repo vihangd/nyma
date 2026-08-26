@@ -452,8 +452,14 @@
    environment: without it, `bun test` on a machine that happens to export
    YUNWU_API_KEY would make live calls to a third party."
   []
-  (let [v (aget js/process.env "NYMA_NO_MODEL_DISCOVERY")]
-    (and (seq (str (or v ""))) (not= "0" (str v)) (not= "false" (str v)))))
+  (let [v (aget js/process.env "NYMA_NO_MODEL_DISCOVERY")
+        ;; A one-shot run resolves the single model named on the command line
+        ;; from the seed list; it has no picker or autocomplete to populate, so
+        ;; fetching every gateway's catalogue is pure launch latency. Set by
+        ;; cli.cljs for print/json mode unless --discover is passed.
+        one-shot (aget js/process.env "NYMA_ONE_SHOT")]
+    (or (and (seq (str (or v ""))) (not= "0" (str v)) (not= "false" (str v)))
+        (= "1" (str (or one-shot ""))))))
 
 (defn ^:async discover!
   "Register the cached list immediately, then refresh in the background when

@@ -198,13 +198,32 @@
         srv-ids  (set (map :id from-srv))]
     (vec (concat from-srv (remove #(contains? srv-ids (str (:id %))) settings-models)))))
 
+(defn discovery-disabled?
+  "Local discovery is skipped for the same reasons the relay path skips it: an
+   explicit opt-out, or a one-shot run that resolves a single named model from
+   the seed list and has no picker to populate."
+  []
+  (let [off (str (or (aget js/process.env "NYMA_NO_MODEL_DISCOVERY") ""))
+        one (str (or (aget js/process.env "NYMA_ONE_SHOT") ""))]
+    (or (and (seq off) (not= "0" off) (not= "false" off))
+        (= "1" one))))
+
 (defn ^:async fetch-server-models
   "GET <base>/models. Returns the raw data array, or nil — a local endpoint that
-   is down must never stop the provider from registering."
-  [base-url]
+   is down must never stop the provider from registering.
+
+   Sends the key. It did not, so any local server requiring auth answered 401,
+   `(when (.-ok res))` turned that into nil, and the whole 'context windows from
+   the server' path silently did nothing — omlx has never had a window read from
+   its server, only the declared one. It appeared to work solely because vllm
+   needs no key."
+  [base-url api-key]
   (try
     (let [res (js-await (js/fetch (str base-url "/models")
-                                  #js {:signal (js/AbortSignal.timeout 4000)}))]
+                                  #js {:signal (js/AbortSignal.timeout 4000)
+                                       :headers (if (seq (str (or api-key "")))
+                                                  #js {"Authorization" (str "Bearer " api-key)}
+                                                  #js {})}))]
       (when (.-ok res)
         (let [body (js-await (.json res))]
           (.-data body))))
@@ -224,7 +243,9 @@
       ;; Then ask the server what it actually serves and re-register with real
       ;; windows. Deliberately after the synchronous registration: a slow or
       ;; absent endpoint delays nothing and breaks nothing.
-      (-> (fetch-server-models base-url)
+      (-> (if (discovery-disabled?)
+            (js/Promise.resolve nil)
+            (fetch-server-models base-url (resolve-key entry)))
           (.then (fn [server-models]
                    (when (seq server-models)
                      (let [merged (merge-server-windows (:models entry) server-models)]

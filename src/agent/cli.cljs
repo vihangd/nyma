@@ -197,6 +197,9 @@ Session:
       --fork <path>      Branch a copy of an existing session into a new file.
       --session <path>   Use a specific session file (jsonl).
       --no-session       Don't read or write any session file.
+      --discover         With -p: fetch provider catalogues at startup. Off by
+                         default in one-shot runs, which only need the model
+                         named on the command line (saves ~3s per launch).
                          (Default: a fresh session file per launch.)
 
 Tools:
@@ -409,6 +412,9 @@ Examples:
                             :session      #js {:type "string"}
                             :fork         #js {:type "string"}
                             :no-session   #js {:type "boolean"}
+                            ;; One-shot runs skip catalogue discovery; this opts back in
+                            ;; for an id that exists only in a live catalogue.
+                            :discover     #js {:type "boolean"}
                             :output-format #js {:type "string"}
                             :permission-mode #js {:type "string"}
                             ;; Accepted for compat with the pi Emacs frontend's trust policy
@@ -425,6 +431,19 @@ Examples:
         mode      (or (:mode values)
                       (when (:print values) "print")
                       "interactive")
+        ;; Provider extensions fetch every gateway's full catalogue at launch so
+        ;; the picker and /model autocomplete have something to show. A one-shot
+        ;; run has neither: it resolves exactly the model named on the command
+        ;; line, which the seed lists already carry. Measured, timed against a
+        ;; non-existent model so startup runs and generation does not: 5.5s with
+        ;; discovery, 2.6s without — and worse per provider holding a stale
+        ;; credential, since those 401 on every launch. `nyma --model vllm/...`
+        ;; was fetching yunwu's catalogue, which is what surfaced this.
+        ;; Env, because that is how NYMA_MODE and NYMA_NO_MODEL_DISCOVERY
+        ;; already reach extensions. --discover opts back in.
+        _ (when (and (contains? #{"print" "json"} mode)
+                     (not (:discover values)))
+            (aset js/process.env "NYMA_ONE_SHOT" "1"))
         settings  (create-settings-manager)
         merged    ((:get settings))
         sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
