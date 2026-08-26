@@ -35,7 +35,7 @@
   (aset js/process.env "HOME" real-home)
   (aset js/globalThis "fetch" real-fetch)
   (aset js/process.env "NYMA_NO_MODEL_DISCOVERY" "1")
-  (js-delete js/process.env "YUNWU_API_KEY")
+  (js-delete js/process.env "OPENLUX_API_KEY")
   nil)
 
 ;; ── Settings normalization ───────────────────────────────────
@@ -76,8 +76,8 @@
 (describe "relay/merge-entries" (fn []
                                   (it "lets a user entry replace a preset of the same name"
                                       (fn []
-                                        (let [merged (relay/merge-entries [{:name "yunwu" :base-url "https://preset"}]
-                                                                          [{:name "yunwu" :base-url "https://mine"}])]
+                                        (let [merged (relay/merge-entries [{:name "openlux" :base-url "https://preset"}]
+                                                                          [{:name "openlux" :base-url "https://mine"}])]
                                           (-> (expect (count merged)) (.toBe 1))
                                           (-> (expect (:base-url (first merged))) (.toBe "https://mine")))))
 
@@ -95,34 +95,34 @@
                                 (it "prefers the env var"
                                     (fn []
                                       (temp-home!)
-                                      (aset js/process.env "YUNWU_API_KEY" "sk-env")
-                                      (-> (expect (relay/resolve-key {:name "yunwu" :api-key-env "YUNWU_API_KEY"}))
+                                      (aset js/process.env "OPENLUX_API_KEY" "sk-env")
+                                      (-> (expect (relay/resolve-key {:name "openlux" :api-key-env "OPENLUX_API_KEY"}))
                                           (.toBe "sk-env"))))
 
                                 (it "shares one /login across both protocol variants of a gateway"
                                     (fn []
-        ;; yunwu and yunwu-claude are one account; logging in twice would be a
+        ;; openlux and openlux-claude are one account; logging in twice would be a
         ;; papercut users would rightly report as a bug.
                                       (let [dir (temp-home!)]
                                         (fs/mkdirSync (path/join dir ".nyma") #js {:recursive true})
                                         (fs/writeFileSync (path/join dir ".nyma" "credentials.json")
-                                                          (js/JSON.stringify #js {:yunwu "sk-saved"})))
-                                      (-> (expect (relay/resolve-key {:name "yunwu-claude"
-                                                                      :credential-name "yunwu"
-                                                                      :api-key-env "YUNWU_API_KEY"}))
+                                                          (js/JSON.stringify #js {:openlux "sk-saved"})))
+                                      (-> (expect (relay/resolve-key {:name "openlux-claude"
+                                                                      :credential-name "openlux"
+                                                                      :api-key-env "OPENLUX_API_KEY"}))
                                           (.toBe "sk-saved"))))
 
                                 (it "names the shared login in the missing-key error"
                                     (fn []
-                                      (-> (expect (relay/missing-key-message {:name "yunwu-claude"
-                                                                              :credential-name "yunwu"
-                                                                              :api-key-env "YUNWU_API_KEY"}))
-                                          (.toContain "/login yunwu"))))
+                                      (-> (expect (relay/missing-key-message {:name "openlux-claude"
+                                                                              :credential-name "openlux"
+                                                                              :api-key-env "OPENLUX_API_KEY"}))
+                                          (.toContain "/login openlux"))))
 
                                 (it "never substitutes a placeholder key"
                                     (fn []
                                       (temp-home!)
-                                      (-> (expect (relay/resolve-key {:name "yunwu" :api-key-env "YUNWU_API_KEY"}))
+                                      (-> (expect (relay/resolve-key {:name "openlux" :api-key-env "OPENLUX_API_KEY"}))
                                           (.toBeNil))))))
 
 ;; ── Filtering ────────────────────────────────────────────────
@@ -159,7 +159,7 @@
 
                                       (it "keeps only models the gateway serves over our protocol"
                                           (fn []
-        ;; Shapes taken verbatim from a real yunwu /v1/models response.
+        ;; Shapes taken verbatim from a real openlux (ex-yunwu) /v1/models response.
                                             (let [p (mf/make-filter {:endpoint-types ["openai"]})]
                                               (-> (expect (p {:id "glm-4.7" :endpoints ["openai"]})) (.toBe true))
                                               (-> (expect (p {:id "gemini-2.5-flash" :endpoints ["gemini" "openai"]})) (.toBe true))
@@ -360,7 +360,7 @@
                                                                                {:id "BAAI/bge-reranker-v2-m3" :endpoints ["rerank"]}
                                                                                {:id "mj_inpaint"             :endpoints ["mj动作"]}]]
 
-                                                                (it "the yunwu preset keeps chat and responses models, drops the rest"
+                                                                (it "the openlux preset keeps chat and responses models, drops the rest"
                                                                     (fn []
                                                                       (let [kept (ids-kept {:endpoint-types ["openai" "openai-response"]
                                                                                             :exclude ["claude"]}
@@ -373,7 +373,7 @@
                                                                       (let [kept (ids-kept {:endpoint-types ["openai" "openai-response"]} catalogue)]
                                                                         (-> (expect (some #{"gpt-5-all"} kept)) (.toBeUndefined)))))
 
-                                                                (it "the yunwu-claude preset keeps exactly the anthropic-capable models"
+                                                                (it "the openlux-claude preset keeps exactly the anthropic-capable models"
                                                                     (fn []
                                                                       (let [kept (ids-kept {:endpoint-types ["anthropic"]} catalogue)]
                                                                         (-> (expect kept) (.toEqual #js ["claude-opus-5" "claude-fable-5"])))))
@@ -388,7 +388,7 @@
 (defn ^:async test-discovered-endpoints-drive-protocol []
   (temp-home!)
   (allow-discovery!)
-  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (aset js/process.env "OPENLUX_API_KEY" "sk-test")
   (aset js/globalThis "fetch"
         (fn [_url _opts]
           (js/Response. (js/JSON.stringify
@@ -401,7 +401,7 @@
   (let [agent   (create-agent {:model "test" :system-prompt "x"})
         api     (create-extension-api agent "relay")
         cleanup ((aget relay "default") api)
-        resolve-model (fn [id] ((:resolve (:provider-registry agent)) "yunwu" id))]
+        resolve-model (fn [id] ((:resolve (:provider-registry agent)) "openlux" id))]
     (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
     ;; The endpoint types discovered at runtime, not the entry's `api`, decide
     ;; which wire protocol each model speaks.
@@ -414,7 +414,7 @@
 (defn ^:async test-discovery-updates-catalogue-live []
   (temp-home!)
   (allow-discovery!)
-  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (aset js/process.env "OPENLUX_API_KEY" "sk-test")
   (aset js/globalThis "fetch"
         (fn [_url _opts]
           (js/Response. (js/JSON.stringify
@@ -430,19 +430,19 @@
                                    ((:list (:provider-registry agent)))
                                    (:context-window (:model-registry agent))))))]
     ;; Seeded synchronously — the provider is usable before discovery lands.
-    (-> (expect (contains? (specs) "yunwu-claude/claude-opus-5")) (.toBe true))
-    (-> (expect (contains? (specs) "yunwu-claude/claude-newly-launched")) (.toBe false))
+    (-> (expect (contains? (specs) "openlux-claude/claude-opus-5")) (.toBe true))
+    (-> (expect (contains? (specs) "openlux-claude/claude-newly-launched")) (.toBe false))
     ;; Let the background refresh settle.
     (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
     ;; Re-registering is enough: the registry is a plain assoc and the catalogue
     ;; reads :models at call time, so /model sees this without a restart.
-    (-> (expect (contains? (specs) "yunwu-claude/claude-newly-launched")) (.toBe true))
+    (-> (expect (contains? (specs) "openlux-claude/claude-newly-launched")) (.toBe true))
     (cleanup)))
 
 (defn ^:async test-discovery-failure-keeps-seed []
   (temp-home!)
   (allow-discovery!)
-  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (aset js/process.env "OPENLUX_API_KEY" "sk-test")
   (aset js/globalThis "fetch" (fn [_url _opts] (js/Response. "" #js {:status 500})))
   (let [agent   (create-agent {:model "test" :system-prompt "x"})
         api     (create-extension-api agent "relay")
@@ -452,7 +452,7 @@
     (let [specs (set (map :spec (catalog/list-all-models
                                  ((:list (:provider-registry agent)))
                                  (:context-window (:model-registry agent)))))]
-      (-> (expect (contains? specs "yunwu-claude/claude-opus-5")) (.toBe true)))
+      (-> (expect (contains? specs "openlux-claude/claude-opus-5")) (.toBe true)))
     (cleanup)))
 
 (defn ^:async test-discovery-off-by-default-in-tests []
@@ -461,7 +461,7 @@
   ;; exported would start making live third-party calls during `bun test`.
   (-> (expect discovery-guard-at-load) (.toBe "1"))
   (temp-home!)
-  (aset js/process.env "YUNWU_API_KEY" "sk-test")
+  (aset js/process.env "OPENLUX_API_KEY" "sk-test")
   (let [calls (atom 0)]
     (aset js/globalThis "fetch"
           (fn [_url _opts] (swap! calls inc) (js/Response. "" #js {:status 200})))
@@ -497,18 +497,18 @@
                                            (beforeEach (fn [] (temp-home!) (reset! pricing/unpriced-providers #{}) nil))
                                            (afterEach restore!)
 
-                                           (it "registers both yunwu presets"
+                                           (it "registers both openlux presets"
                                                (fn []
                                                  (let [{:keys [agent cleanup]} (boot)]
-                                                   (-> (expect (contains? (provider-names agent) "yunwu")) (.toBe true))
-                                                   (-> (expect (contains? (provider-names agent) "yunwu-claude")) (.toBe true))
+                                                   (-> (expect (contains? (provider-names agent) "openlux")) (.toBe true))
+                                                   (-> (expect (contains? (provider-names agent) "openlux-claude")) (.toBe true))
                                                    (cleanup))))
 
                                            (it "marks gateways unpriced so relayed ids don't inherit vendor rates"
                                                (fn []
                                                  (let [{:keys [cleanup]} (boot)]
-                                                   (-> (expect (contains? @pricing/unpriced-providers "yunwu-claude")) (.toBe true))
-                                                   (-> (expect (pricing/lookup-cost "yunwu-claude/claude-opus-5")) (.toBeNil))
+                                                   (-> (expect (contains? @pricing/unpriced-providers "openlux-claude")) (.toBe true))
+                                                   (-> (expect (pricing/lookup-cost "openlux-claude/claude-opus-5")) (.toBeNil))
                                                    (cleanup))))
 
                                            (it "resolves a real context window for a relayed vendor id"
@@ -516,33 +516,33 @@
                                                  (let [{:keys [agent cleanup]} (boot)
                                                        models (catalog/list-all-models ((:list (:provider-registry agent)))
                                                                                        (:context-window (:model-registry agent)))
-                                                       opus   (first (filter (fn [m] (= "yunwu-claude/claude-opus-5" (:spec m))) models))]
+                                                       opus   (first (filter (fn [m] (= "openlux-claude/claude-opus-5" (:spec m))) models))]
           ;; The relay's /v1/models says nothing about size; the vendor entry does.
                                                    (-> (expect (:context-window opus)) (.toBe 1000000))
                                                    (cleanup))))
 
                                            (it "builds an anthropic model against the gateway base URL"
                                                (fn []
-                                                 (aset js/process.env "YUNWU_API_KEY" "sk-test")
+                                                 (aset js/process.env "OPENLUX_API_KEY" "sk-test")
                                                  (let [{:keys [agent cleanup]} (boot)
-                                                       model ((:resolve (:provider-registry agent)) "yunwu-claude" "claude-opus-5")]
+                                                       model ((:resolve (:provider-registry agent)) "openlux-claude" "claude-opus-5")]
           ;; anthropic.messages is what makes cache_control reach the wire.
                                                    (-> (expect (.-provider model)) (.toBe "anthropic.messages"))
                                                    (cleanup))))
 
                                            (it "builds an openai-compatible model for the default variant"
                                                (fn []
-                                                 (aset js/process.env "YUNWU_API_KEY" "sk-test")
+                                                 (aset js/process.env "OPENLUX_API_KEY" "sk-test")
                                                  (let [{:keys [agent cleanup]} (boot)
-                                                       model ((:resolve (:provider-registry agent)) "yunwu" "gpt-5.2")]
+                                                       model ((:resolve (:provider-registry agent)) "openlux" "gpt-5.2")]
                                                    (-> (expect (.-provider model)) (.toBe "openai.chat"))
                                                    (cleanup))))
 
                                            (it "throws a friendly error, not a raw 401, when no key is configured"
                                                (fn []
                                                  (let [{:keys [agent cleanup]} (boot)]
-                                                   (-> (expect (fn [] ((:resolve (:provider-registry agent)) "yunwu" "gpt-5.2")))
-                                                       (.toThrow #"/login yunwu"))
+                                                   (-> (expect (fn [] ((:resolve (:provider-registry agent)) "openlux" "gpt-5.2")))
+                                                       (.toThrow #"/login openlux"))
                                                    (cleanup))))))
 
 ;; ── Catalogs that carry windows and prices ───────────────────

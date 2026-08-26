@@ -327,12 +327,17 @@
         ;; Please sign in at https://api.openlux.ai" — the fix, discarded. On a
         ;; 4xx the provider is usually telling you exactly what is wrong, so say
         ;; it. Capped, because a body can be an HTML error page.
+        ;; 4xx only: a client error carries an actionable message ("account
+        ;; migrated", "invalid token"). A 5xx is the gateway being unwell and
+        ;; the body is usually an HTML page, so skip the extra read there —
+        ;; discovery runs on every startup for every relay entry.
         (do (let [msg (try
-                        (let [t (js-await (.text resp))]
-                          (when (seq t)
-                            (let [parsed (try (js/JSON.parse t) (catch :default _ nil))
-                                  m (some-> parsed .-error .-message)]
-                              (str " — " (subs (str (or m t)) 0 300)))))
+                        (when (< (.-status resp) 500)
+                          (let [t (js-await (.text resp))]
+                            (when (seq t)
+                              (let [parsed (try (js/JSON.parse t) (catch :default _ nil))
+                                    m (some-> parsed .-error .-message)]
+                                (str " — " (subs (str (or m t)) 0 300))))))
                         (catch :default _ nil))]
               (d/warn "model-fetch" (str url " returned " (.-status resp) (or msg ""))))
             nil)

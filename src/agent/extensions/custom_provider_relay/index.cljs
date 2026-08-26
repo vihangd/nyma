@@ -60,9 +60,10 @@
   ;; (same error shape) but does NOT accept the old key — it answers 401
   ;; "无效的令牌". The provider keeps the `yunwu` name so existing settings,
   ;; credentials and /model specs keep working; only the host moved.
-  [{:name      "yunwu"
+  [{:name      "openlux"
     :base-url  "https://api.openlux.ai/v1"
-    :api-key-env "YUNWU_API_KEY"
+    :api-key-env "OPENLUX_API_KEY"
+    :credential-fallbacks ["yunwu"]
     :api       "openai-compatible"
     :discover  true
     ;; yunwu reports `supported_endpoint_types` per model, so we ask for the
@@ -148,11 +149,12 @@
                 ;; order of magnitude under the qwen/glm tier on input.
                 {:id "nvidia/nemotron-3-nano-30b-a3b"   :context-window 262144  :cost {:input 0.05 :output 0.2}}
                 {:id "nvidia/nemotron-3-super-120b-a12b" :context-window 1000000 :cost {:input 0.085 :output 0.4}}]}
-   {:name      "yunwu-claude"
+   {:name      "openlux-claude"
     :base-url  "https://api.openlux.ai/v1"
-    :api-key-env "YUNWU_API_KEY"
+    :api-key-env "OPENLUX_API_KEY"
+    :credential-fallbacks ["yunwu"]
     ;; Same account as `yunwu`, so one /login covers both.
-    :credential-name "yunwu"
+    :credential-name "openlux"
     :api       "anthropic"
     :discover  true
     ;; Confirmed against a live catalogue: Claude ids there declare
@@ -186,6 +188,7 @@
    :base-url    (entry-get e "baseUrl" "base-url")
    :api-key-env (entry-get e "apiKeyEnv" "api-key-env")
    :credential-name (entry-get e "credentialName" "credential-name")
+   :credential-fallbacks (or (entry-get e "credentialFallbacks" "credential-fallbacks") [])
    :api         (or (entry-get e "api" "api") "openai-compatible")
    :discover    (let [v (entry-get e "discover" "discover")]
                   ;; Absent means "yes" — a gateway's whole point is that we
@@ -243,7 +246,12 @@
         ;; Fall back to the provider's own name when it differs, so a key saved
         ;; against either name works.
         (when (not= cred (:name entry))
-          (credentials/read-credential (:name entry))))))
+          (credentials/read-credential (:name entry)))
+        ;; ...and to any name this provider used to have. yunwu became openlux
+        ;; in Aug 2026; a key saved by the old `/login yunwu` should keep
+        ;; working rather than failing as "no credentials".
+        (some (fn [n] (credentials/read-credential (str n)))
+              (or (:credential-fallbacks entry) [])))))
 
 (defn missing-key-message [entry]
   (str "No credentials for '" (:name entry) "'. "
