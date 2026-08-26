@@ -108,11 +108,24 @@
 (defn- new-id []
   (-> (js/Math.random) (.toString 36) (.slice 2 11)))
 
-(defn- model-id [agent]
+(defn model-id
+  "Label for the active model, or an em dash when there isn't one.
+
+   This read `.-modelId` off `(or runtime m)` without checking it was there.
+   Both are nil whenever model resolution failed — an unknown provider, a
+   renamed one, a missing credential — and the status line then threw
+   `TypeError: null is not an object` from sync-status!, taking the whole
+   interactive session down. A provider that cannot be resolved is a message,
+   not a crash. Exposed for tests."
+  [agent]
   (let [config  (:config agent)
-        m       (.-model config)
-        runtime (:runtime-model @(:state agent))]
-    (str (or (.-modelId (or runtime m)) (or runtime m) "–"))))
+        m       (some-> config .-model)
+        runtime (:runtime-model @(:state agent))
+        active  (or runtime m)]
+    (cond
+      (nil? active)    "–"
+      (string? active) active
+      :else            (str (or (.-modelId active) (.-id active) "–")))))
 
 (defn- provider-name [agent]
   "Return the user-friendly provider label captured at setModel time
