@@ -41,23 +41,28 @@
   (let [settings (try (when (.-getSettings api) (.getSettings api))
                       (catch :default _ nil))
         config   (shared/load-config (or settings {}))
-        ;; Honour the --ext-small-model boolean flag (registered below)
-        ;; to allow per-session enable without touching settings.json.
-        flag-val (.getFlag api "small-model")
-        ;; Merge: flag true → force-enable; flag false (explicit) → force-disable
-        config   (cond
-                   (true? flag-val)  (assoc config :enabled true)
-                   (false? flag-val) (assoc config :enabled false)
-                   :else             config)
-
         state    (shared/make-state)
         cleanups (atom [])]
 
-    ;; Register the --ext-small-model flag (must be before resolve-ext-flags runs)
+    ;; Register BEFORE reading. Extensions load before cli's resolve-ext-flags
+    ;; runs, so registerFlag is what applies the parsed --ext-* argv value; the
+    ;; read used to sit above this call and could only ever see nil, which is
+    ;; why --ext-small-model never did anything.
+    ;;
+    ;; No :default either — an absent flag must read as nil so settings decide.
+    ;; A `false` default would hit the (false? flag-val) branch below and
+    ;; silently disable an extension enabled via settings.
     (.registerFlag api "small-model"
                    #js {:description "Enable small-model adaptation layer for this session"
-                        :type        "boolean"
-                        :default     false})
+                        :type        "boolean"})
+
+    ;; Honour the --ext-small-model boolean flag: true → force-enable,
+    ;; explicit false → force-disable, absent → whatever settings said.
+    (let [flag-val (.getFlag api "small-model")
+          config   (cond
+                     (true? flag-val)  (assoc config :enabled true)
+                     (false? flag-val) (assoc config :enabled false)
+                     :else             config)]
 
     (when (:enabled config)
 
@@ -103,7 +108,7 @@
 
       ;; ── Context relief ───────────────────────────────────────────
       ;; Always active when the extension is enabled — no sub-toggle needed.
-      (swap! cleanups conj (context-relief/activate api config)))
+      (swap! cleanups conj (context-relief/activate api config))))
 
     ;; Return deactivate fn
     (fn []

@@ -199,10 +199,16 @@
 
         ;; ── after_provider_request: advance turn counter ──────────
         on-turn
-        (fn [data _ctx]
+        (fn [_data _ctx]
           ;; Reset empty-turn counter on any successful turn
           (swap! counters assoc :empty 0)
-          (reset! deltas-seen 0)
+          ;; No stream-state reset here. This used to `(reset! deltas-seen 0)`,
+          ;; a binding that no longer exists — the mid-stream abort it belonged
+          ;; to was replaced by the observe-only `text-seen?` above, and the
+          ;; rename missed this line. It threw "deltas_seen is not defined" on
+          ;; every after_provider_request, killing the turn-count increment
+          ;; below with it, so max-turns never fired. `on-turn-start` is what
+          ;; clears `text-seen?`.
           (let [tc (swap! state update :turn-count inc)]
             (when (>= (:turn-count tc) max-turns)
               (.sendUserMessage api
