@@ -12,7 +12,7 @@
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.settings.manager :refer [create-settings-manager]]
-            [agent.extensions :refer [create-extension-api]]
+            [agent.extensions :as ext :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
@@ -144,26 +144,19 @@
 
 (defn resolve-ext-flags
   "Resolve --ext-* CLI flags against registered extension flags.
-   Scans process.argv for --ext-flagname=value or --ext-flagname (boolean),
-   matches against registered flags, coerces by type, and sets :value."
+
+   registerFlag already applies the parsed argv value at registration time, so
+   this is the late pass for flags registered after startup (e.g. /reload).
+   The short-name rule lives in agent.extensions — one copy, because two copies
+   of it is how --ext-* silently broke for every extension."
   [agent]
-  (let [argv  (.slice js/process.argv 2)
-        flags @(:flags agent)]
-    (doseq [arg argv]
-      (when (.startsWith arg "--ext-")
-        (let [rest-arg  (.slice arg 6)
-              eq-idx    (.indexOf rest-arg "=")
-              flag-name (if (>= eq-idx 0) (.slice rest-arg 0 eq-idx) rest-arg)
-              raw-value (when (>= eq-idx 0) (.slice rest-arg (inc eq-idx)))]
-          (doseq [[full-name flag-config] flags]
-            (let [short-name (last (.split full-name "/"))]
-              (when (= short-name flag-name)
-                (let [coerced (case (:type flag-config)
-                                "boolean" (if (nil? raw-value) true (not= raw-value "false"))
-                                "number"  (js/Number raw-value)
-                                "string"  (or raw-value "")
-                                raw-value)]
-                  (swap! (:flags agent) assoc-in [full-name :value] coerced))))))))))
+  (let [parsed (ext/parse-ext-flag-argv)]
+    (when (seq parsed)
+      (doseq [[full-name flag-config] @(:flags agent)]
+        (let [raw (get parsed (ext/ext-flag-short-name full-name) :absent)]
+          (when (not= raw :absent)
+            (swap! (:flags agent) assoc-in [full-name :value]
+                   (ext/coerce-flag-value (:type flag-config) raw))))))))
 
 (def ^:private help-text
   "Usage: nyma [options] [prompt]

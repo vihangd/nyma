@@ -9,6 +9,43 @@
             [agent.ui.status-line-segments :as status-segments]
             [agent.debug :as dbg]))
 
+(defn ext-flag-short-name
+  "The CLI-visible name for a registered flag. Registration is namespace-scoped
+   as `ns__name` (extension_scope uses `__`, not `/`, to satisfy the Anthropic
+   tool-name pattern), so the short name has to survive BOTH separators —
+   splitting on `/` alone made every extension flag unreachable from the CLI."
+  [full-name]
+  (last (.split (last (.split (str full-name) "/")) "__")))
+
+(defn parse-ext-flag-argv
+  "Parse `--ext-name` / `--ext-name=value` out of argv into
+   {short-name raw-value-or-nil}. nil value means the bare boolean form.
+   Pure over the argv you pass; defaults to this process's argv."
+  ([] (parse-ext-flag-argv (.slice js/process.argv 2)))
+  ([argv]
+   (reduce (fn [acc arg]
+             (if-not (.startsWith (str arg) "--ext-")
+               acc
+               (let [rest-arg (.slice (str arg) 6)
+                     eq-idx   (.indexOf rest-arg "=")]
+                 (if (>= eq-idx 0)
+                   (assoc acc (.slice rest-arg 0 eq-idx) (.slice rest-arg (inc eq-idx)))
+                   (assoc acc rest-arg nil)))))
+           {}
+           argv)))
+
+(defn coerce-flag-value
+  "Coerce a raw CLI string to the flag's declared type. `raw` is :absent when
+   the flag was not passed (→ nil, so the default applies), or nil for the bare
+   boolean form."
+  [type raw]
+  (cond
+    (= raw :absent) nil
+    (= type "boolean") (if (nil? raw) true (not= raw "false"))
+    (= type "number")  (js/Number raw)
+    (= type "string")  (or raw "")
+    :else raw))
+
 (defn create-extension-api
   "Build the API object that extensions receive.
    Covers pi-mono's ExtensionAPI surface:
@@ -390,12 +427,20 @@
                               ((:emit (:events agent)) event data))
 
        ;; ── Flags ──────────────────────────────────────────────
+       ;; The pending-argv lookup matters: extensions load (cli.cljs:556)
+       ;; BEFORE resolve-ext-flags runs (cli.cljs:601), so an extension that
+       ;; reads its own flag during activation would otherwise always see nil.
+       ;; Applying the parsed argv value here makes getFlag correct as soon as
+       ;; the flag is registered.
          :registerFlag     (fn [name config]
-                             (swap! (:flags agent) assoc name
-                                    {:description (when config (.-description config))
-                                     :type        (or (when config (.-type config)) "boolean")
-                                     :default     (when config (.-default config))
-                                     :value       nil}))
+                             (let [type (or (when config (.-type config)) "boolean")]
+                               (swap! (:flags agent) assoc name
+                                      {:description (when config (.-description config))
+                                       :type        type
+                                       :default     (when config (.-default config))
+                                       :value       (coerce-flag-value
+                                                     type
+                                                     (get (parse-ext-flag-argv) (ext-flag-short-name name) :absent))})))
          :getFlag          (fn [name]
                              (when-let [flag (get @(:flags agent) name)]
                                (if (some? (:value flag))
