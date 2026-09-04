@@ -16,7 +16,8 @@
             [agent.ui.overlay-host :as overlay-host]
             [agent.ui.width-guard :refer [attach-guarded-children!]]
             [agent.ui.crash-recovery :as crash-recovery]
-            [agent.sessions.manager :refer [session->seed-messages]]))
+            [agent.sessions.manager :refer [session->seed-messages]]
+            [clojure.string :as str]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by app.cljs / cli.cljs
@@ -172,11 +173,18 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- run-command! [agent text update-messages!]
-  (let [parts    (.split (.slice text 1) " ")
+  ;; Split on RUNS of whitespace, and drop empties. Splitting on a single " "
+  ;; turned `/spec analyze  foo` (double space) into
+  ;; ["spec" "analyze" "" "foo"], so the handler saw "" as its first argument
+  ;; and reported its usage string — for every command, not just this one.
+  ;; Tabs and a trailing space were broken the same way.
+  (let [parts    (->> (.split (.trim (.slice text 1)) #"\s+")
+                      (remove (fn [p] (= "" p)))
+                      vec)
         cmd      (first parts)
         args     (rest parts)
         commands @(:commands agent)]
-    (when-let [entry (resolve-command commands cmd)]
+    (if-let [entry (resolve-command commands cmd)]
       (let [h (:handler entry)]
         (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
                      :agent          agent
@@ -184,7 +192,28 @@
                      :append-message (fn [msg]
                                        (update-messages!
                                         (fn [prev]
-                                          (conj (vec prev) (assoc msg :id (new-id))))))})))))
+                                          (conj (vec prev) (assoc msg :id (new-id))))))}))
+      ;; Was a bare `when-let`: an unrecognised command did nothing at all,
+      ;; which is indistinguishable from one that ran and had nothing to say.
+      ;; Suggest near misses by prefix — the usual cause is a half-remembered
+      ;; name, not an invented one.
+      (let [near (->> (keys commands)
+                      (map str)
+                      (filter (fn [n] (or (.startsWith n (str cmd))
+                                          (.startsWith (str cmd) n))))
+                      sort
+                      (take 5))]
+        (update-messages!
+         (fn [prev]
+           (conj (vec prev)
+                 {:role       "error"
+                  :id         (new-id)
+                  :local-only true
+                  :content    (str "Unknown command: /" cmd
+                                   (when (seq near)
+                                     (str "\nDid you mean: "
+                                          (str/join ", " (map #(str "/" %) near))))
+                                   "\nRun /help to list commands.")})))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entry point
@@ -230,6 +259,14 @@
         (fn [text]
           (update-messages!
            (fn [msgs] (conj (vec msgs) {:role "user" :content text :id (new-id)}))))
+
+        ;; Rendered in the pane, hidden from the model. `build-context` drops
+        ;; :local-only entries, so this is the same tag `!!cmd` uses.
+        add-local-msg!
+        (fn [text]
+          (update-messages!
+           (fn [msgs] (conj (vec msgs) {:role "user" :content text
+                                        :id (new-id) :local-only true}))))
 
         add-chunk!
         (fn [chunk]
@@ -294,91 +331,147 @@
                         (reset! submit-lock false)
                         (sync-status!)))))
 
+        ;; The original submit dispatch, unchanged. Lifted out of `on-submit`
+        ;; so the routing interception below can decide whether to run it.
+        dispatch-submit!
+        (fn [trimmed]
+          (cond
+                ;; ── Steer: mid-stream follow-up ──────────────────────────
+            @streaming
+            (do (.addToHistory editor trimmed)
+                (steer agent {:role "user" :content trimmed})
+                (add-user-msg! (str trimmed " ↩")))
+
+                ;; ── Slash command ────────────────────────────────────────
+            (and (.startsWith trimmed "/") (not @submit-lock))
+            (do (reset! submit-lock true)
+                (.addToHistory editor trimmed)
+                ;; Echo the command. Every other branch does; this one did not,
+                ;; so a command's output — a notification, an import summary —
+                ;; appeared with no visible cause, and a session in which
+                ;; several had been run rendered as if it were empty.
+                ;; :local-only, like `!!cmd`: on screen, out of the model's
+                ;; context, since the model did not run it and the handler
+                ;; already reports whatever it needs to.
+                (add-local-msg! trimmed)
+                    ;; run-command! inside .then so SYNCHRONOUS throws are
+                    ;; absorbed into the same rejection path as async ones —
+                    ;; one .catch/.finally, one lock reset, nothing to drift.
+                (-> (.then (js/Promise.resolve)
+                           (fn [] (run-command! agent trimmed update-messages!)))
+                    (.catch (fn [e] (add-error! e)))
+                    (.finally (fn [] (reset! submit-lock false)))))
+
+                ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
+            (and (not @submit-lock)
+                 (not= :not-bash (:kind (editor-bash/parse-bash-input trimmed))))
+            (let [{:keys [kind command]} (editor-bash/parse-bash-input trimmed)]
+              (reset! submit-lock true)
+              (.addToHistory editor trimmed)
+              (add-user-msg! trimmed)
+              (-> (editor-bash/run-bash! agent command)
+                  (.then (fn [result]
+                           (let [content (editor-bash/format-bash-output result)
+                                 role    (if (:blocked? result) "error" "shell")]
+                             (update-messages!
+                              (fn [msgs]
+                                (conj (vec msgs)
+                                      {:role       role
+                                       :content    content
+                                       :id         (new-id)
+                                       :local-only (= kind :run-hidden)})))
+                                 ;; Inject into LLM context for !cmd (not !!cmd)
+                             (when (= kind :run)
+                               (swap! (:state agent) update :messages conj
+                                      {:role "user" :content (str trimmed "\n" content)}))
+                             (reset! submit-lock false)
+                             (sync-pane!))))
+                  (.catch (fn [e]
+                            (add-error! e)
+                            (reset! submit-lock false)))))
+
+                ;; ── $expr / $$expr — Babashka eval ───────────────────────
+            (and (not @submit-lock)
+                 (not= :not-eval (:kind (editor-eval/parse-eval-input trimmed))))
+            (let [{:keys [kind expr]} (editor-eval/parse-eval-input trimmed)]
+              (reset! submit-lock true)
+              (.addToHistory editor trimmed)
+              (add-user-msg! trimmed)
+              (-> (editor-eval/run-eval! expr)
+                  (.then (fn [result]
+                           (let [content (editor-eval/format-eval-output result)
+                                 role    (if (:unavailable? result) "error" "shell")]
+                             (update-messages!
+                              (fn [msgs]
+                                (conj (vec msgs)
+                                      {:role       role
+                                       :content    content
+                                       :id         (new-id)
+                                       :local-only (= kind :eval-hidden)})))
+                             (when (= kind :eval)
+                               (swap! (:state agent) update :messages conj
+                                      {:role "user" :content (str trimmed "\n" content)}))
+                             (reset! submit-lock false)
+                             (sync-pane!))))
+                  (.catch (fn [e]
+                            (add-error! e)
+                            (reset! submit-lock false)))))
+
+            ;; ── Normal LLM prompt ────────────────────────────────────
+            (not @submit-lock)
+            (do (reset! submit-lock true)
+                (.addToHistory editor trimmed)
+                (add-user-msg! trimmed)
+                (do-run! trimmed))))
+
+        ;; An extension handling "input" streams straight into the pane. Its
+        ;; messages carry :role/:content/:prompt-id but no :id, and chat-pane
+        ;; keys on :id — so stamp one on rather than making every producer
+        ;; remember.
+        ensure-ids
+        (fn [f]
+          (update-messages!
+           (fn [msgs]
+             (mapv (fn [m] (if (:id m) m (assoc m :id (new-id)))) (f msgs)))))
+
+        ;; An extension claimed this input (agent_shell routing it to an ACP
+        ;; agent). It owns the turn: it sends the prompt and streams back.
+        route-to-agent!
+        (fn [res trimmed]
+          (reset! submit-lock true)
+          (.addToHistory editor trimmed)
+          ;; No add-user-msg! here — the router prefixes "❯ <text>" onto its
+          ;; own first chunk, so echoing it would print the prompt twice.
+          (let [sub (get res "subscribe")]
+            (if-not sub
+              (reset! submit-lock false)
+              (-> (js/Promise.resolve (sub ensure-ids))
+                  (.catch (fn [e] (add-error! e)))
+                  (.finally (fn []
+                              (reset! submit-lock false)
+                              (sync-pane!)))))))
+
         on-submit
         (fn [text]
           (let [trimmed (.trim text)]
             (when (pos? (count trimmed))
               ((:emit-async events) "input_submit" #js {:text trimmed})
-              (cond
-                ;; ── Steer: mid-stream follow-up ──────────────────────────
-                @streaming
-                (do (.addToHistory editor trimmed)
-                    (steer agent {:role "user" :content trimmed})
-                    (add-user-msg! (str trimmed " ↩")))
-
-                ;; ── Slash command ────────────────────────────────────────
-                (and (.startsWith trimmed "/") (not @submit-lock))
-                (do (reset! submit-lock true)
-                    (.addToHistory editor trimmed)
-                    ;; run-command! inside .then so SYNCHRONOUS throws are
-                    ;; absorbed into the same rejection path as async ones —
-                    ;; one .catch/.finally, one lock reset, nothing to drift.
-                    (-> (.then (js/Promise.resolve)
-                               (fn [] (run-command! agent trimmed update-messages!)))
-                        (.catch (fn [e] (add-error! e)))
-                        (.finally (fn [] (reset! submit-lock false)))))
-
-                ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
-                (and (not @submit-lock)
-                     (not= :not-bash (:kind (editor-bash/parse-bash-input trimmed))))
-                (let [{:keys [kind command]} (editor-bash/parse-bash-input trimmed)]
-                  (reset! submit-lock true)
-                  (.addToHistory editor trimmed)
-                  (add-user-msg! trimmed)
-                  (-> (editor-bash/run-bash! agent command)
-                      (.then (fn [result]
-                               (let [content (editor-bash/format-bash-output result)
-                                     role    (if (:blocked? result) "error" "shell")]
-                                 (update-messages!
-                                  (fn [msgs]
-                                    (conj (vec msgs)
-                                          {:role       role
-                                           :content    content
-                                           :id         (new-id)
-                                           :local-only (= kind :run-hidden)})))
-                                 ;; Inject into LLM context for !cmd (not !!cmd)
-                                 (when (= kind :run)
-                                   (swap! (:state agent) update :messages conj
-                                          {:role "user" :content (str trimmed "\n" content)}))
-                                 (reset! submit-lock false)
-                                 (sync-pane!))))
-                      (.catch (fn [e]
-                                (add-error! e)
-                                (reset! submit-lock false)))))
-
-                ;; ── $expr / $$expr — Babashka eval ───────────────────────
-                (and (not @submit-lock)
-                     (not= :not-eval (:kind (editor-eval/parse-eval-input trimmed))))
-                (let [{:keys [kind expr]} (editor-eval/parse-eval-input trimmed)]
-                  (reset! submit-lock true)
-                  (.addToHistory editor trimmed)
-                  (add-user-msg! trimmed)
-                  (-> (editor-eval/run-eval! expr)
-                      (.then (fn [result]
-                               (let [content (editor-eval/format-eval-output result)
-                                     role    (if (:unavailable? result) "error" "shell")]
-                                 (update-messages!
-                                  (fn [msgs]
-                                    (conj (vec msgs)
-                                          {:role       role
-                                           :content    content
-                                           :id         (new-id)
-                                           :local-only (= kind :eval-hidden)})))
-                                 (when (= kind :eval)
-                                   (swap! (:state agent) update :messages conj
-                                          {:role "user" :content (str trimmed "\n" content)}))
-                                 (reset! submit-lock false)
-                                 (sync-pane!))))
-                      (.catch (fn [e]
-                                (add-error! e)
-                                (reset! submit-lock false)))))
-
-                ;; ── Normal LLM prompt ────────────────────────────────────
-                (not @submit-lock)
-                (do (reset! submit-lock true)
-                    (.addToHistory editor trimmed)
-                    (add-user-msg! trimmed)
-                    (do-run! trimmed))))))]
+              ;; `input` is an INTERCEPTION hook, not a notification: a handler
+              ;; returns {handle, streaming, subscribe} to take the turn over.
+              ;; emit-collect is async, so gate on handler-count — with nothing
+              ;; subscribed (the common case) submit stays exactly as
+              ;; synchronous as it was.
+              (if (zero? ((:handler-count events) "input"))
+                (dispatch-submit! trimmed)
+                (-> ((:emit-collect events) "input" #js {:input trimmed})
+                    (.then (fn [res]
+                             (if (and res (get res "handle"))
+                               (route-to-agent! res trimmed)
+                               (dispatch-submit! trimmed))))
+                    (.catch (fn [e]
+                              ;; A broken router must not eat the user's input.
+                              (add-error! e)
+                              (dispatch-submit! trimmed))))))))]
 
     ;; Wire extension UI hooks
     (when-let [ext (.-extension-api agent)]
