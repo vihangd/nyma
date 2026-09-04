@@ -131,6 +131,16 @@
                       sells image and embedding models alongside chat ones
                       (Velona) states which is which, and nyma can only drive
                       the text ones.
+     :available-only  drop models the catalog itself flags unavailable.
+                      Defaults ON, and unlike the options above that is safe:
+                      the same declare-it-first rule applies, so a gateway that
+                      never reports `available` is untouched. Only an endpoint
+                      that explicitly says it will not run is hidden, and a
+                      picker entry that always errors helps nobody. FreeLLMAPI
+                      flags 207 of its 248 models `available: false` with
+                      reason `no_key` — models it lists but has no upstream
+                      credential for.
+
      :paid-only       drop models the catalog prices at zero on both sides.
                       A free TIER is often not the same product as the paid
                       one: Velona serves its free models only from the native
@@ -144,7 +154,8 @@
 
    Endpoint types beat id patterns where available: they're the gateway's own
    statement of what it will serve, rather than a guess from the name."
-  [{:keys [include exclude endpoint-types types paid-only]}]
+  [{:keys [include exclude endpoint-types types paid-only available-only]
+    :or   {available-only true}}]
   (let [inc-preds (mapv pattern->pred (or include []))
         exc-preds (mapv pattern->pred (or exclude []))
         wanted    (set (map str (or endpoint-types [])))
@@ -166,6 +177,7 @@
                   (nil? typ)
                   (contains? want-type (str typ)))
               (or (not paid-only) (not free?))
+              (or (not available-only) (not (false? (:available m))))
               (or (empty? inc-preds) (some (fn [p] (p s)) inc-preds))
               (not (some (fn [p] (p s)) exc-preds))))))))
 
@@ -257,7 +269,12 @@
                        (js/Array.isArray eps)        (assoc :endpoints (vec eps))
                        (and (string? typ) (seq typ)) (assoc :type typ)
                        win                           (assoc :context-window win)
-                       cst                           (assoc :cost cst))))))
+                       cst                           (assoc :cost cst)
+                       ;; `available` is a FreeLLMAPI extension, not standard
+                       ;; OpenAI. Carried only when the gateway states it, same
+                       ;; as `supported_endpoint_types` above, so the filter can
+                       ;; drop what the gateway itself says will not run.
+                       (boolean? (.-available m))    (assoc :available (.-available m)))))))
          vec)))
 
 (defn same-origin?

@@ -60,6 +60,49 @@
      {}
      tools)))
 
+(defn provider-error-detail
+  "The provider's OWN explanation for a failed call, dug out of the AI SDK
+   error. Returns a short string, or nil when there is nothing to add.
+
+   The AI SDK surfaces only the HTTP status text, so a user sees
+   `Too Many Requests` and has no idea why. The reason is in
+   `APICallError.responseBody`, which nothing read: openlux answers an
+   exhausted upstream with a 429 whose body says
+   `当前分组上游负载已饱和` (\"this group's upstream load is saturated\") — capacity,
+   not throttling, and unfixable by the retry the generic message invites.
+
+   RetryError wraps every attempt, so the body is on an inner error, not the
+   one thrown. Checks the outer error first, then the last attempt."
+  [e]
+  (let [body   (fn [x] (when x (.-responseBody x)))
+        errs   (try (vec (or (.-errors e) #js [])) (catch :default _ []))
+        raw    (or (body e)
+                   (body (.-lastError e))
+                   (some body (reverse errs)))
+        raw    (when (and (string? raw) (seq (str/trim raw))) (str/trim raw))]
+    (when raw
+      ;; Providers answer with {"error":{"message":…}} or {"message":…}; fall
+      ;; back to the raw body, which is often HTML from a proxy in front.
+      (let [msg (try
+                  (let [j (js/JSON.parse raw)]
+                    (or (some-> (.-error j) .-message)
+                        (.-message j)))
+                  (catch :default _ nil))
+            out (str (or msg raw))]
+        (when (seq out)
+          (if (> (count out) 300) (str (.slice out 0 300) "…") out))))))
+
+(defn- with-provider-detail!
+  "Append the provider's explanation to `e`'s message, in place. Mutating
+   rather than rewrapping keeps the error's type and fields intact — callers
+   downstream test for context-overflow and abort shapes."
+  [e]
+  (when-let [detail (provider-error-detail e)]
+    (let [m (str (or (.-message e) ""))]
+      (when-not (.includes m detail)
+        (try (aset e "message" (str m " — " detail)) (catch :default _ nil)))))
+  e)
+
 (defn- inject-steer-messages!
   "Move steer queue messages into agent state between tool steps."
   [agent]
@@ -357,7 +400,10 @@
                                                                    :config  st-config}))]
                                 (if (get err-result "retry")
                                   (js-await (streamText st-config))
-                                  (throw e))))))
+                                  ;; Attach the provider's own explanation
+                                  ;; before this leaves the loop — it is the
+                                  ;; only place the raw error is still in hand.
+                                  (throw (with-provider-detail! e)))))))
                         accumulated (atom "")
                         aborted     (atom false)]
 

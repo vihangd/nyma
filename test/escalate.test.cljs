@@ -450,3 +450,35 @@
 (describe "escalate:trigger-wiring"
   (fn []
     (it "a spent verify gate reaches the retry" t-verify-exhausted-triggers-retry)))
+
+;;; ─── chain-for is what /escalate status now reports ────────────────────────
+
+(describe "escalate:chain visibility"
+          (fn []
+            (it "resolves the configured chain for the active role"
+        ;; `/escalate status` printed mode/target/active/used but never the
+        ;; FAILOVER CHAIN — so a configured chain and the empty default looked
+        ;; identical, and an empty chain fails exactly like a missing one
+        ;; (rethrow, turn dies). The status line now renders this.
+                (fn []
+                  (let [cfg (esc/config settings)]
+                    (-> (expect (esc/chain-for cfg "default")) (.toEqual #js ["build" "advisor"])))))
+
+            (it "reports an empty chain when nothing is configured"
+                (fn []
+                  (let [cfg (esc/config {:roles {}})]
+                    (-> (expect (count (esc/chain-for cfg "default"))) (.toBe 0)))))
+
+            (it "falls back to the default chain for an unlisted role"
+                (fn []
+                  (let [cfg (esc/config settings)]
+                    (-> (expect (esc/chain-for cfg "some-other-role"))
+                        (.toEqual #js ["build" "advisor"])))))
+
+            (it "prefers a role-specific chain over the default"
+                (fn []
+                  (let [cfg (esc/config
+                             (assoc settings :escalate
+                                    {:fallback {:default ["build"] :plan ["advisor"]}}))]
+                    (-> (expect (esc/chain-for cfg "plan")) (.toEqual #js ["advisor"]))
+                    (-> (expect (esc/chain-for cfg "default")) (.toEqual #js ["build"])))))))

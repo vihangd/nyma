@@ -452,12 +452,26 @@
           (notify api "Escalation off for this session." "info"))
 
       (= sub "status")
-      (notify api (str "Escalation: " (mode cfg)
-                       "\nTarget: " (or (target-spec api (:to cfg)) "(unresolved)")
-                       "\nActive: " (or (:escalated-to @st) "no")
-                       "\nUsed: " (or (:escalations @st) 0) "/" (:max-per-session cfg)
-                       (when (:escalate-disarmed @st) "\nDisarmed for this session."))
-              "info")
+      ;; The failover chain is reported too. It was invisible here, so the only
+      ;; way to tell a configured chain from the empty default was to trigger a
+      ;; provider error and watch — and an empty chain fails exactly like a
+      ;; missing one (rethrow, turn dies). Resolve each entry so a chain naming
+      ;; a role that no longer exists is obvious rather than silently inert.
+      (let [role  (or (:active-role @st) "default")
+            chain (chain-for cfg role)]
+        (notify api (str "Escalation: " (mode cfg)
+                         "\nTarget: " (or (target-spec api (:to cfg)) "(unresolved)")
+                         "\nActive: " (or (:escalated-to @st) "no")
+                         "\nUsed: " (or (:escalations @st) 0) "/" (:max-per-session cfg)
+                         "\nFallback (" role "): "
+                         (if (seq chain)
+                           (str/join " -> "
+                                     (map (fn [e]
+                                            (str e " [" (or (target-spec api e) "unresolved") "]"))
+                                          chain))
+                           "(none — a provider error will end the turn)")
+                         (when (:escalate-disarmed @st) "\nDisarmed for this session."))
+                "info"))
 
       :else
       (do (swap! st dissoc :escalate-disarmed)

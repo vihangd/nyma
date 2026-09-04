@@ -1,14 +1,16 @@
 # custom-provider-relay
 
-Register any remote OpenAI- or Anthropic-compatible **gateway** as a nyma provider from
-settings, without writing code. Ships with presets for [yunwu.ai](https://yunwu.ai).
+Register any OpenAI- or Anthropic-compatible **gateway** as a nyma provider from settings,
+without writing code. Ships with presets for [yunwu.ai](https://yunwu.ai).
 
 A gateway (relay, proxy, LLM gateway) fronts *other vendors'* models under those vendors'
-own ids. That is what separates this from `custom-provider-local`, which it deliberately
-does not extend:
+own ids. "Gateway" here is about **what it serves, not where it lives** — a proxy you run on
+`localhost` belongs here too, not in `custom-provider-local` (see
+[Self-hosted gateways](#self-hosted-gateways)). That distinction is what separates the two
+extensions, and this one deliberately does not extend the other:
 
-- a missing key is a real error, not something to paper over with a placeholder — a remote
-  gateway answers a dummy key with an opaque `401`;
+- a missing key is a real error, not something to paper over with a placeholder — a gateway
+  answers a dummy key with an opaque `401`;
 - its prices are its own, so its models must not inherit the first-party rate for the same
   model id;
 - its catalogue is large and changes without notice, so the model list is **discovered**
@@ -78,6 +80,7 @@ replace it.
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `types` | *(any)* | Required `type`, any-of — keeps image/embedding models out of the picker. |
 | `paidOnly` | `false` | Drop models the catalog prices at zero on both sides. |
+| `availableOnly` | `true` | Drop models the catalog itself flags `available: false`. On by default, and safe: gateways that never report the field are untouched. Set `false` to list everything, working or not. |
 | `rescueParsing` | `false` | Recover tool calls a model emits as prose instead of `tool_calls`. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
@@ -242,6 +245,49 @@ expose the same endpoints. Point `baseUrl` at yours and both protocols work:
     "api": "anthropic", "include": ["claude"] }
 ]}
 ```
+
+## Self-hosted gateways
+
+A gateway you run yourself still belongs here, not in `custom-provider-local`. The deciding
+question is never the hostname — it is whether the endpoint serves *other vendors'* models
+under those vendors' own ids. If it does, registering it as a local provider writes bare-id
+entries that **silently overwrite the first-party vendor's metadata**, because the last
+registration wins. `unpriced: true` (which this extension always sets) is what keeps a
+gateway's `claude-sonnet-4-5` from clobbering Anthropic's.
+
+Nothing here requires `https` or a remote host: `baseUrl` is passed through verbatim, and the
+same-origin check applies only to a custom [`catalogUrl`](#catalogurl).
+
+Worked example — [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi), a self-hosted
+router that fronts ~34 free-tier providers. **Check the port it actually bound** —
+`3001` is the Docker default, but the desktop app uses `31415`; `lsof -nP -iTCP -sTCP:LISTEN |
+grep -i freellm` settles it:
+
+```json
+{ "providers": [
+  { "name":      "freellmapi",
+    "baseUrl":   "http://127.0.0.1:31415/v1",
+    "apiKeyEnv": "FREELLMAPI_API_KEY",
+    "api":       "openai-compatible",
+    "discover":  true,
+    "include":   ["/^claude-/", "/^gemini-/", "gpt-oss", "llama"],
+    "exclude":   ["preview", "vision", "embed"] }
+]}
+```
+
+Its key is mandatory (`Bearer freellmapi-<key>`, minted in its dashboard), which is the other
+reason `custom-provider-local` is wrong for it: that extension's `local-no-key` placeholder
+would turn a missing key into an opaque `401`.
+
+FreeLLMAPI discovers several hundred endpoints but flags most of them
+`available: false` (`unavailable_reason: "no_key"`) — listed, but with no upstream credential
+behind them. `availableOnly` is on by default and removes those; measured on one instance it
+takes the picker from 248 entries to 41. Use `include`/`exclude` to narrow what remains.
+
+Note that FreeLLMAPI serves some Anthropic-named ids that are **not** Anthropic models —
+`claude-opus-4-5` is listed as *"Opus slot (auto-routed to a free model)"*. nyma shows that name
+in `/model` beside the context window, and `unpriced` keeps such ids from overwriting the real
+vendor's metadata. Read the description before assuming an id means what it says.
 
 ## Audit what a gateway injects before you trust it
 

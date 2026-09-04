@@ -657,6 +657,52 @@
       (fn []
         (-> (expect ((mf/make-filter {}) {:id "a" :cost {:input 0 :output 0}})) (.toBe true))))))
 
+(describe "model-fetch/make-filter — :available-only" (fn []
+
+  ;; FreeLLMAPI flags 207 of its 248 models `available: false` with
+  ;; `unavailable_reason: "no_key"` — models it lists but has no upstream
+  ;; credential for. Listing them offers models that cannot run.
+
+  (it "drops a model the catalog itself flags unavailable"
+      (fn []
+        (-> (expect ((mf/make-filter {}) {:id "a" :available false})) (.toBe false))))
+
+  (it "keeps an available model"
+      (fn []
+        (-> (expect ((mf/make-filter {}) {:id "a" :available true})) (.toBe true))))
+
+  (it "keeps a model whose availability is unknown"
+      (fn []
+        ;; The declare-it-first rule, same as :types and :paid-only. This is
+        ;; what makes defaulting the filter ON safe: a gateway that never
+        ;; reports `available` is untouched by it.
+        (-> (expect ((mf/make-filter {}) {:id "a"})) (.toBe true))))
+
+  (it "shows everything when explicitly disabled"
+      (fn []
+        (-> (expect ((mf/make-filter {:available-only false}) {:id "a" :available false}))
+            (.toBe true))))
+
+  (it "parse-models carries :available only when the gateway states it"
+      (fn []
+        (let [ms (mf/parse-models
+                  #js {:data #js [#js {:id "up"   :available true}
+                                  #js {:id "down" :available false :unavailable_reason "no_key"}
+                                  #js {:id "quiet"}]})
+              by (into {} (map (fn [m] [(:id m) m]) ms))]
+          (-> (expect (:available (get by "up")))    (.toBe true))
+          (-> (expect (:available (get by "down")))  (.toBe false))
+          (-> (expect (contains? (get by "quiet") :available)) (.toBe false)))))
+
+  (it "leaves a gateway that reports no availability at full strength"
+      (fn []
+        ;; Regression guard for the shipped presets: openlux and velona do not
+        ;; report `available`, so turning this on by default must not shrink
+        ;; their catalogues.
+        (let [ms   (mf/parse-models #js {:data #js [#js {:id "a"} #js {:id "b"} #js {:id "c"}]})
+              kept (filterv (mf/make-filter {}) ms)]
+          (-> (expect (count kept)) (.toBe 3)))))))
+
 (describe "model-fetch/make-filter — :types" (fn []
 
   (it "keeps only the declared types when asked"

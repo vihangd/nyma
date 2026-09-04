@@ -67,12 +67,35 @@
     (catalog/rank-by-recent (catalog/list-all-models providers ctx-fn)
                             @recent-models)))
 
+(defn informative-name
+  "The catalogue's display name for `m`, but only when it says something the id
+   does not. Nil when the name is just the id prettified.
+
+   This is not decoration. A gateway can serve a model under a vendor's id that
+   is NOT that vendor's model, and the name is the only warning: FreeLLMAPI
+   lists `claude-opus-4-5` as \"Opus slot (auto-routed to a free model)\". The
+   name used to be a fallback shown only when a model had no context window or
+   price — so on any gateway reporting windows, which is most, it never
+   appeared and the user picked `claude-opus-4-5` believing it was Opus.
+
+   Comparison is on lowercase alphanumerics, so \"Qwen3 32B\" is recognised as a
+   restatement of `qwen3-32b` and suppressed."
+  [m]
+  (let [nm  (str (or (:name m) ""))
+        id  (last (.split (str (or (:spec m) (:id m) "")) "/"))
+        ;; Explicit RegExp with "g": a #"…" literal has no flags, so .replace
+        ;; would strip only the FIRST separator — "GPT-OSS 120B" stayed
+        ;; "gptoss 120b" and read as different from `gpt-oss-120b`.
+        key (fn [s] (.replace (.toLowerCase (str s)) (js/RegExp. "[^a-z0-9]+" "g") ""))]
+    (when (and (seq nm) (not= (key nm) (key id)))
+      nm)))
+
 (defn model->item
   "Catalogue entry → the {value,label,description} shape ui.select expects."
   [m]
   (let [ctx   (catalog/format-context (:context-window m))
         price (catalog/format-price (:cost m))
-        meta  (->> [ctx price] (filter seq) (str/join " · "))]
+        meta  (->> [ctx price (informative-name m)] (filter seq) (str/join " · "))]
     {:value       (:spec m)
      :label       (:spec m)
      :description (if (seq meta) meta (:name m))}))

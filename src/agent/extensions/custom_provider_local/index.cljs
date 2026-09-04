@@ -279,8 +279,13 @@
         (register-entry! api entry)
         (swap! registered conj (:name entry))
         (catch :default e
-          (d/warn "[local-provider] failed to register"
-                  (:name entry) "-" (.-message e)))))
+          ;; Two args, not four: d/warn is (msg) | (tag msg) | (tag msg extras),
+          ;; and squint throws "Invalid arity: 4" on anything else. This is the
+          ;; catch block, so that threw INSIDE the error path — replacing the
+          ;; real failure with an arity error and aborting the doseq, so every
+          ;; local provider after the failing one silently never registered.
+          (d/warn "local-provider"
+                  (str "failed to register " (:name entry) " - " (.-message e))))))
 
     ;; Cleanup
     (fn []

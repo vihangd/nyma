@@ -1,7 +1,7 @@
 (ns commands-builtins.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
-            [agent.commands.builtins :refer [register-builtins]]
+            [agent.commands.builtins :refer [register-builtins informative-name model->item]]
             [agent.commands.share :refer [messages->html messages->markdown]]
             [agent.commands.resolver :refer [resolve-command]]))
 
@@ -374,3 +374,57 @@
                                           result (resolve-command cmds "model")]
                                       (-> (expect (some? result)) (.toBe true))
                                       (-> (expect ((:handler result))) (.toBe "builtin")))))))
+
+
+;; ── /model picker: a display name that contradicts the id ────────
+;;
+;; A gateway can serve a model under a vendor's id that is NOT that vendor's
+;; model. FreeLLMAPI lists `claude-opus-4-5` as "Opus slot (auto-routed to a
+;; free model)". The name used to be shown only as a fallback when a model had
+;; no window or price, so on any gateway reporting windows — most of them — it
+;; never appeared, and the picker implied you had selected Opus.
+
+(describe "informative-name" (fn []
+
+  (it "shows a name that says something the id does not"
+      (fn []
+        (-> (expect (informative-name {:spec "freellmapi/claude-opus-4-5"
+                                       :name "Opus slot (auto-routed to a free model)"}))
+            (.toBe "Opus slot (auto-routed to a free model)"))
+        (-> (expect (informative-name {:spec "freellmapi/auto"
+                                       :name "Auto (router picks the best available model)"}))
+            (.toBeTruthy))))
+
+  (it "suppresses a name that is just the id prettified"
+      (fn []
+        (-> (expect (informative-name {:spec "freellmapi/qwen3-32b" :name "Qwen3 32B"})) (.toBeNil))
+        ;; Regression guard: a non-global regex stripped only the FIRST
+        ;; separator, so "GPT-OSS 120B" normalised to "gptoss 120b" and read as
+        ;; different from `gpt-oss-120b`.
+        (-> (expect (informative-name {:spec "freellmapi/gpt-oss-120b" :name "GPT-OSS 120B"})) (.toBeNil))
+        (-> (expect (informative-name {:spec "freellmapi/deepseek-v4-flash" :name "DeepSeek V4 Flash"})) (.toBeNil))
+        (-> (expect (informative-name {:spec "freellmapi/mistral-7b-instruct-v0.3"
+                                       :name "Mistral 7B Instruct v0.3"})) (.toBeNil))))
+
+  (it "handles a missing name and compares against the id, not the provider"
+      (fn []
+        (-> (expect (informative-name {:spec "openlux/glm-5.3"})) (.toBeNil))
+        (-> (expect (informative-name {:spec "openlux/glm-5.3" :name "glm-5.3"})) (.toBeNil))))))
+
+(describe "model->item" (fn []
+
+  (it "appends an informative name after the context window"
+      (fn []
+        (let [d (:description (model->item {:spec "freellmapi/claude-opus-4-5"
+                                            :name "Opus slot (auto-routed to a free model)"
+                                            :context-window 1048576}))]
+          (-> (expect (.includes d "Opus slot")) (.toBe true))
+          ;; The metadata must survive alongside it, not be replaced.
+          (-> (expect (.includes d "·")) (.toBe true)))))
+
+  (it "does not repeat a redundant name after the context window"
+      (fn []
+        (let [d (:description (model->item {:spec "freellmapi/qwen3-32b"
+                                            :name "Qwen3 32B"
+                                            :context-window 32768}))]
+          (-> (expect (.includes d "Qwen3 32B")) (.toBe false)))))))

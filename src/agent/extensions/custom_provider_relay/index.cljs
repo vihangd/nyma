@@ -1,13 +1,16 @@
 (ns agent.extensions.custom-provider-relay.index
-  "Register any remote OpenAI- or Anthropic-compatible gateway as a provider,
-   without writing code.
+  "Register any OpenAI- or Anthropic-compatible gateway as a provider, without
+   writing code.
 
    A gateway (relay, proxy, LLM gateway) fronts OTHER vendors' models under
-   those vendors' own ids. That is the difference from `custom_provider_local`,
-   which this deliberately does not extend:
+   those vendors' own ids. That is about WHAT IT SERVES, not where it lives: a
+   proxy on localhost is still a gateway, and `baseUrl` is passed through
+   verbatim — nothing here requires https or a remote host. The distinction is
+   the difference from `custom_provider_local`, which this deliberately does
+   not extend:
 
      - a missing key is a real error here, not something to paper over with a
-       placeholder — a remote gateway answers a dummy key with an opaque 401;
+       placeholder — a gateway answers a dummy key with an opaque 401;
      - its prices are its own, so its models must not inherit the first-party
        rate for the same model id (see agent.pricing/unpriced-providers);
      - its catalogue is large and changes without notice, so the model list is
@@ -57,9 +60,19 @@
   ;; yunwu migrated to OpenLux in Aug 2026. Every endpoint on the old host now
   ;; answers 403 with "Your account has been migrated to OpenLux. Please sign in
   ;; at https://api.openlux.ai"; the new host speaks the same New-API dialect
-  ;; (same error shape) but does NOT accept the old key — it answers 401
-  ;; "无效的令牌". The provider keeps the `yunwu` name so existing settings,
-  ;; credentials and /model specs keep working; only the host moved.
+  ;; (same error shape). The provider keeps the `yunwu` name so existing
+  ;; settings, credentials and /model specs keep working; only the host moved.
+  ;;
+  ;; 2026-09: a `yunwu` key DOES authenticate against the new host — /v1/models
+  ;; answers 200 for it. This previously said the old key was rejected with a
+  ;; 401 "无效的令牌"; that is no longer true, and `credential-fallbacks` is
+  ;; what makes one /login cover both names.
+  ;;
+  ;; Debugging a 429 here: openlux answers an exhausted upstream with
+  ;; `429 当前分组上游负载已饱和` ("this group's upstream load is saturated")
+  ;; and NO retry-after header. That is capacity, not throttling — retrying
+  ;; cannot clear it, and `type` reads `unknown_error` rather than
+  ;; `rate_limit_error`, so only the status code identifies it.
   [{:name      "openlux"
     :base-url  "https://api.openlux.ai/v1"
     :api-key-env "OPENLUX_API_KEY"
@@ -175,6 +188,21 @@
       (get e camel)
       (get e kebab)))
 
+(defn- entry-get-bool
+  "`entry-get` for a flag, where a literal `false` is a VALUE and not an
+   absence. `entry-get` cannot express that: it chains candidates with `or`,
+   which collapses `false` into the next one and finally into nil — so a
+   `\"discover\": false` in settings read as \"not set\" and defaulted back to
+   true. Returns `default` only when the key is genuinely absent."
+  [e camel kebab default]
+  (let [cands [(get e (keyword kebab))
+               (when (object? e) (aget e camel))
+               (when (object? e) (aget e kebab))
+               (get e camel)
+               (get e kebab)]
+        v     (first (remove nil? cands))]
+    (if (nil? v) default (boolean v))))
+
 (defn- ->vec [x]
   (cond
     (nil? x)              []
@@ -190,16 +218,21 @@
    :credential-name (entry-get e "credentialName" "credential-name")
    :credential-fallbacks (or (entry-get e "credentialFallbacks" "credential-fallbacks") [])
    :api         (or (entry-get e "api" "api") "openai-compatible")
-   :discover    (let [v (entry-get e "discover" "discover")]
-                  ;; Absent means "yes" — a gateway's whole point is that we
-                  ;; don't know its catalogue.
-                  (if (nil? v) true (boolean v)))
+   ;; Absent means "yes" — a gateway's whole point is that we don't know its
+   ;; catalogue. entry-get-bool, not entry-get: the latter chains with `or`, so
+   ;; an explicit `"discover": false` was collapsed to nil and turned back on.
+   :discover    (entry-get-bool e "discover" "discover" true)
    :include     (->vec (entry-get e "include" "include"))
    :exclude     (->vec (entry-get e "exclude" "exclude"))
    :endpoint-types (->vec (entry-get e "endpointTypes" "endpoint-types"))
    :types       (->vec (entry-get e "types" "types"))
-   :paid-only   (boolean (entry-get e "paidOnly" "paid-only"))
-   :rescue-parsing (boolean (entry-get e "rescueParsing" "rescue-parsing"))
+   :paid-only   (entry-get-bool e "paidOnly" "paid-only" false)
+   ;; Defaults TRUE, unlike the filters above: a gateway that flags a model
+   ;; unavailable is stating it will not run, and make-filter ignores the key
+   ;; on gateways that never report it. Set false to see everything a gateway
+   ;; lists, working or not.
+   :available-only (entry-get-bool e "availableOnly" "available-only" true)
+   :rescue-parsing (entry-get-bool e "rescueParsing" "rescue-parsing" false)
    ;; Absolute URL of a richer catalog than <baseUrl>/models. See
    ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
    :catalog-url (entry-get e "catalogUrl" "catalog-url")
