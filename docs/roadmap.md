@@ -361,6 +361,73 @@ A new mode (`/spec drive [name]` or `/spec start --orchestrated`) that actively 
 
 **What's NOT planned:** auto-applying changes without per-task user review, parallel task execution, or any sub-agent / worktree integration. Those are independent ideas (extension-ideas #22, #30); /spec drive is sequential and stays inside the current agent loop.
 
+### 6b. Make the phase model do something (phase-tagged tasks)
+
+**The finding (2026-09-04).** The phase currently affects exactly one thing —
+which role is bound — and it changes almost never. Three facts, each from the
+code as it stands after the phase loop shipped:
+
+1. `continue-prompt` is one constant string in all four phases (*"do the NEXT
+   unchecked task"*). Deliberately constant: a varying prompt costs ~2x on a
+   cold cache, measured.
+2. `build-spec-context` never tells the model which phase it is in, and
+   `spec_phase_enter` has no consumer outside `spec_driven`.
+3. `tasks.md` is a flat ordered checklist — the import seed asks for exactly
+   that — so no task belongs to a phase.
+
+Combined with `decide` returning `:continue` for `:in-progress`, a phase
+advances only at **100%** completion. So the entry phase is not the first of
+four, it is the ONLY one for the whole run, followed by three instant advances
+through phases with nothing left to do. `routed` is not a plan → execute →
+verify → ship pipeline; it is "pick one role, then say the other names on the
+way out".
+
+Entering at `execute` for imported plans (shipped) makes the common path cheap,
+but it does not make the model real.
+
+**Design sketch.** Sections in `tasks.md`, one per phase:
+
+```markdown
+## execute
+- [ ] Add TokenStore in src/auth/store.ts
+- [ ] Wire the callback in src/auth/routes.ts
+
+## verify
+- [ ] Review the store for per-request scope
+```
+
+- the import/decomposition seed emits the sections
+- `parse-tasks` attributes each task to the heading above it
+- `progress` is computed per phase; `decide` advances when a SECTION completes
+- **fallback is today's behaviour**: an unsectioned file means every task
+  belongs to the current phase, so a cheap model that ignores the format
+  degrades rather than breaks
+
+Only in this shape does `deep` actually review what `fast` wrote, which is the
+thing the profile table has always implied.
+
+**Caution before building it.** `verify_gate` already holds the loop when the
+build is red, in every phase. So a `verify` phase is not "run the tests" — it
+is "have a better model review what the cheap one wrote". Worth having, but a
+different claim, and worth being explicit about rather than letting the phase
+name imply the gate.
+
+**When to do it:** after a captured plan has been run end-to-end on a cheap
+model at least once. Building a richer phase model on top of one just found to
+be inert is the wrong order, and the cold-execution gate (can a cheap model
+follow a captured plan at all?) is still unrun.
+
+### 6c. Or delete phases entirely
+
+The honest fallback if 6b turns out to be more ceremony than value on real
+work: a profile becomes a single role plus the `verify_gate` escalation that
+already exists. Deletes the phase order, `set-phase!`, `entry-phase`, the
+advance branch and the phase segment of the status line.
+
+Worth keeping on the table explicitly, because the alternative failure mode is
+carrying a four-phase vocabulary that only ever binds one role — which is what
+shipped, and what nobody noticed until the roles were traced by hand.
+
 ---
 
 ## 7. Deferred ACP improvements (`agent_shell` extension)

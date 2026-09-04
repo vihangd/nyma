@@ -138,6 +138,16 @@ It hides entirely when no spec is active. The `decomposing…` state matters:
 begin until the next turn ends — without the segment that gap looks like
 nothing happening. A notice also fires when the tasks land and the loop arms.
 
+**Where the loop enters.** `/spec import --run` arms at `execute`, not at the
+first phase: the plan arrived from outside and the decomposition has already
+run, so a planning phase has nothing to do — and because a phase advances only
+when *every* task is checked, entering at `plan` would run the whole task list
+under the planning role. `/spec new` still enters at the first phase, where the
+planning genuinely has not happened. A phase you set yourself always wins, and
+the entry point is a dial: `settings#spec.loop.import-phase`, default
+`execute`. Naming a phase the profile does not define falls back to the first
+and says so.
+
 The pending flag is mirrored to `.nyma/ext-state/`, but a restart deliberately
 clears it rather than restoring it: the queued seed lives in the agent's
 in-memory follow-queue and dies with the process, so a restored `pending` would

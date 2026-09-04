@@ -479,11 +479,14 @@
         (-> (expect (boolean (or (:spec-loop-armed @state)
                                  (get @state "spec-loop-armed"))))
             (.toBe true))
-        ;; The assertion this file exists for: armed AND bound.
+        ;; Armed AND bound — and bound at `execute`, not `plan`. The plan
+        ;; arrived from outside and the decomposition has already run, so a
+        ;; planning phase has nothing to do; entering at it would run the whole
+        ;; task list under the planning role, which is the expensive one.
         (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
-            (.toBe "plan"))
+            (.toBe "execute"))
         (-> (expect (or (:active-role @state) (get @state "active-role")))
-            (.toBe "advisor"))))))
+            (.toBe "fast"))))))
 
 (defn test-promotion-respects-an-explicit-phase []
   (with-tmp
@@ -516,7 +519,7 @@
           (-> (expect (.includes all "decomposition landed")) (.toBe true))
           (-> (expect (.includes all "2 tasks")) (.toBe true))
           ;; Silence about which role it bound is how gap 1 stayed invisible.
-          (-> (expect (.includes all "role: advisor")) (.toBe true)))))))
+          (-> (expect (.includes all "role: fast")) (.toBe true)))))))
 
 (describe "arming the loop binds a role"
           (fn []

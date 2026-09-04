@@ -288,3 +288,62 @@
           (-> (expect (show {:spec "auth" :phase "plan" :role "fast"
                              :progress {:total 11 :checked 0}}))
               (.toBe "⏵ auth · plan · 0/11")))))))
+
+;;; ─── Entry phase ───────────────────────────────────────────────────────────
+;;
+;; `/spec import --run` used to enter at the first phase, which under `routed`
+;; is `plan`/`advisor`. But `decide` returns :continue for :in-progress, so a
+;; phase advances only at 100% completion — meaning the entry phase is not the
+;; first of four, it is the ONLY one for the whole run. Entering at `plan` for
+;; a plan that arrived from Claude Code ran every task under the planning role.
+
+(describe "phases/entry-phase" (fn []
+
+  (it "takes the requested phase when the profile has it"
+      (fn []
+        (let [r (p/entry-phase {:wanted "execute"
+                                     :order ["plan" "execute" "verify" "ship"]})]
+          (-> (expect (:phase r)) (.toBe "execute"))
+          (-> (expect (:fell-back? r)) (.toBe false)))))
+
+  (it "lets an explicit phase win over the request"
+      (fn []
+        ;; Choosing a phase before the decomposition lands is deliberate;
+        ;; promotion must not overwrite it.
+        (let [r (p/entry-phase {:current "verify" :wanted "execute"
+                                     :order ["plan" "execute" "verify" "ship"]})]
+          (-> (expect (:phase r)) (.toBe "verify"))
+          (-> (expect (:fell-back? r)) (.toBe false)))))
+
+  (it "falls back to the first phase and SAYS SO when the profile lacks it"
+      (fn []
+        ;; A profile may define any phase set. Naming one it does not contain
+        ;; would strand the loop on decide's phase-not-in-profile guard.
+        (let [r (p/entry-phase {:wanted "execute" :order ["design" "build"]})]
+          (-> (expect (:phase r)) (.toBe "design"))
+          (-> (expect (:fell-back? r)) (.toBe true))
+          (-> (expect (.includes (:reason r) "not in this profile")) (.toBe true)))))
+
+  (it "does not call it a fallback when nothing was requested"
+      (fn []
+        (let [r (p/entry-phase {:order ["plan" "execute"]})]
+          (-> (expect (:phase r)) (.toBe "plan"))
+          (-> (expect (:fell-back? r)) (.toBe false))
+          (-> (expect (:reason r)) (.toBeNil)))))
+
+  (it "survives a profile with no phases at all"
+      (fn []
+        (let [r (p/entry-phase {:wanted "execute" :order []})]
+          (-> (expect (:phase r)) (.toBeNil))
+          (-> (expect (:fell-back? r)) (.toBe true)))))))
+
+(describe "phases/config import-phase" (fn []
+
+  (it "defaults to execute"
+      (fn []
+        (-> (expect (:import-phase (:loop (p/config nil)))) (.toBe "execute"))))
+
+  (it "is settings-driven, like every other loop dial"
+      (fn []
+        (let [cfg (p/config #js {"spec" #js {"loop" #js {"import-phase" "plan"}}})]
+          (-> (expect (:import-phase (:loop cfg))) (.toBe "plan")))))))

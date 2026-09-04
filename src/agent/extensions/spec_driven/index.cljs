@@ -1815,10 +1815,20 @@
                 ;; profile did nothing. The phase is the same default the loop
                 ;; itself computes, so this changes only the binding.
                 (let [cfg   (phases/config (safe-settings))
-                      order (phases/phase-order (get (:profiles cfg) (get-profile)))]
-                  (set-phase! (or (get-phase) (first order))
-                              (fn [m] (when-let [ui (.-ui api)]
-                                        (when (.-notify ui) (.notify ui m "warning"))))))
+                      order (phases/phase-order (get (:profiles cfg) (get-profile)))
+                      warn  (fn [m] (when-let [ui (.-ui api)]
+                                      (when (.-notify ui) (.notify ui m "warning"))))
+                      ;; Promotion only ever follows `/spec import --run`, so
+                      ;; the plan came from outside and the planning phase has
+                      ;; nothing left to do — entering at it would run the whole
+                      ;; task list under the planning role. An explicit phase
+                      ;; still wins.
+                      e     (phases/entry-phase
+                             {:current (get-phase)
+                              :wanted  (:import-phase (:loop cfg))
+                              :order   order})]
+                  (when (:reason e) (warn (str "spec: " (:reason e))))
+                  (set-phase! (:phase e) warn))
                 ;; Say so. The wait between `--run` and the loop starting is
                 ;; one full turn of decomposition, and silence there reads as
                 ;; nothing having happened.

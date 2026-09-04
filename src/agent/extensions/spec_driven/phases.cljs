@@ -61,7 +61,13 @@
   ;; said in chat. Ralph's premise is that ALL intent lives in the files; the
   ;; moment someone adds "…but skip the OAuth part" in conversation, that
   ;; premise is false and the instruction is gone.
-  {:mode "off" :profile "routed" :max-iterations 25 :fresh-context false})
+  ;; `import-phase` is where the loop enters when the plan arrived from
+  ;; OUTSIDE — `/spec import --run`, i.e. /plan-capture. `/spec new` still
+  ;; enters at the first phase, because there the planning has not happened.
+  ;; Settings-driven rather than hardcoded: the phase set is user-definable, so
+  ;; the entry point has to be too.
+  {:mode "off" :profile "routed" :max-iterations 25 :fresh-context false
+   :import-phase "execute"})
 
 ;; ── Config ───────────────────────────────────────────────────────
 
@@ -93,7 +99,34 @@
                         (number? (get lp "max-iterations"))
                         (assoc :max-iterations (get lp "max-iterations"))
                         (some? (get lp "fresh-context"))
-                        (assoc :fresh-context (boolean (get lp "fresh-context")))))}))
+                        (assoc :fresh-context (boolean (get lp "fresh-context")))
+                        (some? (get lp "import-phase"))
+                        (assoc :import-phase (str (get lp "import-phase")))))}))
+
+(defn entry-phase
+  "Which phase the loop should enter, and whether that is what was asked for.
+
+   Returns {:phase p :fell-back? bool :reason s}. An explicit phase set by the
+   user always wins — choosing one before the decomposition lands is a
+   deliberate act and promotion must not overwrite it.
+
+   `wanted` is only a request: a profile is free to define any phase set, and
+   naming one it does not contain would strand the loop on `decide`'s
+   phase-not-in-profile guard. Falling back silently is the trap this ns exists
+   to avoid, so the caller is told."
+  [{:keys [current wanted order]}]
+  (let [order (vec (or order []))
+        has?  (fn [p] (some (fn [x] (= x (str p))) order))]
+    (cond
+      (and current (has? current)) {:phase (str current) :fell-back? false}
+      (and wanted (has? wanted))   {:phase (str wanted)  :fell-back? false}
+      (seq order)
+      {:phase (first order) :fell-back? (boolean (seq (str (or wanted ""))))
+       :reason (when (seq (str (or wanted "")))
+                 (str "entry phase \"" wanted "\" is not in this profile ("
+                      (str/join ", " order) ") — starting at \"" (first order) "\""))}
+      :else {:phase nil :fell-back? true
+             :reason "profile defines no phases"})))
 
 (defn phase-order
   "Phases in order for `profile-map`, preserving `default-phase-order` for the
