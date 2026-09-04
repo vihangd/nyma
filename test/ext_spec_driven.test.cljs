@@ -8,6 +8,7 @@
             ["node:fs"   :as fs]
             ["node:os"   :as os]
             ["node:path" :as path]
+            [clojure.string :as str]
             ["./agent/extensions/spec_driven/index.mjs" :as spec]))
 
 ;; ── Helpers ─────────────────────────────────────────────────────
@@ -882,3 +883,456 @@
                         (-> (expect (.includes (:error r) "already exists")) (.toBe true)))
                       (finally
                         (fs/rmSync tmp #js {:recursive true :force true}))))))))
+
+;; ── Activation-time behaviour: persistence + agent-driven task hooks ──
+;;
+;; Neither surface had any coverage. Both are prerequisites for a phase
+;; loop: it must survive a restart, and it must be able to see the agent
+;; completing a task rather than only the user typing /spec done.
+
+(defn- fake-api [state-atom sink handlers cwd]
+  #js {:getState      (fn [] @state-atom)
+       :__state_atom  state-atom
+       :state         (let [store (atom {})]
+                        #js {:get    (fn [k] (get @store k))
+                             :set    (fn [k v] (swap! store assoc k v))
+                             :delete (fn [k] (swap! store dissoc k))
+                             :keys   (fn [] (clj->js (vec (keys @store))))
+                             :clear  (fn [] (reset! store {}))})
+       :events        #js {:emit (fn [n d] (swap! sink conj [n d]))}
+       :on            (fn [e h] (swap! handlers update e (fnil conj []) h))
+       :off           (fn [_e _h] nil)
+       :registerCommand   (fn [_n _c] nil)
+       :unregisterCommand (fn [_n] nil)
+       :sendUserMessage   (fn [_m _o] nil)
+       :ui            #js {:notify (fn [_m] nil)}
+       :__cwd         cwd})
+
+(defn- seed-spec! [dir]
+  (let [d (path/join dir ".specify" "specs" "auth")]
+    (fs/mkdirSync d #js {:recursive true})
+    (fs/writeFileSync (path/join d "spec.md")  "# Spec\nauth\n")
+    (fs/writeFileSync (path/join d "plan.md")  "# Plan\nplan\n")
+    (fs/writeFileSync (path/join d "tasks.md") "# Tasks\n- [ ] first task\n- [ ] second task\n")
+    (path/join d "tasks.md")))
+
+(describe "spec-driven activation" (fn []
+
+  (it "emits spec_task_complete when the AGENT edits tasks.md, not just /spec done"
+      (fn []
+        (let [tmp   (mktmp)
+              tasks (seed-spec! tmp)
+              prev  (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [st (atom {:active-spec "auth"}) sink (atom []) hs (atom {})
+                  off ((.-default spec) (fake-api st sink hs tmp))
+                  fire (fn [ev]
+                         (doseq [h (get @hs ev)] (h #js {:toolName "edit"
+                                                         :args #js {:path tasks}} #js {})))]
+              (fire "tool_execution_start")
+              (fs/writeFileSync tasks "# Tasks\n- [x] first task\n- [ ] second task\n")
+              (fire "tool_execution_end")
+              (let [emitted (filterv (fn [[n _]] (= n "spec_task_complete")) @sink)]
+                (-> (expect (count emitted)) (.toBe 1))
+                (-> (expect (.-task (second (first emitted)))) (.toBe "first task"))
+                (-> (expect (.-source (second (first emitted)))) (.toBe "agent")))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "matches the tasks file whether the tool passes a relative or absolute path"
+      (fn []
+        ;; discover-specs builds absolute paths from process.cwd; the edit tool
+        ;; is routinely handed a relative one. Comparing raw strings never matched.
+        (let [tmp  (mktmp)
+              _    (seed-spec! tmp)
+              prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [rel  ".specify/specs/auth/tasks.md"
+                  st (atom {:active-spec "auth"}) sink (atom []) hs (atom {})
+                  off ((.-default spec) (fake-api st sink hs tmp))
+                  fire (fn [ev] (doseq [h (get @hs ev)]
+                                  (h #js {:toolName "edit" :args #js {:path rel}} #js {})))]
+              (fire "tool_execution_start")
+              (fs/writeFileSync rel "# Tasks\n- [x] first task\n- [x] second task\n")
+              (fire "tool_execution_end")
+              (-> (expect (count (filterv (fn [[n _]] (= n "spec_task_complete")) @sink)))
+                  (.toBe 2))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "restores active-spec from persistent state on a later activation"
+      (fn []
+        (let [tmp  (mktmp) _ (seed-spec! tmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [shared (atom {}) sink (atom []) hs (atom {})
+                  api-of (fn [st]
+                           (doto (fake-api st sink hs tmp)
+                             (aset "state" #js {:get    (fn [k] (get @shared k))
+                                                :set    (fn [k v] (swap! shared assoc k v))
+                                                :delete (fn [k] (swap! shared dissoc k))
+                                                :keys   (fn [] (clj->js (vec (keys @shared))))
+                                                :clear  (fn [] (reset! shared {}))})))]
+              (swap! shared assoc "active-spec" "auth")
+              (let [st2 (atom {}) off ((.-default spec) (api-of st2))]
+                (-> (expect (:active-spec @st2)) (.toBe "auth"))
+                (when off (off))))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "does not resurrect a spec that was deleted between sessions"
+      (fn []
+        (let [tmp (mktmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [shared (atom {"active-spec" "ghost"}) sink (atom []) hs (atom {})
+                  api (doto (fake-api (atom {}) sink hs tmp)
+                        (aset "state" #js {:get    (fn [k] (get @shared k))
+                                           :set    (fn [k v] (swap! shared assoc k v))
+                                           :delete (fn [k] (swap! shared dissoc k))
+                                           :keys   (fn [] (clj->js (vec (keys @shared))))
+                                           :clear  (fn [] (reset! shared {}))}))
+                  st  (atom {})]
+              (aset api "getState" (fn [] @st))
+              (aset api "__state_atom" st)
+              (let [off ((.-default spec) api)]
+                (-> (expect (:active-spec @st)) (.toBeUndefined))
+                (-> (expect (get @shared "active-spec")) (.toBeUndefined))
+                (when off (off))))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))))
+
+;; ── /spec phase and /spec profile ────────────────────────────────
+;;
+;; The dispatcher had no test coverage at all. These bind a role, which is the
+;; whole point: a phase IS a role (model + allowed-tools + permissions).
+
+(defn- cmd-harness []
+  (let [notes (atom []) st (atom {}) shared (atom {}) cmd (atom nil)
+        api #js {:getState     (fn [] @st)
+                 :__state_atom st
+                 :getSettings  (fn [] #js {:roles #js {:fast #js {} :deep #js {}
+                                                        :advisor #js {} :commit #js {}}})
+                 :state        #js {:get    (fn [k] (get @shared k))
+                                    :set    (fn [k v] (swap! shared assoc k v))
+                                    :delete (fn [k] (swap! shared dissoc k))
+                                    :keys   (fn [] (clj->js (vec (keys @shared))))
+                                    :clear  (fn [] (reset! shared {}))}
+                 :events       #js {:emit (fn [_n _d] nil)}
+                 :on           (fn [_e _h] nil)
+                 :off          (fn [_e _h] nil)
+                 :registerCommand   (fn [_n c] (reset! cmd (.-handler c)))
+                 :unregisterCommand (fn [_n] nil)
+                 :sendUserMessage   (fn [_m _o] nil)
+                 :ui           #js {:notify (fn [m] (swap! notes conj m))}}
+        off ((.-default spec) api)]
+    {:run (fn [& args] (reset! notes []) (@cmd (vec args)
+                                               #js {:ui #js {:notify (fn [m] (swap! notes conj m))}})
+            (str/join "\n" @notes))
+     :state st :off off}))
+
+(describe "/spec phase + /spec profile" (fn []
+
+  (it "binds :active-role when a phase is set, and re-binds on profile switch"
+      (fn []
+        (let [tmp (mktmp) _ (seed-spec! tmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [{:keys [run state off]} (cmd-harness)]
+              (run "start" "auth" "--force")
+              ;; routed: execute → build
+              (run "phase" "execute")
+              (-> (expect (:active-role @state)) (.toBe "fast"))
+              ;; thrifty: execute → default. Switching re-binds immediately,
+              ;; not only at the next transition.
+              (run "profile" "thrifty")
+              (-> (expect (:active-role @state)) (.toBe "default"))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "rejects an unknown phase and an unknown profile without changing state"
+      (fn []
+        (let [tmp (mktmp) _ (seed-spec! tmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [{:keys [run state off]} (cmd-harness)]
+              (run "start" "auth" "--force")
+              (run "phase" "execute")
+              (let [before (:active-role @state)
+                    out    (run "phase" "bogus")]
+                (-> (expect (.includes out "Unknown phase")) (.toBe true))
+                (-> (expect (:active-role @state)) (.toBe before)))
+              (-> (expect (.includes (run "profile" "nope") "Unknown profile")) (.toBe true))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "refuses phase commands without an active spec"
+      (fn []
+        (let [tmp (mktmp) _ (seed-spec! tmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [{:keys [run off]} (cmd-harness)]
+              (-> (expect (.includes (run "phase") "No active spec")) (.toBe true))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))
+
+  (it "persists phase across activations and clears it on /spec end"
+      (fn []
+        (let [tmp (mktmp) _ (seed-spec! tmp) prev (js/process.cwd)]
+          (try
+            (.chdir js/process tmp)
+            (let [{:keys [run state off]} (cmd-harness)]
+              (run "start" "auth" "--force")
+              (run "phase" "verify")
+              (-> (expect (:spec-phase @state)) (.toBe "verify"))
+              (run "end")
+              (-> (expect (:spec-phase @state)) (.toBeUndefined))
+              (when off (off)))
+            (finally
+              (.chdir js/process prev)
+              (try (fs/rmSync tmp #js {:recursive true :force true}) (catch :default _ nil)))))))))
+
+;; ── /spec run: the phase loop ────────────────────────────────────
+;;
+;; `on-agent-end` had no coverage at all before this. Each case is one of the
+;; guards that keeps a broken or runaway run from looking like a finished one.
+
+(defn- loop-harness [& [settings]]
+  (let [notes (atom []) sent (atom []) st (atom {:messages ["m1" "m2" "m3"]}) shared (atom {})
+        hs (atom {}) cmd (atom nil)
+        api #js {:getState     (fn [] @st)
+                 :__state_atom st
+                 :getSettings  (fn [] (or settings
+                                          #js {:roles #js {:fast #js {} :deep #js {}
+                                                           :advisor #js {} :commit #js {}}}))
+                 :state        #js {:get    (fn [k] (get @shared k))
+                                    :set    (fn [k v] (swap! shared assoc k v))
+                                    :delete (fn [k] (swap! shared dissoc k))
+                                    :keys   (fn [] (clj->js (vec (keys @shared))))
+                                    :clear  (fn [] (reset! shared {}))}
+                 :events       #js {:emit (fn [_n _d] nil)}
+                 :on           (fn [e h] (swap! hs update e (fnil conj []) h))
+                 :off          (fn [_e _h] nil)
+                 :registerCommand   (fn [_n c] (reset! cmd (.-handler c)))
+                 :unregisterCommand (fn [_n] nil)
+                 :sendUserMessage   (fn [m _o] (swap! sent conj m))
+                 :ui           #js {:notify (fn [m & _] (swap! notes conj m))}}
+        off ((.-default spec) api)]
+    {:run  (fn [& args] (reset! notes [])
+             (@cmd (vec args) #js {:ui #js {:notify (fn [m & _] (swap! notes conj m))}})
+             (str/join "\n" @notes))
+     :end  (fn [] (reset! sent []) (reset! notes [])
+             (doseq [h (get @hs "agent_end")] (h #js {:finishReason "stop"}))
+             {:sent (count @sent) :notes (str/join " " @notes) :last (last @sent)})
+     :fire (fn [ev] (doseq [h (get @hs ev)] (h #js {})))
+     :state st :off off}))
+
+(defn- with-tasks [body]
+  (let [tmp (mktmp) tasks (seed-spec! tmp) prev (js/process.cwd)]
+    (try (.chdir js/process tmp) (body tasks)
+         (finally (.chdir js/process prev)
+                  (try (fs/rmSync tmp #js {:recursive true :force true})
+                       (catch :default _ nil))))))
+
+(describe "/spec run — phase loop" (fn []
+
+  (it "does nothing until armed, then continues while tasks remain"
+      (fn []
+        (with-tasks
+          (fn [_tasks]
+            (let [{:keys [run end off]} (loop-harness)]
+              (run "start" "auth" "--force")
+              (-> (expect (:sent (end))) (.toBe 0))       ; never self-arms
+              (run "run")
+              (-> (expect (:sent (end))) (.toBe 1))
+              (when off (off)))))))
+
+  (it "sends a BYTE-IDENTICAL follow-up each iteration"
+      (fn []
+        ;; Measured: an identical prompt keeps the provider cache (3648/3678
+        ;; tokens); varying it drops to zero and costs ~2x a cold call. The task
+        ;; comes from the file, never from this string.
+        (with-tasks
+          (fn [_tasks]
+            (let [{:keys [run end off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (let [a (:last (end)) b (:last (end)) c (:last (end))]
+                (-> (expect a) (.toBe b))
+                (-> (expect b) (.toBe c)))
+              (when off (off)))))))
+
+  (it "advances the phase and rebinds the role when every task is checked"
+      (fn []
+        (with-tasks
+          (fn [tasks]
+            (let [{:keys [run end state off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (fs/writeFileSync tasks "# Tasks\n- [x] first task\n- [x] second task\n")
+              (let [r (end)]
+                (-> (expect (.includes (:notes r) "execute")) (.toBe true))
+                (-> (expect (:spec-phase @state)) (.toBe "execute"))
+                (-> (expect (:active-role @state)) (.toBe "fast")))
+              (when off (off)))))))
+
+  (it "holds while verify is red, then resumes when it goes green"
+      (fn []
+        ;; Holding rather than stopping is the point: disarming on a red build
+        ;; would mean the loop never resumes once verify_gate fixes it.
+        (with-tasks
+          (fn [tasks]
+            (let [{:keys [run end fire state off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (fs/writeFileSync tasks "# Tasks\n- [x] first task\n- [x] second task\n")
+              (fire "small-model/verify-fail")
+              (-> (expect (:sent (end))) (.toBe 0))
+              (-> (expect (:spec-loop-armed @state)) (.toBe true))   ; still armed
+              (fire "small-model/verify-pass")
+              (-> (expect (:sent (end))) (.toBe 1))
+              (when off (off)))))))
+
+  (it "refuses to treat a tasks file with no checkboxes as complete"
+      (fn []
+        (with-tasks
+          (fn [tasks]
+            (let [{:keys [run end off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (fs/writeFileSync tasks "# Tasks\njust prose now\n")
+              (let [r (end)]
+                (-> (expect (:sent r)) (.toBe 0))
+                (-> (expect (.includes (:notes r) "refusing")) (.toBe true)))
+              (when off (off)))))))
+
+  (it "/spec run off disarms mid-flight"
+      (fn []
+        (with-tasks
+          (fn [_tasks]
+            (let [{:keys [run end off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (-> (expect (:sent (end))) (.toBe 1))
+              (run "run" "off")
+              (-> (expect (:sent (end))) (.toBe 0))
+              (when off (off)))))))
+
+  (it "stops at the iteration cap instead of looping forever"
+      (fn []
+        ;; The follow-queue drain upstream is an unbounded recur
+        ;; (loop.cljs:586-594) — this cap is the only thing that applies.
+        (with-tasks
+          (fn [_tasks]
+            (let [{:keys [run end off]}
+                  (loop-harness #js {:roles #js {:fast #js {} :advisor #js {}}
+                                     :spec  #js {:loop #js {:max-iterations 2}}})]
+              (run "start" "auth" "--force") (run "run")
+              (-> (expect (:sent (end))) (.toBe 1))
+              (-> (expect (:sent (end))) (.toBe 1))
+              (let [r (end)]                                  ; 3rd: cap reached
+                (-> (expect (:sent r)) (.toBe 0))
+                (-> (expect (.includes (:notes r) "cap")) (.toBe true)))
+              (when off (off)))))))))
+
+;; ── fresh-context (the Ralph reset) ──────────────────────────────
+
+(describe "/spec run --fresh" (fn []
+
+  (it "preserves the conversation by default"
+      (fn []
+        ;; OFF by default on purpose: clearing discards anything the user said
+        ;; in chat, and Ralph's premise (all intent lives in the files) breaks
+        ;; the moment someone adds an instruction in conversation.
+        (with-tasks
+          (fn [_t]
+            (let [{:keys [run end state off]} (loop-harness)]
+              (run "start" "auth" "--force") (run "run")
+              (end)
+              (-> (expect (count (:messages @state))) (.toBe 3))
+              (when off (off)))))))
+
+  (it "clears the conversation between iterations when asked, and says so"
+      (fn []
+        (with-tasks
+          (fn [_t]
+            (let [{:keys [run end state off]} (loop-harness)]
+              (run "start" "auth" "--force")
+              (let [armed (run "run" "--fresh")]
+                (-> (expect (.includes armed "CLEARED")) (.toBe true)))
+              (let [r (end)]
+                (-> (expect (:sent r)) (.toBe 1))          ; still drives the loop
+                (-> (expect (count (:messages @state))) (.toBe 0)))
+              (when off (off)))))))
+
+  (it "reads fresh-context from settings when no flag is given"
+      (fn []
+        (with-tasks
+          (fn [_t]
+            (let [{:keys [run end state off]}
+                  (loop-harness #js {:roles #js {:fast #js {} :advisor #js {}}
+                                     :spec  #js {:loop #js {:fresh-context true}}})]
+              (run "start" "auth" "--force") (run "run")
+              (end)
+              (-> (expect (count (:messages @state))) (.toBe 0))
+              (when off (off)))))))
+
+  (it "--no-fresh overrides a settings default of true"
+      (fn []
+        (with-tasks
+          (fn [_t]
+            (let [{:keys [run end state off]}
+                  (loop-harness #js {:roles #js {:fast #js {} :advisor #js {}}
+                                     :spec  #js {:loop #js {:fresh-context true}}})]
+              (run "start" "auth" "--force") (run "run" "--no-fresh")
+              (end)
+              (-> (expect (count (:messages @state))) (.toBe 3))
+              (when off (off)))))))))
+
+;;; ─── /spec import: newest artifact + --run ─────────────────────────────────
+
+(describe "spec-driven/newest-plan-artifact" (fn []
+
+  (it "returns the most recent .md in .nyma/plans"
+      (fn []
+        ;; So `/spec import <name>` can be typed without hand-copying a
+        ;; timestamped filename that a machine generated.
+        (let [tmp (mktmp) dir (path/join tmp ".nyma" "plans")]
+          (try
+            (fs/mkdirSync dir #js {:recursive true})
+            (fs/writeFileSync (path/join dir "plan-2026-01-01T00-00-00-000Z.md") "old")
+            (fs/writeFileSync (path/join dir "plan-2026-09-04T00-00-00-000Z.md") "new")
+            ;; mtime decides, so make the intended winner newest
+            (let [now (js/Date.)]
+              (fs/utimesSync (path/join dir "plan-2026-09-04T00-00-00-000Z.md") now now))
+            (-> (expect (.endsWith (spec/newest-plan-artifact tmp)
+                                   "plan-2026-09-04T00-00-00-000Z.md"))
+                (.toBe true))
+            (finally (try (fs/rmSync tmp #js {:recursive true :force true})
+                          (catch :default _ nil)))))))
+
+  (it "ignores non-markdown files"
+      (fn []
+        (let [tmp (mktmp) dir (path/join tmp ".nyma" "plans")]
+          (try
+            (fs/mkdirSync dir #js {:recursive true})
+            (fs/writeFileSync (path/join dir "notes.txt") "x")
+            (-> (expect (spec/newest-plan-artifact tmp)) (.toBeNil))
+            (finally (try (fs/rmSync tmp #js {:recursive true :force true})
+                          (catch :default _ nil)))))))
+
+  (it "is nil when the directory does not exist"
+      (fn []
+        (let [tmp (mktmp)]
+          (try (-> (expect (spec/newest-plan-artifact tmp)) (.toBeNil))
+               (finally (try (fs/rmSync tmp #js {:recursive true :force true})
+                             (catch :default _ nil)))))))))

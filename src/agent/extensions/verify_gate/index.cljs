@@ -72,6 +72,13 @@
                       (d/warn "verify-gate"
                               (str "gate also saw pre-failure test edits this episode — worth a look: "
                                    (.join (clj->js (vec earlier)) ", ")))))
+                  ;; Green. Published so a driver above this gate can tell
+                  ;; "verify is settled" from "verify is mid-fix-loop" — the
+                  ;; fail/exhausted pair alone only ever says it is red, so a
+                  ;; subscriber had no edge on which to resume.
+                  (when (.-emitGlobal api)
+                    (.emitGlobal api "small-model/verify-pass"
+                                 #js {:cmd (:cmd cfg) :attempts @attempts}))
                   (end-episode!))
                 ;; Publish a failure signal for small-model/self-tune (additive;
                 ;; no-op if nothing subscribes). Mirrors quality_monitor's bus use.

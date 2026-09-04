@@ -53,6 +53,9 @@
             [agent.extensions.spec-driven.import :as spec-import]
             [agent.extensions.spec-driven.speckit-adapter :as adapter]
             [agent.extensions.spec-driven.skill-content :as skill-content]
+            [agent.extensions.spec-driven.phases :as phases]
+            [agent.extensions.spec-driven.status-segment :as status-segment]
+            [agent.tool-metadata :as tool-metadata]
             [agent.loop :as agent-loop]
             [agent.debug :as dbg]))
 
@@ -109,6 +112,27 @@
   ["kiro" "spec-kit"])
 
 (def ^:private default-default-shape "spec-kit")
+
+(defn newest-plan-artifact
+  "Newest `.md` under `<cwd>/.nyma/plans`, or nil.
+
+   Both writers of that directory use a `plan-<iso>.md` name, so newest-by-
+   mtime is the one the user just made. Exists so `/spec import <name>` can be
+   typed without hand-copying a timestamped filename — the artifact path is
+   machine-generated and nobody should be transcribing it."
+  [cwd]
+  (let [dir (path/join cwd ".nyma" "plans")]
+    (when (fs/existsSync dir)
+      (->> (fs/readdirSync dir)
+           (map str)
+           (filter (fn [f] (.endsWith f ".md")))
+           (map (fn [f] (let [full (path/join dir f)]
+                          {:path full
+                           :mtime (try (.getTime (.-mtime (fs/statSync full)))
+                                       (catch :default _ 0))})))
+           (sort-by :mtime)
+           last
+           :path))))
 
 (defn read-spec-settings
   "Read `.nyma/settings.json#spec` from cwd if present, returning a
@@ -853,13 +877,89 @@
 
 (defn ^:export default [api]
   (let [handlers (atom [])
+        ;; Filled in when the loop registers below; the command handler is
+        ;; built before that point and closes over the atom, not the map.
+        loop-controls (atom nil)
         ;; Active-spec name lives in extension state, like model-roles
         ;; uses :active-role.
         get-active (fn []
                      (let [s (.getState api)]
                        (or (:active-spec s) (get s "active-spec"))))
+        ;; Persistent store (.nyma/ext-state/spec-driven.json). The state
+        ;; ATOM is per-process, so before this an /spec start did not survive
+        ;; a restart — you resumed a session with the spec docs silently no
+        ;; longer in the prompt. Session resume rebuilds messages only
+        ;; (sessions/manager.cljs), so nothing else was going to rehydrate it.
+        ext-state   (.-state api)
         set-active! (fn [name]
-                      (swap! (.-__state-atom api) assoc :active-spec name))
+                      (swap! (.-__state-atom api) assoc :active-spec name)
+                      (try (when ext-state (.set ext-state "active-spec" name))
+                           (catch :default _ nil)))
+        clear-active! (fn []
+                        (swap! (.-__state-atom api) dissoc :active-spec)
+                        (try (when ext-state (.delete ext-state "active-spec"))
+                             (catch :default _ nil)))
+
+        ;; Merged live settings (defaults < global < project < overrides).
+        ;; read-spec-settings deliberately reads the PROJECT file only, for the
+        ;; shape dials; phase config has to see global settings too.
+        safe-settings (fn []
+                        (try (when (.-getSettings api) (.getSettings api))
+                             (catch :default _ nil)))
+
+        ;; ── Phase state ────────────────────────────────────────
+        ;; Phase and profile live beside :active-spec — in the state atom for
+        ;; the running session, mirrored to the persistent store so a restart
+        ;; resumes mid-feature instead of phase-less.
+        get-phase   (fn [] (let [s (.getState api)]
+                             (or (:spec-phase s) (get s "spec-phase"))))
+        get-profile (fn []
+                      (let [s (.getState api)]
+                        (or (:spec-profile s) (get s "spec-profile")
+                            (:profile (:loop (phases/config (safe-settings)))))))
+        known-roles (fn []
+                      ;; Union of the user's declared roles and the names that
+                      ;; exist without being declared. model_roles field-merges
+                      ;; its defaults under settings.roles, so neither source
+                      ;; alone is the real set.
+                      (let [st (safe-settings)
+                            rs (when st (aget st "roles"))
+                            ks (if rs (vec (js/Object.keys rs)) [])]
+                        (vec (into phases/builtin-role-names ks))))
+        bind-role!  (fn [phase notify-fn]
+                      (let [cfg (phases/config (safe-settings))
+                            r   (phases/resolve-role cfg (get-profile) phase (known-roles))]
+                        (swap! (.-__state-atom api) assoc :active-role (:role r))
+                        (when (and (:fell-back? r) notify-fn)
+                          (notify-fn (str "spec: " (:reason r))))
+                        r))
+        set-phase!  (fn [phase notify-fn]
+                      (swap! (.-__state-atom api) assoc :spec-phase phase)
+                      (try (when ext-state (.set ext-state "spec-phase" phase))
+                           (catch :default _ nil))
+                      (let [r (bind-role! phase notify-fn)]
+                        (when-let [emit (.-emit (.-events api))]
+                          (emit "spec_phase_enter"
+                                #js {:spec (get-active) :phase phase :role (:role r)}))
+                        r))
+        set-profile! (fn [name]
+                       (swap! (.-__state-atom api) assoc :spec-profile name)
+                       (try (when ext-state (.set ext-state "spec-profile" name))
+                            (catch :default _ nil)))
+        ;; Pending means "a decomposition turn is queued". Mirrored to disk
+        ;; like phase and profile, because it was atom-only and `--run`
+        ;; persisted :active-spec beside it: a restart therefore resumed with
+        ;; the spec active and injected into every turn, but no pending flag
+        ;; and — the follow-queue being in memory — no queued turn either. The
+        ;; loop could never arm, and nothing said so.
+        set-pending! (fn [v]
+                       (if v
+                         (do (swap! (.-__state-atom api) assoc :spec-loop-pending true)
+                             (try (when ext-state (.set ext-state "spec-loop-pending" true))
+                                  (catch :default _ nil)))
+                         (do (swap! (.-__state-atom api) dissoc :spec-loop-pending)
+                             (try (when ext-state (.delete ext-state "spec-loop-pending"))
+                                  (catch :default _ nil)))))
 
         cwd-of (fn [_ctx] (js/process.cwd))
 
@@ -963,7 +1063,18 @@
                            "error")
 
                   :else
-                  (let [result (create-spec! cwd target shape-name)]
+                  (let [;; --force replaces the whole spec directory. Say what
+                        ;; that cost when it was not just scaffolding, so a
+                        ;; re-import over real progress is a visible choice
+                        ;; rather than a silent one.
+                        prior   (get specs target)
+                        prior-p (when prior
+                                  (let [raw (read-if-exists (:tasks prior))]
+                                    (phases/progress (parse-tasks raw) raw)))
+                        _       (when (and force? prior)
+                                  (try (fs/rmSync (:dir prior) #js {:recursive true :force true})
+                                       (catch :default _ nil)))
+                        result  (create-spec! cwd target shape-name)]
                     (if (:ok? result)
                       (.notify (.-ui ctx)
                                (str "✓ Created " (case (:source result)
@@ -977,9 +1088,45 @@
                       (.notify (.-ui ctx) (:error result) "error")))))
 
               "import"
-              (let [target          (first rest-)
-                    src-path        (second rest-)
-                    opts            (vec (drop 2 rest-))
+              (let [run?            (boolean (some (fn [a] (= a "--run")) rest-))
+                    ;; Re-importing over an existing spec is the documented
+                    ;; recovery path — the plan turned out wrong, you refined
+                    ;; it with the ACP agent, you capture again. Without this
+                    ;; create-spec! answers "Spec already exists" and there is
+                    ;; no way forward but deleting the directory by hand.
+                    force?          (boolean (some (fn [a] (= a "--force")) rest-))
+                    args-           (vec (remove (fn [a] (or (= a "--run") (= a "--force")))
+                                                 rest-))
+                    target          (first args-)
+                    ;; Path is optional: with none, take the newest artifact in
+                    ;; .nyma/plans. That is where /plan-capture and plan_mode
+                    ;; both write, and the filename is a timestamp nobody should
+                    ;; be retyping.
+                    src-path        (or (second args-)
+                                        (when (seq (str target))
+                                          (newest-plan-artifact cwd)))
+                    opts            (vec (drop 2 args-))
+                    ;; --force applies to BOTH import modes: directory mode
+                    ;; also goes through create-spec!, so without this it
+                    ;; refused with "Spec already exists" while the help said
+                    ;; --force replaces it.
+                    prior           (get specs target)
+                    prior-p         (when prior
+                                      (let [raw (read-if-exists (:tasks prior))]
+                                        (phases/progress (parse-tasks raw) raw)))
+                    ;; Returns an error string when the removal failed. Silently
+                    ;; swallowing it left create-spec! to report "Spec already
+                    ;; exists" even though --force was passed — the pre-fix
+                    ;; message, with nothing pointing at the real cause.
+                    force-clear!    (fn []
+                                      (when (and force? prior)
+                                        (try (fs/rmSync (:dir prior)
+                                                        #js {:recursive true :force true})
+                                             nil
+                                             (catch :default e
+                                               (str "Could not replace the existing spec at "
+                                                    (path/relative cwd (:dir prior)) ": "
+                                                    (or (.-message e) (str e)))))))
                     shape-or-err    (parse-shape-flag opts)
                     shape-flag-err? (and (map? shape-or-err) (:error shape-or-err))
                     shape-name      (when-not shape-flag-err? shape-or-err)
@@ -991,8 +1138,12 @@
 
                   (or (empty? target) (empty? src-path))
                   (.notify (.-ui ctx)
-                           (str "Usage: /spec import <name> <path-to-markdown> [--spec-kit | --kiro]\n"
+                           (str "Usage: /spec import <name> [<path-to-markdown>] "
+                                "[--spec-kit | --kiro] [--run] [--force]\n"
                                 "  Default shape: " chosen ".\n"
+                                "  With no path, takes the newest artifact in .nyma/plans/.\n"
+                                "  --run activates the spec and arms the loop once tasks land.\n"
+                                "  --force replaces an existing spec of the same name.\n"
                                 "  Copies <path> as the spec's primary doc (spec.md or requirements.md);\n"
                                 "  creates empty design.md/plan.md and a starter tasks.md.")
                            "error")
@@ -1007,14 +1158,23 @@
                   ;; missing.
                   (try (.isDirectory (fs/statSync src-path))
                        (catch :default _ false))
-                  (let [result (import-from-dir! cwd target shape-name src-path)]
-                    (if-not (:ok? result)
-                      (.notify (.-ui ctx) (:error result) "error")
+                  (let [clear-err (force-clear!)
+                        result    (when-not clear-err
+                                    (import-from-dir! cwd target shape-name src-path))]
+                    (if-not (and result (:ok? result))
+                      (.notify (.-ui ctx) (or clear-err (:error result)) "error")
                       (.notify (.-ui ctx)
                                (str "✓ Imported "
                                     (case (:source result)
                                       :kiro "Kiro" :spec-kit "spec-kit" "spec")
                                     " spec: " target "\n"
+                                    (when (and force? prior)
+                                      (str "  replaced the previous spec"
+                                           (when (and prior-p (pos? (:checked prior-p)))
+                                             (str " — " (:checked prior-p) " of "
+                                                  (:total prior-p)
+                                                  " tasks were already ticked"))
+                                           "\n"))
                                     (when (seq (:copied result))
                                       (str "  copied:\n"
                                            (->> (:copied result)
@@ -1037,9 +1197,11 @@
                   ;; The next agent turn reads the source and populates
                   ;; spec.md / plan.md / tasks.md (and research.md for
                   ;; leftovers) using the standard tool loop.
-                  (let [result (create-spec! cwd target shape-name)]
-                    (if-not (:ok? result)
-                      (.notify (.-ui ctx) (:error result) "error")
+                  (let [clear-err (force-clear!)
+                        result    (when-not clear-err
+                                    (create-spec! cwd target shape-name))]
+                    (if-not (and result (:ok? result))
+                      (.notify (.-ui ctx) (or clear-err (:error result)) "error")
                       (try
                         (let [src-content (fs/readFileSync src-path "utf8")
                               target-dir  (path/relative cwd (:dir result))
@@ -1057,10 +1219,26 @@
                                      "warning")
                             (do
                               (agent-loop/follow-up agent {:content seed})
+                              ;; --run: activate now and mark the loop PENDING.
+                              ;; It cannot arm yet — tasks.md is still the
+                              ;; scaffold template, and the decomposition turn
+                              ;; queued above is what fills it. The loop
+                              ;; promotes pending→armed at the first turn-end
+                              ;; where real tasks exist.
+                              (when run?
+                                (set-active! target)
+                                (set-pending! true))
                               (.notify (.-ui ctx)
                                        (str "✓ Imported " (case (:source result)
                                                             :kiro "Kiro" :spec-kit "spec-kit" "spec")
                                             " spec: " target "\n"
+                                            (when (and force? prior)
+                                              (str "  replaced the previous spec"
+                                                   (when (and prior-p (pos? (:checked prior-p)))
+                                                     (str " — " (:checked prior-p) " of "
+                                                          (:total prior-p)
+                                                          " tasks were already ticked"))
+                                                   "\n"))
                                             "  scaffolded:\n"
                                             (->> (:files result)
                                                  (map #(str "    " %))
@@ -1068,8 +1246,12 @@
                                             "\n\nDecomposition queued — the next agent turn will read\n"
                                             "  " (path/relative cwd src-path) "\n"
                                             "and populate the files. Send any message (e.g. \"go\") to start.\n"
-                                            "Then run `/spec clarify " target "` to resolve any "
-                                            "[NEEDS CLARIFICATION] markers.")))))
+                                            (if run?
+                                              (str "\nSpec activated; the loop arms itself as soon as the\n"
+                                                   "decomposition lands. Started without /spec analyze —\n"
+                                                   "run `/spec analyze " target "` to check the plan.")
+                                              (str "Then run `/spec clarify " target "` to resolve any "
+                                                   "[NEEDS CLARIFICATION] markers.")))))))
                         (catch :default e
                           (try (fs/rmSync (:dir result)
                                           #js {:recursive true :force true})
@@ -1238,8 +1420,121 @@
                                 "and teaches the model the spec-kit conventions."))
                   (.notify (.-ui ctx) (:error result) "error")))
 
+              "run"
+              (let [arg  (str (or (first rest-) ""))
+                    lc   @loop-controls
+                    cfg  (phases/config (safe-settings))]
+                (cond
+                  (nil? lc)
+                  (.notify (.-ui ctx) "spec: loop unavailable in this context." "error")
+
+                  (or (= arg "off") (= arg "stop"))
+                  (do ((:disarm! lc))
+                      (.notify (.-ui ctx) "spec loop disarmed."))
+
+                  (= arg "status")
+                  (.notify (.-ui ctx)
+                           (str "Loop: " (if ((:armed? lc)) "armed" "off")
+                                "  iteration " ((:iter lc)) "/" (:max-iterations (:loop cfg))
+                                "\nSpec: " (or active "(none)")
+                                "  phase: " (or (get-phase) "(unset)")
+                                "  profile: " (get-profile)
+                                "  fresh-context: " (if ((:fresh? lc)) "on" "off")))
+
+                  (nil? active)
+                  (.notify (.-ui ctx) "No active spec. Use /spec start <name> first." "error")
+
+                  :else
+                  ;; --profile is applied BEFORE arming so the first phase binds under
+                  ;; the profile the user asked for, not the previous one.
+                  (let [pf (some (fn [a] (when (.startsWith (str a) "--profile=")
+                                           (.slice (str a) 10))) rest-)
+                        names (vec (sort (keys (:profiles cfg))))]
+                    (if (and pf (not (some (fn [x] (= x (str pf))) names)))
+                      (.notify (.-ui ctx)
+                               (str "Unknown profile \"" pf "\". Available: "
+                                    (str/join ", " names)) "error")
+                      (let [_  (when pf (set-profile! (str pf)))
+                            _  (when (some (fn [a] (= (str a) "--fresh")) rest-)
+                                 ((:set-fresh! lc) true))
+                            _  (when (some (fn [a] (= (str a) "--no-fresh")) rest-)
+                                 ((:set-fresh! lc) false))
+                            order (phases/phase-order (get (:profiles cfg) (get-profile)))
+                            ph (or (get-phase) (first order))
+                            r  (set-phase! ph (fn [m] (.notify (.-ui ctx) m)))]
+                        ((:arm! lc))
+                        (.notify (.-ui ctx)
+                                 (str "spec loop armed on `" active "`  phase: " ph
+                                      "  role: " (:role r)
+                                      "  profile: " (get-profile)
+                                      (when ((:fresh? lc))
+                                        (str "\nfresh-context ON: the conversation is CLEARED between "
+                                             "tasks. Anything you say in chat is lost — put every "
+                                             "instruction in the spec files."))
+                                      "\nSend any message to start. /spec run off to stop.")))))))
+
+              "phase"
+              (let [cfg    (phases/config (safe-settings))
+                    order  (phases/phase-order (get (:profiles cfg) (get-profile)))
+                    target (first rest-)
+                    nfy    (fn [m] (.notify (.-ui ctx) m))]
+                (cond
+                  (nil? active)
+                  (.notify (.-ui ctx) "No active spec. Use /spec start <name> first." "error")
+
+                  (str/blank? (str target))
+                  (let [ph (or (get-phase) (first order))
+                        r  (phases/resolve-role cfg (get-profile) ph (known-roles))]
+                    (.notify (.-ui ctx)
+                             (str "Phase: " ph "  role: " (:role r)
+                                  (when (:fell-back? r) (str "  (" (:reason r) ")"))
+                                  "\nProfile: " (get-profile)
+                                  "\nOrder:   " (str/join " -> " order))))
+
+                  (not (some (fn [x] (= x (str target))) order))
+                  (.notify (.-ui ctx)
+                           (str "Unknown phase \"" target "\". Available: "
+                                (str/join ", " order)) "error")
+
+                  :else
+                  (let [r (set-phase! (str target) nfy)]
+                    (.notify (.-ui ctx) (str "> phase " target "  role: " (:role r))))))
+
+              "profile"
+              (let [cfg    (phases/config (safe-settings))
+                    names  (vec (sort (keys (:profiles cfg))))
+                    target (first rest-)]
+                (cond
+                  (str/blank? (str target))
+                  (.notify (.-ui ctx)
+                           (str "Profile: " (get-profile)
+                                "\nAvailable: " (str/join ", " names)
+                                "\n"
+                                (str/join "\n"
+                                          (map (fn [ph] (str "  " ph " -> "
+                                                             (get (get (:profiles cfg) (get-profile)) ph)))
+                                               (phases/phase-order (get (:profiles cfg) (get-profile)))))))
+
+                  (not (some (fn [x] (= x (str target))) names))
+                  (.notify (.-ui ctx)
+                           (str "Unknown profile \"" target "\". Available: "
+                                (str/join ", " names)) "error")
+
+                  :else
+                  (do (set-profile! (str target))
+                      ;; Re-bind now so a switch takes effect immediately, not only at
+                      ;; the next transition.
+                      (when-let [ph (get-phase)]
+                        (bind-role! ph (fn [m] (.notify (.-ui ctx) m))))
+                      (.notify (.-ui ctx) (str "Profile: " target)))))
+
               "end"
-              (do (swap! (.-__state-atom api) dissoc :active-spec)
+              (do (clear-active!)
+                  (set-pending! false)
+                  (swap! (.-__state-atom api) dissoc :spec-phase :spec-profile)
+                  (try (when ext-state (.delete ext-state "spec-phase")
+                             (.delete ext-state "spec-profile"))
+                       (catch :default _ nil))
                   (.notify (.-ui ctx) "Active spec cleared."))
 
               "next"
@@ -1310,68 +1605,305 @@
                             "Usage: /spec [list | new <name> | import <name> <path> | "
                             "scaffold <kind> [<name>] | clarify <name> | "
                             "analyze <name> | install-skill | start <name> [--force] | "
-                            "next | done <pattern> | end]")
+                            "next | done <pattern> | run [off|status|--profile=<p>|--fresh] | "
+                            "phase [<name>] | profile [<name>] | end]")
                        "error"))))]
 
     (.on api "context_assembly" on-context-assembly)
     (swap! handlers conj ["context_assembly" on-context-assembly])
 
-    ;; Auto-continue when an active-spec session hits the step budget.
-    ;; AI SDK reports `tool-calls` as the finish reason when the model
-    ;; wanted another step but `stopWhen: stepCountIs(N)` cut it off —
-    ;; that's the signal we hit the cap mid-implementation. `length`
-    ;; covers token-budget exhaustion (rarer). Cap auto-continues at 3
-    ;; per session so a wedged model can't loop forever.
-    (let [auto-continue-cap   3
-          auto-continue-count (atom 0)
-          on-agent-end
-          (fn [data]
-            (let [reason  (or (.-finishReason data)
-                              (get data "finishReason")
-                              "unknown")
-                  active  (get-active)
-                  done?   (or (= reason "stop") (= reason "content-filter"))]
-              (cond
-                done?
-                ;; Natural completion — reset the counter so the next
-                ;; user prompt gets a fresh budget for auto-continues.
-                (reset! auto-continue-count 0)
+    ;; Status segment. Without it a spec run is invisible: after
+    ;; `/spec import --run` the decomposition is queued as a follow-up, so it
+    ;; does not start until the next turn ends, and nothing on screen said a
+    ;; spec was active or that work was pending.
+    (swap! handlers conj
+           [:status-segment
+            (status-segment/register!
+             api
+             (fn []
+               (let [st     (.getState api)
+                     active (get-active)
+                     spec   (when active (get (discover-specs (js/process.cwd)) active))
+                     raw    (when spec (read-if-exists (:tasks spec)))
+                     prog   (when spec (phases/progress (parse-tasks raw) raw))]
+                 {:spec     active
+                  :phase    (get-phase)
+                  :role     (or (:active-role st) (get st "active-role"))
+                  :progress prog
+                  ;; the previously-invisible state: spec exists, tasks are
+                  ;; still the scaffold, decomposition has not landed
+                  :pending? (boolean (or (:spec-loop-pending st)
+                                         (get st "spec-loop-pending")))
+                  :armed?   (boolean (or (:spec-loop-armed st)
+                                         (get st "spec-loop-armed")))})))])
 
-                (and active
-                     (or (= reason "tool-calls") (= reason "length"))
-                     (< @auto-continue-count auto-continue-cap))
-                (let [cwd   (js/process.cwd)
-                      specs (discover-specs cwd)
-                      spec  (get specs active)
-                      open? (some? (next-open-task
-                                    (parse-tasks (read-if-exists (:tasks spec)))))]
-                  (when (and spec open?)
-                    (let [n (swap! auto-continue-count inc)]
-                      (dbg/debug "spec_driven/auto-continue"
-                                 (str "spec=" active " reason=" reason
-                                      " count=" n "/" auto-continue-cap))
-                      ;; sendUserMessage with deliverAs: "followUp" routes
-                      ;; through agent-loop/follow-up under the hood.
-                      ;; Provider-agnostic, mode-agnostic.
-                      ((.-sendUserMessage api)
-                       (str "Continue with the next open task in `"
-                            active "`. Update tasks.md as you "
-                            "complete items (replace `- [ ]` "
-                            "with `- [x]` on each task line). "
-                            "Stop when there are no more open "
-                            "tasks or you need user input.")
-                       #js {:deliverAs "followUp"})))))))]
+    ;; Rehydrate the active spec from the persistent store, but only if it
+    ;; still exists on disk — a spec deleted between sessions must not
+    ;; resurrect and inject missing files into every turn.
+    (try
+      (when-let [saved (and ext-state (.get ext-state "active-spec"))]
+        (when (and (seq (str saved)) (nil? (get-active)))
+          (if (get (discover-specs (js/process.cwd)) (str saved))
+            (do
+              (swap! (.-__state-atom api) assoc :active-spec (str saved))
+              ;; Phase and profile too — restoring only the spec resumed a run
+              ;; at phase 1 under the default profile, silently binding the
+              ;; wrong role for the work actually in flight.
+              (when-let [ph (.get ext-state "spec-phase")]
+                (when (seq (str ph))
+                  (swap! (.-__state-atom api) assoc :spec-phase (str ph))))
+              (when-let [pf (.get ext-state "spec-profile")]
+                (when (seq (str pf))
+                  (swap! (.-__state-atom api) assoc :spec-profile (str pf))))
+              ;; A pending decomposition does NOT survive: the seed lives in
+              ;; the agent's in-memory follow-queue, which died with the last
+              ;; process. Restoring the flag would leave the loop waiting for
+              ;; a turn that can never arrive, so clear it and say what to run.
+              ;; This is the dead end a real session hit — spec active, tasks
+              ;; still `First task`, and no indication anything was wrong.
+              (when (.get ext-state "spec-loop-pending")
+                (set-pending! false)
+                (when-let [ui (.-ui api)]
+                  (when (.-notify ui)
+                    (.notify ui (str "spec: the queued decomposition for " (str saved)
+                                     " did not survive the restart.\n"
+                                     "  Re-run `/spec import " (str saved)
+                                     " --force --run`, then send one message.")
+                             "warning")))))
+            (do (.delete ext-state "active-spec")
+                (.delete ext-state "spec-phase")
+                (.delete ext-state "spec-profile")
+                (.delete ext-state "spec-loop-pending")))))
+      (catch :default _ nil))
+
+    ;; The agent advances tasks by editing tasks.md itself (build-spec-context
+    ;; tells it to). That path emitted NOTHING — only the /spec slash commands
+    ;; fired spec_task_complete — so any automation keyed on task completion
+    ;; silently missed every agent-driven one. Diff the checked set around a
+    ;; write to the active spec's tasks file and emit for what actually flipped.
+    (let [write-tools #{"write" "edit" "multi_edit"}
+          checked-set (fn [content]
+                        (->> (parse-tasks (or content ""))
+                             (filter :checked?)
+                             (map :text)
+                             set))
+          before      (atom nil)
+          tasks-path  (fn []
+                        (when-let [active (get-active)]
+                          (some-> (get (discover-specs (js/process.cwd)) active) :tasks)))
+          ;; Resolve BOTH sides: discover-specs builds absolute paths from
+          ;; process.cwd, while the edit tool is routinely handed a relative
+          ;; one. Comparing the raw strings silently never matched.
+          same-file?  (fn [a b]
+                        (let [ra (try (path/resolve (str a)) (catch :default _ nil))
+                              rb (try (path/resolve (str b)) (catch :default _ nil))]
+                          (cond
+                            (or (nil? ra) (nil? rb)) false
+                            (= ra rb)                true
+                            ;; path/resolve does not follow symlinks, and the
+                            ;; common temp/home roots are symlinked (/var ->
+                            ;; /private/var on macOS). Only pay for realpath
+                            ;; when the cheap compare already failed.
+                            :else
+                            (try (= (fs/realpathSync ra) (fs/realpathSync rb))
+                                 (catch :default _ false)))))
+          ;; Guard BEFORE resolving the path. tasks-path calls discover-specs,
+          ;; which re-reads settings and walks both spec roots with an
+          ;; existsSync per optional file — doing that eagerly meant two full
+          ;; spec-tree walks per `read`, `grep` and `bash`, i.e. every tool call.
+          touches?    (fn [event]
+                        (let [tool (or (.-toolName event) "")]
+                          (when (contains? write-tools tool)
+                            (let [p (tool-metadata/tool-path (.-args event))]
+                              (when p
+                                (when-let [tp (tasks-path)]
+                                  (same-file? p tp)))))))
+          on-write-start
+          (fn [event _ctx]
+            (when (touches? event)
+              (reset! before (checked-set (read-if-exists (tasks-path))))))
+          on-write-end
+          (fn [event _ctx]
+            (when (and (touches? event) (some? @before))
+              (let [after (checked-set (read-if-exists (tasks-path)))
+                    prev  @before
+                    newly (remove (fn [t] (contains? prev t)) after)
+                    spec  (get-active)]
+                (reset! before nil)
+                (when-let [emit (.-emit (.-events api))]
+                  (doseq [t newly]
+                    (emit "spec_task_complete"
+                          #js {:spec spec :task t :source "agent"}))))))]
+      (.on api "tool_execution_start" on-write-start)
+      (.on api "tool_execution_end" on-write-end)
+      (swap! handlers conj ["tool_execution_start" on-write-start])
+      (swap! handlers conj ["tool_execution_end" on-write-end]))
+
+    ;; ── The phase loop ────────────────────────────────────────
+    ;;
+    ;; Opt-in (`/spec run`). It never arms itself: settings#spec.loop.mode
+    ;; defaults to "off", because an autonomous loop that starts on its own is
+    ;; how people wake up to a spent quota.
+    ;;
+    ;; The decision is delegated to phases/decide — pure, and tested per failure
+    ;; mode. Everything here is the impure half: read the file, ask, act.
+    ;;
+    ;; Two things this deliberately does NOT do:
+    ;;   * trust `finishReason`. The agent reporting "stop" with tasks open is
+    ;;     premature termination, the documented failure of loops like this.
+    ;;     The unchecked count in tasks.md is the only completion signal.
+    ;;   * vary the follow-up text. Measured: an identical prompt keeps the
+    ;;     provider cache (3648/3678 tokens on glm-5.3-flash), a per-task one
+    ;;     drops to zero and costs ~2x a cold call. The task to work on comes
+    ;;     from the FILE, which the agent reads — not from this string.
+    (let [loop-iteration (atom 0)
+          verify-red?    (atom false)
+          on-verify-fail (fn [_d] (reset! verify-red? true))
+          on-verify-ok   (fn [_d] (reset! verify-red? false))
+          armed?         (fn []
+                           (let [st (.getState api)]
+                             (boolean (or (:spec-loop-armed st)
+                                          (get st "spec-loop-armed")
+                                          ;; settings#spec.loop.mode "on" was
+                                          ;; parsed and never read, so opting in
+                                          ;; permanently did nothing at all.
+                                          (phases/armed-by-settings?
+                                           (phases/config (safe-settings)))))))
+          disarm!        (fn [] (swap! (.-__state-atom api) dissoc :spec-loop-armed))
+          fresh?         (fn [cfg]
+                           (let [st (.getState api)
+                                 ov (or (:spec-loop-fresh st) (get st "spec-loop-fresh"))]
+                             (if (some? ov) (boolean ov)
+                                 (boolean (:fresh-context (:loop cfg))))))
+          ;; Ralph's reset. The store shares this atom (core.cljs:110 passes it
+          ;; to create-agent-store), and compaction.cljs does the same surgery
+          ;; the same way, so a direct swap! is the established path — note
+          ;; api.dispatch only EMITS an event, it does not run store reducers.
+          ;;
+          ;; Fires BEFORE the follow-up is enqueued, and agent_end runs before
+          ;; the follow-queue drain (loop.cljs:586), so the next turn starts
+          ;; with just the reset message. Spec docs are re-read from disk by
+          ;; context_assembly every turn, which is what carries state across.
+          reset-context! (fn []
+                           (swap! (.-__state-atom api) assoc :messages []))
+          continue-prompt
+          ;; Constant by construction — see the cache note above.
+          (str "Read the tasks file for the active spec, do the NEXT unchecked "
+               "task, and tick it off in tasks.md (replace `- [ ]` with `- [x]` "
+               "on that line) in the same turn. Do exactly one task. Stop if you "
+               "need user input.")
+
+          ;; `/spec import --run` cannot arm immediately: import scaffolds
+          ;; tasks.md from a TEMPLATE (with placeholder "First task" /
+          ;; "Second task" checkboxes) and queues an LLM turn to decompose the
+          ;; plan into real ones. Arming there would set the loop to work on
+          ;; the placeholders. So --run marks the loop PENDING, and it promotes
+          ;; to armed at the first turn-end where the file holds real tasks.
+          promote-pending!
+          (fn [progress]
+            (let [st (.getState api)]
+              (when (and (or (:spec-loop-pending st) (get st "spec-loop-pending"))
+                         (= :in-progress (:status progress))
+                         (not (phases/template-tasks? progress)))
+                (set-pending! false)
+                (swap! (.-__state-atom api) assoc :spec-loop-armed true)
+                ;; Say so. The wait between `--run` and the loop starting is
+                ;; one full turn of decomposition, and silence there reads as
+                ;; nothing having happened.
+                (when-let [ui (.-ui api)]
+                  (when (.-notify ui)
+                    (.notify ui (str "spec: decomposition landed — "
+                                     (:total progress) " tasks, loop armed")
+                             "info")))
+                true)))
+
+          on-agent-end
+          (fn [_data]
+            (let [cwd0    (js/process.cwd)
+                  active0 (get-active)
+                  spec0   (when active0 (get (discover-specs cwd0) active0))
+                  raw0    (when spec0 (read-if-exists (:tasks spec0)))]
+              (promote-pending! (phases/progress (parse-tasks raw0) raw0)))
+            (when (armed?)
+              (let [active (get-active)
+                    cwd    (js/process.cwd)
+                    spec   (when active (get (discover-specs cwd) active))
+                    raw    (when spec (read-if-exists (:tasks spec)))
+                    cfg    (phases/config (safe-settings))
+                    profile (get-profile)
+                    order  (phases/phase-order (get (:profiles cfg) profile))
+                    phase  (or (get-phase) (first order))
+                    d      (phases/decide
+                            {:armed?          true
+                             :phase           phase
+                             :profile         profile
+                             :phases          order
+                             :iteration       @loop-iteration
+                             :max-iterations  (:max-iterations (:loop cfg))
+                             :verify-pending? @verify-red?
+                             :progress        (phases/progress (parse-tasks raw) raw)})
+                    say    (fn [m] (when-let [ui (.-ui api)]
+                                     (when (.-notify ui) (.notify ui m "info"))))]
+                (dbg/debug "spec_driven/loop"
+                           (str "spec=" active " phase=" phase " -> " (:action d)
+                                " (" (:reason d) ")"))
+                (case (str (:action d))
+                  "continue"
+                  (do (swap! loop-iteration inc)
+                      (when (fresh? cfg) (reset-context!))
+                      ((.-sendUserMessage api) continue-prompt #js {:deliverAs "followUp"}))
+
+                  "advance"
+                  (let [nxt (:next-phase d)
+                        r   (set-phase! nxt say)]
+                    (swap! loop-iteration inc)
+                    (say (str "> " phase " -> " nxt "  role: " (:role r)))
+                    (when (fresh? cfg) (reset-context!))
+                    ((.-sendUserMessage api) continue-prompt #js {:deliverAs "followUp"}))
+
+                  "hold"
+                  ;; Stay armed and silent — verify_gate's fix follow-up is the
+                  ;; next turn, and it will resume us when the build is green.
+                  nil
+
+                  "done"
+                  (do (disarm!)
+                      (say (str "spec loop finished: " (:reason d))))
+
+                  ;; stop — including the guards that exist to keep a broken
+                  ;; run from looking like a finished one.
+                  (do (disarm!)
+                      (say (str "spec loop stopped: " (:reason d))))))))]
+
       (.on api "agent_end" on-agent-end)
-      (swap! handlers conj ["agent_end" on-agent-end]))
+      (swap! handlers conj ["agent_end" on-agent-end])
+      ;; verify_gate publishes these on the main bus via emitGlobal; every
+      ;; subscriber picks them up with plain api.on (cf. self_tune.cljs:205).
+      (doseq [[ev h] [["small-model/verify-fail" on-verify-fail]
+                      ["small-model/verify-exhausted" on-verify-fail]
+                      ["small-model/verify-pass" on-verify-ok]]]
+        (.on api ev h)
+        (swap! handlers conj [ev h]))
+      (reset! loop-controls {:set-fresh! (fn [v] (swap! (.-__state-atom api)
+                                                        assoc :spec-loop-fresh (boolean v)))
+                             :fresh?     (fn [] (fresh? (phases/config (safe-settings))))
+                             :arm!   (fn [] (reset! loop-iteration 0)
+                                       (reset! verify-red? false)
+                                       (swap! (.-__state-atom api) assoc :spec-loop-armed true))
+                             :disarm! disarm!
+                             :armed?  armed?
+                             :iter    (fn [] @loop-iteration)}))
 
     (.registerCommand api "spec"
-                      #js {:description "Spec-driven development. Usage: /spec [list|new|import|scaffold|clarify|analyze|start|next|done|end]"
+                      #js {:description "Spec-driven development. Usage: /spec [list|new|import|scaffold|clarify|analyze|start|next|done|run|phase|profile|end]"
                            :handler spec-cmd})
 
     ;; Cleanup
     (fn []
       (doseq [[event handler] @handlers]
-        (.off api event handler))
+        (if (= :status-segment event)
+          (when (fn? handler) (handler))
+          (.off api event handler)))
       (.unregisterCommand api "spec")
       ;; Clear active-spec from extension state so a hot-reload doesn't
       ;; silently re-attach with stale spec docs in every turn.
