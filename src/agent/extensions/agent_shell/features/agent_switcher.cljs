@@ -33,6 +33,12 @@
             (.then
              (fn [conn]
                (reset! shared/active-agent agent-key)
+               ;; Point at the capture command while the user is in the state
+               ;; where it makes sense — it is not discoverable otherwise, and
+               ;; plan mode is exactly when someone is about to want it.
+               (when (= "plan" (str (shared/get-agent-state agent-key :mode)))
+                 (notify api (str "planning with " (shared/kw-name agent-key)
+                                  " — /plan-capture when the plan looks right")))
                 ;; Initialize agent state
                (shared/update-agent-state! agent-key :connected true)
                 ;; Install the custom header now that an agent is active.
@@ -81,6 +87,27 @@
                     (notify api (str "Disconnect error: " (.-message e)) "error")))))
     (notify api "No agent connected")))
 
+(defn- detach-agent!
+  "Stop routing input to the agent WITHOUT tearing the process down.
+
+   `disconnect` kills the subprocess (stdin close -> SIGTERM -> SIGKILL), and
+   that process holds the only copy of the agent's conversation context. So
+   after planning there was no way to hand control back to nyma's own loop and
+   still be able to return: staying attached sends your typing to the agent
+   while /spec run drives nyma, and disconnecting loses the plan discussion.
+
+   Detaching clears `active-agent` only. `pool/get-or-create` keys off the
+   connections map and returns any entry that already has a :session-id, so a
+   later `/agent <key>` reattaches to the SAME session with its context intact."
+  [api]
+  (if-let [agent-key @shared/active-agent]
+    (let [agent-def (get registry/agents agent-key)]
+      (reset! shared/active-agent nil)
+      (notify api (str "Detached from " (or (:name agent-def) (shared/kw-name agent-key))
+                       " — session left running. /agent " (shared/kw-name agent-key)
+                       " to resume, /agent disconnect to stop it.")))
+    (notify api "No agent connected")))
+
 (defn- list-agents
   "Show available agents and highlight the active one."
   [api]
@@ -97,7 +124,7 @@
   "Register the /agent command."
   [api]
   (.registerCommand api "agent"
-                    #js {:description "Connect to a coding agent (claude, gemini, opencode, qwen, goose, kiro)"
+                    #js {:description "Connect to a coding agent. /agent <key> | detach | disconnect"
                          :handler (fn [args _ctx]
                                     (let [subcmd (first args)]
                                       (cond
@@ -106,6 +133,9 @@
 
                                         (= subcmd "disconnect")
                                         (disconnect-agent! api)
+
+                                        (= subcmd "detach")
+                                        (detach-agent! api)
 
                                         :else
                                         (connect-agent! api subcmd))))})

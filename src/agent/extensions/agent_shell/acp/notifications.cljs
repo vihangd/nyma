@@ -50,6 +50,8 @@
     ;; Track in prompt state
     (swap! (:prompt-state conn) update :tool-calls conj
            {:id tool-id :title title :kind kind :status status})
+    ;; Some agents report a terminal status on the initial call.
+    (shared/record-tool-call! (:pool-key conn) kind status)
     ;; Emit for UI rendering (reuse nyma's tool execution events)
     (when-let [emit (:emit conn)]
       (emit "acp_tool_start"
@@ -74,6 +76,11 @@
                                                     (js/JSON.stringify content))))
                       %)
                    calls)))
+    ;; The usual path: the call lands here with its final status. A denied or
+    ;; failed write must NOT count as a change to the tree.
+    (let [kind (some (fn [c] (when (= (:id c) tool-id) (:kind c)))
+                     (:tool-calls @(:prompt-state conn)))]
+      (shared/record-tool-call! (:pool-key conn) kind status))
     ;; Emit for UI
     (when-let [emit (:emit conn)]
       (emit "acp_tool_update"

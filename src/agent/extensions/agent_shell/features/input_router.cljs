@@ -94,6 +94,9 @@
         (reset! shared/plan-callback
                 (fn [plan-data]
                   (set-messages (fn [prev] (append-plan prev plan-data pid)))))
+        ;; RETURN this chain — the caller (interactive/route-to-agent!) clears
+        ;; its submit lock in a .finally on it. Returning nil left the editor
+        ;; wedged for the rest of the session.
         (-> (client/send-prompt conn text)
             (.then
              (fn [result]
@@ -113,10 +116,23 @@
                           (str "ACP error: " (.-message e)) "error"))))))}))
 
 (defn activate
-  "Hook the 'input' event at high priority. When an agent is active:
+  "Hook the `input` event at high priority. When an agent is active:
    - Plain text → forwarded to ACP agent as a prompt (streamed)
    - //command  → forwarded to ACP agent as '/command' (streamed)
-   - /command   → passed through to nyma's command handler"
+   - /command   → passed through to nyma's command handler
+
+   `input` is an INTERCEPTION hook, not a notification. The payload key is
+   `:input` (not `:text` — that is the separate fire-and-forget
+   `input_submit`), and returning a truthy `:handle` takes the turn over:
+
+     {:handle true :streaming true :subscribe (fn [set-messages] -> Promise)}
+
+   Returning nil declines, and the input falls through to nyma's own loop —
+   which is how `/command` still reaches the local command handler.
+
+   `subscribe` receives a `set-messages` of the same shape as the interactive
+   pane's updater — `(fn [(fn [prev-msgs]) -> msgs])` — and MUST return the
+   promise for the turn so the caller can unlock the editor when it settles."
   [api]
   (let [handler
         (fn [data _ctx]

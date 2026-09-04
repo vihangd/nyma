@@ -141,6 +141,98 @@
   [agent-key field]
   (get-in @agent-state [agent-key field]))
 
+;;; ─── Session transcript ─────────────────────────────────────
+;;
+;; Deliberately NOT a field inside agent-state. That map is keyed by agent-key
+;; alone, while connections are keyed by [agent, cwd] (see pool-key) — the
+;; gateway fans one agent out across several projects, so a transcript kept per
+;; agent would interleave two projects' conversations into one plan.
+;;
+;; Nothing else records the conversation: agent-state holds only :plan, :mode,
+;; :model, :usage and friends, `(:prompt-state conn)` is reset at the start of
+;; every prompt (client/send-prompt), and the ACP stream drops user turns
+;; outright (`user_message_chunk` → nil, "replay only"). So this is the only
+;; place a captured plan can come from.
+
+(def transcripts
+  "pool-key → [{:role \"user\"|\"assistant\" :text s} …], oldest first."
+  (atom {}))
+
+(def ^:private max-turns 40)
+(def ^:private max-chars 200000)
+
+(defn- trim-transcript
+  "Drop oldest turns until the transcript is within both caps. A planning
+   session is unbounded otherwise, and the useful part is always the tail."
+  [turns]
+  (loop [ts (vec turns)]
+    (if (or (> (count ts) max-turns)
+            (and (seq ts) (> (reduce + 0 (map (fn [t] (count (str (:text t)))) ts)) max-chars)))
+      (recur (vec (rest ts)))
+      ts)))
+
+(defn append-turn!
+  "Append one turn to `pool-key`'s transcript. Blank text is ignored — a
+   whitespace-only assistant reply must not create a phantom turn, and
+   `seq` is not enough for that since \"   \" is a non-empty string."
+  [pool-key role text]
+  (when (and pool-key (not (str/blank? (str text))))
+    (swap! transcripts update (str pool-key)
+           (fn [ts] (trim-transcript (conj (vec ts) {:role (str role) :text (str text)})))))
+  nil)
+
+(defn get-transcript
+  "Turns for `pool-key`, oldest first. [] when there is none."
+  [pool-key]
+  (vec (get @transcripts (str pool-key) [])))
+
+(def mutating-tool-kinds
+  "ACP ToolKind values that change the working tree. `read`, `search`, `think`
+   and `fetch` do not."
+  #{"edit" "delete" "move"})
+
+(def ^:private edit-counts
+  "pool-key → number of COMPLETED mutating tool calls this session."
+  (atom {}))
+
+(defn record-tool-call!
+  "Count a tool call against `pool-key` when it both mutates and completed.
+
+   This is what tells a planning session apart from one that already did the
+   work. Mode is only a proxy — an agent in default mode may be denied every
+   write, while one in an auto-approving mode quietly makes the changes the
+   plan is supposed to describe. Counting completed edits answers it directly."
+  [pool-key kind status]
+  (when (and pool-key
+             (contains? mutating-tool-kinds (str kind))
+             (= "completed" (str status)))
+    (swap! edit-counts update (str pool-key) (fn [n] (inc (or n 0)))))
+  nil)
+
+(defn edit-count
+  "Completed mutating tool calls for `pool-key`."
+  [pool-key]
+  (or (get @edit-counts (str pool-key)) 0))
+
+(defn clear-transcript!
+  "Forget `pool-key`'s conversation. Called on disconnect and on a fresh
+   session — otherwise a reconnect would let /plan-capture write a plan from
+   the PREVIOUS session, which agent-state never cleared either."
+  [pool-key]
+  (swap! transcripts dissoc (str pool-key))
+  (swap! edit-counts dissoc (str pool-key))
+  nil)
+
+(defn clear-transcripts-for-agent!
+  "Forget every project's transcript for `agent-key` (the `/agent disconnect`
+   shape, which tears down all cwds for that agent)."
+  [agent-key]
+  (let [prefix (str (kw-name agent-key) "@")]
+    (let [drop-prefixed (fn [m] (into {} (remove (fn [[k _]] (and (string? k) (.startsWith k prefix))) m)))]
+      (swap! transcripts drop-prefixed)
+      (swap! edit-counts drop-prefixed)))
+  nil)
+
 (defn- ->camel-case
   "kebab-case-string → camelCaseString."
   [s]
@@ -246,10 +338,19 @@
    status now flows through registerStatusSegment in
    features/status_segments.cljs (registered from index.cljs on
    session_ready). Only the Header remains here because it's a
-   different slot with different UX requirements."
+   different slot with different UX requirements.
+
+   `.setHeader` is OPTIONAL and currently unimplemented: extensions.cljs
+   declares it as a nil placeholder and the interactive TUI never assigns it
+   (it wires notify/select/input/custom/setWidget, not the header slot). Calling
+   it unguarded threw `api.ui.setHeader is not a function` from inside
+   /agent connect — i.e. a cosmetic header took the whole connection down.
+   Guard it the way openwiki guards the equally-optional .setStatus, and leave
+   `footer-set?` unset so a TUI that later implements the slot picks it up."
   []
   (when-not @footer-set?
     (when-let [api @api-ref]
-      (when (and (.-ui api) (.-available (.-ui api)))
-        (reset! footer-set? true)
-        (.setHeader (.-ui api) header-factory)))))
+      (let [ui (.-ui api)]
+        (when (and ui (.-available ui) (.-setHeader ui))
+          (reset! footer-set? true)
+          (.setHeader ui header-factory))))))

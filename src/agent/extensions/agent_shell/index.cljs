@@ -16,6 +16,7 @@
             [agent.extensions.agent-shell.features.cost-tracker :as cost-tracker]
             [agent.extensions.agent-shell.features.handoff :as handoff]
             [agent.extensions.agent-shell.features.mcp-discovery :as mcp-discovery]
+            [agent.extensions.agent-shell.features.plan-capture :as plan-capture]
             [agent.extensions.agent-shell.features.status-segments :as status-segments]))
 
 ;; Note: UI components (header, status_line) use JSX and are loaded
@@ -42,6 +43,7 @@
            (session-mgmt/activate api)
            (cost-tracker/activate api)
            (handoff/activate api)
+           (plan-capture/activate api)
            (mcp-discovery/activate api)]]
 
       ;; Store the api reference for lazy UI access (footer/header setup on connect)

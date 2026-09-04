@@ -135,3 +135,45 @@
                                   (let [mock-api #js {}]
                                     (register-all! mock-api)
                                     (-> (expect true) (.toBe true)))))))
+
+;;; ─── Separators belong to the status line, not the segments ────────────────
+
+(describe "acp status segments: no inline separators" (fn []
+
+  (it "acp.mode renders the bare mode, with no leading pipe"
+      (fn []
+        ;; These segments replaced a ui.setFooter layout in which everything was
+        ;; joined into ONE string, so each piece carried its own " | ". Status
+        ;; segments are rendered individually and the status line inserts its
+        ;; own divider — the leftover literal rendered as "│ | default".
+        (reset! shared/active-agent "claude")
+        (reset! shared/agent-state {"claude" {:mode "default"}})
+        (let [r ((:render (get segments "acp.mode")) {:theme test-theme})]
+          (-> (expect (:visible? r)) (.toBe true))
+          (-> (expect (:content r)) (.toBe "default"))
+          (-> (expect (.includes (:content r) "|")) (.toBe false)))))
+
+  (it "no visible segment embeds a divider character"
+      (fn []
+        ;; Guards the whole set, so the next migration cannot reintroduce one.
+        (reset! shared/active-agent "claude")
+        (reset! shared/agent-state
+                {"claude" {:model "claude-opus-4-6"
+                           :mode  "plan"
+                           :usage {:used 1000 :size 200000}
+                           :cost  {:amount 0.33}
+                           :turn-usage {:input-tokens 2 :output-tokens 10}}})
+        (doseq [[id seg] segments]
+          (let [r ((:render seg) {:theme test-theme})]
+            (when (:visible? r)
+              (-> (expect #js [id (boolean (.includes (str (:content r)) "|"))])
+                  (.toEqual #js [id false]))
+              (-> (expect #js [id (boolean (.includes (str (:content r)) "│"))])
+                  (.toEqual #js [id false])))))))
+
+  (it "acp.mode hides again once the agent disconnects"
+      (fn []
+        (reset! shared/active-agent nil)
+        (reset! shared/agent-state {})
+        (-> (expect (:visible? ((:render (get segments "acp.mode")) {:theme test-theme})))
+            (.toBe false))))))

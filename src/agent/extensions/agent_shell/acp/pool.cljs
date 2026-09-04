@@ -121,6 +121,12 @@
                 (fn [session-result]
                   (let [sid (.-sessionId session-result)]
                     (reset! (:session-id conn) sid)
+                    ;; Fresh session — the agent has no memory of anything
+                    ;; before this point, so neither should the transcript.
+                    ;; /clear takes this path (index.cljs re-issues session/new
+                    ;; while keeping the agent), and capturing across that
+                    ;; boundary would attribute an old plan to a new session.
+                    (shared/clear-transcript! p-key)
                       ;; Store agent name for UI
                     (shared/update-agent-state! agent-key :name (:name agent-def))
                       ;; Set default mode label (agents may override via notification)
@@ -203,6 +209,11 @@
   [p-key]
   (let [entry (get @shared/connections p-key)]
     (swap! shared/connections dissoc p-key)
+    ;; Forget the conversation too. agent-state was never cleared here, which
+    ;; is why a reconnect could still see the previous session's :plan — a
+    ;; transcript left behind would let /plan-capture write a plan from a
+    ;; conversation that is no longer on screen.
+    (shared/clear-transcript! p-key)
     (cond
       ;; In-process agent — no subprocess to kill, just clean up
       (and (map? entry) (:in-process? entry))

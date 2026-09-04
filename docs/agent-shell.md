@@ -33,6 +33,8 @@ Agent Shell is a nyma extension that turns the nyma chat interface into a unifie
 
 When Agent Shell is active, every message you type in the nyma chat window is forwarded to your connected coding agent. Responses stream back in real-time with support for thinking blocks, tool-call displays, and execution plan rendering.
 
+Routing works by intercepting the `input` event: `input_router` returns `{handle, streaming, subscribe}` to take the turn over, or `nil` to decline — which is how a single-slash `/model` still reaches nyma's own command handler while `//model` is forwarded to the agent. `subscribe` returns the turn's promise so the editor unlocks when it settles.
+
 Agent Shell is designed around a single principle: the agent does the coding work, nyma handles the interface. You get:
 
 - **One interface, many agents** — switch between Claude, Gemini, and others without leaving the session
@@ -180,7 +182,13 @@ To see all available agents:
 /agent list
 ```
 
-To disconnect the current agent:
+To stop routing input to the agent but keep the session alive:
+
+```
+/agent detach
+```
+
+To shut the agent down entirely:
 
 ```
 /agent disconnect
@@ -223,9 +231,20 @@ Response streaming begins immediately. Text chunks, thinking blocks, and tool-ca
 /agent                  → list available agents
 /agent list             → list available agents
 /agent <name>           → connect to agent (disconnects current)
-/agent disconnect       → disconnect current agent
+/agent detach           → stop routing input to the agent, leave it running
+/agent disconnect       → disconnect current agent (kills the process)
 /disconnect             → disconnect current agent
 ```
+
+**`detach` vs `disconnect`.** `disconnect` tears the subprocess down
+(stdin close → SIGTERM → SIGKILL), and that process holds the only copy of the
+conversation — reconnecting starts from nothing. `detach` clears the routing
+only: your typing goes back to nyma's own model while the session keeps
+running, so `/agent <name>` later resumes it with its context intact.
+
+That matters whenever you want nyma's loop to do something (run a spec, answer
+a question) and then return to the agent. `/plan-capture` detaches for exactly
+this reason.
 
 ### `/model` — Switch models
 
@@ -299,6 +318,80 @@ Controls how much reasoning effort the agent applies before responding. Only sup
 ```
 
 If the connected agent does not support effort control, the command shows an error notification and does not affect the session.
+
+### `/plan-capture` — Hand the agent's plan to nyma
+
+```
+/plan-capture [<name>] [--all] [--any-mode] [--execute --role=<r>] [--dry-run] [--disconnect]
+```
+
+Writes the agent's plan to `.nyma/plans/plan-<iso>.md`, then **detaches** so
+nyma's own model takes over execution.
+
+The point is cost. Claude Code runs on your Max/Pro subscription, so planning
+with it is free at the margin; implementation then runs locally on whatever
+cheap model you like. Planning moves off the meter rather than onto a cheaper
+one.
+
+```
+/agent claude                 # ideally with init-mode "plan" — see below
+add OAuth login to the API    # converse: it asks, you refine
+/plan-capture
+  ✓ oauth-login-api · 12 steps → .nyma/plans/plan-2026-09-04T11-20-03.md
+    detached; /agent claude to resume planning
+    next: /spec import oauth-login-api --run
+
+/spec import oauth-login-api --run
+```
+
+`/spec import` with no path picks the newest artifact, and `--run` activates
+the spec and arms the phase loop as soon as the import's decomposition lands.
+
+| flag | effect |
+|---|---|
+| `<name>` | Spec name. Omitted → derived from your first message (`add OAuth login to the API` → `oauth-login-api`). |
+| `--all` | Capture the whole conversation, not just the last reply. For a plan built up across turns. |
+| `--any-mode` | Silence the already-edited warning. |
+| `--execute` | Skip specs: set `:active-role` and send one follow-up pointing at the artifact. |
+| `--role=<r>` | Role for `--execute`. Default `default`. |
+| `--dry-run` | Report what would be captured; write nothing. |
+| `--disconnect` | Also shut the agent down. Default is to leave it warm. |
+
+**Prefer plan mode.** Claude Code ships `init-mode: nil`, so `/agent claude`
+lands in its *default* mode, where it may try to make the changes as well as
+describe them. Capture still works, and warns only if the agent **actually
+completed** file changes during the session — a plan for work already done
+would send the executing model over the same ground. A write you declined
+changed nothing and is not flagged. `--any-mode` silences the warning. Run
+`/plan` after connecting, or set it once:
+
+```json
+{ "agent-shell": { "claude": { "init-mode": "plan" } } }
+```
+
+**It refuses rather than capturing something useless:**
+
+| condition | why |
+|---|---|
+| no agent connected | nothing to capture from |
+| empty transcript | you have not asked it anything |
+| last reply has no numbered steps | that is a question, not a plan |
+
+**Refining.** Capture detaches but leaves the session running, so if the plan
+turns out wrong mid-execution: `/spec run off`, `/agent claude` (same session,
+context intact), explain the problem, then capture again.
+
+**The artifact** carries provenance and a note to its reader, because the model
+that executes it has none of the planning conversation:
+
+```markdown
+---
+source: agent-shell/claude
+mode: plan
+captured: 2026-09-04T11:20:03Z
+request: add OAuth login to the API
+---
+```
 
 ### `/handoff` — Transfer to another agent
 

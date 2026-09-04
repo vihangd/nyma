@@ -12,7 +12,7 @@ This is the most feature-rich extension in the tree. For details — wire format
 
 | Command | What it does |
 |---|---|
-| `/agent` | Connect, disconnect, list, or switch the active agent |
+| `/agent` | Connect, detach, disconnect, list, or switch the active agent |
 | `/disconnect` | Disconnect the currently active agent |
 | `/model` | Show the model picker, list models, or switch model directly |
 | `/plan` | Plan / read-only mode |
@@ -23,6 +23,36 @@ This is the most feature-rich extension in the tree. For details — wire format
 | `/handoff` | Hand the current session off to a different agent, with context transfer |
 | `/mcp` | Discover and manage MCP servers from project config (`.mcp.json`, `.cursor/mcp.json`, …) |
 | `/sessions` | List, resume, or create new agent sessions |
+| `/plan-capture` | Write the agent's plan to `.nyma/plans/` and detach, so a cheap local model can execute it |
+
+### `detach` vs `disconnect`
+
+`disconnect` kills the subprocess; the conversation goes with it. `detach`
+clears input routing only — typing returns to nyma's own model while the ACP
+session keeps running, so `/agent <name>` resumes it with context intact.
+
+### Plan here, execute cheaply there
+
+`/plan-capture` exists for one reason: Claude Code runs on your subscription, so
+planning with it costs nothing at the margin, while implementation can run on a
+cheap local model.
+
+```
+/agent claude                       # set init-mode "plan" — see below
+add OAuth login to the API          # converse
+/plan-capture                       # writes .nyma/plans/…md, detaches
+/spec import oauth-login-api --run  # decompose, activate, run the phase loop
+```
+
+Without `spec_driven`, `/plan-capture --execute --role=default` sets the role
+and points the model at the artifact — but there is no re-injection or task
+tracking, so the plan falls out of context as the conversation grows. That is
+the argument for using specs on anything long.
+
+Claude Code ships `init-mode: nil`, so it connects able to attempt edits.
+Capture proceeds regardless, warning only when the agent actually completed
+file changes — a declined write changed nothing. Set plan mode once with
+`{"agent-shell": {"claude": {"init-mode": "plan"}}}`.
 
 ## Hooks
 

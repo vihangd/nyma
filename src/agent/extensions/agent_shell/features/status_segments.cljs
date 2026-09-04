@@ -38,9 +38,13 @@
 ;;; ─── acp.mode ─────────────────────────────────────────
 
 (defn- acp-mode-segment [{:keys [theme]}]
+  ;; No leading "| " — that is a leftover from the ui.setFooter layout, where
+  ;; every segment was joined into ONE string and had to carry its own
+  ;; separator. Status segments are rendered individually and the status line
+  ;; inserts its own divider, so the literal pipe rendered as "│ | default".
   (if-let [state (active-state)]
     (if-let [mode (:mode state)]
-      (visible (str "| " mode)
+      (visible (str mode)
                (get-in theme [:colors :warning] "#e0af68"))
       (hidden))
     (hidden)))

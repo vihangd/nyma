@@ -42,6 +42,10 @@
                                (swap! registered-commands dissoc name))
           :registerFlag      (fn [name opts]
                                (swap! registered-flags assoc name opts))
+          ;; Ungated on the real api (extensions.cljs:405). input_router reads
+          ;; it inside subscribe to skip thought-streaming when the
+          ;; thinking-renderer extension is active.
+          :getGlobalFlag     (fn [_name] nil)
           :on                (fn [evt handler _priority]
                                (swap! event-handlers update evt (fnil conj []) handler))
           :off               (fn [evt handler]
@@ -313,6 +317,12 @@
     {:stdin   #js {:write (fn [data] (swap! writes conj data) nil)
                    :flush (fn [] nil)}
      :state   (atom {:pending {} :terminals {}})
+     ;; client/send-prompt resets :prompt-state and derefs :session-id before
+     ;; writing the request, so a conn without them throws inside subscribe.
+     :prompt-state (atom {:text "" :tool-calls []})
+     :session-id   (atom "sess_test")
+     :id-counter   (atom 0)
+     :callbacks    (atom nil)
      :_writes writes}))
 
 (defn- last-result
@@ -630,6 +640,41 @@
                                                  (-> (expect (some #(str/includes? % "No agent") @(.-_notifications api)))
                                                      (.toBe true)))))))
 
+;;; ─── setup-ui! ──────────────────────────────────────────────────────────────
+
+(describe "agent-shell:setup-ui!" (fn []
+
+  (it "does not throw when the TUI provides no .setHeader"
+      (fn []
+        ;; extensions.cljs declares :setHeader as a nil placeholder and the
+        ;; interactive TUI never assigns it — it wires notify/select/input/
+        ;; custom/setWidget, not the header slot. Calling it unguarded threw
+        ;; "api.ui.setHeader is not a function" from inside /agent connect, so a
+        ;; cosmetic header took the entire connection down.
+        (reset! shared/footer-set? false)
+        (reset! shared/api-ref #js {:ui #js {:available true :setHeader nil}})
+        (shared/setup-ui!)
+        (-> (expect @shared/footer-set?) (.toBe false))))
+
+  (it "installs the header when the slot exists"
+      (fn []
+        (reset! shared/footer-set? false)
+        (let [installed (atom nil)]
+          (reset! shared/api-ref
+                  #js {:ui #js {:available true
+                                :setHeader (fn [f] (reset! installed f))}})
+          (shared/setup-ui!)
+          (-> (expect (some? @installed)) (.toBe true))
+          (-> (expect @shared/footer-set?) (.toBe true)))))
+
+  (it "does nothing when the ui is unavailable"
+      (fn []
+        (reset! shared/footer-set? false)
+        (reset! shared/api-ref #js {:ui #js {:available false
+                                             :setHeader (fn [_f] nil)}})
+        (shared/setup-ui!)
+        (-> (expect @shared/footer-set?) (.toBe false))))))
+
 ;;; ─── Input router ───────────────────────────────────────────────────────────
 
 (describe "agent-shell:input-router" (fn []
@@ -676,6 +721,37 @@
                                                  (-> (expect (some? result)) (.toBe true))
                                                  (-> (expect (.-handle result)) (.toBe true))
                                                  (-> (expect (.-streaming result)) (.toBe true))))))
+
+                                       (it "handles //command by forwarding it to the agent"
+                                           (fn []
+                                             ;; // is the escape for "send this slash command to the ACP agent";
+                                             ;; a single / stays local. The interception therefore has to sit ahead
+                                             ;; of interactive.cljs's slash branch, which would otherwise swallow it.
+                                             (let [mock-conn (make-test-conn)]
+                                               (reset! shared/active-agent "claude")
+                                               (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) mock-conn})
+                                               (let [api     (make-mock-api)
+                                                     _       (input-router/activate api)
+                                                     handler (first (get @(.-_events api) "input"))
+                                                     result  (handler #js {:input "//model"} nil)]
+                                                 (-> (expect (some? result)) (.toBe true))
+                                                 (-> (expect (.-handle result)) (.toBe true))))))
+
+                                       (it "subscribe RETURNS the turn promise so the caller can unlock the editor"
+                                           (fn []
+                                             ;; Regression: subscribe used to handle .then/.catch internally and
+                                             ;; return nil, so interactive.cljs could not tell when the ACP turn had
+                                             ;; ended — the submit lock never cleared and the editor stayed wedged.
+                                             (let [mock-conn (make-test-conn)]
+                                               (reset! shared/active-agent "claude")
+                                               (reset! shared/connections {(shared/pool-key "claude" (js/process.cwd)) mock-conn})
+                                               (let [api     (make-mock-api)
+                                                     _       (input-router/activate api)
+                                                     handler (first (get @(.-_events api) "input"))
+                                                     result  (handler #js {:input "hi"} nil)
+                                                     ret     ((.-subscribe result) (fn [_f] nil))]
+                                                 (-> (expect (some? ret)) (.toBe true))
+                                                 (-> (expect (fn? (.-then ret))) (.toBe true))))))
 
                                        (it "append-chunk creates new assistant message for new prompt-id"
                                            (fn []
@@ -1006,3 +1082,105 @@
                                               (let [api   (make-mock-api)
                                                     deact (permission-ui/activate api)]
                                                 (-> (expect (fn? deact)) (.toBe true)))))))
+
+;;; ─── Completed-edit tracking ───────────────────────────────────────────────
+
+(describe "agent-shell:edit tracking" (fn []
+
+  (it "counts only mutating tool calls that completed"
+      (fn []
+        ;; A denied or failed write changed nothing, and must not make
+        ;; /plan-capture claim the agent already did the work.
+        (shared/clear-transcript! "claude@/x")
+        (shared/record-tool-call! "claude@/x" "edit" "completed")
+        (shared/record-tool-call! "claude@/x" "edit" "failed")
+        (shared/record-tool-call! "claude@/x" "read" "completed")
+        (shared/record-tool-call! "claude@/x" "search" "completed")
+        (-> (expect (shared/edit-count "claude@/x")) (.toBe 1))))
+
+  (it "counts delete and move as changes too"
+      (fn []
+        (shared/clear-transcript! "claude@/y")
+        (shared/record-tool-call! "claude@/y" "delete" "completed")
+        (shared/record-tool-call! "claude@/y" "move" "completed")
+        (-> (expect (shared/edit-count "claude@/y")) (.toBe 2))))
+
+  (it "is per pool key and cleared with the transcript"
+      (fn []
+        (shared/clear-transcript! "claude@/a")
+        (shared/clear-transcript! "claude@/b")
+        (shared/record-tool-call! "claude@/a" "edit" "completed")
+        (-> (expect (shared/edit-count "claude@/b")) (.toBe 0))
+        (shared/clear-transcript! "claude@/a")
+        (-> (expect (shared/edit-count "claude@/a")) (.toBe 0))))))
+
+;;; ─── Transcript accumulation ───────────────────────────────────────────────
+;;
+;; `/plan-capture` reads this and nothing else: agent-state holds only
+;; :plan/:mode/:model/:usage, `(:prompt-state conn)` is reset every prompt, and
+;; the ACP stream drops user turns outright (`user_message_chunk` → nil,
+;; "replay only"). Three properties decide whether a captured plan is the one
+;; you were looking at, and each was a gap found in review rather than a
+;; hypothetical.
+
+(describe "agent-shell:transcript" (fn []
+
+  (it "keeps both roles, oldest first"
+      (fn []
+        ;; The user turn is only here because send-prompt records it at the
+        ;; call site — the stream never yields it, so `request:` in the
+        ;; artifact header has no other source.
+        (shared/clear-transcript! "claude@/p")
+        (shared/append-turn! "claude@/p" "user" "add OAuth login")
+        (shared/append-turn! "claude@/p" "assistant" "1. do a thing")
+        (let [ts (shared/get-transcript "claude@/p")]
+          (-> (expect (count ts)) (.toBe 2))
+          (-> (expect (:role (first ts))) (.toBe "user"))
+          (-> (expect (:text (first ts))) (.toBe "add OAuth login"))
+          (-> (expect (:role (second ts))) (.toBe "assistant")))))
+
+  (it "is keyed by pool key, so two projects do not interleave"
+      (fn []
+        ;; agent-state is keyed by agent ALONE while the pool is keyed by
+        ;; [agent, cwd], and the gateway deliberately fans out that way. A
+        ;; transcript stored under the agent would splice two projects' plans
+        ;; into one capture.
+        (shared/clear-transcript! "claude@/one")
+        (shared/clear-transcript! "claude@/two")
+        (shared/append-turn! "claude@/one" "user" "project one")
+        (shared/append-turn! "claude@/two" "user" "project two")
+        (-> (expect (count (shared/get-transcript "claude@/one"))) (.toBe 1))
+        (-> (expect (:text (first (shared/get-transcript "claude@/one"))))
+            (.toBe "project one"))
+        (-> (expect (:text (first (shared/get-transcript "claude@/two"))))
+            (.toBe "project two"))))
+
+  (it "clears, so a reconnect cannot capture the previous session's plan"
+      (fn []
+        ;; pool/disconnect nils active-agent and nothing else; without an
+        ;; explicit clear, /plan-capture after a reconnect would happily write
+        ;; a stale plan under a fresh session's name.
+        (shared/append-turn! "claude@/gone" "user" "old plan")
+        (shared/clear-transcript! "claude@/gone")
+        (-> (expect (shared/get-transcript "claude@/gone")) (.toEqual #js []))))
+
+  (it "ignores blank turns rather than recording phantoms"
+      (fn []
+        (shared/clear-transcript! "claude@/blank")
+        (shared/append-turn! "claude@/blank" "assistant" "   ")
+        (shared/append-turn! "claude@/blank" "assistant" "")
+        (shared/append-turn! "claude@/blank" "assistant" nil)
+        (-> (expect (count (shared/get-transcript "claude@/blank"))) (.toBe 0))))
+
+  (it "caps a long planning session by dropping the oldest turns"
+      (fn []
+        ;; Unbounded otherwise, and the useful part of a planning session is
+        ;; always the tail — the plan is the last thing said.
+        (shared/clear-transcript! "claude@/long")
+        (doseq [i (range 60)]
+          (shared/append-turn! "claude@/long" "user" (str "turn-" i)))
+        (let [ts (shared/get-transcript "claude@/long")]
+          (-> (expect (count ts)) (.toBeLessThanOrEqual 40))
+          ;; newest kept, oldest dropped
+          (-> (expect (:text (last ts))) (.toBe "turn-59"))
+          (-> (expect (some (fn [t] (= "turn-0" (:text t))) ts)) (.toBeFalsy)))))))

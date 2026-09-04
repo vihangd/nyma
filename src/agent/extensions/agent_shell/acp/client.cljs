@@ -4,7 +4,8 @@
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
-            [agent.debug :as dbg]))
+            [agent.debug :as dbg]
+            [agent.extensions.agent-shell.shared :as shared]))
 
 ;;; ─── Stderr logging ────────────────────────────────────────
 ;;
@@ -231,16 +232,11 @@
 
 ;;; ─── Prompt sending ────────────────────────────────────────
 
-(defn send-prompt
-  "Send a prompt to an established ACP connection.
-   Returns a promise of {:text, :stop-reason, :usage, :tool-calls}.
-   In-process agents (Agent SDK runner) delegate to :sdk-query on the conn."
-  [conn prompt-text & [timeout-ms]]
-  ;; Reset per-prompt accumulators
-  (reset! (:prompt-state conn) {:text "" :tool-calls []})
-  (if (:in-process? conn)
-    ((:sdk-query conn) conn prompt-text)
-    (let [sid     @(:session-id conn)
+(defn- send-prompt-acp
+  "The ACP wire path of send-prompt, split out so the transcript wrapper above
+   can cover it and the in-process path identically."
+  [conn prompt-text timeout-ms]
+  (let [sid     @(:session-id conn)
           timeout (or timeout-ms 600000)
           req-id  (next-id conn)
           prompt-promise
@@ -267,9 +263,33 @@
                 (swap! (:state conn) update :pending dissoc req-id)
                 (reject (js/Error. (str "ACP prompt timed out after " timeout "ms"))))
               timeout)))]
-      (js/Promise.race #js [prompt-promise timeout-promise]))))
+      (js/Promise.race #js [prompt-promise timeout-promise])))
 
 ;;; ─── Connection cancel ─────────────────────────────────────
+(defn send-prompt
+  "Send a prompt to an established ACP connection.
+   Returns a promise of {:text, :stop-reason, :usage, :tool-calls}.
+   In-process agents (Agent SDK runner) delegate to :sdk-query on the conn.
+
+   Also records the turn into the session transcript. This is the only place
+   both halves are visible: the ACP stream drops user text
+   (`user_message_chunk` → nil, \"replay only\") and :prompt-state is reset
+   below, so nothing downstream can reconstruct the conversation. Keyed by
+   :pool-key rather than agent-key because one agent may drive several
+   projects at once, and the in-process branch is wrapped too — it returns
+   straight from sdk-query and would otherwise never be recorded."
+  [conn prompt-text & [timeout-ms]]
+  ;; Reset per-prompt accumulators
+  (reset! (:prompt-state conn) {:text "" :tool-calls []})
+  (shared/append-turn! (:pool-key conn) "user" prompt-text)
+  (let [record! (fn [result]
+                  (shared/append-turn! (:pool-key conn) "assistant" (:text result))
+                  result)
+        p       (if (:in-process? conn)
+                  (js/Promise.resolve ((:sdk-query conn) conn prompt-text))
+                  (send-prompt-acp conn prompt-text timeout-ms))]
+    (.then p record!)))
+
 
 (defn cancel-prompt
   "Send session/cancel notification to abort in-flight generation."
