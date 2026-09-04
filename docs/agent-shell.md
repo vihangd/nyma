@@ -322,7 +322,7 @@ If the connected agent does not support effort control, the command shows an err
 ### `/plan-capture` — Hand the agent's plan to nyma
 
 ```
-/plan-capture [<name>] [--all] [--any-mode] [--execute --role=<r>] [--dry-run] [--disconnect]
+/plan-capture [<name>] [--all] [--any-mode] [--execute --role=<r>] [--dry-run] [--no-refine] [--disconnect]
 ```
 
 Writes the agent's plan to `.nyma/plans/plan-<iso>.md`, then **detaches** so
@@ -355,6 +355,7 @@ the spec and arms the phase loop as soon as the import's decomposition lands.
 | `--execute` | Skip specs: set `:active-role` and send one follow-up pointing at the artifact. |
 | `--role=<r>` | Role for `--execute`. Default `default`. |
 | `--dry-run` | Report what would be captured; write nothing. |
+| `--no-refine` | Skip the rewrite round-trip described below. |
 | `--disconnect` | Also shut the agent down. Default is to leave it warm. |
 
 **Prefer plan mode.** Claude Code ships `init-mode: nil`, so `/agent claude`
@@ -368,6 +369,19 @@ changed nothing and is not flagged. `--any-mode` silences the warning. Run
 ```json
 { "agent-shell": { "claude": { "init-mode": "plan" } } }
 ```
+
+**It asks for a rewrite when the plan cannot be executed cold.** The plan the
+agent writes is addressed to *you*, mid-conversation — it can say "eyeball the
+output" or "the usual place" because you were both there. The model that
+executes it has none of that. So if no step names a file, or no step names a
+command that could exit non-zero, `/plan-capture` sends one follow-up asking
+for exact paths, current behaviour before each change, numbered steps, and a
+verifying command per step — then captures the rewrite instead.
+
+That round-trip is free at the margin on a subscription but not free in time;
+`--no-refine` skips it. It is also skipped for `--all` and `--dry-run`, and a
+rewrite that fails or times out is not a failed capture — the plan already on
+the transcript is written as-is, with a warning.
 
 **It refuses rather than capturing something useless:**
 

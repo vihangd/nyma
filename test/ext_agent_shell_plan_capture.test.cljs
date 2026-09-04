@@ -178,10 +178,12 @@
 
 ;;; ─── End to end ─────────────────────────────────────────────
 
-(defn- with-tmp [body]
+(defn- ^:async with-tmp
+  "Async: capture! now awaits an optional refine round-trip."
+  [body]
   (let [tmp  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-pc-"))
         prev (js/process.cwd)]
-    (try (.chdir js/process tmp) (body tmp)
+    (try (.chdir js/process tmp) (js-await (body tmp))
          (finally (.chdir js/process prev)
                   (try (fs/rmSync tmp #js {:recursive true :force true})
                        (catch :default _ nil))))))
@@ -204,55 +206,211 @@
     (shared/append-turn! pk "assistant" plan-text)
     pk))
 
+(def ^:private executable-plan-text
+  "Names files AND a command with an exit code — the bar the refine pass is
+   trying to reach. The `plan-text` fixture above deliberately does not: it
+   cites paths but verifies nothing, which is the commonest real shape."
+  (str "1. Add TokenStore in `src/auth/store.ts:1`.\n"
+       "2. Wire the callback in `src/auth/routes.ts:40`.\n"
+       "3. Verify: `bun test test/auth.test.ts` exits 0.\n"))
+
+(defn- thin-plan-text
+  "Reads well, cannot be executed cold: no file path, no verifying command."
+  []
+  (str "Plan:\n1. Add a token store.\n2. Wire it into the callback.\n"
+       "3. Check it works by trying a login.\n"))
+
 (describe "plan-capture/capture! end to end" (fn []
 
-                                               (it "writes an artifact and DETACHES, leaving the session reattachable"
-                                                   (fn []
-                                                     (with-tmp
-                                                       (fn [tmp]
-                                                         (let [_ (seed!) {:keys [api notes]} (harness)]
-                                                           (pc/capture! api [])
-                                                           (let [files (vec (fs/readdirSync (path/join tmp ".nyma" "plans")))]
-                                                             (-> (expect (count files)) (.toBe 1))
-                                                             (-> (expect (.startsWith (first files) "plan-")) (.toBe true)))
-              ;; detach, not disconnect — the pooled process must survive so a
-              ;; follow-up refinement still has the planning context
-                                                           (-> (expect @shared/active-agent) (.toBeNil))
-                                                           (-> (expect (.includes (str/join " " @notes) "detached")) (.toBe true)))))))
+  (it "writes an artifact and DETACHES, leaving the session reattachable" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [tmp]
+             (let [_ (seed!) {:keys [api notes]} (harness)]
+               (js-await (pc/capture! api []))
+               (let [files (vec (fs/readdirSync (path/join tmp ".nyma" "plans")))]
+                 (-> (expect (count files)) (.toBe 1))
+                 (-> (expect (.startsWith (first files) "plan-")) (.toBe true)))
+               ;; detach, not disconnect — the pooled process must survive so a
+               ;; follow-up refinement still has the planning context
+               (-> (expect @shared/active-agent) (.toBeNil))
+               (-> (expect (.includes (str/join " " @notes) "detached")) (.toBe true))))))))
 
-                                               (it "--dry-run writes nothing and stays attached"
-                                                   (fn []
-                                                     (with-tmp
-                                                       (fn [tmp]
-                                                         (let [_ (seed!) {:keys [api notes]} (harness)]
-                                                           (pc/capture! api ["--dry-run"])
-                                                           (-> (expect (fs/existsSync (path/join tmp ".nyma" "plans"))) (.toBe false))
-                                                           (-> (expect @shared/active-agent) (.toBe "claude"))
-                                                           (-> (expect (.includes (str/join " " @notes) "dry run")) (.toBe true)))))))
+  (it "--dry-run writes nothing and stays attached" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [tmp]
+             (let [_ (seed!) {:keys [api notes]} (harness)]
+               (js-await (pc/capture! api ["--dry-run"]))
+               (-> (expect (fs/existsSync (path/join tmp ".nyma" "plans"))) (.toBe false))
+               (-> (expect @shared/active-agent) (.toBe "claude"))
+               (-> (expect (.includes (str/join " " @notes) "dry run")) (.toBe true))))))))
 
-                                               (it "derives the name from the first request when none is given"
-                                                   (fn []
-                                                     (with-tmp
-                                                       (fn [_tmp]
-                                                         (let [_ (seed!) {:keys [api notes]} (harness)]
-                                                           (pc/capture! api [])
-                                                           (-> (expect (.includes (str/join " " @notes) "oauth-login-api")) (.toBe true)))))))
+  (it "derives the name from the first request when none is given" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [_tmp]
+             (let [_ (seed!) {:keys [api notes]} (harness)]
+               (js-await (pc/capture! api []))
+               (-> (expect (.includes (str/join " " @notes) "oauth-login-api")) (.toBe true))))))))
 
-                                               (it "--execute sets the role and sends exactly one follow-up"
-                                                   (fn []
-                                                     (with-tmp
-                                                       (fn [_tmp]
-                                                         (let [_ (seed!) {:keys [api sent state]} (harness)]
-                                                           (pc/capture! api ["--execute" "--role=fast"])
-                                                           (-> (expect (:active-role @state)) (.toBe "fast"))
-                                                           (-> (expect (count @sent)) (.toBe 1))
-                                                           (-> (expect (.includes (first @sent) ".nyma/plans/")) (.toBe true)))))))
+  (it "--execute sets the role and sends exactly one follow-up" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [_tmp]
+             (let [_ (seed!) {:keys [api sent state]} (harness)]
+               (js-await (pc/capture! api ["--execute" "--role=fast"]))
+               (-> (expect (:active-role @state)) (.toBe "fast"))
+               (-> (expect (count @sent)) (.toBe 1))
+               (-> (expect (.includes (first @sent) ".nyma/plans/")) (.toBe true))))))))
 
-                                               (it "writes nothing when it refuses"
-                                                   (fn []
-                                                     (with-tmp
-                                                       (fn [tmp]
-                                                         (reset! shared/active-agent nil)
-                                                         (let [{:keys [api]} (harness)]
-                                                           (pc/capture! api [])
-                                                           (-> (expect (fs/existsSync (path/join tmp ".nyma"))) (.toBe false)))))))))
+  (it "writes nothing when it refuses" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [tmp]
+             (reset! shared/active-agent nil)
+             (let [{:keys [api]} (harness)]
+               (js-await (pc/capture! api []))
+               (-> (expect (fs/existsSync (path/join tmp ".nyma"))) (.toBe false))))))))))
+
+;;; ─── Self-containment: the refine round-trip ────────────────
+;;
+;; The plan the agent writes is addressed to YOU, mid-conversation. A real
+;; capture named an absolute path and inlined the file body — executable — but
+;; verified with "run it, eyeball `2026-09-04`", which no gate can act on, and
+;; carried an offer ("say which and me adjust") aimed at the planner rather
+;; than the reader. `thin-plan?` decides whether to ask for a rewrite.
+
+(describe "plan-capture/thin-plan?" (fn []
+
+  (it "passes a plan that names files and a verifying command"
+      (fn []
+        (-> (expect (pc/thin-plan? executable-plan-text 3)) (.toBeNil))))
+
+  (it "flags the commonest real shape: paths cited, nothing verified"
+      (fn []
+        ;; `plan-text` is exactly that — three steps naming files, no command.
+        (-> (expect (pc/thin-plan? plan-text 3))
+            (.toBe "no step names a command that verifies it"))))
+
+  (it "flags a plan that names no file"
+      (fn []
+        (-> (expect (pc/thin-plan? (thin-plan-text) 3)) (.toBe "no step names a file"))))
+
+  (it "flags a plan whose check is an instruction to look at something"
+      (fn []
+        ;; The observed case: paths present, verification by eyeball.
+        (let [t (str "1. Create `/tmp/today.sh` with `date +%F`.\n"
+                     "2. chmod +x it.\n"
+                     "3. Check: run it, eyeball the date.\n")]
+          (-> (expect (pc/thin-plan? t 3))
+              (.toBe "no step names a command that verifies it")))))
+
+  (it "says nothing when there are no steps — capture-refusal owns that"
+      (fn []
+        (-> (expect (pc/thin-plan? "Which provider?" 0)) (.toBeNil))))))
+
+(describe "plan-capture/capture! refine pass" (fn []
+
+  (it "asks the agent to rewrite a thin plan, then captures the rewrite" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [tmp]
+             (reset! shared/active-agent "claude")
+             (let [pk (shared/pool-key "claude" (js/process.cwd))
+                   {:keys [api notes]} (harness)
+                   asked (atom [])]
+               (shared/clear-transcript! pk)
+               (shared/append-turn! pk "user" "write a date script")
+               (shared/append-turn! pk "assistant" (thin-plan-text))
+               ;; Stands in for client/send-prompt: records the ask and appends
+               ;; the reply, exactly as the real one does.
+               (js-await (pc/capture!
+                          api []
+                          (fn [text]
+                            (swap! asked conj text)
+                            (shared/append-turn! pk "user" text)
+                            (shared/append-turn!
+                             pk "assistant"
+                             (str "1. Create `src/date.sh` with `date +%F`.\n"
+                                  "2. Verify: `bash src/date.sh` exits 0.\n"))
+                            (js/Promise.resolve #js {}))))
+               (-> (expect (count @asked)) (.toBe 1))
+               (-> (expect (.includes (first @asked) "no access to this conversation"))
+                   (.toBe true))
+               (-> (expect (.includes (str/join " " @notes) "asking claude to rewrite"))
+                   (.toBe true))
+               ;; The ARTIFACT must hold the rewrite, not the original.
+               (let [dir  (path/join tmp ".nyma" "plans")
+                     body (fs/readFileSync
+                           (path/join dir (first (fs/readdirSync dir))) "utf8")]
+                 (-> (expect (.includes body "bash src/date.sh")) (.toBe true))
+                 (-> (expect (.includes body "Check it works by trying a login")) (.toBe false)))))))))
+
+  (it "leaves a plan alone when it is already executable" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [_tmp]
+             (reset! shared/active-agent "claude")
+             (let [pk (shared/pool-key "claude" (js/process.cwd))
+                   {:keys [api]} (harness)
+                   asked (atom 0)]
+               (shared/clear-transcript! pk)
+               (shared/append-turn! pk "user" "add OAuth login")
+               (shared/append-turn! pk "assistant" executable-plan-text)
+               (js-await (pc/capture! api [] (fn [_] (swap! asked inc)
+                                               (js/Promise.resolve #js {}))))
+               (-> (expect @asked) (.toBe 0))))))))
+
+  (it "--no-refine skips the round-trip" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [_tmp]
+             (reset! shared/active-agent "claude")
+             (let [pk (shared/pool-key "claude" (js/process.cwd))
+                   {:keys [api]} (harness)
+                   asked (atom 0)]
+               (shared/clear-transcript! pk)
+               (shared/append-turn! pk "user" "x")
+               (shared/append-turn! pk "assistant" (thin-plan-text))
+               (js-await (pc/capture! api ["--no-refine"]
+                                      (fn [_] (swap! asked inc)
+                                        (js/Promise.resolve #js {}))))
+               (-> (expect @asked) (.toBe 0))))))))
+
+  (it "still captures when the rewrite fails" ^:async
+      (fn []
+        (js-await
+         (with-tmp
+           ^:async
+           (fn [tmp]
+             (reset! shared/active-agent "claude")
+             (let [pk (shared/pool-key "claude" (js/process.cwd))
+                   {:keys [api notes]} (harness)]
+               (shared/clear-transcript! pk)
+               (shared/append-turn! pk "user" "x")
+               (shared/append-turn! pk "assistant" (thin-plan-text))
+               ;; A failed rewrite must not lose the plan already on the
+               ;; transcript — the agent may simply have timed out.
+               (js-await (pc/capture! api []
+                                      (fn [_] (js/Promise.reject (js/Error. "timeout")))))
+               (-> (expect (.includes (str/join " " @notes) "rewrite failed")) (.toBe true))
+               (-> (expect (count (fs/readdirSync (path/join tmp ".nyma" "plans"))))
+                   (.toBe 1)))))))))
+)

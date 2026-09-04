@@ -18,6 +18,7 @@
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shared]
+            [agent.extensions.agent-shell.acp.client :as client]
             [agent.extensions.model-roles.features.plan-mode :as plan-mode]))
 
 ;;; ─── Pure ──────────────────────────────────────────────────
@@ -37,6 +38,9 @@
      :any-mode?   (flag "--any-mode")   ; silence the already-edited warning
      :execute?    (flag "--execute")
      :dry-run?    (flag "--dry-run")
+     ;; The refine round-trip is one extra turn on the planning agent — free
+     ;; at the margin on a subscription, but not free in time.
+     :no-refine?  (flag "--no-refine")
      :disconnect? (flag "--disconnect")
      :role        (or role "default")}))
 
@@ -173,6 +177,55 @@
          (when (not= "plan" (str mode)) (str " (mode: " (or mode "unknown") ")"))
          " — check the plan does not describe work already done")))
 
+(def refine-prompt
+  "Sent back to the planning agent when the plan is not executable cold.
+
+   The plan the agent writes is addressed to YOU, mid-conversation: it can say
+   \"eyeball the output\" or \"the usual place\" because you were both there.
+   The model that executes it has none of that. This asks for the missing
+   half."
+  (str "Rewrite that plan so an engineer with no access to this conversation "
+       "can execute it. For each step: name the exact file path (and line "
+       "range where it matters), state the current behaviour before the "
+       "change, and give the command that verifies the step succeeded — a "
+       "command with an exit code, not an instruction to look at something. "
+       "Number the steps. Output only the plan."))
+
+(def ^:private path-like
+  ;; A path or a dotted filename. Deliberately loose: the question is whether
+  ;; the plan points anywhere at all, not whether the path resolves.
+  (js/RegExp. "(^|[\\s`'\"(])(?:[.~]?/[\\w.-]+|[\\w.-]+/[\\w./-]+|[\\w-]+\\.[a-z]{2,4})\\b"))
+
+(def ^:private verify-like
+  ;; A command that could exit non-zero. `verify_gate` needs one of these;
+  ;; "run it and check the output" gives it nothing to gate on.
+  ;;
+  ;; Anchored at a token start rather than \\b: bare `sh` and `go` matched
+  ;; inside `today.sh` and inside ordinary prose, so a plan verified by eyeball
+  ;; looked verified. Dropped both in favour of the forms people actually type.
+  (js/RegExp. (str "(^|[\\s`'\"(])"
+                   "(bun|npm|npx|yarn|pnpm|cargo|pytest|python3?|make|bash"
+                   "|git|tsc|eslint|jest|vitest|go (?:test|build|run))"
+                   "\\b")))
+
+(defn thin-plan?
+  "Why `plan` cannot be executed cold, or nil when it can.
+
+   Two signals, both drawn from a real capture. That plan named an absolute
+   path and gave the file body inline — genuinely executable — but its
+   verification step was \"run it, eyeball `2026-09-04`\", which no gate can
+   act on. A plan naming no file at all is the worse case and the more common
+   one.
+
+   Only consulted to decide whether to ASK for a rewrite; it never refuses."
+  [plan steps]
+  (let [t (str (or plan ""))]
+    (cond
+      (zero? (or steps 0))       nil ; capture-refusal already covers this
+      (not (.test path-like t))  "no step names a file"
+      (not (.test verify-like t)) "no step names a command that verifies it"
+      :else nil)))
+
 (defn capture-refusal
   "Pure: the reason capture must not proceed, or nil. Order matters — the
    cheapest, most-likely-wrong condition first.
@@ -214,18 +267,47 @@
       (fs/writeFileSync file text "utf8")
       file)))
 
-(defn capture!
-  "The command body, split from registration so tests can drive it."
-  [api args]
-  (let [{:keys [name all? any-mode? execute? role dry-run? disconnect?]}
+(defn ^:async capture!
+  "The command body, split from registration so tests can drive it.
+
+   `send-fn` is the refine round-trip, injected so tests need no ACP."
+  [api args & [send-fn]]
+  (let [{:keys [name all? any-mode? execute? role dry-run? disconnect? no-refine?]}
         (parse-args args)
         agent-key  @shared/active-agent
         cwd        (js/process.cwd)
         p-key      (when agent-key (shared/pool-key agent-key cwd))
         transcript (when p-key (shared/get-transcript p-key))
         mode       (when agent-key (shared/get-agent-state agent-key :mode))
-        plan       (plan-text transcript all?)
-        steps      (count (plan-mode/extract-todos (str plan)))
+        plan0      (plan-text transcript all?)
+        steps0     (count (plan-mode/extract-todos (str plan0)))
+        ;; Ask once for a rewrite when the plan reads well but cannot be
+        ;; executed by a stranger. Skipped for --all (which captures the whole
+        ;; conversation, so a single turn's thinness says nothing), for
+        ;; --dry-run, and when there is no sender.
+        thin       (when-not (or no-refine? all? dry-run?)
+                     (thin-plan? plan0 steps0))
+        refined?   (atom false)
+        _          (when (and thin send-fn p-key)
+                     (notify api (str "plan-capture: " thin
+                                      " — asking " (shared/kw-name agent-key)
+                                      " to rewrite it for a reader with no "
+                                      "access to this conversation"))
+                     (js-await (-> (js/Promise.resolve (send-fn refine-prompt))
+                                   (.then (fn [_] (reset! refined? true)))
+                                   (.catch (fn [e]
+                                             ;; A failed rewrite is not a failed
+                                             ;; capture — the original plan is
+                                             ;; still on the transcript.
+                                             (notify api (str "plan-capture: rewrite failed ("
+                                                              (.-message e)
+                                                              "); capturing the plan as written")
+                                                     "warning"))))))
+        ;; Re-read: send-prompt appends both turns, so the rewrite is now the
+        ;; last assistant turn.
+        transcript (if @refined? (shared/get-transcript p-key) transcript)
+        plan       (if @refined? (plan-text transcript all?) plan0)
+        steps      (if @refined? (count (plan-mode/extract-todos (str plan))) steps0)
         refusal    (capture-refusal {:agent-key agent-key :transcript transcript
                                      :steps steps})
         edits      (when p-key (shared/edit-count p-key))
@@ -274,6 +356,12 @@
    api "plan-capture"
    #js {:description (str "Capture the ACP agent's plan to .nyma/plans/. "
                           "Usage: /plan-capture [<name>] [--all] [--any-mode] "
-                          "[--execute --role=<r>] [--dry-run] [--disconnect]")
-        :handler (fn [args _ctx] (capture! api args))})
+                          "[--execute --role=<r>] [--dry-run] [--no-refine] "
+                          "[--disconnect]")
+        :handler (fn [args _ctx]
+                   (capture! api args
+                             (fn [text]
+                               (when-let [conn (some-> @shared/active-agent
+                                                       shared/find-conn-by-agent)]
+                                 (client/send-prompt conn text)))))})
   (fn [] (.unregisterCommand api "plan-capture")))
