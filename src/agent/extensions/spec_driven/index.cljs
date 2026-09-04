@@ -1807,13 +1807,28 @@
                          (not (phases/template-tasks? progress)))
                 (set-pending! false)
                 (swap! (.-__state-atom api) assoc :spec-loop-armed true)
+                ;; Bind a role, like every other arming path. This did not, and
+                ;; `bind-role!` is only reachable through `set-phase!` — called
+                ;; from /spec run, /spec phase and the :advance branch, never
+                ;; from here. So `/spec import --run` armed a loop that ran the
+                ;; whole task list on whatever model nyma started with, and the
+                ;; profile did nothing. The phase is the same default the loop
+                ;; itself computes, so this changes only the binding.
+                (let [cfg   (phases/config (safe-settings))
+                      order (phases/phase-order (get (:profiles cfg) (get-profile)))]
+                  (set-phase! (or (get-phase) (first order))
+                              (fn [m] (when-let [ui (.-ui api)]
+                                        (when (.-notify ui) (.notify ui m "warning"))))))
                 ;; Say so. The wait between `--run` and the loop starting is
                 ;; one full turn of decomposition, and silence there reads as
                 ;; nothing having happened.
                 (when-let [ui (.-ui api)]
                   (when (.-notify ui)
                     (.notify ui (str "spec: decomposition landed — "
-                                     (:total progress) " tasks, loop armed")
+                                     (:total progress) " tasks, loop armed"
+                                     "  phase: " (get-phase)
+                                     "  role: " (or (:active-role (.getState api))
+                                                    (get (.getState api) "active-role")))
                              "info")))
                 true)))
 

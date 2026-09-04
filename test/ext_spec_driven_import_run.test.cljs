@@ -76,7 +76,8 @@
   []
   (let [st    (atom {})
         notes (atom [])
-        cmds  (atom {})]
+        cmds  (atom {})
+        evs   (atom {})]
     {:api #js {:ui                #js {:available true
                                        :notify (fn [m & _] (swap! notes conj m))}
                :__state_atom      st
@@ -85,11 +86,15 @@
                :unregisterCommand (fn [n] (swap! cmds dissoc n))
                :registerStatusSegment (fn [_ _] nil)
                :unregisterStatusSegment (fn [_] nil)
-               :on                (fn [_e _h & _] nil)
+               ;; Recorded, not discarded: the promotion that arms the loop
+               ;; happens in the `agent_end` handler, so a test that never
+               ;; fires it cannot see whether arming binds a role.
+               :on                (fn [e h & _] (swap! evs update (str e) (fnil conj []) h) nil)
                :off               (fn [_e _h] nil)
+               :events            #js {:emit (fn [_e _d] nil)}
                :sendUserMessage   (fn [_t _o] nil)
                :getSettings       (fn [] #js {})}
-     :state st :notes notes :cmds cmds}))
+     :state st :notes notes :cmds cmds :evs evs}))
 
 (defn- spec-cmd!
   "Activate spec_driven and invoke /spec with `args`, passing a ctx that
@@ -433,3 +438,91 @@
                 test-force-is-not-mistaken-for-a-path)
             (it "applies to directory mode too, not just file mode"
                 test-force-applies-to-directory-mode)))
+
+;;; ─── Arming binds a role ───────────────────────────────────
+
+;; `promote-pending!` armed the loop and stopped there. `bind-role!` is only
+;; reachable through `set-phase!` — called from /spec run, /spec phase and the
+;; :advance branch, never from the promotion. So `/spec import --run` armed a
+;; loop that ran the entire task list on whatever model nyma started with, and
+;; the profile that is the whole point of the phase loop did nothing. The
+;; status segment gates role on `(and armed? (seq role))`, so such a run
+;; rendered `⏵ spec · 7/11` with no role — visible, to anyone who got that far.
+
+(defn- fire-agent-end!
+  "Drive the handlers registered on `agent_end`, which is where promotion runs."
+  [{:keys [evs]}]
+  (doseq [h (get @evs "agent_end")] (h #js {})))
+
+(defn- write-real-tasks! [tmp name]
+  (fs/writeFileSync (path/join tmp ".specify" "specs" name "tasks.md")
+                    (str "# " name " — Tasks\n\n"
+                         "- [ ] Add the token store\n"
+                         "- [ ] Wire the callback\n")
+                    "utf8"))
+
+(defn test-promotion-binds-a-role []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [state] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        ;; Still pending: tasks are the scaffold, so promotion must NOT fire.
+        (fire-agent-end! h)
+        (-> (expect (boolean (or (:spec-loop-armed @state)
+                                 (get @state "spec-loop-armed"))))
+            (.toBe false))
+        ;; The decomposition turn lands.
+        (write-real-tasks! tmp "token-store")
+        (fire-agent-end! h)
+        (-> (expect (boolean (or (:spec-loop-armed @state)
+                                 (get @state "spec-loop-armed"))))
+            (.toBe true))
+        ;; The assertion this file exists for: armed AND bound.
+        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+            (.toBe "plan"))
+        (-> (expect (or (:active-role @state) (get @state "active-role")))
+            (.toBe "advisor"))))))
+
+(defn test-promotion-respects-an-explicit-phase []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [state] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        ;; A phase chosen before the decomposition lands must survive it —
+        ;; promotion binds the phase already set, it does not reset to first.
+        (spec-cmd! h agent ["phase" "execute"])
+        (write-real-tasks! tmp "token-store")
+        (fire-agent-end! h)
+        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+            (.toBe "execute"))
+        (-> (expect (or (:active-role @state) (get @state "active-role")))
+            (.toBe "fast"))))))
+
+(defn test-promotion-reports-phase-and-role []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [notes] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        (write-real-tasks! tmp "token-store")
+        (reset! notes [])
+        (fire-agent-end! h)
+        (let [all (apply str @notes)]
+          (-> (expect (.includes all "decomposition landed")) (.toBe true))
+          (-> (expect (.includes all "2 tasks")) (.toBe true))
+          ;; Silence about which role it bound is how gap 1 stayed invisible.
+          (-> (expect (.includes all "role: advisor")) (.toBe true)))))))
+
+(describe "arming the loop binds a role"
+          (fn []
+            (it "binds phase and role when the decomposition lands"
+                test-promotion-binds-a-role)
+            (it "keeps a phase set before the decomposition landed"
+                test-promotion-respects-an-explicit-phase)
+            (it "says which phase and role it armed on"
+                test-promotion-reports-phase-and-role)))
