@@ -1,5 +1,11 @@
 {
   "namespace": "openwiki",
-  "capabilities": ["events", "commands", "tools", "flags", "state", "ui"],
+  "capabilities": [
+    "events",
+    "commands",
+    "tools",
+    "flags",
+    "ui"
+  ],
   "dependsOn": []
 }

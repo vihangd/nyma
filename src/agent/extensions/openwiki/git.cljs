@@ -10,7 +10,12 @@
   "Run a git command, return trimmed stdout, or \"\" on any failure."
   [cmd]
   (try
-    (str/trim (cp/execSync (str "git " cmd) #js {:encoding "utf-8"}))
+    ;; maxBuffer: execSync defaults to 1 MB, and `ls-files` on a large repo
+    ;; exceeds it — which threw ENOBUFS, hit the catch, and returned "". The
+    ;; caller cannot tell that from "clean repo", so the orientation block went
+    ;; silently empty. Exactly the failure the truncation fix was meant to end.
+    (str/trim (cp/execSync (str "git " cmd)
+                           #js {:encoding "utf-8" :maxBuffer (* 64 1024 1024)}))
     (catch :default _ "")))
 
 (defn in-git-repo? []
@@ -27,6 +32,8 @@
   []
   {:status (git "status --short")
    :log    (git "log --oneline --max-count=20")
+   ;; name-status, NOT a patch — the prompts must label it as the file list it
+   ;; is, or the model believes it has seen the changes themselves.
    :diff   (git "diff --name-status HEAD")})
 
 (defn changes-since
@@ -37,12 +44,36 @@
     ""
     (git (str "log " sha "..HEAD --name-status --oneline"))))
 
+(def ^:private tree-limit 120)
+
 (defn repo-tree
-  "A bounded file listing for orientation (excludes common noise dirs)."
+  "A bounded orientation listing: file counts per directory (three levels
+   deep), busiest first, plus the root-level files.
+
+   Not a truncated `ls-files`. That is what this was, and on a 700-file repo
+   `head -200` handed the model an alphabetical prefix — `.github/`, `bench/`,
+   `docs/` and one sliver of `src/`, never `src/agent/loop.cljs` or
+   `src/gateway/` — with nothing saying it had been cut. A silent prefix is
+   worse than a summary: it reads as the whole repo."
   []
-  (try
-    (str/trim
-     (cp/execSync
-      (str "git ls-files 2>/dev/null | head -200")
-      #js {:encoding "utf-8" :shell "/bin/sh"}))
-    (catch :default _ "")))
+  (let [files (->> (str/split-lines (git "ls-files"))
+                   (map str/trim)
+                   (remove str/blank?))
+        total (count files)]
+    (if (zero? total)
+      ""
+      (let [group  (fn [f]
+                     (let [parts (.split f "/")]
+                       (if (<= (count parts) 1)
+                         "(repo root)"
+                         (str/join "/" (take 3 (butlast parts))))))
+            counts (->> files
+                        (reduce (fn [acc f] (let [g (group f)] (assoc acc g (inc (or (get acc g) 0))))) {})
+                        (sort-by (fn [[_ n]] (- n))))
+            shown  (take tree-limit counts)]
+        (str total " tracked files across " (count counts) " directories"
+             (when (> (count counts) tree-limit)
+               (str " — the " tree-limit " largest are listed; "
+                    (- (count counts) tree-limit) " smaller directories are not"))
+             ":\n"
+             (str/join "\n" (map (fn [[k n]] (str "  " n "\t" k)) shown)))))))

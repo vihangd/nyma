@@ -1,10 +1,14 @@
 (ns agent.extensions.openwiki.commands
-  "The /openwiki command: dispatches init | update | chat.
+  "The /openwiki command: dispatches init | update.
 
-   Generation is triggered by follow-up PRIMING — the doc-writing/answering run
-   fires on the user's next turn (nyma commands can't start an agentic run at
-   idle; the follow-queue drains inside the next run). This is the same pattern
-   spec_driven's /spec import uses. The notice makes the deferral explicit."
+   Generation is triggered by follow-up PRIMING — the doc-writing run fires on
+   the user's next turn (nyma commands can't start an agentic run at idle; the
+   follow-queue drains inside the next run). This is the same pattern
+   spec_driven's /spec import uses. The notice makes the deferral explicit.
+
+   There is no `chat` verb. It built a prompt saying 'answer the question, cite
+   file:line, change nothing' and deferred it a turn — which is what asking the
+   agent already does, minus a keystroke."
   (:require ["node:fs" :as fs]
             [clojure.string :as str]
             [agent.loop :as agent-loop]
@@ -26,6 +30,15 @@
     (do (agent-loop/follow-up agent {:content prompt}) true)
     false))
 
+(defn- read-instructions
+  "User-authored `<dir>/INSTRUCTIONS.md`, or nil. This is the only scope control
+   OpenWiki has — without it `init` happily documents build output and vendored
+   trees. Inlined verbatim into the prompt and never rewritten by the agent."
+  [dir]
+  (let [f (shared/instructions-file dir)]
+    (when (fs/existsSync f)
+      (try (fs/readFileSync f "utf8") (catch :default _ nil)))))
+
 (defn make-handler
   "Command handler. `args` is a ClojureScript seq of tokens (from
    run-command!'s `(rest parts)`), NOT a JS array — use seq ops."
@@ -34,7 +47,6 @@
     (let [dir      (:dir config)
           sections (:sections config)
           verb     (or (first args) "help")
-          rest-args (rest args)
           prime-notice
           (fn [ok? queued-msg]
             (if ok?
@@ -45,7 +57,8 @@
         (if-not (git/in-git-repo?)
           (notify ctx "openwiki: not a git repository." "error")
           (let [ctx-data (assoc (git/collect-context) :tree (git/repo-tree))]
-            (prime-notice (prime! ctx (prompts/init-prompt dir sections ctx-data))
+            (prime-notice (prime! ctx (prompts/init-prompt dir sections ctx-data
+                                                           (read-instructions dir)))
                           (str "OpenWiki queued — press Enter (or send any message) to start "
                                "writing " dir "/."))))
 
@@ -60,15 +73,9 @@
                 changes (git/changes-since (when meta (aget meta "gitHead")))]
             (if (str/blank? changes)
               (notify ctx "No changes since last update. Nothing to do." "warning")
-              (let [{:keys [status diff]} (git/collect-context)]
-                (prime-notice (prime! ctx (prompts/update-prompt dir meta changes status diff))
+              (let [ctx-data (assoc (git/collect-context) :tree (git/repo-tree))]
+                (prime-notice (prime! ctx (prompts/update-prompt dir meta changes ctx-data
+                                                                (read-instructions dir)))
                               "OpenWiki update queued — send any message to begin.")))))
 
-        "chat"
-        (let [q (str/trim (str/join " " rest-args))]
-          (if (str/blank? q)
-            (notify ctx "Usage: /openwiki chat <question>" "error")
-            (prime-notice (prime! ctx (prompts/chat-prompt dir q))
-                          "OpenWiki question queued — send any message for the answer.")))
-
-        (notify ctx "Usage: /openwiki [init | update | chat <question>]" "info")))))
+        (notify ctx "Usage: /openwiki [init | update]" "info")))))
