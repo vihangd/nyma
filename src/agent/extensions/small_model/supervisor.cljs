@@ -60,7 +60,16 @@
   "Invoke the `advisor` tool via getTool, or fall back if unavailable."
   [api focus-question]
   (try
-    (let [adv-tool (when (.-getTool api) (.getTool api "advisor"))]
+    (let [;; Tools are registered NAMESPACED — extension_scope prefixes with
+          ;; "<ns>__" — while getTool passes the name straight through. So a
+          ;; bare "advisor" could never match, and every intervention in a real
+          ;; session degraded to the canned fallback below without ever saying
+          ;; the lookup was the problem. `dependsOn ["advisor"]` guarantees
+          ;; which namespace it is; the bare name is kept as a fallback in case
+          ;; something registers it unprefixed via overrideTool.
+          get-tool (fn [n] (when (.-getTool api)
+                             (try (.getTool api n) (catch :default _ nil))))
+          adv-tool (or (get-tool "advisor__advisor") (get-tool "advisor"))]
       (if (and adv-tool (.-execute adv-tool))
         (let [result (js-await ((.-execute adv-tool)
                                 #js {:focus focus-question}))]
