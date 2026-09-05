@@ -249,6 +249,26 @@
                        (.setMessages chat-pane @messages)
                        (.requestRender tui))
 
+        ;; The activity spinner advances once per RENDER, and renders happen
+        ;; when output arrives. nyma's own turns stream tokens continuously so
+        ;; that was invisible, but an ACP agent can spend a minute inside one
+        ;; tool call emitting nothing — and a frozen spinner reads exactly like
+        ;; a hung process, which is the complaint this whole change started
+        ;; from. Tick only while working: at idle the status line must stop
+        ;; re-rendering so the terminal scroll position holds.
+        tick-timer   (atom nil)
+        set-streaming!
+        (fn [on?]
+          (reset! streaming (boolean on?))
+          (if on?
+            (when-not @tick-timer
+              (reset! tick-timer
+                      (js/setInterval (fn [] (sync-status!) (.requestRender tui)) 100)))
+            (when-let [t @tick-timer]
+              (js/clearInterval t)
+              (reset! tick-timer nil)))
+          (sync-status!))
+
         ;; ── Message mutations ──────────────────────────────────────────────
         update-messages!
         (fn [f]
@@ -312,22 +332,21 @@
 
         do-run!
         (fn [text]
-          (reset! streaming true)
-          (sync-status!)
+          (set-streaming! true)
           (-> (js/Promise.resolve nil)
               (.then (fn [_]
                        (run-turn-with-update-handler
                         agent add-chunk!
                         #(run agent text))))
               (.then (fn [_]
-                       (reset! streaming false)
+                       (set-streaming! false)
                        (swap! turn-count inc)
                        (reset! submit-lock false)
                        (sync-status!)
                        (sync-pane!)))
               (.catch (fn [e]
                         (add-error! e)
-                        (reset! streaming false)
+                        (set-streaming! false)
                         (reset! submit-lock false)
                         (sync-status!)))))
 
@@ -442,8 +461,7 @@
           ;; An ACP turn is a turn. Without this the status bar read idle for
           ;; its whole duration — the one place that could have said "something
           ;; is happening" while the agent worked in silence.
-          (reset! streaming true)
-          (sync-status!)
+          (set-streaming! true)
           (.addToHistory editor trimmed)
           ;; Echo NOW, not when the agent answers. The router used to prefix
           ;; "❯ <text>" onto its own first chunk, so the prompt appeared only
@@ -453,14 +471,12 @@
           (let [sub (get res "subscribe")]
             (if-not sub
               (do (reset! submit-lock false)
-                  (reset! streaming false)
-                  (sync-status!))
+                  (set-streaming! false))
               (-> (js/Promise.resolve (sub ensure-ids))
                   (.catch (fn [e] (add-error! e)))
                   (.finally (fn []
                               (reset! submit-lock false)
-                              (reset! streaming false)
-                              (sync-status!)
+                              (set-streaming! false)
                               (sync-pane!)))))))
 
         on-submit
@@ -655,6 +671,9 @@
                          (fn [data]
                            (when (matchesKey data "ctrl+c")
                              (.stop tui)
+                             ;; Or the render ticker keeps the event loop alive
+                             ;; and the process never exits.
+                             (set-streaming! false)
                              ((:off events) "tool_execution_start"  on-tool-start)
                              ((:off events) "tool_execution_end"    on-tool-end)
                              ((:off events) "tool_execution_update" on-tool-update)

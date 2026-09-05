@@ -69,6 +69,11 @@
                       @shared/tool-callback)]
       (cb {:id tool-id :title title :kind kind :status status
            :path (tool-path upd)}))
+    ;; Surface it on the status line too — during a long tool call the pane is
+    ;; static, and the one row that is always visible should say what is
+    ;; running.
+    (shared/update-agent-state! (:agent-key conn) :current-tool
+                                {:kind kind :title title :path (tool-path upd)})
     ;; Emit for UI rendering (reuse nyma's tool execution events)
     (when-let [emit (:emit conn)]
       (emit "acp_tool_start"
@@ -105,6 +110,10 @@
                       @shared/tool-callback)]
       (cb {:id tool-id :title (.-title upd) :kind (.-kind upd)
            :status status :path (tool-path upd)}))
+    ;; Clear the status-line tool once it settles, so a finished call does not
+    ;; sit there looking live.
+    (when (contains? #{"completed" "failed"} (str status))
+      (shared/update-agent-state! (:agent-key conn) :current-tool nil))
     ;; Emit for UI
     (when-let [emit (:emit conn)]
       (emit "acp_tool_update"

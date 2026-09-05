@@ -49,6 +49,27 @@
       (hidden))
     (hidden)))
 
+
+;;; ─── acp.tool ─────────────────────────────────────────
+
+(defn acp-tool-segment
+  "What the agent is doing right now.
+
+   The pane shows every tool call, but during a single long one it is static —
+   and the status line is the row that is always on screen. Cleared when the
+   call settles, so a finished tool does not sit there looking live."
+  [{:keys [theme]}]
+  (if-let [t (:current-tool (active-state))]
+    (let [label  (get {"read" "reading" "edit" "editing" "delete" "deleting"
+                       "move" "moving"  "search" "searching" "execute" "running"
+                       "think" "thinking" "fetch" "fetching"}
+                      (str (:kind t)) "working")
+          detail (or (not-empty (str (or (:path t) "")))
+                     (not-empty (str (or (:title t) ""))))]
+      (visible (str label (when detail (str ": " detail)))
+               (get-in theme [:colors :warning] "#e0af68")))
+    (hidden)))
+
 ;;; ─── acp.context ──────────────────────────────────────
 
 (defn- progress-bar [ratio width]
@@ -104,6 +125,7 @@
   {"acp.agent"      {:render acp-agent-segment      :position "left"}
    "acp.model"      {:render acp-model-segment      :position "left"}
    "acp.mode"       {:render acp-mode-segment       :position "left"}
+   "acp.tool"       {:render acp-tool-segment       :position "left"}
    "acp.context"    {:render acp-context-segment    :position "right"}
    "acp.cost"       {:render acp-cost-segment       :position "right"}
    "acp.turn-usage" {:render acp-turn-usage-segment :position "right"}})

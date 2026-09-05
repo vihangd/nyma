@@ -524,6 +524,19 @@ to its title.
 Your prompt is echoed when you send it, not when the agent replies — an ACP
 agent replies last, so waiting for it meant staring at a blank screen.
 
+The status line says what is running, and keeps moving while it runs:
+
+```
+⠹ Conjuring…   nyma │ glm-flash │ [claude] plan  editing: src/auth/store.ts
+```
+
+`acp.tool` names the current call and clears when it settles. The spinner used
+to advance once per render — fine for nyma's own turns, which stream tokens
+continuously, but an ACP agent can sit inside one tool call for a minute
+emitting nothing, and a frozen spinner reads exactly like a hung process. It
+now ticks on its own while a turn is in flight, and stops at idle so the
+terminal scroll position holds.
+
 ### Thinking
 
 `agent-shell.inline-thinking` in `.nyma/settings.json`:

@@ -1,7 +1,7 @@
 (ns status-line-segments.test
   "Tests for segment registry and context-usage-level."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
-            [agent.ui.status-line-segments :refer [register-segment
+            [agent.ui.status-line-segments :as segs :refer [register-segment
                                                    unregister-segment
                                                    get-segment
                                                    segment-registry
@@ -149,3 +149,29 @@
                                      (fn []
                                        (let [samples [{:ts 1000 :delta-tokens 10} {:ts 1000 :delta-tokens 20}]]
                                          (-> (expect (token-rate-per-sec samples 60000 1000)) (.toBe 0)))))))
+
+;;; ─── Activity verb ─────────────────────────────────────────────────────────
+;;
+;; `:verb` was documented as "rotated by StatusLine's useEffect" — Ink-era
+;; wiring that did not survive the migration. Nothing supplied it, so twelve
+;; verbs rendered as "Thinking" forever. Derived from the clock instead: no
+;; ticker to lose.
+
+(describe "status-line activity verb" (fn []
+
+  (it "rotates every ~2.5 seconds"
+      (fn []
+        (-> (expect (= (segs/activity-verb 0) (segs/activity-verb 2499))) (.toBe true))
+        (-> (expect (= (segs/activity-verb 0) (segs/activity-verb 2500))) (.toBe false))))
+
+  (it "wraps around the whole list"
+      (fn []
+        (-> (expect (segs/activity-verb 0))
+            (.toBe (segs/activity-verb (* 2500 (count segs/ACTIVITY-VERBS)))))))
+
+  (it "is always one of the declared verbs"
+      (fn []
+        (doseq [i (range 30)]
+          (-> (expect (boolean (some #(= % (segs/activity-verb (* i 2500)))
+                                     segs/ACTIVITY-VERBS)))
+              (.toBe true)))))))

@@ -352,11 +352,18 @@
              (get-in theme [:colors :warning] "#e0af68"))
     (hidden)))
 
+(defn activity-verb
+  "Verb for `ms`, rotating every ~2.5s. Derived from the clock rather than a
+   ticker: the caller never supplied `:verb` after the Ink migration, so the
+   list of twelve rendered as \"Thinking\" forever."
+  [ms]
+  (nth ACTIVITY-VERBS (mod (js/Math.floor (/ ms 2500)) (count ACTIVITY-VERBS))))
+
 (defn- activity-seg [{:keys [activity spinner-frame verb theme]}]
   (if activity
     (let [frame (nth SPINNER-FRAMES
                      (mod (or spinner-frame 0) (count SPINNER-FRAMES)))
-          v     (or verb (first ACTIVITY-VERBS))]
+          v     (or verb (activity-verb (js/Date.now)))]
       (visible (str frame " " v "…")
                (get-in theme [:colors :warning] "#e0af68")))
     (hidden)))
