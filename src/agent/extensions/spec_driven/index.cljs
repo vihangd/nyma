@@ -1001,10 +1001,18 @@
               ;; `/spec start <name> --force` — order shouldn't matter.
               (let [force?    (boolean (some #(= % "--force") rest-))
                     pos-args  (vec (remove #(= % "--force") rest-))
-                    target    (first pos-args)]
+                    ;; Default to the spec that is already active. Reporting
+                    ;; "Usage" while a spec IS active reads as "nothing is set
+                    ;; up", which is the opposite of the truth — and it is the
+                    ;; commonest way to type the command after a restart.
+                    target    (or (first pos-args) active)]
                 (cond
                   (empty? target)
-                  (.notify (.-ui ctx) "Usage: /spec start <name> [--force]" "error")
+                  (.notify (.-ui ctx)
+                           (str "Usage: /spec start <name> [--force]\n"
+                                "  No spec is active. " (count specs)
+                                " found — /spec list to see them.")
+                           "error")
 
                   (not (get specs target))
                   (.notify (.-ui ctx)
@@ -1046,8 +1054,14 @@
                         (.notify (.-ui ctx)
                                  (str "Active spec: " target
                                       (when force? " (forced past analyze warnings)")
-                                      ".\nDocs are now appended to the system prompt for every turn. "
-                                      "Use /spec next to advance, /spec end to clear.")))))))
+                                      ".\nDocs are appended to the system prompt every turn.\n"
+                                      ;; Name what each one DOES. This said "use
+                                      ;; /spec next to advance" and /spec next
+                                      ;; only printed the task — so the path it
+                                      ;; recommended advanced nothing.
+                                      "  /spec run    — run every task on the phase loop\n"
+                                      "  /spec next   — do the next task, one turn\n"
+                                      "  /spec end    — clear the active spec")))))))
 
               "new"
               (let [target          (first rest-)
@@ -1557,29 +1571,45 @@
                   (.notify (.-ui ctx) "Active spec cleared."))
 
               "next"
-              (cond
-                (nil? active)
-                (.notify (.-ui ctx) "No active spec. Use /spec start <name> first." "error")
+              (let [show-only? (boolean (some (fn [a] (= (str a) "--show")) rest-))]
+                (cond
+                  (nil? active)
+                  (.notify (.-ui ctx) "No active spec. Use /spec start <name> first." "error")
 
-                :else
-                (let [spec  (get specs active)
-                      tasks (parse-tasks (read-if-exists (:tasks spec)))
-                      task  (next-open-task tasks)]
-                  (cond
-                    (empty? tasks)
-                    (.notify (.-ui ctx) (str "Spec " active " has no tasks yet."))
+                  :else
+                  (let [spec  (get specs active)
+                        tasks (parse-tasks (read-if-exists (:tasks spec)))
+                        task  (next-open-task tasks)]
+                    (cond
+                      (empty? tasks)
+                      (.notify (.-ui ctx) (str "Spec " active " has no tasks yet."))
 
-                    (nil? task)
-                    (.notify (.-ui ctx) (str "All tasks in " active " are done. 🎉"))
+                      (nil? task)
+                      (.notify (.-ui ctx) (str "All tasks in " active " are done. 🎉"))
 
-                    :else
-                    (do
-                      ;; Notify hook listeners so users can wire pre-task automation.
-                      (when-let [emit (.-emit (.-events api))]
-                        (emit "spec_task_start"
-                              #js {:spec active :task (:text task) :line (:line-idx task)}))
-                      (.notify (.-ui ctx)
-                               (str "Next task in " active ":\n  • " (:text task)))))))
+                      :else
+                      (do
+                        ;; Notify hook listeners so users can wire pre-task automation.
+                        (when-let [emit (.-emit (.-events api))]
+                          (emit "spec_task_start"
+                                #js {:spec active :task (:text task) :line (:line-idx task)}))
+                        ;; …and actually START it. This only ever PRINTED the
+                        ;; task, while `/spec start` pointed at it with "use
+                        ;; /spec next to advance" — so the documented manual
+                        ;; path dead-ended on a command that advanced nothing
+                        ;; and the user had to retype the task by hand.
+                        (if show-only?
+                          (.notify (.-ui ctx)
+                                   (str "Next task in " active ":\n  • " (:text task)))
+                          (do
+                            (.notify (.-ui ctx)
+                                     (str "▸ " active ": " (:text task)))
+                            ((.-sendUserMessage api)
+                             (str "Do this one task from the active spec, then tick it off "
+                                  "in tasks.md (replace `- [ ]` with `- [x]` on that line) "
+                                  "in the same turn. Do exactly this task and stop — do not "
+                                  "start the next one.\n\nTask: " (:text task))
+                             #js {:deliverAs "followUp"}))))))))
 
               "done"
               (let [pattern (str/join " " rest-)]

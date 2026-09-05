@@ -4,7 +4,7 @@
 
 ## What it does
 
-Discovers feature specs in either of the two converged 2026 markdown layouts, lets the user activate one with `/spec start <name>`, and from then on appends the active spec's three documents (spec / plan / tasks for spec-kit, or requirements / design / tasks for Kiro) to the system prompt every turn. Tasks are tracked as markdown checkboxes; the agent (or you) advance them with `/spec next` and `/spec done <pattern>`.
+Discovers feature specs in either of the two converged 2026 markdown layouts, lets the user activate one with `/spec start [<name>]` (defaulting to whichever spec is already active), and from then on appends the active spec's three documents (spec / plan / tasks for spec-kit, or requirements / design / tasks for Kiro) to the system prompt every turn. Tasks are tracked as markdown checkboxes; the agent (or you) advance them with `/spec next` and `/spec done <pattern>`.
 
 Solves the "did the agent do what I asked?" trust problem by making the plan a durable, reviewable, diff-able artifact instead of an ephemeral chat scrollback. The spec docs survive context compaction and stay in scope for every model turn until you `/spec end`.
 
@@ -111,7 +111,7 @@ The system prompt block looks like:
 | `/spec analyze <name>` | **Drop-in compatible with spec-kit's `/speckit.analyze`.** Read-only consistency check across spec/plan/tasks/constitution. Six detection passes: Duplication, Ambiguity, Underspecification, Constitution Alignment (MUST violations auto-CRITICAL), Coverage Gaps, Inconsistency. Renders a Markdown report with finding ID + severity + location. 4-level severity (CRITICAL/HIGH/MEDIUM/LOW), 50-finding cap, stable IDs (A1, D1, etc.) so re-runs are diffable. Caches the run in `.nyma/spec-state.json` for the soft-block on `/spec start`. |
 | `/spec start <name> [--force]` | Activate. From this point the spec's docs are appended to the system prompt every turn. **Soft-blocks** if `/spec analyze` has never run for this spec, has unresolved CRITICAL findings, or the spec content has drifted since the last analyze — the warning suggests running analyze first; pass `--force` to start anyway. |
 | `/spec install-skill [--force]` | Write the companion `spec-driven-dev` SKILL.md to `~/.nyma/skills/spec-driven-dev/`. The skill teaches the model the spec-kit conventions (FR-### IDs, `[NEEDS CLARIFICATION:]` markers, 11-category clarify taxonomy, 6-pass analyze checks, constitution-as-MUST). Uses agentskills.io baseline frontmatter only — portable across Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI. Refuses to overwrite an existing install unless `--force`. |
-| `/spec next` | Find the first unchecked task in the active spec, narrate it, **emit `spec_task_start` hook**. |
+| `/spec next [--show]` | Hand the first unchecked task in the active spec to the model as a follow-up — do that one task, tick it off, stop. **Emits `spec_task_start`.** `--show` prints it without spending a turn. Before this it only ever printed, while `/spec start` told you to use it "to advance", so the recommended manual path advanced nothing. |
 | `/spec done <pattern>` | Case-insensitive substring match against task text → flip `[ ]` to `[x]` in `tasks.md` on disk. **Emits `spec_task_complete` hook**. |
 | `/spec phase [<name>]` | Show the current phase, its bound role and the phase order — or move to `<name>`. Setting a phase writes `:active-role`, so the model, allowed-tools and permissions switch together. |
 | `/spec profile [<name>]` | Show or switch the phase→role profile. A switch re-binds the current phase immediately, not just at the next transition. |
@@ -385,7 +385,9 @@ without running an agent:
 > /spec start auth-flow
 ℹ Active spec: auth-flow.
    Docs are now appended to the system prompt for every turn.
-   Use /spec next to advance, /spec end to clear.
+   /spec run    — run every task on the phase loop
+   /spec next   — do the next task, one turn
+   /spec end    — clear the active spec
 
 > /spec next
 ℹ Next task in auth-flow:

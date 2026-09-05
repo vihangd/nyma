@@ -529,3 +529,86 @@
                 test-promotion-respects-an-explicit-phase)
             (it "says which phase and role it armed on"
                 test-promotion-reports-phase-and-role)))
+
+;;; ─── /spec next actually starts the task ───────────────────
+;;
+;; Observed live, and a dead end: `/spec start apps` printed "Use /spec next to
+;; advance", `/spec next` printed the task text — and nothing happened. The one
+;; command the guidance recommended advanced nothing, so the task had to be
+;; retyped by hand to get any work out of it.
+
+(defn- sent-messages
+  "Capture what the extension hands to sendUserMessage."
+  [h]
+  (let [sent (atom [])]
+    (aset (:api h) "sendUserMessage" (fn [m _o] (swap! sent conj (str m))))
+    sent))
+
+(defn- ready-spec!
+  "An imported spec with real tasks, active and started."
+  [tmp h agent]
+  (write-plan! tmp)
+  (spec-cmd! h agent ["import" "token-store"])
+  (write-real-tasks! tmp "token-store")
+  (spec-cmd! h agent ["start" "token-store" "--force"]))
+
+(defn test-next-dispatches-the-task []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            sent  (sent-messages h)]
+        (ready-spec! tmp h agent)
+        (spec-cmd! h agent ["next"])
+        (-> (expect (count @sent)) (.toBe 1))
+        (let [m (first @sent)]
+          ;; The task itself, and the tick-off instruction that makes progress
+          ;; observable — without it the loop cannot tell the task was done.
+          (-> (expect (.includes m "Add the token store")) (.toBe true))
+          (-> (expect (.includes m "- [x]")) (.toBe true))
+          ;; One task, not a free run.
+          (-> (expect (.includes m "do not")) (.toBe true)))))))
+
+(defn test-next-show-only []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            sent  (sent-messages h)]
+        (ready-spec! tmp h agent)
+        (spec-cmd! h agent ["next" "--show"])
+        ;; The old behaviour, kept for "what is next?" without committing a turn.
+        (-> (expect (count @sent)) (.toBe 0))
+        (-> (expect (.includes (apply str @(:notes h)) "Next task in")) (.toBe true))))))
+
+(defn test-next-sends-nothing-when-done []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            sent  (sent-messages h)]
+        (ready-spec! tmp h agent)
+        (fs/writeFileSync (path/join tmp ".specify" "specs" "token-store" "tasks.md")
+                          "# t\n\n- [x] Add the token store\n- [x] Wire the callback\n" "utf8")
+        (spec-cmd! h agent ["next"])
+        (-> (expect (count @sent)) (.toBe 0))
+        (-> (expect (.includes (apply str @(:notes h)) "are done")) (.toBe true))))))
+
+(defn test-start-defaults-to-the-active-spec []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)]
+        (ready-spec! tmp h agent)
+        (reset! (:notes h) [])
+        ;; Bare `/spec start` reported "Usage" while a spec WAS active, which
+        ;; reads as "nothing is set up" — the opposite of the truth.
+        (spec-cmd! h agent ["start"])
+        (let [all (apply str @(:notes h))]
+          (-> (expect (.includes all "Usage")) (.toBe false))
+          ;; Either it activates or it reports the analyze soft-block — both
+          ;; name the spec. What it must NOT do is claim nothing is set up.
+          (-> (expect (.includes all "token-store")) (.toBe true)))))))
+
+(describe "/spec next starts work, /spec start defaults to active"
+          (fn []
+            (it "hands the next task to the model" test-next-dispatches-the-task)
+            (it "--show keeps the old print-only behaviour" test-next-show-only)
+            (it "sends nothing when every task is done" test-next-sends-nothing-when-done)
+            (it "bare /spec start uses the active spec" test-start-defaults-to-the-active-spec)))
