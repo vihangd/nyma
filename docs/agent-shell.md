@@ -295,7 +295,7 @@ Automatically approves file edits but still prompts before running shell command
 /sessions resume <id>   → load a previous session
 ```
 
-Not all agents support sessions. Claude and Gemini do. Agents without `:sessions` in their feature set will show an informational message.
+Not all agents support sessions. Claude and Gemini do. Availability is read from the capabilities the agent reports at handshake — the registry's `:features` set is descriptive only and does not gate anything.
 
 ### `/mcp` — Inspect MCP servers
 
@@ -504,9 +504,45 @@ Modes that aren't supported by the current agent display an informational messag
 
 ---
 
+## Watching a turn
+
+An ACP agent works before it answers: it reads files, greps, edits, and only
+then writes a reply. nyma shows that work as it happens.
+
+```
+❯ add OAuth login to the API
+⚒ Read  src/auth/routes.ts  ✓
+⚒ Read  src/auth/store.ts  ✓
+⚒ Edit  src/auth/store.ts  ⋯
+```
+
+One line per tool call, rewritten in place as its status changes
+(`⋯` pending or running, `✓` completed, `✗` failed). The label comes from the
+ACP tool kind and the detail from the location the agent reports, falling back
+to its title.
+
+Your prompt is echoed when you send it, not when the agent replies — an ACP
+agent replies last, so waiting for it meant staring at a blank screen.
+
+### Thinking
+
+`agent-shell.inline-thinking` in `.nyma/settings.json`:
+
+| value | effect |
+|---|---|
+| `auto` (default) | inline only when nothing else is rendering thinking |
+| `always` | always inline, even alongside a thinking widget |
+| `never` | never inline |
+
+`auto` exists because the `thinking-renderer` extension paints its own
+collapsible widget; inlining as well would render every thought twice. If you
+do not have that extension, `auto` inlines.
+
 ## Session Management
 
-Agents that support `:sessions` can save and resume past sessions. Session data (conversation history, file context, etc.) is managed by the agent itself.
+Session data (conversation history, file context) is managed by the agent
+itself; nyma stores only the id. Availability is decided by the capabilities
+the agent reports at handshake, not by the `:features` set in the registry.
 
 ### Listing Sessions
 
@@ -520,9 +556,46 @@ If the agent supports sessions, this shows a list with session IDs and titles. O
 
 ```
 /sessions resume <session-id>
+/sessions resume                 # the session nyma remembers for this project
 ```
 
-This calls `session/load` on the ACP agent, which restores the previous conversation context.
+Two ACP methods do this and they differ in a way you will notice:
+
+| method | restores agent context | replays history |
+|---|---|---|
+| `session/resume` (current spec) | yes | **no** |
+| `session/load` (older agents) | yes | yes |
+| `session/resume` | Restore a session WITHOUT replaying its history (current spec; `session/load` is the older, replaying form) |
+
+nyma tries `session/resume` first and falls back to `session/load` when the
+agent answers `-32601`. After a `resume` the agent remembers the conversation
+and nyma does not, so the notice says so — this matters because
+`/plan-capture` reads nyma's transcript, not the agent's.
+
+After a `load`, the replayed conversation is rendered into the transcript **and**
+rebuilt into the capture transcript, so `/plan-capture` works immediately
+without sending a fresh prompt. While replay is in flight nyma treats those
+frames as history: they do not count toward the "already edited N files"
+warning, and they do not overwrite the current plan.
+
+### Sessions across restarts
+
+nyma remembers the session id per `[agent, project]` in
+`.nyma/ext-state/agent-shell.json` — written when a session is created and when
+one is resumed. On connect, if a previous session exists for the project:
+
+```
+previous session for this project: OAuth work
+  /agent-shell__sessions resume to pick it up
+```
+
+That is the whole point: the id is opaque and nobody retypes one, so without
+this a conversation was unreachable the moment nyma exited. The agent must
+still have the session on its side — nyma stores the id, not the history.
+
+Not available on in-process runners (`claude-sdk`): they have no ACP stdio, so
+`/sessions` reports that rather than hanging. Their history is resumed by the
+SDK on connect instead.
 
 ### Session Titles
 
