@@ -44,6 +44,24 @@
    Set by the input router before sending a prompt, cleared after."
   (atom nil))
 
+(def tool-callback
+  "Atom holding a callback (fn [{:id :title :kind :status :path}]) for
+   rendering tool activity. Set by the input router before sending a prompt,
+   cleared after.
+
+   Added because a turn looked hung: `acp_tool_start` / `acp_tool_update` were
+   emitted as events (declared in events.cljs) that NOTHING subscribed to, and
+   Claude Code spends most of a turn reading and editing before it emits any
+   text. The whole working period rendered as a blank screen."
+  (atom nil))
+
+(def replay-callback
+  "Atom holding (fn [{:role :text}]) used while a session is replaying, so the
+   restored conversation lands in the transcript pane. Separate from
+   `stream-callback` because replay is history: it must not look like the
+   agent is answering right now."
+  (atom nil))
+
 (def mcp-servers
   "Discovered MCP server configs in ACP array format.
    [{:name \"server\" :command \"npx\" :args [...] :env {...}}]"
@@ -185,6 +203,37 @@
   "Turns for `pool-key`, oldest first. [] when there is none."
   [pool-key]
   (vec (get @transcripts (str pool-key) [])))
+
+;;; ─── Remembered sessions ───────────────────────────────────
+;;
+;; agent_shell declares the `state` capability in extension.json and never used
+;; it, so `:session-id` lived only in a per-conn atom and every session died
+;; with the process. Refining a captured plan the next day meant starting cold.
+
+(defn store-key
+  "Sessions are remembered per [agent, project] — the same key the connection
+   pool uses, because one agent commonly drives several checkouts."
+  [agent-key cwd]
+  (str "session:" (pool-key agent-key cwd)))
+
+(defn remember-session!
+  "Persist the current session id for this agent+cwd. Silent on failure: a
+   read-only or missing ext-state dir must not break the session itself."
+  [api agent-key session-id & [title]]
+  (when (and session-id (.-state api))
+    (try
+      (.set (.-state api) (store-key agent-key (js/process.cwd))
+            #js {:sessionId (str session-id)
+                 :title     (or title "")
+                 :updated   (.toISOString (js/Date.))})
+      (catch :default _ nil))))
+
+(defn recall-session
+  "The remembered session for this agent+cwd, or nil."
+  [api agent-key]
+  (when (.-state api)
+    (try (.get (.-state api) (store-key agent-key (js/process.cwd)))
+         (catch :default _ nil))))
 
 (def mutating-tool-kinds
   "ACP ToolKind values that change the working tree. `read`, `search`, `think`

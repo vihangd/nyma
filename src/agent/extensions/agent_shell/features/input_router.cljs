@@ -62,10 +62,72 @@
         (assoc all idx plan-msg)
         (conj all plan-msg)))))
 
+(def tool-glyphs
+  "ACP ToolCallStatus -> glyph. `pending` covers both \"input still streaming\"
+   and \"awaiting approval\", which look the same from here."
+  {"pending" "\u22ef" "in_progress" "\u22ef" "completed" "\u2713" "failed" "\u2717"})
+
+(def tool-labels
+  "ACP ToolKind -> a short verb. The spec's nine kinds; anything else falls
+   back to the raw kind so a new one is visible rather than swallowed."
+  {"read" "Read" "edit" "Edit" "delete" "Delete" "move" "Move" "search" "Search"
+   "execute" "Bash" "think" "Think" "fetch" "Fetch" "other" "Tool"})
+
+(defn tool-line
+  "One activity line for a tool call: `\u2692 Read  src/auth/store.ts  \u22ef`.
+
+   Prefers the reported location over the title — `locations` is what the spec
+   provides for follow-along, and a path says more in one line than prose."
+  [{:keys [title kind status path]}]
+  (let [label  (get tool-labels (str kind) (or (not-empty (str kind)) "Tool"))
+        detail (or (not-empty (str (or path ""))) (not-empty (str (or title ""))) "")
+        glyph  (get tool-glyphs (str status) "\u22ef")]
+    (str "\u2692 " label (when (seq detail) (str "  " detail)) "  " glyph)))
+
+(defn upsert-tool
+  "Add or update the message for one tool call, keyed by its id.
+
+   ACP sends `tool_call` once and then any number of `tool_call_update`s in
+   which every field but `toolCallId` is optional. So this MERGES: a
+   status-only update must not blank the title it already showed."
+  [prev {:keys [id] :as call} current-prompt-id]
+  (let [all (vec prev)
+        idx (some (fn [[i m]] (when (and (= (:tool-id m) (str id))
+                                         (= (:prompt-id m) current-prompt-id))
+                                i))
+                  (map-indexed vector all))
+        prior (when idx (get all idx))
+        merged (merge (select-keys (or prior {}) [:title :kind :status :path])
+                      (into {} (remove (fn [[_ v]] (nil? v))
+                                       (select-keys call [:title :kind :status :path]))))
+        msg   (assoc merged
+                     :role "tool" :tool-id (str id) :prompt-id current-prompt-id
+                     :content (tool-line merged))]
+    (if idx (assoc all idx msg) (conj all msg))))
+
+(defn inline-thinking?
+  "Should thinking be streamed into the transcript?
+
+   `agent-shell.inline-thinking`: \"auto\" (default) inlines only when nothing
+   else renders it; \"always\" and \"never\" override. A normal settings dial
+   rather than a hidden coupling to whichever extension happens to be
+   installed."
+  [api]
+  (case (str (or (get (shared/load-config) "inline-thinking") "auto"))
+    "always" true
+    "never"  false
+    ;; `auto`: inline unless something else is already painting it. Guarded
+    ;; because getGlobalFlag is absent on programmatic/gateway APIs, and an
+    ;; unconditional call there threw inside `subscribe` — taking the whole
+    ;; turn down rather than losing one nicety.
+    (not (when (.-getGlobalFlag api)
+           (.getGlobalFlag api "thinking-renderer__active")))))
+
 (defn- clear-callbacks! []
   (reset! shared/stream-callback nil)
   (reset! shared/thought-callback nil)
-  (reset! shared/plan-callback nil))
+  (reset! shared/plan-callback nil)
+  (reset! shared/tool-callback nil))
 
 (defn- make-stream-handler
   "Create a streaming handler object.
@@ -81,15 +143,27 @@
         ;; Wire text streaming callback
         (reset! shared/stream-callback
                 (fn [text-delta]
-                  (let [delta (if (compare-and-set! first? true false)
-                                (str "❯ " user-text "\n" text-delta)
-                                text-delta)]
-                    (set-messages (fn [prev] (append-chunk prev delta pid))))))
-        ;; Wire thinking callback (skip if thinking-renderer extension is active)
-        (when-not (.getGlobalFlag api "thinking-renderer__active")
+                  ;; No "❯ <text>" prefix any more: the caller echoes the
+                  ;; prompt at submit time instead. Prefixing the first CHUNK
+                  ;; meant the prompt appeared only once the agent answered —
+                  ;; and Claude Code answers last, after all its tool work.
+                  (compare-and-set! first? true false)
+                  (set-messages (fn [prev] (append-chunk prev text-delta pid)))))
+        ;; Wire thinking inline unless something else already renders it.
+        ;; `auto` reproduces the original behaviour — thinking_renderer paints a
+        ;; widget, so inlining too would double-render — but the check was
+        ;; unconditional and undocumented, and with that extension installed
+        ;; (its `active` flag defaults TRUE) thinking never appeared inline and
+        ;; there was no way to ask for it.
+        (when (inline-thinking? api)
           (reset! shared/thought-callback
                   (fn [thought-text]
                     (set-messages (fn [prev] (append-thought prev thought-text pid))))))
+        ;; Wire tool activity — the reads and edits that fill the silence
+        ;; before any text arrives.
+        (reset! shared/tool-callback
+                (fn [call]
+                  (set-messages (fn [prev] (upsert-tool prev call pid)))))
         ;; Wire plan callback
         (reset! shared/plan-callback
                 (fn [plan-data]
@@ -104,8 +178,7 @@
                (when @first?
                  (set-messages
                   (fn [prev]
-                    (append-chunk prev
-                                  (str "❯ " user-text "\n(no response)") pid))))
+                    (append-chunk prev "(no response)" pid))))
                (when-let [usage (:usage result)]
                  (shared/update-agent-state! agent-key :turn-usage usage))))
             (.catch

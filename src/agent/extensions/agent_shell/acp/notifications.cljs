@@ -40,6 +40,17 @@
 
 ;;; ─── Tool call handling ────────────────────────────────────
 
+(defn tool-path
+  "First location path an ACP tool call reports, or nil.
+
+   `locations` is what the spec provides for \"follow-along\" — which file the
+   agent is on right now — and it is more useful in a one-line renderer than
+   the title, which is prose."
+  [upd]
+  (let [locs (.-locations upd)]
+    (when (and locs (pos? (.-length locs)))
+      (.-path (aget locs 0)))))
+
 (defn- handle-tool-call
   "Handle tool_call notification — tool invocation start."
   [conn upd api]
@@ -52,6 +63,12 @@
            {:id tool-id :title title :kind kind :status status})
     ;; Some agents report a terminal status on the initial call.
     (shared/record-tool-call! (:pool-key conn) kind status)
+    ;; Render it. Without this the whole working period of a turn is blank —
+    ;; the events below have no subscriber anywhere in the repo.
+    (when-let [cb (or (and (:callbacks conn) (:on-tool @(:callbacks conn)))
+                      @shared/tool-callback)]
+      (cb {:id tool-id :title title :kind kind :status status
+           :path (tool-path upd)}))
     ;; Emit for UI rendering (reuse nyma's tool execution events)
     (when-let [emit (:emit conn)]
       (emit "acp_tool_start"
@@ -81,6 +98,13 @@
     (let [kind (some (fn [c] (when (= (:id c) tool-id) (:kind c)))
                      (:tool-calls @(:prompt-state conn)))]
       (shared/record-tool-call! (:pool-key conn) kind status))
+    ;; Render the change in place. Every field but toolCallId is optional on an
+    ;; update, so nils here mean "unchanged" — the renderer merges rather than
+    ;; replaces, or a status-only update would blank the title.
+    (when-let [cb (or (and (:callbacks conn) (:on-tool @(:callbacks conn)))
+                      @shared/tool-callback)]
+      (cb {:id tool-id :title (.-title upd) :kind (.-kind upd)
+           :status status :path (tool-path upd)}))
     ;; Emit for UI
     (when-let [emit (:emit conn)]
       (emit "acp_tool_update"
@@ -203,13 +227,49 @@
 
 ;;; ─── Main dispatcher ───────────────────────────────────────
 
+(defn- chunk-text
+  "Text out of an ACP content block, tolerating the string shorthand."
+  [upd]
+  (let [c (.-content upd)]
+    (cond
+      (nil? c)      nil
+      (string? c)   c
+      :else         (when (= (.-type c) "text") (.-text c)))))
+
+(defn replay-turn!
+  "Record one replayed turn under `role`, and hand it to the renderer.
+
+   Replay is the ONE context where `user_message_chunk` carries data — live it
+   is dropped (\"replay only\"), because the prompt is recorded at the call
+   site instead. So this is the only path that can rebuild what was said, and
+   without it /plan-capture is empty after a resume.
+
+   Chunks arrive fragmented; `append-turn!` appends per chunk rather than per
+   message, which is acceptable because the transcript is read as a
+   conversation and consecutive same-role turns concatenate naturally."
+  [conn role upd]
+  (when-let [text (chunk-text upd)]
+    (when (seq (str text))
+      (shared/append-turn! (:pool-key conn) role text)
+      (when-let [cb @shared/replay-callback]
+        (cb {:role role :text text})))))
+
 (defn dispatch-notification
   "Route a session/update notification to the appropriate handler."
   [conn parsed api]
   (when (= (.-method parsed) "session/update")
     (let [upd   (.. parsed -params -update)
           utype (.-sessionUpdate upd)]
-      (case utype
+      (if (and (:replaying? conn) @(:replaying? conn))
+        ;; History, not activity. Rebuild the conversation and ignore
+        ;; everything else: a replayed tool_call must not count toward the
+        ;; edit warning, and a replayed plan must not overwrite the live one.
+        (case utype
+          "user_message_chunk"  (replay-turn! conn "user" upd)
+          "agent_message_chunk" (replay-turn! conn "assistant" upd)
+          "session_info_update" (handle-session-info conn upd api)
+          nil)
+        (case utype
         "agent_message_chunk"       (handle-message-chunk conn upd api)
         "agent_thought_chunk"       (handle-thought-chunk conn upd api)
         "user_message_chunk"        nil ;; replay only
@@ -221,4 +281,4 @@
         "config_option_update"      (handle-config-update conn upd api)
         "usage_update"              (handle-usage-update conn upd api)
         "session_info_update"       (handle-session-info conn upd api)
-        nil))))
+        nil)))))

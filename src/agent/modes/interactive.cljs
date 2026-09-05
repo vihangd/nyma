@@ -439,16 +439,28 @@
         route-to-agent!
         (fn [res trimmed]
           (reset! submit-lock true)
+          ;; An ACP turn is a turn. Without this the status bar read idle for
+          ;; its whole duration — the one place that could have said "something
+          ;; is happening" while the agent worked in silence.
+          (reset! streaming true)
+          (sync-status!)
           (.addToHistory editor trimmed)
-          ;; No add-user-msg! here — the router prefixes "❯ <text>" onto its
-          ;; own first chunk, so echoing it would print the prompt twice.
+          ;; Echo NOW, not when the agent answers. The router used to prefix
+          ;; "❯ <text>" onto its own first chunk, so the prompt appeared only
+          ;; once a reply arrived — and an ACP agent answers last, after all
+          ;; its tool work. Until then the screen showed nothing at all.
+          (add-user-msg! trimmed)
           (let [sub (get res "subscribe")]
             (if-not sub
-              (reset! submit-lock false)
+              (do (reset! submit-lock false)
+                  (reset! streaming false)
+                  (sync-status!))
               (-> (js/Promise.resolve (sub ensure-ids))
                   (.catch (fn [e] (add-error! e)))
                   (.finally (fn []
                               (reset! submit-lock false)
+                              (reset! streaming false)
+                              (sync-status!)
                               (sync-pane!)))))))
 
         on-submit

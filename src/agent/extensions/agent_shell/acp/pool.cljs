@@ -51,6 +51,14 @@
                        :callbacks    (atom nil)
                        :id-counter   (atom 0)
                        :session-id   (atom nil)
+                       ;; True while session/load or session/resume is replaying
+                       ;; history. The spec has the agent push every past turn
+                       ;; as session/update notifications and only THEN answer
+                       ;; the request, so replayed frames are otherwise
+                       ;; indistinguishable from live ones — they would
+                       ;; re-stream the whole conversation into the UI and
+                       ;; count historical edits against /plan-capture.
+                       :replaying?   (atom false)
                        :on-reverse-request (fn [conn parsed]
                                              (handlers/dispatch-reverse-request conn parsed api))
                        :on-notification    (fn [conn parsed]
@@ -127,6 +135,10 @@
                     ;; while keeping the agent), and capturing across that
                     ;; boundary would attribute an old plan to a new session.
                     (shared/clear-transcript! p-key)
+                    ;; Remember it so a later nyma process can offer to pick
+                    ;; this conversation back up — the id is otherwise lost the
+                    ;; moment we exit.
+                    (shared/remember-session! api agent-key sid)
                       ;; Store agent name for UI
                     (shared/update-agent-state! agent-key :name (:name agent-def))
                       ;; Set default mode label (agents may override via notification)

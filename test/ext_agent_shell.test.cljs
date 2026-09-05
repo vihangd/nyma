@@ -9,6 +9,7 @@
             [agent.extensions.agent-shell.features.model-switcher :as model-switcher]
             [agent.extensions.agent-shell.features.mode-switcher :as mode-switcher]
             [agent.extensions.agent-shell.features.session-mgmt :as session-mgmt]
+            [agent.extensions.agent-shell.acp.notifications :as notifications]
             [agent.extensions.agent-shell.features.cost-tracker :as cost-tracker]
             [agent.extensions.agent-shell.features.permission-ui :as permission-ui]
             [agent.extensions.agent-shell.features.input-router :as input-router]
@@ -1184,3 +1185,234 @@
           ;; newest kept, oldest dropped
           (-> (expect (:text (last ts))) (.toBe "turn-59"))
           (-> (expect (some (fn [t] (= "turn-0" (:text t))) ts)) (.toBeFalsy)))))))
+
+;;; ─── Live tool activity ────────────────────────────────────────────────────
+;;
+;; `acp_tool_start` / `acp_tool_update` were emitted as events that NOTHING in
+;; the repo subscribed to. Claude Code spends most of a turn reading and editing
+;; before it emits any text, so the entire working period rendered blank and a
+;; turn looked hung.
+
+(describe "agent-shell:tool activity lines" (fn []
+
+  (it "labels by ACP kind and prefers the reported location"
+      (fn []
+        ;; `locations` is what the spec provides for follow-along; a path says
+        ;; more in one line than the title's prose.
+        (-> (expect (input-router/tool-line {:kind "read" :title "Reading a file"
+                                       :path "src/auth/store.ts" :status "completed"}))
+            (.toBe "⚒ Read  src/auth/store.ts  ✓"))
+        (-> (expect (input-router/tool-line {:kind "execute" :title "bun test" :status "failed"}))
+            (.toBe "⚒ Bash  bun test  ✗"))))
+
+  (it "shows an unknown kind rather than swallowing it"
+      (fn []
+        (-> (expect (.includes (input-router/tool-line {:kind "teleport" :title "x" :status "pending"})
+                               "teleport"))
+            (.toBe true))))
+
+  (it "appends a new call and updates it in place"
+      (fn []
+        (let [a (input-router/upsert-tool [] {:id "c1" :kind "read" :path "a.ts"
+                                        :status "pending"} 1)
+              b (input-router/upsert-tool a {:id "c1" :status "completed"} 1)]
+          (-> (expect (count a)) (.toBe 1))
+          (-> (expect (count b)) (.toBe 1))
+          (-> (expect (.includes (:content (first b)) "✓")) (.toBe true)))))
+
+  (it "MERGES an update, so a status-only frame does not blank the title"
+      (fn []
+        ;; Every field but toolCallId is optional on tool_call_update.
+        (let [a (input-router/upsert-tool [] {:id "c1" :kind "edit" :path "src/x.ts"
+                                        :status "pending"} 1)
+              b (input-router/upsert-tool a {:id "c1" :title nil :kind nil :path nil
+                                       :status "completed"} 1)]
+          (-> (expect (.includes (:content (first b)) "Edit")) (.toBe true))
+          (-> (expect (.includes (:content (first b)) "src/x.ts")) (.toBe true)))))
+
+  (it "keeps separate calls separate, and separate prompts separate"
+      (fn []
+        (let [v (-> []
+                    (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 1)
+                    (input-router/upsert-tool {:id "c2" :kind "edit" :status "pending"} 1)
+                    (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 2))]
+          ;; c1 from prompt 2 is a different line than c1 from prompt 1 —
+          ;; ids are only unique within a session, and re-using a line across
+          ;; turns would rewrite history.
+          (-> (expect (count v)) (.toBe 3)))))))
+
+;;; ─── Session replay ────────────────────────────────────────────────────────
+;;
+;; `session/load` streams the ENTIRE prior conversation back as session/update
+;; notifications and only then answers the request. Those frames were
+;; indistinguishable from live ones: the whole history re-streamed into the UI,
+;; historical edits inflated the count /plan-capture warns on, and a replayed
+;; plan overwrote the live one. Meanwhile `user_message_chunk` was dropped
+;; ("replay only") — so the one context where it carries data discarded it, and
+;; the capture transcript stayed EMPTY after a resume.
+
+(defn- replay-conn [pk]
+  {:pool-key pk :agent-key "claude"
+   :replaying? (atom false)
+   :prompt-state (atom {:text "" :tool-calls []})
+   :callbacks (atom nil)
+   :emit (fn [_ _] nil)})
+
+(defn- upd
+  "One session/update frame. Built with aset rather than cond-> because the
+   payload is a plain JS object all the way down, exactly as JSON.parse leaves
+   it."
+  [utype {:keys [text tool-id kind status]}]
+  (let [u #js {:sessionUpdate utype}]
+    (when text    (aset u "content" #js {:type "text" :text text}))
+    (when tool-id (aset u "toolCallId" tool-id))
+    (when kind    (aset u "kind" kind))
+    (when status  (aset u "status" status))
+    #js {:method "session/update" :params #js {:update u}}))
+
+(describe "agent-shell:session replay" (fn []
+
+  (it "rebuilds BOTH roles into the capture transcript"
+      (fn []
+        (let [pk "claude@/replay-a"
+              conn (replay-conn pk)]
+          (shared/clear-transcript! pk)
+          (reset! (:replaying? conn) true)
+          (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "add OAuth"}) nil)
+          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "1. do it"}) nil)
+          (reset! (:replaying? conn) false)
+          (let [ts (shared/get-transcript pk)]
+            (-> (expect (count ts)) (.toBe 2))
+            (-> (expect (:role (first ts))) (.toBe "user"))
+            (-> (expect (:text (first ts))) (.toBe "add OAuth"))
+            (-> (expect (:role (second ts))) (.toBe "assistant"))))))
+
+  (it "still drops user_message_chunk when NOT replaying"
+      (fn []
+        ;; Live, the prompt is recorded at the call site instead; recording it
+        ;; here as well would double every turn.
+        (let [pk "claude@/replay-b"
+              conn (replay-conn pk)]
+          (shared/clear-transcript! pk)
+          (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "hi"}) nil)
+          (-> (expect (count (shared/get-transcript pk))) (.toBe 0)))))
+
+  (it "does not count replayed edits against the plan-capture warning"
+      (fn []
+        (let [pk "claude@/replay-c"
+              conn (replay-conn pk)]
+          (shared/clear-transcript! pk)
+          (reset! (:replaying? conn) true)
+          (notifications/dispatch-notification
+           conn (upd "tool_call" {:tool-id "t1" :kind "edit" :status "completed"}) nil)
+          (-> (expect (shared/edit-count pk)) (.toBe 0))
+          ;; …but a live one still counts.
+          (reset! (:replaying? conn) false)
+          (notifications/dispatch-notification
+           conn (upd "tool_call" {:tool-id "t2" :kind "edit" :status "completed"}) nil)
+          (-> (expect (shared/edit-count pk)) (.toBe 1)))))
+
+  (it "hands replayed turns to the pane renderer"
+      (fn []
+        (let [pk "claude@/replay-d"
+              conn (replay-conn pk)
+              seen (atom [])]
+          (shared/clear-transcript! pk)
+          (reset! shared/replay-callback (fn [t] (swap! seen conj t)))
+          (reset! (:replaying? conn) true)
+          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "hello"}) nil)
+          (reset! (:replaying? conn) false)
+          (reset! shared/replay-callback nil)
+          (-> (expect (count @seen)) (.toBe 1))
+          (-> (expect (:role (first @seen))) (.toBe "assistant")))))
+
+  (it "does not treat replay as live output"
+      (fn []
+        ;; The stream callback drives the "agent is answering now" rendering;
+        ;; firing it for history would replay the conversation as if it were
+        ;; arriving.
+        (let [conn (replay-conn "claude@/replay-e")
+              hits (atom 0)]
+          (reset! shared/stream-callback (fn [_] (swap! hits inc)))
+          (reset! (:replaying? conn) true)
+          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "x"}) nil)
+          (reset! shared/stream-callback nil)
+          (-> (expect @hits) (.toBe 0)))))))
+
+;;; ─── Remembered sessions ───────────────────────────────────────────────────
+
+(describe "agent-shell:remembered sessions" (fn []
+
+  (it "round-trips a session id through the state capability"
+      (fn []
+        ;; agent_shell declared the `state` capability and never used it, so
+        ;; every session id died with the process.
+        (let [store (atom {})
+              api   #js {:state #js {:get (fn [k] (get @store (str k)))
+                                     :set (fn [k v] (swap! store assoc (str k) v))
+                                     :delete (fn [k] (swap! store dissoc (str k)))}}]
+          (shared/remember-session! api "claude" "sess-123" "OAuth work")
+          (let [got (shared/recall-session api "claude")]
+            (-> (expect (aget got "sessionId")) (.toBe "sess-123"))
+            (-> (expect (aget got "title")) (.toBe "OAuth work"))))))
+
+  (it "is keyed per project, so two checkouts do not collide"
+      (fn []
+        (-> (expect (= (shared/store-key "claude" "/a") (shared/store-key "claude" "/b")))
+            (.toBe false))))
+
+  (it "is silent when the extension has no state capability"
+      (fn []
+        ;; Must not throw: a read-only or missing ext-state dir cannot be
+        ;; allowed to break the session itself.
+        (-> (expect (shared/remember-session! #js {} "claude" "s1")) (.toBeNil))
+        (-> (expect (shared/recall-session #js {} "claude")) (.toBeNil))))))
+
+(describe "agent-shell:session-mgmt guards" (fn []
+
+  (it "detects method-not-found by CODE, not just message text"
+      (fn []
+        ;; handle-response used to format the error and drop `.-code`, so the
+        ;; session/load fallback could never fire on the code.
+        (let [e (js/Error. "ACP error: nope")]
+          (aset e "code" -32601)
+          (-> (expect (session-mgmt/method-not-found? e)) (.toBe true)))
+        (-> (expect (session-mgmt/method-not-found? (js/Error. "Method not found")))
+            (.toBe true))
+        (-> (expect (session-mgmt/method-not-found? (js/Error. "boom"))) (.toBe false))))
+
+  (it "refuses in-process runners instead of hanging"
+      (fn []
+        ;; :stdin is nil and safe-write swallows the failure, so the request
+        ;; registered a promise that never settled — a silent hang.
+        (-> (expect (.includes (session-mgmt/in-process-refusal {:in-process? true} "claude-sdk")
+                               "in-process"))
+            (.toBe true))
+        (-> (expect (session-mgmt/in-process-refusal {:in-process? false} "claude")) (.toBeNil))))))
+
+;;; ─── Inline thinking ───────────────────────────────────────────────────────
+;;
+;; The router wired thinking into the transcript only when
+;; `thinking-renderer__active` was falsy. That flag defaults TRUE and the
+;; extension is commonly installed, so thinking never appeared inline and there
+;; was no way to ask for it — an unconditional, undocumented coupling to
+;; whichever extension happened to be present.
+
+(defn- api-with-flag [v]
+  #js {:getGlobalFlag (fn [_] v)})
+
+(describe "agent-shell:inline-thinking" (fn []
+
+  (it "auto defers to a renderer that is already active"
+      (fn []
+        (-> (expect (input-router/inline-thinking? (api-with-flag true))) (.toBe false))))
+
+  (it "auto inlines when nothing else renders it"
+      (fn []
+        (-> (expect (input-router/inline-thinking? (api-with-flag false))) (.toBe true))))
+
+  (it "survives an API with no flag support"
+      (fn []
+        ;; Gateway/programmatic APIs have no getGlobalFlag; calling it threw
+        ;; inside subscribe and took the whole turn down.
+        (-> (expect (input-router/inline-thinking? #js {})) (.toBe true))))))

@@ -151,8 +151,15 @@
      :stderr       nil
      :project-root (js/process.cwd)
      :agent-key    agent-key
+     ;; Same key shape the pooled ACP conns use. Omitting it meant
+     ;; `shared/append-turn!` (client/send-prompt) recorded this runner's turns
+     ;; under a nil key, so /plan-capture found an empty transcript for the
+     ;; in-process agent while working fine for the subprocess one.
+     :pool-key     (shared/pool-key agent-key (js/process.cwd))
      :state        (atom {:pending {} :terminals {}})
      :prompt-state (atom {:text "" :tool-calls []})
+     :callbacks    (atom nil)
+     :replaying?   (atom false)
      :id-counter   (atom 0)
      :session-id   (atom nil)
      :sdk-query    (fn [conn text] (send-prompt-sdk conn sdk-mod text))

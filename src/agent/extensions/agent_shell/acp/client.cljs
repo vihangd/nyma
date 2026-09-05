@@ -131,7 +131,15 @@
               detail (when (.-data err)
                        (try (str " — " (js/JSON.stringify (.-data err)))
                             (catch :default _ nil)))]
-          ((:reject pending) (js/Error. (str "ACP error: " (.-message err) (or detail "")))))
+          ((:reject pending)
+           (let [e (js/Error. (str "ACP error: " (.-message err) (or detail "")))]
+             ;; Carry the JSON-RPC code. It used to be dropped entirely, which
+             ;; made every caller string-match the message instead — and the
+             ;; -32601 ("method not found") test that picks the session/load
+             ;; fallback could therefore never fire on the code.
+             (aset e "code" (.-code err))
+             (aset e "rpcData" (.-data err))
+             e)))
         ((:resolve pending) (.-result parsed))))))
 
 (defn route-message
@@ -196,7 +204,19 @@
                                                   " | bytes: "
                                                   (.slice (str line) 0 256)))))))))
                        (read-loop))))
-                  (.catch (fn [_] nil))))]  ;; stream closed — expected on exit
+                  ;; A rejection here is usually the stream closing on exit,
+                  ;; which is expected. But `route-message` runs the UI
+                  ;; callbacks synchronously, so a throw inside one lands here
+                  ;; too — and swallowing it killed the reader permanently with
+                  ;; no breadcrumb: every later notification vanished and the
+                  ;; turn merely appeared to hang. The stderr reader already
+                  ;; logs; this one did not.
+                  (.catch (fn [e]
+                            (when (and e (.-message e))
+                              (dbg/warn "agent-shell/acp"
+                                        (str "stdout reader stopped for "
+                                             (:agent-key conn) ": " (.-message e))))
+                            nil))))]
       (read-loop))))
 
 (defn setup-stderr-handler

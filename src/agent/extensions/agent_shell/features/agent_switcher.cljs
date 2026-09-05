@@ -39,6 +39,16 @@
                (when (= "plan" (str (shared/get-agent-state agent-key :mode)))
                  (notify api (str "planning with " (shared/kw-name agent-key)
                                   " — /plan-capture when the plan looks right")))
+               ;; A remembered session from a PREVIOUS nyma process. The id is
+               ;; opaque and nobody retypes one, so surfacing it here is the
+               ;; only realistic way a conversation gets picked back up.
+               (when-let [saved (shared/recall-session api agent-key)]
+                 (let [sid (aget saved "sessionId")]
+                   (when (and sid (not= sid @(:session-id conn)))
+                     (notify api (str "previous session for this project"
+                                      (when (seq (str (or (aget saved "title") "")))
+                                        (str ": " (aget saved "title")))
+                                      "\n  /agent-shell__sessions resume to pick it up")))))
                 ;; Initialize agent state
                (shared/update-agent-state! agent-key :connected true)
                 ;; Install the custom header now that an agent is active.

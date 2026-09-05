@@ -228,6 +228,12 @@
       "plan"
       (wrap+split (str (fg "#7dcfff") "📋 " RESET content) w)
 
+      ;; One line per ACP tool call, rewritten in place as its status changes.
+      ;; Dim like "shell": this is activity, not output, and a turn can carry
+      ;; dozens of them.
+      "tool"
+      (wrap+split (str mc DIM content RESET) w)
+
       "info"
       (wrap+split (str (fg "#7dcfff") "ℹ " RESET mc content RESET) w)
 
