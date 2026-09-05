@@ -946,6 +946,14 @@
                        (swap! (.-__state-atom api) assoc :spec-profile name)
                        (try (when ext-state (.set ext-state "spec-profile" name))
                             (catch :default _ nil)))
+        ;; In-flight marker for `/spec analyze`, which is a direct
+        ;; generateText rather than an agent turn — nothing else on screen
+        ;; moves while it runs. Not persisted: a request cannot survive the
+        ;; process that issued it.
+        set-analyzing! (fn [v]
+                         (if v
+                           (swap! (.-__state-atom api) assoc :spec-analyzing true)
+                           (swap! (.-__state-atom api) dissoc :spec-analyzing)))
         ;; Pending means "a decomposition turn is queued". Mirrored to disk
         ;; like phase and profile, because it was atom-only and `--run`
         ;; persisted :active-spec beside it: a restart therefore resumed with
@@ -1377,7 +1385,16 @@
                                "error")
 
                       :else
-                      (-> (generateText
+                      (do
+                        ;; Say it started. This is a direct generateText, not
+                        ;; an agent turn — so there is no spinner, no turn
+                        ;; counter and no streamed text, and on a slow model
+                        ;; the command looked like it had done nothing at all.
+                        (set-analyzing! true)
+                        (.notify (.-ui ctx)
+                                 (str "spec: analyzing " target
+                                      " — checking the plan against the spec"))
+                        (-> (generateText
                            #js {:model    model
                                 :messages #js [#js {:role    "user"
                                                     :content prompt}]
@@ -1398,13 +1415,15 @@
                                  :critical-count (:critical-count parsed)
                                  :finding-count  (count (:findings parsed))})
                                ;; Render the full Markdown report.
+                               (set-analyzing! false)
                                (.notify (.-ui ctx) (or report "")))))
                           (.catch
                            (fn [e]
+                             (set-analyzing! false)
                              (.notify (.-ui ctx)
                                       (str "Analyze failed: "
                                            (or (.-message e) (str e)))
-                                      "error"))))))))
+                                      "error")))))))))
 
               "install-skill"
               (let [opts   (vec rest-)
@@ -1632,6 +1651,8 @@
                   :progress prog
                   ;; the previously-invisible state: spec exists, tasks are
                   ;; still the scaffold, decomposition has not landed
+                  :analyzing? (boolean (or (:spec-analyzing st)
+                                           (get st "spec-analyzing")))
                   :pending? (boolean (or (:spec-loop-pending st)
                                          (get st "spec-loop-pending")))
                   :armed?   (boolean (or (:spec-loop-armed st)

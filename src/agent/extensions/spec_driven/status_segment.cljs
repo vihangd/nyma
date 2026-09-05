@@ -24,8 +24,11 @@
 
    `state` is {:spec :phase :role :progress :pending? :armed?} where
    :progress is phases/progress output. Nothing on screen unless a spec is
-   active — a user who never touches /spec sees no change at all."
-  [{:keys [spec phase role progress pending? armed?]} theme]
+   active — a user who never touches /spec sees no change at all.
+
+   The two in-flight states matter most: both `/spec import --run` and
+   `/spec analyze` do their real work with nothing else on screen moving."
+  [{:keys [spec phase role progress pending? armed? analyzing?]} theme]
   (if-not (seq (str (or spec "")))
     (hidden)
     (let [total   (or (:total progress) 0)
@@ -34,6 +37,10 @@
                     ;; "decomposing" is the state that was invisible: the spec
                     ;; exists but its tasks are still the scaffold template.
                     pending?          (conj "decomposing…")
+                    ;; …and "analyzing" is the same problem one command over:
+                    ;; /spec analyze is a direct generateText, so no spinner,
+                    ;; no turn counter, nothing moving anywhere.
+                    analyzing?        (conj "analyzing…")
                     (seq (str phase)) (conj (str phase))
                     (pos? total)      (conj (str checked "/" total))
                     (and armed? (seq (str role))) (conj (str role)))]

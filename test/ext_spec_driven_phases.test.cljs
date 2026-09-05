@@ -402,3 +402,42 @@
         ;; take the status bar with it.
         (let [r (registered-render (fn [] (throw (js/Error. "spec vanished"))))]
           (-> (expect (fn? r)) (.toBe true)))))))
+
+;;; ─── The other silent command ──────────────────────────────────────────────
+;;
+;; `/spec analyze` is a direct generateText, not an agent turn: no spinner, no
+;; turn counter, no streamed text. On a slow model it looked exactly like a
+;; command that had done nothing — the same complaint `decomposing…` was added
+;; for, one command over.
+
+(describe "spec status segment: analyzing" (fn []
+
+  (it "shows analyzing while the pass is in flight"
+      (fn []
+        (let [out (seg/render-spec {:spec "apps" :phase "execute" :analyzing? true} {})]
+          (-> (expect (:visible? out)) (.toBe true))
+          (-> (expect (.includes (:content out) "analyzing…")) (.toBe true)))))
+
+  (it "shows both when a decomposition is queued and analyze is running"
+      (fn []
+        ;; Reachable: /spec import --run queues, you analyze before sending a
+        ;; message. Neither state should mask the other.
+        (let [c (:content (seg/render-spec {:spec "apps" :pending? true :analyzing? true} {}))]
+          (-> (expect (.includes c "decomposing…")) (.toBe true))
+          (-> (expect (.includes c "analyzing…")) (.toBe true)))))
+
+  (it "is absent once the pass settles"
+      (fn []
+        (-> (expect (.includes (:content (seg/render-spec
+                                          {:spec "apps" :phase "execute"
+                                           :progress {:total 8 :checked 1}
+                                           :armed? true :role "fast"} {}))
+                               "analyzing"))
+            (.toBe false))))
+
+  (it "still needs an active spec"
+      (fn []
+        ;; analyze can run against a named spec that is not the active one;
+        ;; the segment is about the ACTIVE spec and stays hidden either way.
+        (-> (expect (:visible? (seg/render-spec {:spec nil :analyzing? true} {})))
+            (.toBe false))))))

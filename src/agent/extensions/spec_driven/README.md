@@ -133,7 +133,16 @@ When a spec is active, a `spec.active` segment auto-appends to the status line:
 ⏵ oauth-login · decomposing…            # import queued, tasks not written yet
 ```
 
-It hides entirely when no spec is active. The `decomposing…` state matters:
+```
+⏵ apps · analyzing…                     # /spec analyze in flight
+```
+
+It hides entirely when no spec is active. The in-flight states matter most,
+because both commands that show them do their real work with nothing else on
+screen moving — `/spec analyze` is a direct model call rather than an agent
+turn, so there is no spinner and no turn counter either.
+
+The `decomposing…` state:
 `/spec import --run` queues the decomposition as a follow-up, so it does not
 begin until the next turn ends — without the segment that gap looks like
 nothing happening. A notice also fires when the tasks land and the loop arms.
