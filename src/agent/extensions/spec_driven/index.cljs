@@ -875,6 +875,21 @@
 
 ;; ── Extension entry ────────────────────────────────────────────
 
+(def continue-prompt
+  "The loop's per-task instruction.
+
+   Constant by construction: an identical prompt keeps the provider's cache
+   warm (measured — a varying one costs about 2x on a cold call), so nothing
+   here may interpolate task text or a counter.
+
+   Top level rather than a `let` binding because /spec run needs it too, to
+   start the first turn — as a local it compiled to a free variable there and
+   would have thrown the moment the loop was armed."
+  (str "Read the tasks file for the active spec, do the NEXT unchecked "
+       "task, and tick it off in tasks.md (replace `- [ ]` with `- [x]` "
+       "on that line) in the same turn. Do exactly one task. Stop if you "
+       "need user input."))
+
 (defn ^:export default [api]
   (let [handlers (atom [])
         ;; Filled in when the loop registers below; the command handler is
@@ -938,7 +953,7 @@
                       (try (when ext-state (.set ext-state "spec-phase" phase))
                            (catch :default _ nil))
                       (let [r (bind-role! phase notify-fn)]
-                        (when-let [emit (.-emit (.-events api))]
+                        (when-let [emit (some-> (.-events api) .-emit)]
                           (emit "spec_phase_enter"
                                 #js {:spec (get-active) :phase phase :role (:role r)}))
                         r))
@@ -946,6 +961,17 @@
                        (swap! (.-__state-atom api) assoc :spec-profile name)
                        (try (when ext-state (.set ext-state "spec-profile" name))
                             (catch :default _ nil)))
+        ;; Ask the host to START a turn. `sendUserMessage` only queues —
+        ;; steer needs a run in flight, follow-up drains at a turn boundary —
+        ;; so arming the loop could previously do nothing but tell the user to
+        ;; "send any message to start", and a user who did not read that line
+        ;; saw an armed loop do nothing at all. Falls back to the queue when
+        ;; the host has no listener or a turn is already running, which is the
+        ;; correct mechanism in both cases.
+        start-turn! (fn [text]
+                      (if-let [emit (some-> (.-events api) .-emit)]
+                        (emit "turn_request" #js {:text text})
+                        ((.-sendUserMessage api) text #js {:deliverAs "followUp"})))
         ;; In-flight marker for `/spec analyze`, which is a direct
         ;; generateText rather than an agent turn — nothing else on screen
         ;; moves while it runs. Not persisted: a request cannot survive the
@@ -1504,7 +1530,9 @@
                                         (str "\nfresh-context ON: the conversation is CLEARED between "
                                              "tasks. Anything you say in chat is lost — put every "
                                              "instruction in the spec files."))
-                                      "\nSend any message to start. /spec run off to stop.")))))))
+                                      "\nStarting. /spec run off to stop."))
+                        ;; Begin immediately rather than waiting to be typed at.
+                        (start-turn! continue-prompt))))))
 
               "phase"
               (let [cfg    (phases/config (safe-settings))
@@ -1590,7 +1618,7 @@
                       :else
                       (do
                         ;; Notify hook listeners so users can wire pre-task automation.
-                        (when-let [emit (.-emit (.-events api))]
+                        (when-let [emit (some-> (.-events api) .-emit)]
                           (emit "spec_task_start"
                                 #js {:spec active :task (:text task) :line (:line-idx task)}))
                         ;; …and actually START it. This only ever PRINTED the
@@ -1641,7 +1669,7 @@
                       (let [updated (mark-task-done content (:line-idx task))]
                         (when updated
                           (fs/writeFileSync (:tasks spec) updated))
-                        (when-let [emit (.-emit (.-events api))]
+                        (when-let [emit (some-> (.-events api) .-emit)]
                           (emit "spec_task_complete"
                                 #js {:spec active :task (:text task)
                                      :line (:line-idx task)}))
@@ -1781,7 +1809,7 @@
                     newly (remove (fn [t] (contains? prev t)) after)
                     spec  (get-active)]
                 (reset! before nil)
-                (when-let [emit (.-emit (.-events api))]
+                (when-let [emit (some-> (.-events api) .-emit)]
                   (doseq [t newly]
                     (emit "spec_task_complete"
                           #js {:spec spec :task t :source "agent"}))))))]
@@ -1837,13 +1865,6 @@
           ;; context_assembly every turn, which is what carries state across.
           reset-context! (fn []
                            (swap! (.-__state-atom api) assoc :messages []))
-          continue-prompt
-          ;; Constant by construction — see the cache note above.
-          (str "Read the tasks file for the active spec, do the NEXT unchecked "
-               "task, and tick it off in tasks.md (replace `- [ ]` with `- [x]` "
-               "on that line) in the same turn. Do exactly one task. Stop if you "
-               "need user input.")
-
           ;; `/spec import --run` cannot arm immediately: import scaffolds
           ;; tasks.md from a TEMPLATE (with placeholder "First task" /
           ;; "Second task" checkboxes) and queues an LLM turn to decompose the

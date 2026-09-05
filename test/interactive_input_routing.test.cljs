@@ -184,3 +184,62 @@
         (let [c (:content (unknown-msg ["spec" "model"] "zzz"))]
           (-> (expect (.includes c "Did you mean")) (.toBe false))
           (-> (expect (.includes c "/help")) (.toBe true)))))))
+
+;;; ─── turn_request ──────────────────────────────────────────────────────────
+;;
+;; `sendUserMessage` only queues: `steer` needs a run already in flight,
+;; `followUp` drains at a turn boundary. Neither BEGINS a turn, so an extension
+;; that wanted to start work could do nothing but print "send any message to
+;; start" — which /spec import --run, /spec analyze and /spec run all did, and
+;; which reads as the feature not working. `turn_request` is the missing verb.
+;;
+;; Routed through the same submit path a typed message takes, so a requested
+;; turn gets the lock, the streaming state and the pane wiring. Mirrors the
+;; handler in interactive.cljs.
+
+(defn- turn-request!
+  "Mirrors interactive.cljs on-turn-request."
+  [{:keys [locked? dispatched echoed]} data]
+  (let [text (str (or (and data (.-text data)) ""))]
+    (when (and (seq (.trim text)) (not @locked?))
+      (when (and data (.-echo data)) (swap! echoed conj text))
+      (swap! dispatched conj text))
+    nil))
+
+(defn- req-state [locked]
+  {:locked? (atom locked) :dispatched (atom []) :echoed (atom [])})
+
+(describe "turn_request" (fn []
+
+  (it "dispatches the requested text"
+      (fn []
+        (let [st (req-state false)]
+          (turn-request! st #js {:text "do the next task"})
+          (-> (expect @(:dispatched st)) (.toEqual #js ["do the next task"])))))
+
+  (it "declines while a turn is already in flight"
+      (fn []
+        ;; The follow-up queue is the right mechanism then — starting a second
+        ;; turn on top of a running one is how you get two loops.
+        (let [st (req-state true)]
+          (turn-request! st #js {:text "go"})
+          (-> (expect (count @(:dispatched st))) (.toBe 0)))))
+
+  (it "ignores empty and whitespace-only requests"
+      (fn []
+        (let [st (req-state false)]
+          (turn-request! st #js {:text "   "})
+          (turn-request! st #js {:text ""})
+          (turn-request! st #js {})
+          (-> (expect (count @(:dispatched st))) (.toBe 0)))))
+
+  (it "echoes only when asked"
+      (fn []
+        ;; The loop's continue-prompt is machinery, not something the user
+        ;; typed; echoing it every turn would bury the actual work.
+        (let [st (req-state false)]
+          (turn-request! st #js {:text "internal prompt"})
+          (-> (expect (count @(:echoed st))) (.toBe 0)))
+        (let [st (req-state false)]
+          (turn-request! st #js {:text "visible" :echo true})
+          (-> (expect @(:echoed st)) (.toEqual #js ["visible"])))))))

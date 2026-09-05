@@ -43,7 +43,14 @@
    ;; Extended tool lifecycle
    "tool_complete" "permission_request"
    ;; Input pipeline
-   "input_submit"])
+   "input_submit"
+   ;; An extension asking for a turn to START. `sendUserMessage` only ever
+   ;; QUEUES (steer or follow-up) and neither begins one, so anything that
+   ;; wanted to kick off work — /spec run arming the loop, an import's
+   ;; decomposition seed — had to tell the user to "send any message". The
+   ;; interactive mode owns the submit path (lock, streaming state, UI
+   ;; wiring), so it subscribes and dispatches; nothing else can.
+   "turn_request"])
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys

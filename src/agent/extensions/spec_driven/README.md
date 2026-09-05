@@ -157,6 +157,13 @@ the entry point is a dial: `settings#spec.loop.import-phase`, default
 `execute`. Naming a phase the profile does not define falls back to the first
 and says so.
 
+`/spec run` starts the first turn itself. It used to arm and then print "send
+any message to start", because `sendUserMessage` only ever queues — `steer`
+needs a run already in flight, `followUp` drains at a turn boundary, and
+neither BEGINS one. Arming now emits `turn_request`, which the interactive mode
+answers by dispatching through the same submit path a typed message takes. A
+host with no listener, or one already mid-turn, falls back to the queue.
+
 The pending flag is mirrored to `.nyma/ext-state/`, but a restart deliberately
 clears it rather than restoring it: the queued seed lives in the agent's
 in-memory follow-queue and dies with the process, so a restored `pending` would

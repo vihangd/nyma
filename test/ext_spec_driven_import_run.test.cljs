@@ -612,3 +612,75 @@
             (it "--show keeps the old print-only behaviour" test-next-show-only)
             (it "sends nothing when every task is done" test-next-sends-nothing-when-done)
             (it "bare /spec start uses the active spec" test-start-defaults-to-the-active-spec)))
+
+;;; ─── Arming the loop starts it ─────────────────────────────
+;;
+;; `/spec run` armed and then printed "Send any message to start", because
+;; sendUserMessage only ever QUEUES — steer needs a run in flight, follow-up
+;; drains at a turn boundary, neither begins one. So an armed loop sat there
+;; doing nothing until the user happened to type, which reads as "it didn't
+;; start". Three features shipped with that instruction before it was worth a
+;; real mechanism: `turn_request`, which the interactive mode answers by
+;; dispatching through its normal submit path.
+
+(defn- with-turn-requests
+  "Capture turn_request emissions from the extension."
+  [h]
+  (let [reqs (atom [])]
+    (aset (:api h) "events" #js {:emit (fn [ev data]
+                                         (when (= "turn_request" (str ev))
+                                           (swap! reqs conj (str (.-text data))))
+                                         nil)})
+    reqs))
+
+(defn test-run-starts-immediately []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            reqs  (with-turn-requests h)]
+        (ready-spec! tmp h agent)
+        (spec-cmd! h agent ["run"])
+        (-> (expect (count @reqs)) (.toBe 1))
+        ;; The loop's own per-task prompt, not an ad-hoc string — it has to be
+        ;; byte-identical to what :continue sends or the provider cache misses
+        ;; on the very first turn.
+        (-> (expect (first @reqs)) (.toBe spec-driven/continue-prompt))
+        (-> (expect (.includes (apply str @(:notes h)) "Starting")) (.toBe true))))))
+
+(defn test-run-off-starts-nothing []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            reqs  (with-turn-requests h)]
+        (ready-spec! tmp h agent)
+        (spec-cmd! h agent ["run" "off"])
+        (-> (expect (count @reqs)) (.toBe 0))))))
+
+(defn test-run-falls-back-to-the-queue []
+  (with-tmp
+    (fn [tmp]
+      (let [agent (make-test-agent) h (harness)
+            sent  (sent-messages h)]
+        ;; No events bus on the api — a host that cannot start a turn must
+        ;; still queue the work rather than dropping it.
+        (aset (:api h) "events" nil)
+        (ready-spec! tmp h agent)
+        (spec-cmd! h agent ["run"])
+        (-> (expect (count @sent)) (.toBe 1))
+        (-> (expect (first @sent)) (.toBe spec-driven/continue-prompt))))))
+
+(defn test-continue-prompt-is-shared []
+  ;; It was a `let` binding inside the loop's scope while /spec run referenced
+  ;; it from the command scope, where it compiled to a free variable — a
+  ;; ReferenceError the moment anyone armed the loop.
+  (-> (expect (string? spec-driven/continue-prompt)) (.toBe true))
+  (-> (expect (.includes spec-driven/continue-prompt "- [x]")) (.toBe true)))
+
+(describe "arming the loop starts it"
+          (fn []
+            (it "requests a turn instead of waiting to be typed at" test-run-starts-immediately)
+            (it "/spec run off starts nothing" test-run-off-starts-nothing)
+            (it "queues the work when the host cannot start a turn"
+                test-run-falls-back-to-the-queue)
+            (it "shares one continue-prompt across every caller"
+                test-continue-prompt-is-shared)))

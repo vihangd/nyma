@@ -601,7 +601,27 @@
             (fn [data]
               (reset! turn-count 0)
               (h data)
-              (sync-status!)))]
+              (sync-status!)))
+
+          ;; An extension asking to START a turn. `sendUserMessage` only
+          ;; queues — steer needs a run in flight, follow-up drains at a turn
+          ;; boundary — so anything wanting to begin work could do nothing but
+          ;; print "send any message to start". Three separate features shipped
+          ;; with that instruction before it was worth fixing properly.
+          ;;
+          ;; Routed through `dispatch-submit!` rather than `run` directly, so a
+          ;; requested turn gets the same lock, streaming state and pane wiring
+          ;; a typed one does. Declined while a turn is already in flight: the
+          ;; follow-up queue is the right mechanism then, and it is what the
+          ;; caller falls back to.
+          on-turn-request
+          (fn [data]
+            (let [text (str (or (and data (.-text data)) ""))]
+              (when (and (seq (.trim text)) (not @submit-lock))
+                (when-let [echo (and data (.-echo data))]
+                  (when echo (add-user-msg! text)))
+                (dispatch-submit! text))
+              nil))]
 
       ;; Subscribe to tool lifecycle events
       ((:on events) "tool_execution_start"  on-tool-start)
@@ -610,6 +630,7 @@
       ((:on events) "model_select"          on-model-select)
       ((:on events) "session_clear"         on-session-clear)
       ((:on events) "session_start"         on-session-start)
+      ((:on events) "turn_request"          on-turn-request)
 
       ;; Prior conversation, for a session resumed with -c / -r / --session.
       ;; Same path the runtime events use — see seed-pane! above.
@@ -680,6 +701,7 @@
                              ((:off events) "model_select"          on-model-select)
                              ((:off events) "session_clear"         on-session-clear)
                              ((:off events) "session_start"         on-session-start)
+                             ((:off events) "turn_request"          on-turn-request)
                              ((:emit-async events) "session_shutdown" #js {:reason "user-exit"})
                              (js/process.exit 0))
                            nil))
