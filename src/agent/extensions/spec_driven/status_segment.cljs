@@ -53,10 +53,13 @@
            #js {:category   "spec-driven"
                 :autoAppend true
                 :position   "left"
-                :render     (fn [ctx]
-                              (render-spec (state-fn)
-                                           (js->clj (or (.-theme ctx) #js {})
-                                                    :keywordize-keys true)))})
+                ;; ctx is a CLJS map and :theme is already a CLJS map —
+                ;; status_bar does `(assoc seg-ctx :theme theme)`. This read it
+                ;; with `(.-theme ctx)` and ran it through `js->clj`, which
+                ;; squint does not provide: the render threw on every frame,
+                ;; status_bar's per-segment catch swallowed it, and the segment
+                ;; simply never appeared. Nothing anywhere said why.
+                :render     (fn [ctx] (render-spec (state-fn) (:theme ctx)))})
       (fn [] (when-let [unreg (.-unregisterStatusSegment api)]
                (unreg "spec.active"))))
     (fn [] nil)))

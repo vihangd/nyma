@@ -12,7 +12,8 @@
    layer to invalidate when extensions add/remove segments at
    runtime."
   (:require ["@mariozechner/pi-tui" :refer [truncateToWidth visibleWidth]]
-            [agent.ui.status-line-segments :as segs]))
+            [agent.ui.status-line-segments :as segs]
+            [agent.debug :as dbg]))
 
 (def ^:private ESC   (js/String.fromCharCode 27))
 (def ^:private RESET (str ESC "[0m"))
@@ -51,7 +52,15 @@
                        {:id      (:id seg)
                         :content (or (:content out) "")
                         :color   (:color out)}))
-                   (catch :default _e nil))))
+                   ;; Isolated, but no longer silent: a segment that throws on
+                   ;; every frame is indistinguishable from one that has
+                   ;; nothing to say, and that hid a broken segment for a whole
+                   ;; release. Debug level — this runs at render cadence.
+                   (catch :default e
+                     (dbg/debug "status-bar"
+                                (str "segment " (:id seg) " render failed: "
+                                     (or (.-message e) (str e))))
+                     nil))))
          vec)))
 
 (defn- format-segment

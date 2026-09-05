@@ -347,3 +347,58 @@
       (fn []
         (let [cfg (p/config #js {"spec" #js {"loop" #js {"import-phase" "plan"}}})]
           (-> (expect (:import-phase (:loop cfg))) (.toBe "plan")))))))
+
+;;; ─── The registered render, not just the pure one ──────────────────────────
+;;
+;; `render-spec` was tested directly and passed, while the segment never once
+;; appeared on screen. The wrapper `register!` installs read the theme with
+;; `(.-theme ctx)` and ran it through `js->clj`, which squint does not provide
+;; — so the render threw on EVERY frame. status_bar isolates segment errors in
+;; a catch, so it failed silently for a whole release.
+;;
+;; The lesson is the seam: test what gets registered, with the ctx status_bar
+;; actually passes (a CLJS map whose :theme is already a CLJS map).
+
+(defn- registered-render
+  "The render fn `register!` hands to the host."
+  [state-fn]
+  (let [captured (atom nil)
+        api #js {:registerStatusSegment (fn [_id cfg] (reset! captured cfg))
+                 :unregisterStatusSegment (fn [_id] nil)}]
+    (seg/register! api state-fn)
+    (.-render @captured)))
+
+(def ^:private bar-ctx
+  ;; What status_bar builds: (assoc seg-ctx :theme theme).
+  {:activity true :theme {:colors {:secondary "#9ece6a"}}})
+
+(describe "spec status segment: as registered" (fn []
+
+  (it "renders through the registered wrapper"
+      (fn []
+        (let [r (registered-render
+                 (fn [] {:spec "apps" :phase "execute" :role "fast"
+                         :progress {:total 8 :checked 3}
+                         :pending? false :armed? true}))
+              out (r bar-ctx)]
+          (-> (expect (:visible? out)) (.toBe true))
+          (-> (expect (:content out)) (.toBe "⏵ apps · execute · 3/8 · fast")))))
+
+  (it "does not throw when the host passes no theme"
+      (fn []
+        ;; The failure mode was an exception, so absence of a throw IS the
+        ;; assertion.
+        (let [r (registered-render (fn [] {:spec "apps"}))]
+          (-> (expect (:visible? (r {}))) (.toBe true)))))
+
+  (it "hides with no active spec"
+      (fn []
+        (let [r (registered-render (fn [] {:spec nil}))]
+          (-> (expect (:visible? (r bar-ctx))) (.toBe false)))))
+
+  (it "survives a state-fn that blows up"
+      (fn []
+        ;; state-fn touches the filesystem; a deleted spec mid-render must not
+        ;; take the status bar with it.
+        (let [r (registered-render (fn [] (throw (js/Error. "spec vanished"))))]
+          (-> (expect (fn? r)) (.toBe true)))))))

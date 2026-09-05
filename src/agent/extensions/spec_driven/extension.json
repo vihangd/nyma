@@ -1,5 +1,5 @@
 {
   "namespace": "spec-driven",
-  "capabilities": ["events", "commands", "state", "ui"],
+  "capabilities": ["events", "commands", "state", "ui", "messages"],
   "dependsOn": []
 }
