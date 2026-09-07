@@ -1275,7 +1275,27 @@
                               ;; where real tasks exist.
                               (when run?
                                 (set-active! target)
-                                (set-pending! true))
+                                (set-pending! true)
+                                ;; Bind the entry phase NOW, not at promotion.
+                                ;; The decomposition turn queued above is the
+                                ;; one that turns a design doc into the spec's
+                                ;; requirements and task list — and it ran with
+                                ;; no role bound at all, so it fell through to
+                                ;; settings.model while every later turn got
+                                ;; the profile's model. The most consequential
+                                ;; turn in the flow used the least chosen
+                                ;; model. promote-pending! still calls this and
+                                ;; is simply idempotent now.
+                                (let [cfg   (phases/config (safe-settings))
+                                      order (phases/phase-order
+                                             (get (:profiles cfg) (get-profile)))
+                                      warn  (fn [m] (.notify (.-ui ctx) m "warning"))
+                                      e     (phases/entry-phase
+                                             {:current (get-phase)
+                                              :wanted  (:import-phase (:loop cfg))
+                                              :order   order})]
+                                  (when (:reason e) (warn (str "spec: " (:reason e))))
+                                  (set-phase! (:phase e) warn)))
                               (.notify (.-ui ctx)
                                        (str "✓ Imported " (case (:source result)
                                                             :kiro "Kiro" :spec-kit "spec-kit" "spec")
@@ -1291,6 +1311,11 @@
                                             (->> (:files result)
                                                  (map #(str "    " %))
                                                  (str/join "\n"))
+                                            (when run?
+                                              (str "  role: "
+                                                   (or (:active-role (.getState api))
+                                                       (get (.getState api) "active-role"))
+                                                   " (decomposition runs on this)\n"))
                                             "\n\nDecomposition queued — the next agent turn will read\n"
                                             "  " (path/relative cwd src-path) "\n"
                                             "and populate the files. Send any message (e.g. \"go\") to start.\n"

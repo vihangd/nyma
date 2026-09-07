@@ -684,3 +684,76 @@
                 test-run-falls-back-to-the-queue)
             (it "shares one continue-prompt across every caller"
                 test-continue-prompt-is-shared)))
+
+;;; ─── The decomposition turn gets a role too ────────────────
+;;
+;; `--run` set :active-spec and :spec-loop-pending and nothing else, so the
+;; DECOMPOSITION turn — the one that turns a captured design doc into the
+;; spec's requirements and ordered task list — ran with no role bound and fell
+;; through to settings.model. Every LATER turn got the profile's model. The most
+;; consequential turn in the flow used the least deliberately chosen model.
+;;
+;; Invisible to the existing tests because they assert role binding only after
+;; `agent_end` fires, which is exactly one turn too late.
+
+(defn test-import-run-binds-role-immediately []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [state] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        ;; No agent_end has fired. The queued decomposition turn is the very
+        ;; next thing that will run, and it must already have a model.
+        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+            (.toBe "execute"))
+        (-> (expect (or (:active-role @state) (get @state "active-role")))
+            (.toBe "fast"))))))
+
+(defn test-import-without-run-binds-nothing []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [state] :as h} (harness)]
+        ;; Without --run the user has not asked for a loop, so nothing should
+        ;; seize their current model.
+        (spec-cmd! h agent ["import" "token-store"])
+        (-> (expect (or (:active-role @state) (get @state "active-role")))
+            (.toBeUndefined))))))
+
+(defn test-promotion-is-idempotent []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [state] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        (write-real-tasks! tmp "token-store")
+        (fire-agent-end! h)
+        ;; promote-pending! binds the phase too; now that import already did,
+        ;; it must not change anything or double-fire.
+        (-> (expect (or (:spec-phase @state) (get @state "spec-phase"))) (.toBe "execute"))
+        (-> (expect (or (:active-role @state) (get @state "active-role"))) (.toBe "fast"))
+        (-> (expect (boolean (or (:spec-loop-armed @state)
+                                 (get @state "spec-loop-armed"))))
+            (.toBe true))))))
+
+(defn test-import-names-the-decomposition-role []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            {:keys [notes] :as h} (harness)]
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        ;; Say which model is about to do the work — silence here is how the
+        ;; wrong model went unnoticed through a whole session.
+        (-> (expect (.includes (apply str @notes) "role: fast")) (.toBe true))))))
+
+(describe "the decomposition turn runs under a bound role"
+          (fn []
+            (it "binds phase and role at import time, before any turn"
+                test-import-run-binds-role-immediately)
+            (it "binds nothing without --run" test-import-without-run-binds-nothing)
+            (it "promotion after import changes nothing" test-promotion-is-idempotent)
+            (it "names the role that will decompose" test-import-names-the-decomposition-role)))

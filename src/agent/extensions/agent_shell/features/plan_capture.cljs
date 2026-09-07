@@ -42,7 +42,12 @@
      ;; at the margin on a subscription, but not free in time.
      :no-refine?  (flag "--no-refine")
      :disconnect? (flag "--disconnect")
-     :role        (or role "default")}))
+     ;; Not "default": `model_roles/on-resolve` guards
+     ;; `(not= role "default")`, so a role by that name is a silent no-op and
+     ;; the handoff would run on settings.model rather than anything chosen
+     ;; here. `fast` is the role that exists for exactly this — cheap execution
+     ;; of a plan someone else wrote.
+     :role        (or role "fast")}))
 
 (def ^:private stopwords
   "Dropped when deriving a name — grammar and meta-instruction, neither of

@@ -36,12 +36,23 @@
                                           (fn []
                                             (-> (expect (:name (pc/parse-args ["--all" "--execute"]))) (.toBeUndefined))))
 
-                                      (it "reads --role and defaults it to `default`"
+                                      (it "reads --role and defaults it to a role that APPLIES"
                                           (fn []
-        ;; NOT `build` — that is not a builtin role, and shipping a default
-        ;; naming a non-existent role is a mistake already made once this cycle.
-                                            (-> (expect (:role (pc/parse-args []))) (.toBe "default"))
-                                            (-> (expect (:role (pc/parse-args ["--role=fast"]))) (.toBe "fast"))))))
+        ;; Not `default`: model_roles/on-resolve guards
+        ;; `(not= role "default")`, so setting :active-role to "default" is a
+        ;; silent no-op and --execute would hand off on settings.model instead
+        ;; of anything chosen here. Verified against the compiled module —
+        ;; active-role "default" produces zero setModel calls.
+        ;;
+        ;; Not `build` either: that is not a BUILTIN role, and shipping a
+        ;; default naming a role the user may not have declared is a mistake
+        ;; already made once this cycle. `fast` is builtin and is the role for
+        ;; cheap execution of a plan someone else wrote.
+                                            (-> (expect (:role (pc/parse-args []))) (.toBe "fast"))
+                                            (-> (expect (:role (pc/parse-args ["--role=deep"]))) (.toBe "deep"))
+                                            (-> (expect (boolean (some #(= % (:role (pc/parse-args [])))
+                                                                       ["default" ""])))
+                                                (.toBe false))))))
 
 ;;; ─── Name derivation ────────────────────────────────────────
 
