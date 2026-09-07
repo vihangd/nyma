@@ -25,11 +25,20 @@
 (defn apply-keybindings
   "Merge loaded keybindings into the agent's :shortcuts atom.
    Action format: 'command:name' dispatches the /name command.
-   Each binding is stored as {:action string :source \"keybindings.json\"}."
+   Each binding is stored as {:action string :source \"keybindings.json\"}.
+
+   Runs AFTER extensions load (cli.cljs), so a user binding on a combo an
+   extension already claimed replaces it — the user wins, which is the right
+   precedence and was previously a silent overwrite. It is now named, because
+   \"my ctrl+r stopped opening history\" is otherwise unattributable."
   ([shortcuts-atom commands-atom bindings]
    (apply-keybindings shortcuts-atom commands-atom bindings nil))
   ([shortcuts-atom commands-atom bindings agent]
    (doseq [[key-combo action] bindings]
+     (when (contains? @shortcuts-atom key-combo)
+       (d/warn "keybindings"
+               (str key-combo " is already bound by an extension — your "
+                    "keybindings.json binding (" action ") replaces it.")))
      (swap! shortcuts-atom assoc key-combo
             {:action action
              :source "keybindings.json"
@@ -53,7 +62,12 @@
    Two shapes live in this one atom and both have to work: `registerShortcut`
    stores a BARE FN (extensions.cljs), while `apply-keybindings` above stores
    `{:action :source :handler f}`. Pure — `matches?` is pi-tui's `matchesKey`
-   in production and a stub in tests."
+   in production and a stub in tests.
+
+   `escape` and `ctrl+c` are NOT reachable here: interactive.cljs adds their
+   listeners before this one and pi-tui walks listeners in insertion order, so
+   the abort and graceful-exit handlers see those two keys first. Binding
+   either in keybindings.json will not take effect."
   [shortcuts data matches?]
   (some (fn [[combo entry]]
           (when (try (matches? data combo) (catch :default _ false))

@@ -76,13 +76,24 @@
                                                                                                  (let [shortcuts {"ctrl+r" (fn [] (throw (js/Error. "boom")))}]
                                                                                                    (-> (expect (kb/dispatch-shortcut! shortcuts ctrl-r matchesKey)) (.toBe true)))))
 
+                                (it "a user binding replaces an extension's on the same combo" (fn []
+    ;; Load order: extensions register first (cli.cljs:556), apply-keybindings
+    ;; runs after (:620), so the user wins — one map key, last writer. Correct
+    ;; precedence, and now a warning rather than a silent swap.
+                                                                                 (let [log        (atom [])
+                                                                                       shortcuts  (atom {"ctrl+r" (fn [] (swap! log conj "extension"))})
+                                                                                       commands   (atom {"clear" {:handler (fn [_a _c] (swap! log conj "user"))}})]
+                                                                                   (kb/apply-keybindings shortcuts commands {"ctrl+r" "command:clear"})
+                                                                                   (kb/dispatch-shortcut! @shortcuts ctrl-r matchesKey)
+                                                                                   (-> (expect @log) (.toEqual #js ["user"])))))
+
                                 (it "does nothing with an empty registry" (fn []
                                                                             (-> (expect (kb/dispatch-shortcut! {} ctrl-r matchesKey)) (.toBe false))))
 
                                 (it "survives a combo matchesKey cannot parse" (fn []
     ;; A typo'd binding in keybindings.json must not break every other key.
                                                                                  (let [ran (atom false)
-                                                                                       shortcuts {"ctrl+" (fn [] (reset! ran :bad))
-                                                                                                  "ctrl+r" (fn [] (reset! ran :good))}]
+                                                                                       shortcuts {"ctrl+" (fn [] (reset! ran "bad"))
+                                                                                                  "ctrl+r" (fn [] (reset! ran "good"))}]
                                                                                    (-> (expect (kb/dispatch-shortcut! shortcuts ctrl-r matchesKey)) (.toBe true))
                                                                                    (-> (expect @ran) (.toBe "good")))))))
