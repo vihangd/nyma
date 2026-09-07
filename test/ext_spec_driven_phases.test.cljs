@@ -339,9 +339,14 @@
 
 (describe "phases/config import-phase" (fn []
 
-  (it "defaults to execute"
+  (it "defaults to plan — decomposition is the plan phase's work"
       (fn []
-        (-> (expect (:import-phase (:loop (p/config nil)))) (.toBe "execute"))))
+        ;; Was "execute", on the reasoning that an imported plan means planning
+        ;; already happened. But decomposition — turning the captured document
+        ;; into spec.md / plan.md / tasks.md — IS this phase, and it is exactly
+        ;; the step a model skips: a real run read PLAN.md and wrote 233 lines
+        ;; of implementation while tasks.md still said "First task".
+        (-> (expect (:import-phase (:loop (p/config nil)))) (.toBe "plan"))))
 
   (it "is settings-driven, like every other loop dial"
       (fn []
@@ -441,3 +446,123 @@
         ;; the segment is about the ACTIVE spec and stays hidden either way.
         (-> (expect (:visible? (seg/render-spec {:spec nil :analyzing? true} {})))
             (.toBe false))))))
+
+;;; ─── The phase gate ────────────────────────────────────────────────────────
+;;
+;; A real run read PLAN.md and wrote 233 lines of apps.py while tasks.md still
+;; said "First task". Nothing stopped it: the phase picked a model and nothing
+;; else. The literature calls this the agent-pause assumption — humans stop when
+;; a spec does not parse, agents fill the hole with the most defensible-looking
+;; value and keep building.
+;;
+;; No comparable tool enforces this mechanically: spec-kit is convention, BMAD
+;; says "start anywhere", the gated-skill packs use human approval. The only
+;; precedent is Claude Code's plan mode, which is globally read-only and so
+;; cannot write the spec files either. Hence a phase-scoped, path-scoped gate.
+
+(def ^:private spec-dir ".specify/specs/apps")
+
+(defn- real-tasks
+  "Progress for `n` genuinely-named tasks — not the scaffold placeholders."
+  [n]
+  (p/progress (mapv (fn [i] {:checked? false :text (str "Scan source " i)}) (range n))
+              (.join (clj->js (mapv (fn [i] (str "- [ ] Scan source " i)) (range n))) "\n")))
+
+(defn- allows [phase tool path]
+  (:allowed? (p/phase-allows? {:phase phase :tool tool :path path :spec-dir spec-dir})))
+
+(describe "phases/phase-allows?" (fn []
+
+  (it "lets the plan phase write the spec's own files"
+      (fn []
+        (-> (expect (allows "plan" "write" ".specify/specs/apps/tasks.md")) (.toBe true))
+        (-> (expect (allows "plan" "edit"  ".specify/specs/apps/spec.md"))  (.toBe true))
+        ;; reads are never restricted — decomposition has to read the source
+        (-> (expect (allows "plan" "read" "PLAN.md")) (.toBe true))
+        (-> (expect (allows "plan" "grep" "anything")) (.toBe true))))
+
+  (it "refuses implementation during the plan phase"
+      (fn []
+        ;; The exact call that shipped 233 lines of apps.py.
+        (-> (expect (allows "plan" "write" "apps.py")) (.toBe false))
+        (-> (expect (allows "plan" "edit" "src/main.py")) (.toBe false))
+        (-> (expect (allows "plan" "multi_edit" "apps.py")) (.toBe false))))
+
+  (it "refuses bash outright in the plan phase"
+      (fn []
+        ;; Without this the gate is decorative — `echo > apps.py` walks past a
+        ;; path check on the write tools.
+        (-> (expect (allows "plan" "bash" nil)) (.toBe false))))
+
+  (it "is not fooled by .. traversal"
+      (fn []
+        (-> (expect (allows "plan" "write" ".specify/specs/apps/../../apps.py"))
+            (.toBe false))
+        (-> (expect (allows "plan" "write" ".specify/specs/apps/./tasks.md"))
+            (.toBe true))
+        ;; a sibling spec is still outside this spec's dir
+        (-> (expect (allows "plan" "write" ".specify/specs/other/tasks.md"))
+            (.toBe false))))
+
+  (it "restricts nothing outside the plan phase"
+      (fn []
+        (doseq [ph ["execute" "verify" "ship"]]
+          (-> (expect (allows ph "write" "apps.py")) (.toBe true))
+          (-> (expect (allows ph "bash" nil)) (.toBe true)))))
+
+  (it "explains itself to the model rather than just refusing"
+      (fn []
+        ;; The reason is returned as a tool RESULT, so the model reads it and
+        ;; self-corrects. An opaque cancellation just gets retried.
+        (let [r (p/phase-allows? {:phase "plan" :tool "write" :path "apps.py"
+                                  :spec-dir spec-dir})]
+          (-> (expect (.includes (:reason r) "plan")) (.toBe true))
+          (-> (expect (.includes (:reason r) spec-dir)) (.toBe true)))))))
+
+(describe "phases/open-clarifications" (fn []
+
+  (it "counts unresolved markers across documents"
+      (fn []
+        (-> (expect (p/open-clarifications "a [NEEDS CLARIFICATION: x] b"
+                                           "c [NEEDS CLARIFICATION: y]"))
+            (.toBe 2))
+        (-> (expect (p/open-clarifications "clean" nil "")) (.toBe 0))))))
+
+(describe "phases/decide — the plan phase can refuse" (fn []
+
+  (let [base {:armed? true :phase "plan" :profile "routed"
+              :phases ["plan" "execute" "verify" "ship"]
+              :iteration 0 :max-iterations 25}]
+
+    (it "keeps decomposing while tasks are still the scaffold"
+        (fn []
+          ;; `prog` builds task maps with no :text, which template-tasks? cannot
+          ;; see — build the real shape here.
+          (let [tmpl (p/progress [{:checked? false :text "First task"}
+                                  {:checked? false :text "Second task"}]
+                                 "- [ ] First task\n- [ ] Second task")
+                d    (p/decide (assoc base :progress tmpl))]
+            (-> (expect (p/template-tasks? tmpl)) (.toBe true))
+            (-> (expect (str (:action d))) (.toBe "continue")))))
+
+    (it "advances once the spec holds real tasks"
+        (fn []
+          (let [d (p/decide (assoc base :progress (real-tasks 9)))]
+            (-> (expect (str (:action d))) (.toBe "advance"))
+            (-> (expect (:next-phase d)) (.toBe "execute")))))
+
+    (it "HOLDS on unresolved clarification markers"
+        (fn []
+          ;; Elmore's point: a gate that cannot fail is theatre, and an open
+          ;; question should block rather than be filled in. The import seed
+          ;; already asks the model to insert these instead of inventing.
+          (let [d (p/decide (assoc base :progress (real-tasks 9)
+                                        :open-clarifications 2))]
+            (-> (expect (str (:action d))) (.toBe "hold"))
+            (-> (expect (.includes (:reason d) "clarify")) (.toBe true)))))
+
+    (it "leaves the other phases' behaviour unchanged"
+        (fn []
+          (let [d (p/decide (assoc base :phase "execute"
+                                        :progress (prog 9 3 "- [ ] x")))]
+            (-> (expect (str (:action d))) (.toBe "continue"))))))))

@@ -66,8 +66,13 @@
   ;; enters at the first phase, because there the planning has not happened.
   ;; Settings-driven rather than hardcoded: the phase set is user-definable, so
   ;; the entry point has to be too.
+  ;; import-phase is `plan`, not `execute`. Decomposition — turning a captured
+  ;; plan into the spec's requirements and task list — IS the plan phase's work,
+  ;; and it is exactly the step a model skips when nothing stops it: a real run
+  ;; read PLAN.md and wrote 233 lines of implementation while tasks.md stayed on
+  ;; "First task".
   {:mode "off" :profile "routed" :max-iterations 25 :fresh-context false
-   :import-phase "execute"})
+   :import-phase "plan"})
 
 ;; ── Config ───────────────────────────────────────────────────────
 
@@ -212,6 +217,73 @@
           (every? (fn [t] (contains? template-task-texts
                                      (str/lower-case (str/trim (str t))))) ts)))))
 
+(def plan-phase-writable-tools
+  "Tools that write. The plan phase confines these to the spec's own directory."
+  #{"write" "edit" "multi_edit"})
+
+(defn- under?
+  "Is `p` inside `dir`? Both are compared after normalising `..` segments —
+   `.specify/specs/x/../../apps.py` must not read as inside the spec dir."
+  [p dir]
+  (let [norm (fn [s] (-> (str s)
+                         (str/replace #"\\" "/")
+                         (str/replace #"/+" "/")))
+        seg  (fn [s] (reduce (fn [acc part]
+                               (cond (= part "..") (vec (butlast acc))
+                                     (or (= part ".") (= part "")) acc
+                                     :else (conj acc part)))
+                             []
+                             (str/split (norm s) #"/")))
+        ps (seg p) ds (seg dir)]
+    (and (seq ds)
+         (<= (count ds) (count ps))
+         (= ds (vec (take (count ds) ps))))))
+
+(defn phase-allows?
+  "May `tool` run, with `path`, during `phase`? Pure.
+
+   Only the plan phase restricts anything. Decomposition writes the spec's own
+   files and nothing else, so:
+     - a write/edit outside the spec dir is refused;
+     - `bash` is refused outright — without that the gate is decorative, since
+       `echo > apps.py` walks straight past a path check on the write tools.
+
+   Returns {:allowed? bool :reason s}. The reason is shown to the MODEL as a
+   tool result, so it is phrased to make it self-correct rather than retry."
+  [{:keys [phase tool path spec-dir]}]
+  (let [phase (str phase) tool (str tool)]
+    (cond
+      (not= phase "plan")
+      {:allowed? true}
+
+      (= tool "bash")
+      {:allowed? false
+       :reason (str "Refused: the spec is in its `plan` phase, which decomposes "
+                    "the source document into spec.md / plan.md / tasks.md. "
+                    "Shell commands belong to the execute phase. Edit the spec "
+                    "files; the loop advances on its own once tasks.md holds "
+                    "real tasks.")}
+
+      (and (contains? plan-phase-writable-tools tool)
+           (seq (str (or spec-dir "")))
+           (not (under? (str (or path "")) (str spec-dir))))
+      {:allowed? false
+       :reason (str "Refused: writing `" path "` is implementation work, and the "
+                    "spec is in its `plan` phase. Write only inside " spec-dir
+                    " — fill in spec.md, plan.md and tasks.md. Implementation "
+                    "comes next, automatically, once tasks.md holds real tasks.")}
+
+      :else {:allowed? true})))
+
+(defn open-clarifications
+  "Count of unresolved [NEEDS CLARIFICATION] markers across the spec's docs.
+   The import seed instructs the model to insert these rather than invent an
+   answer; nothing has ever read them back. Pure."
+  [& contents]
+  (reduce (fn [n c]
+            (+ n (count (re-seq #"\[NEEDS CLARIFICATION" (str (or c ""))))))
+          0 contents))
+
 (defn decide
   "What the loop should do at the end of a turn. Pure.
 
@@ -229,7 +301,7 @@
      :no-tasks       — a broken tasks.md must stop, never read as complete
      open > 0        — the only real completion signal"
   [{:keys [armed? phase profile iteration max-iterations progress
-           verify-pending? phases]}]
+           verify-pending? phases open-clarifications]}]
   (let [order  (vec (or phases default-phase-order))
         idx    (.indexOf order (str phase))
         nxt    (when (and (>= idx 0) (< (inc idx) (count order)))
@@ -256,6 +328,26 @@
        :reason (if (:empty-file? progress)
                  "tasks file is empty — nothing to run"
                  "no checkboxes found in tasks file — refusing to treat as complete")}
+
+      ;; The plan phase is done when the spec is decomposed, not when its
+      ;; tasks are finished — those get done in `execute`. Three outcomes, and
+      ;; it must be able to REFUSE: a gate that always passes is theatre.
+      (and (= phase "plan") (= st :in-progress))
+      (cond
+        (template-tasks? progress)
+        {:action :continue :reason "tasks.md is still the scaffold — decomposing"}
+
+        (pos? (or open-clarifications 0))
+        {:action :hold
+         :reason (str open-clarifications " unresolved [NEEDS CLARIFICATION] "
+                      "marker(s) — run /spec clarify before implementing")}
+
+        (some? nxt)
+        {:action :advance :next-phase nxt
+         :reason (str "decomposed into " (:total progress) " tasks")}
+
+        :else
+        {:action :done :reason "decomposed, and no phase follows plan"})
 
       (= st :in-progress)
       {:action :continue

@@ -369,6 +369,31 @@
         (.join lines "\n"))
       tasks)))
 
+(def phase-banner
+  "What the current phase permits, stated first, in the model's own context.
+
+   The gate in `phases/phase-allows?` is the enforcement — it lives outside the
+   context and cannot be reasoned around. This is the other half: a refusal the
+   model could have anticipated is worth more than one it walks into, and every
+   spec-driven system in the field (spec-kit, BMAD, agent-skills) relies on
+   convention like this alone. Here it is the polite layer over a real gate.
+
+   Phase-stable strings, no interpolation — they change three times a run."
+  {"plan"    (str "**Phase: plan.** Write the spec's own files only — "
+                  "spec.md, plan.md, tasks.md and their siblings inside the "
+                  "spec directory. Do NOT write implementation files and do "
+                  "not run shell commands; both are refused in this phase. "
+                  "Where the source is silent, insert "
+                  "`[NEEDS CLARIFICATION: <question>]` rather than inventing "
+                  "an answer — open markers hold the phase open, which is the "
+                  "point of them.")
+   "execute" (str "**Phase: execute.** Implement the NEXT unchecked task and "
+                  "tick it off. One task per turn.")
+   "verify"  (str "**Phase: verify.** The tasks are done. Run the tests and "
+                  "checks; fix what fails. Do not add new scope.")
+   "ship"    (str "**Phase: ship.** Everything passes. Summarise the change "
+                  "and prepare the commit. No new code.")})
+
 (defn build-spec-context
   "Build the system-prompt addendum for an active spec.
 
@@ -379,8 +404,11 @@
      ### Design / Plan
      ### Tasks
      [optional per-spec artifacts: data-model.md, quickstart.md, research.md]
-     [optional per-spec directories: contracts/*]"
-  [cwd spec]
+     [optional per-spec directories: contracts/*]
+
+   `phase` is optional and trailing: an unknown or absent phase simply omits
+   the banner, so the six 2-arity call sites keep working."
+  [cwd spec & [phase]]
   (let [shape    (get spec-shapes (case (:source spec)
                                     :spec-kit "spec-kit"
                                     :kiro     "kiro"))
@@ -409,6 +437,8 @@
     (str "\n\n## Active Spec: " (:name spec) "  ("
          (case (:source spec) :kiro "Kiro" :spec-kit "spec-kit" "spec")
          "; " (:done progress) "/" (:total progress) " tasks done)\n"
+         (when-let [banner (get phase-banner (str phase))]
+           (str "\n" banner "\n"))
          (when (seq project)
            (str "\n### Project guidance\n"
                 (->> project
@@ -890,6 +920,31 @@
        "on that line) in the same turn. Do exactly one task. Stop if you "
        "need user input."))
 
+(def phase-prompt
+  "The loop's per-turn instruction, per phase. `execute` IS `continue-prompt`
+   by identity — that phase is the loop's hot path, and its docstring's cache
+   argument depends on the bytes not moving.
+
+   `plan` is here because the loop now enters at that phase: the decomposition
+   turn is plan work, and telling it to \"do the NEXT unchecked task\" is how a
+   template tasks.md got implemented from the design doc instead of replaced."
+  {"plan"    (str "Continue turning the source document into this spec's own "
+                  "files. Write spec.md, plan.md and tasks.md — real, ordered, "
+                  "checkable tasks, not the scaffold template. Where the source "
+                  "does not say, write `[NEEDS CLARIFICATION: <question>]`. Do "
+                  "not implement anything yet.")
+   "verify"  (str "Run the project's tests and checks for this spec and fix "
+                  "what fails. Do not add new scope. Say so plainly if "
+                  "something cannot be fixed.")
+   "ship"    (str "Summarise what changed for this spec and prepare the "
+                  "commit. Do not write new code.")})
+
+(defn prompt-for-phase
+  "The instruction to send for `phase`. Falls back to `continue-prompt`, which
+   is also what `execute` resolves to."
+  [phase]
+  (or (get phase-prompt (str phase)) continue-prompt))
+
 (defn ^:export default [api]
   (let [handlers (atom [])
         ;; Filled in when the loop registers below; the command handler is
@@ -968,8 +1023,14 @@
         ;; saw an armed loop do nothing at all. Falls back to the queue when
         ;; the host has no listener or a turn is already running, which is the
         ;; correct mechanism in both cases.
+        ;; emitGlobal, NOT api.events.emit: the scoped events object prefixes
+        ;; every name with the namespace (extension_scope.cljs), so this emitted
+        ;; `spec-driven__turn_request` — which interactive mode, subscribed to
+        ;; the bare name, never heard. And since `.emit` existed, the fallback
+        ;; never fired either: the prompt was dropped on the floor. That is what
+        ;; "the loop armed and nothing happened" was.
         start-turn! (fn [text]
-                      (if-let [emit (some-> (.-events api) .-emit)]
+                      (if-let [emit (.-emitGlobal api)]
                         (emit "turn_request" #js {:text text})
                         ((.-sendUserMessage api) text #js {:deliverAs "followUp"})))
         ;; In-flight marker for `/spec analyze`, which is a direct
@@ -1005,8 +1066,40 @@
                 spec   (when active (get specs active))]
             (when spec
               (let [base (or (.-systemPrompt data) "")
-                    addendum (build-spec-context cwd spec)]
+                    addendum (build-spec-context cwd spec (get-phase))]
                 #js {:system (str base addendum)}))))
+
+        ;; The phase gate. Registered on before_tool_call, which is the one
+        ;; chokepoint outside the agent's own context: it sits AFTER the
+        ;; permission check and is not subject to the persistent allow-list
+        ;; fast path (middleware.cljs), unlike a role's :permissions. And it is
+        ;; deny-specific rather than an allow-list, so it cannot silently drop
+        ;; MCP tools the way a bare-name :allowed-tools would.
+        ;;
+        ;; `skip` rather than `block`: middleware calls it "clean
+        ;; deny-with-explanation" and still fires tool_result, so the model
+        ;; READS the reason and self-corrects instead of retrying a cancellation
+        ;; it cannot see.
+        on-before-tool
+        (fn [data]
+          (let [active (get-active)
+                phase  (get-phase)]
+            (when (and active phase)
+              (let [spec (get (discover-specs (js/process.cwd)) active)
+                    tool (str (or (.-name data) (.-toolName data)))
+                    args (.-args data)
+                    ;; tool-path, not (.-path args): an edit from an MCP
+                    ;; bridge names it file_path, and a gate that misses the
+                    ;; argument silently allows the write it exists to refuse.
+                    path (tool-metadata/tool-path args)
+                    r    (phases/phase-allows?
+                          {:phase phase :tool tool :path path
+                           :spec-dir (when spec (path/relative (js/process.cwd)
+                                                               (:dir spec)))})]
+                (when-not (:allowed? r)
+                  (dbg/debug "spec_driven/gate"
+                             (str phase " phase refused " tool " " path))
+                  #js {:skip true :result (:reason r)})))))
 
         ;; /spec — top-level dispatcher.  Subcommands: list, start, next,
         ;; done, end. With no args, behaves like `list`.
@@ -1266,7 +1359,19 @@
                                           "Run `/spec clarify " target "` to fill them in.")
                                      "warning")
                             (do
-                              (agent-loop/follow-up agent {:content seed})
+                              ;; Without --run there is no loop and no phase, so
+                              ;; the queue is the right mechanism. With --run the
+                              ;; seed must START a turn: the follow-queue drains
+                              ;; only at a turn boundary, so the user's next
+                              ;; message ran FIRST, against a spec still full of
+                              ;; template placeholders — and the model, seeing a
+                              ;; design doc and no tasks, implemented the whole
+                              ;; feature directly. See start-turn! below the
+                              ;; notify: it fires last, after the phase is bound,
+                              ;; or the gate abstains on the one turn it exists
+                              ;; to constrain.
+                              (when-not run?
+                                (agent-loop/follow-up agent {:content seed}))
                               ;; --run: activate now and mark the loop PENDING.
                               ;; It cannot arm yet — tasks.md is still the
                               ;; scaffold template, and the decomposition turn
@@ -1324,7 +1429,8 @@
                                                    "decomposition lands. Started without /spec analyze —\n"
                                                    "run `/spec analyze " target "` to check the plan.")
                                               (str "Then run `/spec clarify " target "` to resolve any "
-                                                   "[NEEDS CLARIFICATION] markers.")))))))
+                                                   "[NEEDS CLARIFICATION] markers."))))
+                              (when run? (start-turn! seed)))))
                         (catch :default e
                           (try (fs/rmSync (:dir result)
                                           #js {:recursive true :force true})
@@ -1712,6 +1818,8 @@
                        "error"))))]
 
     (.on api "context_assembly" on-context-assembly)
+    (.on api "before_tool_call" on-before-tool)
+    (swap! handlers conj ["before_tool_call" on-before-tool])
     (swap! handlers conj ["context_assembly" on-context-assembly])
 
     ;; Status segment. Without it a spec run is invisible: after
@@ -1963,6 +2071,16 @@
                              :iteration       @loop-iteration
                              :max-iterations  (:max-iterations (:loop cfg))
                              :verify-pending? @verify-red?
+                             ;; Open questions HOLD the plan phase rather than
+                             ;; being quietly filled in. The seed has always
+                             ;; asked the model to write these markers; nothing
+                             ;; read them back until now.
+                             :open-clarifications
+                             (when spec
+                               (phases/open-clarifications
+                                raw
+                                (read-if-exists (:req spec))
+                                (read-if-exists (:design spec))))
                              :progress        (phases/progress (parse-tasks raw) raw)})
                     say    (fn [m] (when-let [ui (.-ui api)]
                                      (when (.-notify ui) (.notify ui m "info"))))]
@@ -1973,7 +2091,8 @@
                   "continue"
                   (do (swap! loop-iteration inc)
                       (when (fresh? cfg) (reset-context!))
-                      ((.-sendUserMessage api) continue-prompt #js {:deliverAs "followUp"}))
+                      ((.-sendUserMessage api) (prompt-for-phase phase)
+                       #js {:deliverAs "followUp"}))
 
                   "advance"
                   (let [nxt (:next-phase d)
@@ -1981,7 +2100,10 @@
                     (swap! loop-iteration inc)
                     (say (str "> " phase " -> " nxt "  role: " (:role r)))
                     (when (fresh? cfg) (reset-context!))
-                    ((.-sendUserMessage api) continue-prompt #js {:deliverAs "followUp"}))
+                    ;; The prompt of the phase we are entering, not the one we
+                    ;; just left.
+                    ((.-sendUserMessage api) (prompt-for-phase nxt)
+                     #js {:deliverAs "followUp"}))
 
                   "hold"
                   ;; Stay armed and silent — verify_gate's fix follow-up is the

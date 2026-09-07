@@ -120,7 +120,8 @@
     (fn [tmp]
       (write-plan! tmp)
       (let [agent (make-test-agent)
-            h     (harness)]
+            h     (harness)
+            reqs  (with-turn-requests h)]
         (spec-cmd! h agent ["import" "token-store" "--run"])
         ;; The spec exists and its tasks are still the scaffold — that is the
         ;; expected state at this instant, and exactly the state the real run
@@ -129,11 +130,14 @@
             (.toBe true))
         (-> (expect (phases/template-tasks? (tasks-progress tmp "token-store")))
             (.toBe true))
-        ;; The assertion the old tests were missing: something is queued to
-        ;; act on it. A passing `compose-import-seed` test plus an empty queue
-        ;; is precisely the bug that shipped.
-        (-> (expect (count @(:follow-queue agent))) (.toBe 1))
-        (let [seed (str (:content (first @(:follow-queue agent))))]
+        ;; The seed STARTS a turn rather than joining the follow-queue. The
+        ;; queue drains only at a turn boundary, so under --run the user's next
+        ;; message ran first, against a spec of template placeholders — and the
+        ;; model implemented the feature straight from the design doc instead
+        ;; of decomposing it. Queued-but-not-started was the whole failure.
+        (-> (expect (count @(:follow-queue agent))) (.toBe 0))
+        (-> (expect (count @reqs)) (.toBe 1))
+        (let [seed (str (first @reqs))]
           (-> (expect (.includes seed "token-store")) (.toBe true))
           (-> (expect (.includes seed ".nyma/plans/")) (.toBe true)))))))
 
@@ -355,7 +359,8 @@
     (fn [tmp]
       (write-plan! tmp)
       (let [agent (make-test-agent)
-            {:keys [notes] :as h} (harness)]
+            {:keys [notes] :as h} (harness)
+            reqs  (with-turn-requests h)]
         (spec-cmd! h agent ["import" "token-store" "--run"])
         ;; Stand in for a spec that has been worked on: real tasks, one ticked.
         (fs/writeFileSync (path/join tmp ".specify" "specs" "token-store" "tasks.md")
@@ -370,14 +375,11 @@
           (-> (expect (.includes all "1 of 2 tasks were already ticked")) (.toBe true)))
         ;; Back to scaffold, and a fresh decomposition queued for it.
         (-> (expect (phases/template-tasks? (tasks-progress tmp "token-store"))) (.toBe true))
-        ;; Two seeds, because the first was never consumed — re-importing
-        ;; before sending any message stacks them. Left alone deliberately:
-        ;; both decompose the same spec from the same artifact, so the second
-        ;; simply redoes the first, costing one turn and converging on the
-        ;; same tasks.md. Draining the queue selectively would mean an
-        ;; extension reaching into the agent's internals to undo work it did
-        ;; not queue.
-        (-> (expect (count @(:follow-queue agent))) (.toBe 2))))))
+        ;; Two turn requests, one per import. Left alone deliberately: both
+        ;; decompose the same spec from the same artifact, so the second simply
+        ;; redoes the first, costing one turn and converging on the same
+        ;; tasks.md. The host serialises them through its submit lock.
+        (-> (expect (count @reqs)) (.toBe 2))))))
 
 (defn test-force-on-a-new-spec-is-a-no-op []
   (with-tmp
@@ -479,10 +481,10 @@
         (-> (expect (boolean (or (:spec-loop-armed @state)
                                  (get @state "spec-loop-armed"))))
             (.toBe true))
-        ;; Armed AND bound — and bound at `execute`, not `plan`. The plan
-        ;; arrived from outside and the decomposition has already run, so a
-        ;; planning phase has nothing to do; entering at it would run the whole
-        ;; task list under the planning role, which is the expensive one.
+        ;; Armed at `plan`, then advanced in the SAME agent_end: decide sees
+        ;; real, non-template tasks with no open clarifications and moves on.
+        ;; That is the decomposition→implementation handoff, and it happens
+        ;; without a human.
         (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
             (.toBe "execute"))
         (-> (expect (or (:active-role @state) (get @state "active-role")))
@@ -519,7 +521,7 @@
           (-> (expect (.includes all "decomposition landed")) (.toBe true))
           (-> (expect (.includes all "2 tasks")) (.toBe true))
           ;; Silence about which role it bound is how gap 1 stayed invisible.
-          (-> (expect (.includes all "role: fast")) (.toBe true)))))))
+          (-> (expect (.includes all "role: advisor")) (.toBe true)))))))
 
 (describe "arming the loop binds a role"
           (fn []
@@ -627,10 +629,14 @@
   "Capture turn_request emissions from the extension."
   [h]
   (let [reqs (atom [])]
-    (aset (:api h) "events" #js {:emit (fn [ev data]
-                                         (when (= "turn_request" (str ev))
-                                           (swap! reqs conj (str (.-text data))))
-                                         nil)})
+    ;; emitGlobal, not api.events.emit — the scoped events object PREFIXES the
+    ;; name (`spec-driven__turn_request`), so a double built on `.emit` passes
+    ;; while production drops every request. Pinning the real channel here is
+    ;; the point of the test.
+    (aset (:api h) "emitGlobal" (fn [ev data]
+                                  (when (= "turn_request" (str ev))
+                                    (swap! reqs conj (str (.-text data))))
+                                  nil))
     reqs))
 
 (defn test-run-starts-immediately []
@@ -661,9 +667,9 @@
     (fn [tmp]
       (let [agent (make-test-agent) h (harness)
             sent  (sent-messages h)]
-        ;; No events bus on the api — a host that cannot start a turn must
+        ;; No emitGlobal on the api — a host that cannot start a turn must
         ;; still queue the work rather than dropping it.
-        (aset (:api h) "events" nil)
+        (aset (:api h) "emitGlobal" nil)
         (ready-spec! tmp h agent)
         (spec-cmd! h agent ["run"])
         (-> (expect (count @sent)) (.toBe 1))
@@ -703,12 +709,14 @@
       (let [agent (make-test-agent)
             {:keys [state] :as h} (harness)]
         (spec-cmd! h agent ["import" "token-store" "--run"])
-        ;; No agent_end has fired. The queued decomposition turn is the very
-        ;; next thing that will run, and it must already have a model.
+        ;; No agent_end has fired. The decomposition turn is the very next
+        ;; thing that runs, and it must already have a model AND a phase — the
+        ;; `plan` phase, whose gate keeps it writing spec files rather than
+        ;; implementing.
         (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
-            (.toBe "execute"))
+            (.toBe "plan"))
         (-> (expect (or (:active-role @state) (get @state "active-role")))
-            (.toBe "fast"))))))
+            (.toBe "advisor"))))))
 
 (defn test-import-without-run-binds-nothing []
   (with-tmp
@@ -732,7 +740,9 @@
         (write-real-tasks! tmp "token-store")
         (fire-agent-end! h)
         ;; promote-pending! binds the phase too; now that import already did,
-        ;; it must not change anything or double-fire.
+        ;; it must not change anything or double-fire. Phase stays `plan` —
+        ;; advancing to execute is decide's job, and it happens in this same
+        ;; agent_end once tasks.md is real and carries no open clarifications.
         (-> (expect (or (:spec-phase @state) (get @state "spec-phase"))) (.toBe "execute"))
         (-> (expect (or (:active-role @state) (get @state "active-role"))) (.toBe "fast"))
         (-> (expect (boolean (or (:spec-loop-armed @state)
@@ -748,7 +758,7 @@
         (spec-cmd! h agent ["import" "token-store" "--run"])
         ;; Say which model is about to do the work — silence here is how the
         ;; wrong model went unnoticed through a whole session.
-        (-> (expect (.includes (apply str @notes) "role: fast")) (.toBe true))))))
+        (-> (expect (.includes (apply str @notes) "role: advisor")) (.toBe true))))))
 
 (describe "the decomposition turn runs under a bound role"
           (fn []
