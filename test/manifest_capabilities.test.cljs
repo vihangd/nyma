@@ -60,6 +60,16 @@
           (cljs-files ext-dir)))
 
 (describe "extension manifest capability coverage" (fn []
+
+                                                     (it "actually finds extensions to check"
+                                                         (fn []
+        ;; Guard the guard. This asserted a joined violation string is "" with
+        ;; no floor check, so a bad ext-root would certify a clean repo forever.
+        ;; Its sibling extension_capability_lint has had this check from the
+        ;; start; this one did not.
+                                                           (-> (expect (> (count (vec (fs/readdirSync ext-root))) 10))
+                                                               (.toBe true))))
+
                                                      (it "every gated api call is covered by a declared capability"
                                                          (fn []
                                                            (let [violations (atom [])]

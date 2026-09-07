@@ -142,10 +142,78 @@
    []
    obfuscation-patterns))
 
+(def privilege-commands
+  "Commands that run what follows them as another user. They are wrappers, not
+   work: the risk belongs to the command BEHIND them."
+  #{"sudo" "doas" "pkexec" "su" "runuser"})
+
+(defn strip-privilege-wrapper
+  "Tokens with any leading privilege wrapper removed, so the real command is the
+   one classified.
+
+   Every classifier here keys off `(first tokens)`, and none of these wrappers
+   appears in the command tables — so `sudo cat /etc/shadow` classified as
+   :safe (cmd-name \"sudo\" → :else), and `curl x | sudo bash` was NOT flagged
+   as a pipe-to-interpreter while `curl x | bash` was. A privilege wrapper
+   downgraded everything behind it.
+
+   `su`/`runuser` run their command inside a `-c` STRING, so there is no bare
+   command token to recover; those are left in place and caught by
+   `check-privilege-escalation` instead. Pure; exposed for tests."
+  [tokens]
+  (loop [ts (vec tokens)]
+    (let [head (first ts)]
+      (cond
+        (nil? head) ts
+        ;; `env FOO=1 cmd` — drop env and its assignments.
+        (= head "env") (recur (vec (drop-while (fn [t] (.includes (str t) "="))
+                                               (rest ts))))
+        ;; Only wrappers that take the command as ARGV can be unwrapped.
+        (contains? #{"sudo" "doas" "pkexec"} head)
+        (recur (loop [r (vec (rest ts))]
+                 (let [o (first r)]
+                   (cond
+                     (nil? o) r
+                     ;; flags taking a value
+                     (contains? #{"-u" "-g" "-p" "-U" "--user" "--group"} o) (recur (vec (drop 2 r)))
+                     (= o "--") (vec (rest r))
+                     (.startsWith (str o) "-") (recur (vec (rest r)))
+                     :else r))))
+        :else ts))))
+
+(def privilege-patterns
+  "Privilege escalation, gated on config `:block-privilege-escalation`.
+
+   `su -c` and `runuser -c` carry their command in a quoted string, so stripping
+   the wrapper cannot recover it — these are flagged on the wrapper itself.
+   Bare `sudo cmd` is NOT here: the wrapper is stripped and `cmd` is judged on
+   its own merits, which is the point. What IS here is sudo used to obtain a
+   shell or to run an interpreter, where the intent is the privilege itself."
+  [{:regex #"\b(su|runuser)\b[^|;&]*\s-c\b"
+    :reason "runs a command as another user via su -c"}
+   {:regex #"\b(sudo|doas|pkexec)\s+(-[a-zA-Z]+\s+)*(bash|sh|zsh|dash|ksh)\b"
+    :reason "opens a privileged shell"}
+   {:regex #"\bsudo\s+(-[a-zA-Z]+\s+)*(python3?|perl|ruby|node)\b"
+    :reason "runs an interpreter with elevated privileges"}
+   {:regex #"\bsudo\s+-[a-zA-Z]*s\b"
+    :reason "sudo -s opens a privileged shell"}
+   {:regex #"\bchmod\s+(u\+s|[0-7]*[24][0-7]{3})\b"
+    :reason "sets a setuid/setgid bit"}])
+
+(defn check-privilege-escalation
+  "Reasons `cmd` escalates privilege, or an empty vector. Pure; exposed for
+   tests. Mirrors check-obfuscation."
+  [cmd]
+  (reduce (fn [acc {:keys [regex reason]}]
+            (if (.test regex cmd) (conj acc reason) acc))
+          []
+          privilege-patterns))
+
 (defn- classify-token-group
   "Classify a group of tokens (a single subcommand) by its command name and arguments."
   [tokens]
-  (let [cmd-name (first tokens)
+  (let [tokens   (strip-privilege-wrapper tokens)
+        cmd-name (first tokens)
         args-str (str/join " " tokens)]
     (cond
       (nil? cmd-name) :safe
@@ -176,8 +244,10 @@
      (fn [reasons group]
        (if (and (= (:piped-from group) "|")
                 (seq (:tokens group))
-                (contains? interpreter-commands (first (:tokens group))))
-         (conj reasons (str "piped output to interpreter: " (first (:tokens group))))
+                (contains? interpreter-commands
+                    (first (strip-privilege-wrapper (:tokens group)))))
+         (conj reasons (str "piped output to interpreter: "
+                            (first (strip-privilege-wrapper (:tokens group)))))
          reasons))
      []
      @groups)))
@@ -207,6 +277,8 @@
       (let [destructive-reasons (check-destructive-patterns cmd-str)
             obfuscation-reasons (when (:block-obfuscated config)
                                   (check-obfuscation cmd-str))
+            privilege-reasons   (when (:block-privilege-escalation config)
+                                  (check-privilege-escalation cmd-str))
             ;; (c) Recursively classify subshell bodies; take highest risk
             subshell-results    (when (pos? max-depth)
                                   (mapv #(classify-command
@@ -220,6 +292,8 @@
           {:level :destructive :reasons destructive-reasons :command cmd-str}
           (if (seq obfuscation-reasons)
             {:level :destructive :reasons obfuscation-reasons :command cmd-str}
+            (if (seq privilege-reasons)
+              {:level :destructive :reasons privilege-reasons :command cmd-str}
             (if (= subshell-max :destructive)
               {:level   :destructive
                :reasons (or (seq subshell-reasons) ["destructive command in subshell"])
@@ -256,7 +330,7 @@
                   ;; Fail-closed: unparseable commands treated as destructive
                   {:level   :destructive
                    :reasons ["unparseable command (fail-closed)"]
-                   :command cmd-str})))))))))
+                   :command cmd-str}))))))))))
 
 (defn should-block?
   "Determine if a classified command should be blocked based on config."

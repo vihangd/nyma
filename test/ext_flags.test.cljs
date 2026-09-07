@@ -46,3 +46,50 @@
                                    (fn []
                                      (-> (expect (ext/coerce-flag-value "number" "42")) (.toBe 42))
                                      (-> (expect (ext/coerce-flag-value "string" nil)) (.toBe ""))))))
+
+;;; ─── Defaults are coerced too ──────────────────────────────────────────────
+;;
+;; `coerce-flag-value` only ever saw CLI argv. `registerFlag` stored `:default`
+;; RAW, and `getFlag` returns the default when there is no CLI override — so a
+;; default of the wrong type reached the consumer untouched.
+;;
+;; One flag is exposed: desktop_notify passes `:default (:enabled config)`
+;; straight from settings.json with no validation, so
+;; `{"desktop-notify": {"enabled": "false"}}` stored the STRING "false", which
+;; is truthy, and notifications stayed on. Every other default is a literal.
+;;
+;; Note this is NOT the CLI bug I first reported — `--ext-x=false` has worked
+;; since registerFlag began defaulting :type to "boolean" (865b95a).
+
+(describe "coerce-flag-default" (fn []
+
+  (it "turns a stringly-typed boolean from settings JSON into a boolean"
+      (fn []
+        (-> (expect (ext/coerce-flag-default "boolean" "false")) (.toBe false))
+        (-> (expect (ext/coerce-flag-default "boolean" "true"))  (.toBe true))))
+
+  (it "leaves a real boolean alone"
+      (fn []
+        (-> (expect (ext/coerce-flag-default "boolean" false)) (.toBe false))
+        (-> (expect (ext/coerce-flag-default "boolean" true))  (.toBe true))))
+
+  (it "keeps nil as nil — absent is not false"
+      (fn []
+        ;; small_model and openwiki deliberately register no default so that
+        ;; settings win; coercing nil to false would override them.
+        (-> (expect (ext/coerce-flag-default "boolean" nil)) (.toBeNil))
+        (-> (expect (ext/coerce-flag-default "string" nil))  (.toBeNil))))
+
+  (it "coerces number and string defaults"
+      (fn []
+        (-> (expect (ext/coerce-flag-default "number" "42")) (.toBe 42))
+        (-> (expect (ext/coerce-flag-default "number" 42))   (.toBe 42))
+        (-> (expect (ext/coerce-flag-default "string" 7))    (.toBe "7"))))
+
+  (it "coerce-flag-value still handles an absent type as boolean"
+      (fn []
+        ;; The case ext_flags never covered, and the reason the type-defaulting
+        ;; behaviour went untested: registerFlag substitutes "boolean" before
+        ;; calling this, so passing nil here documents the contract.
+        (-> (expect (ext/coerce-flag-value "boolean" "false")) (.toBe false))
+        (-> (expect (ext/coerce-flag-value "boolean" nil))     (.toBe true))))))

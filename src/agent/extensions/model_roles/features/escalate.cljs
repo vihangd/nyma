@@ -203,6 +203,35 @@
       t
       (plan-mode/role-model-spec (settings api) t))))
 
+(defn try-set-model!
+  "Apply `spec`; true on success, false on failure. `setModel` returns nil
+   always, so throwing is its only signal.
+
+   Five call sites wrapped it in `(try … (catch :default _e nil))` and then
+   asserted success anyway — notifying \"⚡ escalated to X\", writing
+   :escalated-to, incrementing :escalations, or (in revert!) clearing the state
+   while the config stayed on the expensive model for the rest of the session.
+   The realistic failure is a missing credential for the target provider, which
+   is exactly the case an escalation chain walks into.
+
+   `warn-quiet` rather than `warn`: this runs on `model_resolve`, which fires
+   mid-render, and d/warn mirrors to stderr — a stderr write during a render
+   desynchronises pi-tui's differential renderer.
+
+   Note what this CANNOT catch: an unknown provider does not throw. setModel
+   guards on the registry and silently assigns the raw spec string to
+   config.model. That is a separate defect.
+
+   Pure-ish and exposed for tests."
+  [api spec]
+  (try
+    (.setModel api spec)
+    true
+    (catch :default e
+      (d/warn-quiet "escalate" (str "setModel failed for " spec ": "
+                                    (or (.-message e) (str e))))
+      false)))
+
 (defn- swap-model!
   "Apply `spec` to the live request. All three steps matter: st-config carries
    the model object the retry actually sends, setModel keeps the status bar and
@@ -219,8 +248,9 @@
             (aset st-config "providerOptions" #js {})))
         (catch :default e
           (d/warn "escalate" (str "resolveModel failed for " spec ": " (.-message e))))))
-    (try (.setModel api spec) (catch :default _e nil))
-    true))
+    ;; Report the real outcome. This returned `true` unconditionally, and the
+    ;; caller notified "falling back to X" on the strength of it.
+    (try-set-model! api spec)))
 
 ;; ---------------------------------------------------------------------------
 ;; capability escalation
@@ -263,8 +293,8 @@
            :escalate-retries (inc (or (:escalate-retries @st) 0)))
     (notify api (str "↻ retrying from a clean context — " reason) "info")
     (d/info "escalate" (str "retry " (:escalate-retries @st)) #js {:reason reason})
-    (when (and request (.-sendUserMessage api))
-      (.sendUserMessage api request #js {:deliverAs "followUp"}))
+        (when (and request (.-sendUserMessage api))
+          (.sendUserMessage api request #js {:deliverAs "followUp"}))
     true))
 
 (defn apply-escalation!
@@ -280,17 +310,28 @@
           (prune-tail msgs (stall-note (current-spec api) reason))
           {:messages msgs :request nil})]
     (swap! st assoc
-           :messages       messages
-           :escalated-to   spec
-           :escalated-from (current-spec api)
-           :escalations    (inc (or (:escalations @st) 0)))
-    (try (.setModel api spec) (catch :default _e nil))
-    (notify api (str "⚡ escalated to " spec " — " reason
-                     ". /escalate off to go back.") "warning")
-    (d/info "escalate" (str "escalated to " spec) #js {:reason reason})
-    (when (and request (.-sendUserMessage api))
-      (.sendUserMessage api request #js {:deliverAs "followUp"}))
-    true))
+           :messages       messages)
+    ;; Switch FIRST, and only record the escalation if it took. This wrote
+    ;; :escalated-to and incremented :escalations before calling setModel, so a
+    ;; failure burned a slot against max-per-session, left the state claiming a
+    ;; model that was never applied, and re-delivered the request to the model
+    ;; that had just stalled — with the context already pruned.
+    (if-not (try-set-model! api spec)
+      (do (notify api (str "escalation to " spec " failed — staying on "
+                           (current-spec api)
+                           ". Check credentials for that provider.") "error")
+          nil)
+      (do
+        (swap! st assoc
+               :escalated-to   spec
+               :escalated-from (current-spec api)
+               :escalations    (inc (or (:escalations @st) 0)))
+        (notify api (str "⚡ escalated to " spec " — " reason
+                         ". /escalate off to go back.") "warning")
+        (d/info "escalate" (str "escalated to " spec) #js {:reason reason})
+        (when (and request (.-sendUserMessage api))
+          (.sendUserMessage api request #js {:deliverAs "followUp"}))
+        true))))
 
 (defn ^:async escalate!
   "One capability escalation, consent included. Every refusal path is silent
@@ -351,9 +392,18 @@
         back (or (:escalated-from @st)
                  (plan-mode/effective-model-spec api (or (:active-role @st) "default")))]
     (when (:escalated-to @st)
-      (swap! st dissoc :escalated-to :escalated-from)
-      (when back (try (.setModel api back) (catch :default _e nil)))
-      true)))
+      ;; Restore BEFORE clearing the state. Clearing first and swallowing the
+      ;; failure meant the state said "not escalated" while config.model stayed
+      ;; on the expensive model for the rest of the session — and on-resolve no
+      ;; longer re-applied anything, so nothing ever corrected it. That is the
+      ;; exact cost leak this function exists to prevent, so it must be loud.
+      (if (and back (not (try-set-model! api back)))
+        (do (notify api (str "could not switch back to " back
+                             " — still running " (current-spec api)
+                             ". /model " back " to fix.") "error")
+            false)
+        (do (swap! st dissoc :escalated-to :escalated-from)
+            true)))))
 
 ;; ---------------------------------------------------------------------------
 ;; handlers
@@ -365,7 +415,10 @@
    to config.model."
   [api _data]
   (when-let [spec (:escalated-to (cur-state api))]
-    (try (.setModel api spec) (catch :default _e nil)))
+    ;; Fires every turn. A silent failure here ran the whole session on the
+    ;; wrong model while :escalated-to insisted otherwise. try-set-model! warns
+    ;; quietly — this is mid-render, and stderr during a render desyncs pi-tui.
+    (try-set-model! api spec))
   nil)
 
 (defn on-provider-error

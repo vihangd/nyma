@@ -482,3 +482,43 @@
                                     {:fallback {:default ["build"] :plan ["advisor"]}}))]
                     (-> (expect (esc/chain-for cfg "plan")) (.toEqual #js ["advisor"]))
                     (-> (expect (esc/chain-for cfg "default")) (.toEqual #js ["build"])))))))
+
+;;; ─── A failed switch must not be reported as a success ─────────────────────
+;;
+;; `(try (.setModel api spec) (catch :default _e nil))` appeared at five sites,
+;; each followed by an assertion that it worked. setModel returns nil always, so
+;; throwing is its only signal — and the realistic throw is a missing credential
+;; for the target provider, exactly what an escalation chain walks into.
+;;
+;; The costs differed per site: apply-escalation! burned a slot against
+;; max-per-session and re-delivered the request to the model that had just
+;; stalled; revert! left config.model on the EXPENSIVE model for the rest of the
+;; session while the state said "not escalated", which is the leak the function
+;; exists to prevent.
+
+(defn- api-that [f]
+  (let [calls (atom [])]
+    {:calls calls
+     :api #js {:setModel (fn [spec] (swap! calls conj spec) (f spec))}}))
+
+(describe "escalate/try-set-model!" (fn []
+
+  (it "reports success when setModel returns"
+      (fn []
+        (let [{:keys [api calls]} (api-that (fn [_] nil))]
+          (-> (expect (esc/try-set-model! api "p/m")) (.toBe true))
+          (-> (expect (vec @calls)) (.toEqual #js ["p/m"])))))
+
+  (it "reports failure instead of swallowing"
+      (fn []
+        ;; The credential case: provider has no key, create-model throws.
+        (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "No credentials for provider 'x'"))))]
+          (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))
+
+  (it "does not throw out of the handler it runs in"
+      (fn []
+        ;; on-resolve calls this mid-turn; a throw there would take the turn
+        ;; down. It must convert the failure into a return value.
+        (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "boom"))))]
+          (-> (expect (fn? (fn [] (esc/try-set-model! api "x/m")))) (.toBe true))
+          (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))))

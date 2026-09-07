@@ -32,12 +32,29 @@
                 (when (.endsWith p ".cljs") [p]))))
           (fs/readdirSync dir)))
 
+(def ^:private lint-roots
+  "Scanned for hyphenated property reads. `src/agent` alone left src/gateway
+   (1,700+ LOC) and src/macros unscanned — the trap applies equally there."
+  ["src/agent" "src/gateway" "src/macros"])
+
 (describe "squint hyphenated .- access lint" (fn []
-                                               (it "src/agent has no hyphenated property reads outside the allowlist"
+
+                                               (it "actually finds files to scan"
+                                                   (fn []
+        ;; Guard the guard. This asserted `(str/join …)` is "" with no floor
+        ;; check, so a path that resolved to nothing would certify a clean repo
+        ;; forever — the same rot its sibling extension_capability_lint
+        ;; explicitly defends against.
+                                                     (doseq [root lint-roots]
+                                                       (-> (expect (> (count (cljs-files root)) 0)) (.toBe true)))
+                                                     (-> (expect (> (count (mapcat cljs-files lint-roots)) 100))
+                                                         (.toBe true))))
+
+                                               (it "src/ has no hyphenated property reads outside the allowlist"
                                                    (fn []
                                                      (let [rx    (js/RegExp. "\\(\\.-([a-z]+(?:-[a-z]+)+)[ )]" "g")
                                                            hits  (atom [])]
-                                                       (doseq [f (cljs-files "src/agent")]
+                                                       (doseq [f (mapcat cljs-files lint-roots)]
                                                          (let [content (fs/readFileSync f "utf8")]
                                                            (doseq [[i raw-line] (map-indexed vector (str/split content "\n"))]
                                                              ;; Scan the code BEFORE any comment — skipping whole lines that

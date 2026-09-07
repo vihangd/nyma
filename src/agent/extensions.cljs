@@ -34,6 +34,24 @@
            {}
            argv)))
 
+(defn coerce-flag-default
+  "Coerce a registered flag's `:default` to its declared type.
+
+   `coerce-flag-value` only ever saw CLI argv, where absence is `:absent` and a
+   bare flag is nil. A default arrives already-typed from a literal, or
+   wrongly-typed from settings JSON. nil means \"no default\" and must stay nil,
+   so this cannot reuse coerce-flag-value's nil-means-true boolean rule. Pure."
+  [type raw]
+  (cond
+    (nil? raw)         nil
+    (= type "boolean") (cond (boolean? raw) raw
+                             (= raw "false") false
+                             (= raw "true")  true
+                             :else           (boolean raw))
+    (= type "number")  (if (number? raw) raw (js/Number raw))
+    (= type "string")  (str raw)
+    :else              raw))
+
 (defn coerce-flag-value
   "Coerce a raw CLI string to the flag's declared type. `raw` is :absent when
    the flag was not passed (→ nil, so the default applies), or nil for the bare
@@ -437,7 +455,18 @@
                                (swap! (:flags agent) assoc name
                                       {:description (when config (.-description config))
                                        :type        type
-                                       :default     (when config (.-default config))
+                                       ;; Coerce the DEFAULT too, not just the
+                                       ;; CLI value. desktop_notify passes
+                                       ;; `:default (:enabled config)` straight
+                                       ;; from settings.json, so
+                                       ;; `{"enabled": "false"}` stored the
+                                       ;; STRING "false" — truthy — and kept the
+                                       ;; feature on. It is the only flag whose
+                                       ;; default comes from user JSON, and the
+                                       ;; only one that could carry a wrong type.
+                                       :default     (coerce-flag-default
+                                                     type
+                                                     (when config (.-default config)))
                                        :value       (coerce-flag-value
                                                      type
                                                      (get (parse-ext-flag-argv) (ext-flag-short-name name) :absent))})))

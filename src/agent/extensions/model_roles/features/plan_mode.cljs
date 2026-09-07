@@ -323,7 +323,15 @@ the user will approve the plan before execution begins.")
   (let [s (cur-state api)]
     (when (and (:plan-mode s) (not (:plan-planner-unusable s)))
       (when-let [spec (planner-spec (settings api))]
-        (try (.setModel api spec) (catch :default _e nil))))
+        ;; Was swallowed, and the comment below asserted "setModel just set" it.
+        ;; A silent failure degraded opusplan to the execution model with no
+        ;; message and no :plan-planner-unusable, so nothing recovered.
+        ;; warn-quiet: model_resolve fires mid-render.
+        (try (.setModel api spec)
+             (catch :default e
+               (d/warn-quiet "plan-mode"
+                             (str "planner setModel failed for " spec ": "
+                                  (or (.-message e) (str e))))))))
     ;; loop falls back to config.model (which setModel just set)
     nil))
 
