@@ -151,11 +151,11 @@ plain text; the executor will read it on its next turn.")
 
       :else
       (let [chosen (resolve-advisor-model settings)
-            ;; State atom holds :model directly (+ :runtime-model after a
-            ;; /model switch) — there is no :config key in state.
+            ;; State atom holds :model directly — there is no :config key in
+            ;; state. It used to read :runtime-model first "after a /model
+            ;; switch", but nothing ever wrote that key.
             current-model (when-let [a (aget api "__state_atom")]
-                            (try (or (:runtime-model @a) (:model @a))
-                                 (catch :default _ nil)))
+                            (try (:model @a) (catch :default _ nil)))
             ;; Try the role-resolved model first, but if its provider
             ;; lacks credentials (common: default `:advisor {:provider
             ;; "anthropic"}` for a `claude-native` OAuth-only user),

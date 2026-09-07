@@ -47,6 +47,19 @@
    "registerProvider" "providers" "unregisterProvider" "providers"
    "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"})
 
+(def ui-property-capability
+  "`api.ui` is NOT a gated method — extension_scope defines it as a getter that
+   returns `#js {:available false}` when :ui is absent, instead of the thrower
+   `gate` installs. So an extension without the capability gets a silent stub
+   and every notify/setWidget quietly does nothing.
+
+   Three shipped extensions were in exactly that state: token_suite's live token
+   widget could never render, workspace_config's entire /alias output was
+   swallowed, and claude_hook_bridge's detect-mode read `.-ui` and so reported
+   \"sdk\" in interactive sessions. The method-name lint could not see any of
+   it, because `ui` is a property."
+  "ui")
+
 (defn- cljs-files
   "Every .cljs under `dir`, recursively."
   [dir]
@@ -80,6 +93,14 @@
                                    (str/join "\n"))})))))
        vec))
 
+(defn missing-ui-capability
+  "Does `ext` touch `api.ui` without declaring the capability?"
+  [ext]
+  (when (and (not (contains? (:capabilities ext) ui-property-capability))
+             (or (.includes (:source ext) "(.-ui api)")
+                 (.includes (:source ext) "(.-ui api")))
+    {:method "api.ui" :capability ui-property-capability}))
+
 (defn missing-capabilities
   "Capabilities `ext` calls into but does not declare.
 
@@ -93,6 +114,7 @@
                           (or (.includes (:source ext) (str "(." method " api"))
                               (.includes (:source ext) (str "(.-" method " api)"))))
                  {:method method :capability capability})))
+       (concat (when-let [u (missing-ui-capability ext)] [u]))
        vec))
 
 (describe "extension manifests declare what the code calls" (fn []
@@ -140,4 +162,21 @@
                                                                     (-> (expect (count (missing-capabilities
                                                                                         {:capabilities #{"events"}
                                                                                          :source ";; we could call sendUserMessage here"})))
-                                                                        (.toBe 0))))))
+                                                                        (.toBe 0))))
+
+                                                              (it "detects an undeclared api.ui, which is a PROPERTY not a gated method"
+                                                                  (fn []
+        ;; Why three extensions shipped with silent UI: extension_scope hands
+        ;; out `#js {:available false}` rather than a thrower, so the feature
+        ;; simply stops working. A method-name table cannot see it.
+                                                                    (-> (expect (:capability (missing-ui-capability
+                                                                                              {:capabilities #{"commands"}
+                                                                                               :source "(when (.-ui api) (.notify (.-ui api) \"hi\"))"})))
+                                                                        (.toBe "ui"))
+                                                                    (-> (expect (missing-ui-capability
+                                                                                 {:capabilities #{"commands" "ui"}
+                                                                                  :source "(when (.-ui api) (.notify (.-ui api) \"hi\"))"}))
+                                                                        (.toBeNil))
+                                                                    (-> (expect (missing-ui-capability
+                                                                                 {:capabilities #{"commands"} :source ";; no ui here"}))
+                                                                        (.toBeNil))))))

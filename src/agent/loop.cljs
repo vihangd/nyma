@@ -176,11 +176,14 @@
             ;; Resolve model — model_resolve lets extensions (e.g. model roles) override
             resolve-result (js-await
                             (emit-collect "model_resolve"
-                                          #js {:default   (or (:runtime-model @state) (:model config))
+                                          ;; `:runtime-model` used to lead this `or`. Nothing in the
+                                          ;; repo ever wrote it — setModel writes config.model and the
+                                          ;; reducer stores :model — so it was a permanently-nil first
+                                          ;; branch in the most load-bearing resolution path here.
+                                          #js {:default   (:model config)
                                                :context   "generation"
                                                :turnCount (or (:turn-count @state) 0)}))
-            active-model (or (get resolve-result "model")
-                             (or (:runtime-model @state) (:model config)))
+            active-model (or (get resolve-result "model") (:model config))
             _ (when-not active-model
                 (throw (js/Error. "No model configured. Set ANTHROPIC_API_KEY or configure a provider via /login")))
 

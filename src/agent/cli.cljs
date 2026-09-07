@@ -513,13 +513,20 @@ Examples:
                            seeded)]
         (when (seq seeded)
           (swap! (:state agent) assoc :messages seeded)
-          ((:emit (:events agent)) "session_start"
-                                   {:reason (cond (:fork values)     "fork"
-                                                  (:continue values) "continue"
-                                                  (:resume values)   "resume"
-                                                  :else              "default")
-                                    :sessionFile ((:get-file-path session))
-                                    :messageCount (count seeded)}))))
+          ;; DEFERRED, not emitted here. Extensions load ~30 lines below and the
+          ;; bus has no replay (events.cljs) — an emit at this point reaches an
+          ;; empty handler list and is simply lost. That silently disabled the
+          ;; Claude-Code-compatible SessionStart hook
+          ;; (claude_hook_bridge/events/session.cljs) at launch, and mcp_client's
+          ;; bring-up, which is why it subscribes to two events hoping one lands.
+          (swap! (:state agent) assoc
+                 :pending-session-start
+                 {:reason (cond (:fork values)     "fork"
+                                (:continue values) "continue"
+                                (:resume values)   "resume"
+                                :else              "default")
+                  :sessionFile ((:get-file-path session))
+                  :messageCount (count seeded)}))))
     (attach-session-persistence! agent session)
 
     ;; Initial permission mode (modes-as-roles). Interactive defaults to
@@ -593,6 +600,12 @@ Examples:
 
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)
+
+      ;; NOW emit the deferred session_start — extensions are loaded and their
+      ;; handlers are registered, so subscribers actually exist.
+      (when-let [payload (:pending-session-start @(:state agent))]
+        (swap! (:state agent) dissoc :pending-session-start)
+        ((:emit (:events agent)) "session_start" payload))
 
       ;; Load user keybindings and rebuild the action-id registry
       (let [bindings (load-keybindings)]

@@ -139,7 +139,10 @@
             ;; assistantMessageEvent.delta. Re-sending the full accumulated
             ;; :message on every token is O(n^2) CPU + stdout. The full text
             ;; ships once at message_end. (:message is optional/guarded there.)
-            (let [d (or (.-textDelta chunk) "")]
+            ;; `.text` first: message_update carries the AI SDK v7 fullStream
+            ;; part. Reading only `.textDelta` — the OBJECT stream's field —
+            ;; made every delta shipped to the frontend an empty string.
+            (let [d (or (.-text chunk) (.-textDelta chunk) "")]
               (swap! acc str d)
               (write-event! {:type "message_update"
                              :assistantMessageEvent {:type "text_delta"

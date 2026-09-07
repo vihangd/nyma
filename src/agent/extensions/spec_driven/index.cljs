@@ -2017,7 +2017,7 @@
                              :iter    (fn [] @loop-iteration)}))
 
     (.registerCommand api "spec"
-                      #js {:description "Spec-driven development. Usage: /spec [list|new|import|scaffold|clarify|analyze|start|next|done|run|phase|profile|end]"
+                      #js {:description "Spec-driven development. Usage: /spec [list|new|import|scaffold|clarify|analyze|start|next|done|run|phase|profile|end|install-skill]"
                            :handler spec-cmd})
 
     ;; Cleanup

@@ -120,9 +120,9 @@
    not a crash. Exposed for tests."
   [agent]
   (let [config  (:config agent)
-        m       (some-> config .-model)
-        runtime (:runtime-model @(:state agent))
-        active  (or runtime m)]
+        ;; config.model is the whole story: setModel writes it, and the
+        ;; `:runtime-model` state key this also consulted has no writer anywhere.
+        active  (some-> config .-model)]
     (cond
       (nil? active)    "–"
       (string? active) active

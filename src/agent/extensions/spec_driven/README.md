@@ -351,7 +351,7 @@ without running an agent:
 - **The loop never arms itself.** `/spec run` is explicit, `settings#spec.loop.mode` defaults to `off`, and `/spec run off` existed before the loop did. An autonomous loop that starts on its own is how people wake up to a spent quota.
 - **Markdown is the completion signal.** Not the model's finish reason, which is exactly what premature termination corrupts. A tasks file with no checkboxes is `:no-tasks`, never `:complete` — a corrupted file must stop the loop, not look like a finished one.
 - **Fallback is always loud.** An unresolvable role reports `role "X" (phase "verify") is not defined — using default`. The advisor tool does the opposite (`advisor/index.cljs:164-168`) and you never learn your role did nothing.
-- **Reuses Claude-Code hook shape.** No custom hook event names — `spec_task_start`/`_complete` ride the same `claude_hook_bridge` channel that PreToolUse/PostToolUse use. Users get pre/post-task automation without nyma-specific config.
+- **Emitted on nyma's own event bus**, not through `claude_hook_bridge`. An earlier version of this line claimed they "ride the same channel that PreToolUse/PostToolUse use" — they do not: the bridge subscribes a fixed list (`before_tool_call`, `tool_complete`, `session_start`, `agent_end`, …) with no `spec_*` entry, and Claude Code has no hook name these would map to. `spec_phase_enter` and `spec_task_start` currently have **no consumer at all**. To act on them today, write an extension that calls `api.on "spec_task_start"`. Routing them through the bridge is tracked in `docs/roadmap.md`.
 
 ## Usage example
 

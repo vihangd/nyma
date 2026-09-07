@@ -1,5 +1,10 @@
 {
   "namespace": "claude-hook-bridge",
-  "capabilities": ["events", "state", "messages"],
+  "capabilities": [
+    "events",
+    "state",
+    "messages",
+    "ui"
+  ],
   "dependsOn": []
 }

@@ -1,5 +1,12 @@
 {
   "namespace": "token-suite",
-  "capabilities": ["events", "context", "tools", "middleware", "commands"],
+  "capabilities": [
+    "events",
+    "context",
+    "tools",
+    "middleware",
+    "commands",
+    "ui"
+  ],
   "dependsOn": []
 }

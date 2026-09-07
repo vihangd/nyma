@@ -186,8 +186,8 @@
 (defn- current-spec
   "The 'provider/model' the session is actually running right now."
   [api]
-  (let [s (cur-state api)]
-    (or (:runtime-model s) (:model s))))
+  ;; `:runtime-model` led this `or` and has no writer anywhere.
+  (:model (cur-state api)))
 
 (defn- split-spec [spec]
   (let [s (str spec)

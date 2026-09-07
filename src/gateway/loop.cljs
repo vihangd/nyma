@@ -85,7 +85,15 @@
                      (or streaming-policy :debounce))
         ;; ── Event handlers ──────────────────────────────────────────────
         on-update     (fn [chunk]
-                        (when-let [delta (.-textDelta chunk)]
+                        ;; `.text`, not `.textDelta`. message_update carries the
+                        ;; raw AI SDK v7 fullStream part, whose field is `text`;
+                        ;; `textDelta` belongs to the OBJECT stream and is always
+                        ;; undefined here. agent/loop.cljs documents this and the
+                        ;; interactive + session paths were fixed for it — the
+                        ;; gateway was not, so on-chunk never fired once and all
+                        ;; output arrived in the single on-end flush. Keep the
+                        ;; old field as a fallback for any older producer.
+                        (when-let [delta (or (.-text chunk) (.-textDelta chunk))]
                           (when (seq delta)
                             ((:on-chunk sp-handler) delta))))
         on-tool-start (fn [data]
@@ -98,8 +106,13 @@
                          {:name (.-toolName data) :id (.-execId data)
                           :error (.-isError data)}))
         on-agent-end  (fn [data]
-                        ;; Flush the streaming buffer, then signal done
-                        ((:on-end sp-handler) (.-text data))
+                        ;; Flush the streaming buffer, then signal done.
+                        ;; agent_end has two producers: the explicit emits, which
+                        ;; carry :text, and the stream-chunk mapping
+                        ;; "finish" -> "agent_end", which hands over the raw
+                        ;; finish part with no text at all. Coerce so the second
+                        ;; arm flushes "" rather than the string "undefined".
+                        ((:on-end sp-handler) (or (.-text data) ""))
                         ((:meta! response-ctx) :done {}))]
 
     (on-evt "message_update"       on-update)

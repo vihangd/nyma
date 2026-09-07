@@ -8,12 +8,16 @@
             [agent.extensions.handoff.shared :as shared]))
 
 (defn- current-model
-  "Active model from the agent STATE atom — :runtime-model when /model
-   switched it, else the startup :model. (There is no :config in state;
-   config lives on the agent map.)"
+  "Active model from the agent STATE atom. (There is no :config in state;
+   config lives on the agent map.)
+
+   This claimed to prefer :runtime-model \"when /model switched it\" — a key
+   with no writer anywhere in the repo. /model goes through setModel, which
+   updates config.model and dispatches :model-changed; the reducer stores it
+   as :model."
   [api]
   (when-let [a (aget api "__state_atom")]
-    (try (or (:runtime-model @a) (:model @a)) (catch :default _ nil))))
+    (try (:model @a) (catch :default _ nil))))
 
 (defn ^:async generate-brief!
   "Generate + write the brief. gen-fn injectable for tests."
