@@ -17,8 +17,13 @@
                     (-> (expect (some? entry)) (.toBe true))
                     (-> (expect (fn? (:create-model entry))) (.toBe true)))))
 
-            (it "registers the v4 + legacy models"
+            (it "registers exactly what GET /models returns"
                 (fn []
+                  ;; Verified against the live endpoint 2026-09-07: three ids,
+                  ;; and the legacy aliases are gone. Keeping deepseek-chat /
+                  ;; deepseek-reasoner offered the picker two ids that 404 —
+                  ;; they sunset 2026-07-24 and thinking is now a request
+                  ;; parameter, not a separate model.
                   (let [agent (create-agent {:model "test" :system-prompt "test"})
                         api   (create-extension-api agent)
                         _     ((.-default ds) api)
@@ -26,18 +31,19 @@
                         ids   (set (map :id (:models entry)))]
                     (-> (expect (contains? ids "deepseek-v4-pro"))   (.toBe true))
                     (-> (expect (contains? ids "deepseek-v4-flash")) (.toBe true))
-                    (-> (expect (contains? ids "deepseek-chat"))     (.toBe true))
-                    (-> (expect (contains? ids "deepseek-reasoner")) (.toBe true)))))
+                    (-> (expect (contains? ids "deepseek-v4-flash-vision-exp")) (.toBe true))
+                    (-> (expect (contains? ids "deepseek-chat"))     (.toBe false))
+                    (-> (expect (contains? ids "deepseek-reasoner")) (.toBe false)))))
 
-            (it "registers 131072-token context window on every model"
+            (it "registers the real 1M context window on every model"
                 (fn []
                   (let [agent (create-agent {:model "test" :system-prompt "test"})
                         api   (create-extension-api agent)
                         _     ((.-default ds) api)]
                     (doseq [id ["deepseek-v4-pro" "deepseek-v4-flash"
-                                "deepseek-chat"   "deepseek-reasoner"]]
+                                "deepseek-v4-flash-vision-exp"]]
                       (let [info ((:get (:model-registry agent)) id)]
-                        (-> (expect (:context-window info)) (.toBe 131072)))))))))
+                        (-> (expect (:context-window info)) (.toBe 1000000)))))))))
 
 (describe "custom-provider-deepseek — base URL"
           (fn []

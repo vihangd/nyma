@@ -27,17 +27,28 @@
 (def ^:private provider-name "deepseek")
 (def ^:private default-base-url "https://api.deepseek.com/v1")
 
-;; DeepSeek model catalog as of May 2026.
+;; DeepSeek model catalog, verified against GET /models 2026-09-07.
 ;; - deepseek-v4-pro   : flagship, ~671B MoE (~37B active), thinking-capable
 ;; - deepseek-v4-flash : faster/cheaper, also thinking-capable
-;; - Legacy aliases deepseek-chat / deepseek-reasoner sunset 2026-07-24,
-;;   currently routing to v4-flash non-thinking / thinking respectively.
-;;   Included so users mid-transition don't break, with a (legacy) tag.
+;; - deepseek-v4-flash-vision-exp : flash plus image input
+;;
+;; Context is 1M on all three (docs: "1M context / 384K max output"), not the
+;; 131072 this declared. That was not cosmetic: the window drives
+;; `compaction-point`, so nyma compacted at ~111k on a model that accepts 1M —
+;; roughly 8x too early, and premature compaction on a re-injection-heavy loop
+;; is exactly how context rot starts. The repo already assumed the truth
+;; elsewhere (compaction.test.cljs reasons about deepseek-v4-pro's 1,048,576
+;; window, from the openlux seed). 1000000 rather than 1048576 because the docs
+;; say "1M" and under-declaring a window is safe where over-declaring is not.
+;;
+;; Legacy aliases deepseek-chat / deepseek-reasoner sunset 2026-07-24 and are
+;; now GONE from GET /models — keeping them offered the picker two ids that
+;; 404. Thinking is a request parameter on the v4 models, not a separate id.
 (def ^:private models
-  [{:id "deepseek-v4-pro"   :name "DeepSeek V4 Pro"            :ctx 131072}
-   {:id "deepseek-v4-flash" :name "DeepSeek V4 Flash"          :ctx 131072}
-   {:id "deepseek-chat"     :name "DeepSeek Chat (legacy)"     :ctx 131072}
-   {:id "deepseek-reasoner" :name "DeepSeek Reasoner (legacy)" :ctx 131072}])
+  [{:id "deepseek-v4-pro"   :name "DeepSeek V4 Pro"            :ctx 1000000}
+   {:id "deepseek-v4-flash" :name "DeepSeek V4 Flash"          :ctx 1000000}
+   {:id "deepseek-v4-flash-vision-exp"
+    :name "DeepSeek V4 Flash Vision (exp)"                     :ctx 1000000}])
 
 (defn- ->js-model [{:keys [id name ctx]}]
   #js {:id            id
