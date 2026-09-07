@@ -133,6 +133,45 @@
                                                   :args {} :result "" :duration 1500 :id "1"}))]
                   (-> (expect (.includes text "1.5s")) (.toBe true)))))
 
+          ;;; ── a tool's own :display metadata ──────────────────────────
+          ;;
+          ;; middleware computes formatArgs/formatResult/icon and app_reducers
+          ;; copies them onto the message. Nothing read them here, so every
+          ;; extension tool fell through to the generic `k=v` branch — a
+          ;; questionnaire call rendered as
+          ;;   ✓ questionnaire__questionnaire questions=[object Object] · [object Object]
+          ;; with the declared ❓ icon nowhere in sight. Registry written,
+          ;; nobody reading it (roadmap 3a).
+
+          (it "prefers the tool's own one-line args over the generic preview"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "questionnaire__questionnaire"
+                                     :args {:questions [{:id "q1" :prompt "Q?"}]}
+                                     :custom-one-line-args "1 question"
+                                     :custom-one-line-result "1 answer"
+                                     :result "User answered 1 question:\n  q1: blue"
+                                     :id "1"}))]
+                  (-> (expect (.includes text "1 question")) (.toBe true))
+                  (-> (expect (.includes text "1 answer")) (.toBe true))
+                  ;; The failure this test exists for.
+                  (-> (expect (.includes text "[object Object]")) (.toBe false)))))
+
+          (it "prefers the tool's own icon"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "questionnaire"
+                                     :args {} :result "" :custom-icon "❓" :id "1"}))]
+                  (-> (expect (.includes text "❓")) (.toBe true))
+                  (-> (expect (.includes text "✓")) (.toBe false)))))
+
+          (it "falls back to the generic preview when a tool declares nothing"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "read"
+                                                  :args {:path "src/foo.cljs"}
+                                                  :result "a\nb" :id "1"}))]
+                  (-> (expect (.includes text "src/foo.cljs")) (.toBe true)))))
+
           (it "shows the read path on tool-end (args + result combined)"
               (fn []
                 (let [text (visible-text (render {:role "tool-end" :tool-name "read"

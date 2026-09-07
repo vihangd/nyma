@@ -413,9 +413,13 @@
                   (fn [data] (reset! captured data)))
     (let [t (mock-tool-with-display
              (fn [_] "ok")
-             {:formatArgs (fn [args] (str "custom:" (.-url args)))})]
+             ;; (tool-name, args) — the arity every real formatter in
+             ;; src/agent/extensions is written with. This test used to take
+             ;; one argument, which meant it agreed with nobody and all 13
+             ;; shipped formatters were dead behind a green suite.
+             {:formatArgs (fn [name args] (str name ":" (.-url args)))})]
       (js-await ((:execute pipeline) "scraper" t {:url "https://example.com"})))
-    (-> (expect (get @captured :customOneLineArgs)) (.toBe "custom:https://example.com"))))
+    (-> (expect (get @captured :customOneLineArgs)) (.toBe "scraper:https://example.com"))))
 
 (defn ^:async test-display-formatResult-propagated []
   (let [events   (create-event-bus)
@@ -456,7 +460,7 @@
                   (fn [data] (reset! captured data)))
     (let [t (mock-tool-with-display
              (fn [_] "ok")
-             {:formatArgs (fn [_] (throw (js/Error. "boom")))})]
+             {:formatArgs (fn [_n _a] (throw (js/Error. "boom")))})]
       (js-await ((:execute pipeline) "scraper" t {:url "x"})))
     ;; Should not have custom args (formatter threw), but should not crash
     (-> (expect (get @captured :customOneLineArgs)) (.toBeUndefined))))

@@ -82,6 +82,11 @@
                             :max-lines max-lines}
                      start-id                           (assoc :id start-id)
                      start-args                         (assoc :args start-args)
+                     ;; The end payload has no customOneLineArgs — only the
+                     ;; start event carries it — so without this the finished
+                     ;; line drops back to the generic arg preview.
+                     (and start-msg (:custom-one-line-args start-msg))
+                     (assoc :custom-one-line-args (:custom-one-line-args start-msg))
                      (get data :customOneLineResult) (assoc :custom-one-line-result (get data :customOneLineResult))
                      (get data :customIcon)            (assoc :custom-icon (get data :customIcon)))]
     (if (some? idx)

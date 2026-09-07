@@ -4,7 +4,8 @@
             [agent.extension-context :refer [create-extension-context]]
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
-            [agent.utils.ui :refer [ui-prompt-ready?]]))
+            [agent.utils.ui :refer [ui-prompt-ready?]]
+            [agent.debug :as d]))
 
 (defn normalize-tool-result
   "Normalize tool results to a STRING (transcript/UI value). Supports plain
@@ -12,20 +13,43 @@
    Multimodal tools return {content:[file/image parts], summary}: `:summary`
    wins so the string is short and non-text parts never stringify to
    `[object Object]` or a giant base64 blob (the image reaches the model via
-   the tool's toModelOutput, not this string)."
-  [result]
-  (cond
-    (string? result) result
-    (and (some? result) (not (string? result)) (.-summary result))
-    (str (.-summary result))
-    (and (some? result) (not (string? result)) (.-content result))
-    (let [parts (.-content result)]
-      (.join
-       (.map parts
-             (fn [item]
-               (if (= (.-type item) "text") (.-text item) (str (.-type item) " content"))))
-       "\n"))
-    :else (str result)))
+   the tool's toModelOutput, not this string).
+
+   A tool that returns an object matching NONE of those shapes used to fall to
+   `(str result)`, which is `\"[object Object]\"` — and that string is what
+   entered the context window. questionnaire returned `{answers, text}` and so
+   the model could not read an answer the user had just spent 74 seconds
+   giving; nothing failed, nothing warned. Unknown objects are now serialised
+   and the tool is named in a warning, because the alternative is silence.
+
+   `tool-name` is optional so the four existing 1-arity callers keep working."
+  ([result] (normalize-tool-result result nil))
+  ([result tool-name]
+   (cond
+     (string? result) result
+     (and (some? result) (not (string? result)) (.-summary result))
+     (str (.-summary result))
+     (and (some? result) (not (string? result)) (.-content result))
+     (let [parts (.-content result)]
+       (.join
+        (.map parts
+              (fn [item]
+                (if (= (.-type item) "text") (.-text item) (str (.-type item) " content"))))
+        "\n"))
+     ;; An Error stringifies to "Error: msg"; JSON.stringify gives "{}".
+     (instance? js/Error result) (str result)
+
+     (and (some? result) (object? result))
+     (let [json (try (js/JSON.stringify result)
+                     ;; Cyclic or otherwise unserialisable — nothing better to
+                     ;; offer than the old behaviour, but say so.
+                     (catch :default _ nil))]
+       (d/warn "tool-result"
+               (str (or tool-name "a tool") " returned an object with no"
+                    " `content`, `summary` or string result — serialising it."
+                    " Return a string or {content:[{type:\"text\",text}]}."))
+       (or json (str result)))
+     :else (str result))))
 
 (defn ^:async execute-tool-fn
   "Terminal interceptor enter — actually calls tool.execute.
@@ -74,7 +98,7 @@
                                  (string? m) m
                                  :else       (or (.-modelId m) "unknown")))))
           raw-result (js-await ((.-execute (:tool ctx)) (:args ctx) ext-ctx))
-          result     (normalize-tool-result raw-result)
+          result     (normalize-tool-result raw-result (:tool-name ctx))
           ;; Preserve structured metadata for downstream consumers
           details    (when (and (some? raw-result) (not (string? raw-result))
                                 (.-details raw-result))
@@ -166,12 +190,26 @@
   (when f
     (try (f arg) (catch :default _ nil))))
 
+(defn- safe-call2
+  "Two-arg `safe-call`. Same swallow-and-return-nil contract."
+  [f a b]
+  (when f
+    (try (f a b) (catch :default _ nil))))
+
 (defn- extract-display-fields
-  "Read .display from tool object, invoke formatters on data, return custom fields map."
-  [tool data-for-formatters]
+  "Read .display from tool object, invoke formatters on data, return custom fields map.
+
+   formatArgs and statusText are called as (tool-name, args). Every one of the
+   13 formatters in the repo is written `(fn [_name args] …)` — this called them
+   with the args alone, so `args` was undefined inside, the first property
+   access threw, `safe-call` swallowed it, and the field was dropped. All 13
+   were dead; the only 1-arity formatter that existed was in the test that
+   claimed to cover this. formatResult keeps its single string argument, which
+   is what its users already expect."
+  [tool tool-name data-for-formatters]
   (when-let [display (and tool (.-display tool))]
-    (let [custom-args   (safe-call (.-formatArgs display) (clj->js data-for-formatters))
-          status-text   (safe-call (.-statusText display) (clj->js data-for-formatters))
+    (let [custom-args   (safe-call2 (.-formatArgs display) tool-name (clj->js data-for-formatters))
+          status-text   (safe-call2 (.-statusText display) tool-name (clj->js data-for-formatters))
           icon          (.-icon display)
           verbosity     (.-verbosity display)]
       (cond-> {}
@@ -262,7 +300,7 @@
    :enter (fn [ctx]
             (let [exec-id    (str (js/Date.now) "-" (.toString (js/Math.random) 36))
                   start-time (js/Date.now)
-                  display-fields (extract-display-fields (:tool ctx) (:args ctx))]
+                  display-fields (extract-display-fields (:tool ctx) (:tool-name ctx) (:args ctx))]
               (when events
                 ;; merge of squint maps is already a plain JS object with
                 ;; camelCase keys — no clj->js. NOTE: :args ALIASES the live

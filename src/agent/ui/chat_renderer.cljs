@@ -195,10 +195,18 @@
             args     (:args msg)
             dur      (:duration msg)
             is-end   (= role "tool-end")
-            icon     (if is-end "✓" "⚙")
-            arg-str  (format-one-line-args tname args)
+            ;; A tool's own :display metadata wins over the generic formatter.
+            ;; middleware computes these (formatArgs/formatResult/icon) and
+            ;; app_reducers copies them onto the message — and nothing read
+            ;; them here, so every extension tool rendered through the generic
+            ;; `k=v` branch below. That is what printed
+            ;; `questions=[object Object]` for a questionnaire call.
+            icon     (or (:custom-icon msg) (if is-end "✓" "⚙"))
+            arg-str  (or (:custom-one-line-args msg)
+                         (format-one-line-args tname args))
             res-str  (when is-end
-                       (format-one-line-result-for-tool tname (:result msg) args))
+                       (or (:custom-one-line-result msg)
+                           (format-one-line-result-for-tool tname (:result msg) args)))
             line     (str mc icon " " (or tname "?")
                           (when (seq arg-str) (str " " arg-str))
                           ;; Result + duration appear in dim with a · separator so the

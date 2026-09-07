@@ -3,6 +3,7 @@
    Covers schema validation, happy-path flows, cancellation/abort,
    isSecret handling, and extension lifecycle."
   (:require ["bun:test" :refer [describe it expect]]
+            [agent.middleware :as mw]
             [agent.extensions.questionnaire.index :as q-ext]))
 
 ;;; ─── helpers ─────────────────────────────────────────────────
@@ -192,8 +193,8 @@
                     (activate api)
                     (-> (execute api #js {:questions #js [#js {:id "q1" :prompt "Q?"}]})
                         (.then (fn [r]
-                                 (-> (expect (.includes (.-text r) "User answered:")) (.toBe true))
-                                 (-> (expect (.includes (.-text r) "q1=")) (.toBe true))))))))
+                                 (-> (expect (.includes (.-text r) "User answered 1 question:")) (.toBe true))
+                                 (-> (expect (.includes (.-text r) "q1: custom text")) (.toBe true))))))))
 
             (it "type-own sentinel → falls back to text input with wasCustom true"
                 (fn []
@@ -306,3 +307,85 @@
                     (activate api)
                     (-> (expect (execute api #js {:questions #js [#js {:id "q1" :prompt "Q?"}]}))
                         (.rejects.toThrow "UI not available")))))))
+
+;;; ─── what the MODEL receives ─────────────────────────────────
+;;
+;; Every test above asserts on the object `questionnaire-execute` returns. The
+;; model never sees that object: middleware/normalize-tool-result turns it into
+;; a string first. This tool returned `{answers, text}`, which matches none of
+;; that function's shapes, so it fell to `(str result)` and the model's copy of
+;; a 74-second questionnaire was the literal string "[object Object]".
+;;
+;; Both halves were tested and green. The join was not tested at all, so these
+;; run the real normalizer over the real result.
+
+(describe "questionnaire:model-visible result"
+          (fn []
+
+            (it "is not [object Object]"
+                (fn []
+                  (let [api (make-mock-api {:input-answers ["custom text"]})]
+                    (activate api)
+                    (-> (execute api #js {:questions #js [#js {:id "q1" :prompt "Q?"}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (.includes s "[object Object]")) (.toBe false)))))))))
+
+            (it "carries the answer the user typed"
+                (fn []
+                  (let [api (make-mock-api {:input-answers ["blue"]})]
+                    (activate api)
+                    (-> (execute api #js {:questions #js [#js {:id "colour" :prompt "Colour?"}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (.includes s "colour: blue")) (.toBe true))
+                                   (-> (expect (.includes s "User answered 1 question:")) (.toBe true)))))))))
+
+            (it "carries every answer of a multi-question run"
+                (fn []
+                  (let [api (make-mock-api {:input-answers ["blue" "large"]})]
+                    (activate api)
+                    (-> (execute api #js {:questions #js [#js {:id "colour" :prompt "Colour?"}
+                                                         #js {:id "size"   :prompt "Size?"}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (.includes s "colour: blue")) (.toBe true))
+                                   (-> (expect (.includes s "size: large")) (.toBe true))
+                                   (-> (expect (.includes s "User answered 2 questions:")) (.toBe true)))))))))
+
+            (it "masks a secret answer in the model-visible string"
+                (fn []
+                  (let [api (make-mock-api {:input-answers ["hunter2"]})]
+                    (activate api)
+                    (-> (execute api #js {:questions #js [#js {:id "pw" :prompt "Password?"
+                                                              :isSecret true}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (.includes s "hunter2")) (.toBe false))
+                                   (-> (expect (.includes s "[secret]")) (.toBe true)))))))))
+
+            (it "says so when the user cancelled"
+                (fn []
+                  (let [api (make-mock-api {:input-answers [nil]})]
+                    (activate api)
+                    (-> (execute api #js {:questions #js [#js {:id "q1" :prompt "Q?"}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (.includes s "[object Object]")) (.toBe false))
+                                   (-> (expect (.includes s "cancelled")) (.toBe true)))))))))
+
+            (it "formatResult reads the string middleware actually hands it"
+                (fn []
+        ;; Not the object — middleware passes the policy-processed, truncated
+        ;; RESULT STRING. Reading .answers off it threw, safe-call swallowed
+        ;; the throw, and the transcript fell back to the raw value.
+                  (let [api  (make-mock-api {:input-answers ["blue" "large"]})
+                        _    (activate api)
+                        tool (get-tool api)
+                        fmt  (.-formatResult (.-display tool))]
+                    (-> (execute api #js {:questions #js [#js {:id "colour" :prompt "Colour?"}
+                                                          #js {:id "size"   :prompt "Size?"}]})
+                        (.then (fn [r]
+                                 (let [s (mw/normalize-tool-result r "questionnaire")]
+                                   (-> (expect (fmt s)) (.toBe "2 answers"))
+                                   (-> (expect (fmt "User cancelled the questionnaire.")) (.toBe "cancelled")))))))))))

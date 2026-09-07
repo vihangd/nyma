@@ -94,6 +94,34 @@
         (when (some? typed)
           {:value typed :wasCustom false})))))
 
+;;; ─── result shape ────────────────────────────────────────────
+;;
+;; The tool contract is string-first: middleware/normalize-tool-result reads a
+;; string, a `.summary`, or `.content[]` — and NOTHING else. This tool returned
+;; a bare `{answers, text}`, so the model's copy of a 74-second questionnaire
+;; was the string "[object Object]". `text` below is now the model's only view
+;; of the answers, so it carries them in full.
+
+(defn answered-headline
+  "First line of the answered result. Stable and countable: formatResult sees
+   this string AFTER the result policy and a 500-char truncation, so anything
+   it counts has to live on line one."
+  [n]
+  (str "User answered " n " question" (when (not= n 1) "s") ":"))
+
+(def cancelled-headline "User cancelled the questionnaire.")
+
+(defn result-envelope
+  "The pi-compatible shape normalize-tool-result understands. `answers` stays
+   reachable on `.details` for structured consumers (and for the tests, which
+   assert on the answers themselves)."
+  [text answers]
+  #js {:content #js [#js {:type "text" :text text}]
+       :details #js {:answers (clj->js answers)}
+       ;; Kept for callers that already read these directly.
+       :text    text
+       :answers (clj->js answers)})
+
 ;;; ─── main execute function ───────────────────────────────────
 
 (defn ^:async questionnaire-execute [api args ctx]
@@ -118,12 +146,11 @@
           ;; ── all answered ──────────────────────────────────
           (let [text (->> answers
                           (map (fn [a]
-                                 (str (:id a) "="
+                                 (str "  " (:id a) ": "
                                       (if (:isSecret a) "[secret]" (:value a)))))
-                          (str/join ", ")
-                          (str "User answered: "))]
-            #js {:answers  (clj->js (mapv #(dissoc % :isSecret) answers))
-                 :text     text})
+                          (str/join "\n")
+                          (str (answered-headline (count answers)) "\n"))]
+            (result-envelope text (mapv #(dissoc % :isSecret) answers)))
 
           ;; ── next question ─────────────────────────────────
           (let [q (first remaining)]
@@ -133,9 +160,10 @@
             (let [answer (js-await (ask-one api q signal))]
               (if (nil? answer)
                 ;; cancelled
-                #js {:cancelled true
-                     :answers   (clj->js answers)
-                     :text      "User cancelled questionnaire"}
+                (let [env (result-envelope cancelled-headline
+                                           (mapv #(dissoc % :isSecret) answers))]
+                  (aset env "cancelled" true)
+                  env)
                 (recur (rest remaining)
                        (conj answers
                              (assoc answer
@@ -186,11 +214,21 @@ or be an open-ended text question."
                                            (if (and qs (pos? (.-length qs)))
                                              (str (.-length qs) " question" (when (> (.-length qs) 1) "s"))
                                              "questions")))
+                           ;; A STRING, not the object: middleware hands
+                           ;; formatResult the policy-processed, 500-char
+                           ;; truncated result. Reading `.answers` off it
+                           ;; yielded undefined and threw, and safe-call
+                           ;; swallowed that — which is why the line read
+                           ;; "[object Object]" instead of "2 answers".
                            :formatResult (fn [result]
-                                           (if (.-cancelled result)
-                                             "cancelled"
-                                             (str (.-length (.-answers result)) " answer"
-                                                  (when (> (.-length (.-answers result)) 1) "s"))))}
+                                           (let [s (str result)]
+                                             (if (.startsWith s cancelled-headline)
+                                               "cancelled"
+                                               (let [m (.match s (js/RegExp. "User answered (\\d+) question"))]
+                                                 (if m
+                                                   (str (aget m 1) " answer"
+                                                        (when (not= "1" (aget m 1)) "s"))
+                                                   "answered")))))}
                       :execute (fn [args ctx] (questionnaire-execute api args ctx))})
 
   ;; Return cleanup function

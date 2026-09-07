@@ -54,7 +54,36 @@
 
   (it "stringifies non-string non-content results"
     (fn []
-      (-> (expect (normalize-tool-result 42)) (.toBe "42"))))))
+      (-> (expect (normalize-tool-result 42)) (.toBe "42"))))
+
+  ;; An object matching none of the known shapes used to become the literal
+  ;; string "[object Object]" — and that string is what entered the context
+  ;; window. questionnaire returned {answers, text}, so the model could not read
+  ;; an answer the user had just spent 74 seconds giving, and nothing failed.
+  (it "serialises an object it does not recognise, rather than [object Object]"
+    (fn []
+      (let [s (normalize-tool-result #js {:answers #js [] :text "User answered 1 question:"}
+                                     "questionnaire")]
+        (-> (expect (.includes s "[object Object]")) (.toBe false))
+        (-> (expect (.includes s "User answered 1 question:")) (.toBe true)))))
+
+  (it "keeps an Error readable"
+    (fn []
+      ;; JSON.stringify of an Error is "{}" — worse than the old behaviour.
+      (-> (expect (normalize-tool-result (js/Error. "boom") "thrower"))
+          (.toBe "Error: boom"))))
+
+  (it "survives an object that cannot be serialised"
+    (fn []
+      (let [o #js {:name "cyclic"}]
+        (aset o "self" o)
+        ;; No throw, and the caller still gets a string.
+        (-> (expect (string? (normalize-tool-result o "loopy"))) (.toBe true)))))
+
+  (it "keeps working when called with one argument"
+    (fn []
+      ;; Four callers in this file predate the tool-name argument.
+      (-> (expect (normalize-tool-result "hello")) (.toBe "hello"))))))
 
 ;;; ─── tool_call event blocking ───────────────────────────
 
