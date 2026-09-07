@@ -103,9 +103,11 @@
                                                  (.then (fn [out]
                                                           (-> (expect out) (.toBe "mock_tool|foo")))))))
 
-                                       (it "a real extension formatter produces a string through the pipeline"
+                                       (it "an (_name, args) formatter of the shape extensions use produces a string"
                                            (fn []
-        ;; ast_tools' actual formatter shape, verbatim.
+        ;; ast_tools' shape, hand-copied — this proves the CALLING CONVENTION,
+        ;; not ast_tools itself. What holds the real formatters to it is
+        ;; `formatter-sites` above, which reads them out of the source.
                                              (-> (run-formatter #js {:formatArgs (fn [_name args]
                                                                                    (str (.-pattern args) " in "
                                                                                         (or (.-path args) ".")))})

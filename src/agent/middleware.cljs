@@ -39,6 +39,9 @@
      ;; An Error stringifies to "Error: msg"; JSON.stringify gives "{}".
      (instance? js/Error result) (str result)
 
+     ;; squint's `object?` is `constructor === Object` — PLAIN objects only.
+     ;; A Map or a Set (both of which JSON.stringify to "{}") and any class
+     ;; instance fall through to `(str result)`, which is what they want.
      (and (some? result) (object? result))
      (let [json (try (js/JSON.stringify result)
                      ;; Cyclic or otherwise unserialisable — nothing better to
