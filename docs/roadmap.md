@@ -29,7 +29,19 @@ build on pi-tui's own `matchesKey`.
 - **Rough plan:** add `:aliases`, `:hidden?`, `:enabled?` to individual entries in `(register-builtins …)` — nothing else changes.
 - **Files to touch:** `src/agent/commands/builtins.cljs` only.
 
-### 1c. Debug logger adoption across the codebase
+### 1c. Debug logger adoption across the codebase — CLOSED (2026-09-07)
+
+Rescoped and closed. The raw count looked alarming (90 `console.*` against 12
+`dbg/*`) but is legitimate: `rpc`/`pi_rpc` use `console.error` on stderr and say
+so in their docstrings, `src/gateway` is a server, and the only TUI-path calls
+are `ui/crash_recovery.cljs:110-111`, printing a stack after teardown. The rule
+worth keeping is narrower than "adopt dbg everywhere": **prefer `d/warn-quiet`
+for anything that runs while the TUI owns the screen**, because stderr during a
+render desynchronises pi-tui's differential renderer.
+
+Original entry, for context:
+
+#### 1c (as written)
 
 - **What's ready:** `src/agent/utils/debug.cljs` with env-gated `d/debug`/`d/info` (off by default unless `NYMA_DEBUG=1` or `DEBUG` contains `nyma`) and always-on `d/warn`/`d/error`. `configure-logger!` lets tests capture output without touching globals. Full coverage in `test/utils_debug.test.cljs` (15 tests).
 - **What's wired:** exactly one production caller — `settings/manager/load-json` emits `d/warn` on duplicate JSON keys. Everywhere else still uses raw `js/console.log` / `js/console.warn`.
@@ -45,7 +57,16 @@ build on pi-tui's own `matchesKey`.
   - `src/agent/commands/share.cljs:118`
   - likely others under `extensions/`
 
-### 1d. Per-tool safety metadata → permission flow
+### 1d. Per-tool safety metadata → permission flow — CLOSED (2026-09-07)
+
+Wired. `tool_result_policy.cljs` resolves `default-policy → builtin-policies →
+tool-metadata :result-policy → ext-policies`; `middleware.cljs:290` maps
+`file-editing?` to the `"write"` category; `core.cljs` consumes it at
+registration.
+
+Original entry, for context:
+
+#### 1d (as written)
 
 - **What's ready:** `src/agent/tool_metadata.cljs` with `:read-only?` / `:destructive?` / `:requires-confirmation?` / `:network?` / `:long-running?` / `:category` metadata for every built-in tool, plus `register-metadata!` so extensions can declare safety for their own tools. Full coverage in `test/tool_metadata.test.cljs` (18 tests).
 - **What's wired:** nothing consumes it yet. The registry is populated and query-able; no code branches on it.
@@ -179,6 +200,15 @@ For the record, these cc-kit findings **have** been borrowed in phases 8–15 an
 
 ## 3. Bug classes to watch
 
+**Closed classes are kept, marked CLOSED with the evidence** — a class that
+looks solved is worth recognising if it comes back, and 3b came back wearing a
+different hat (3k).
+
+New since 2026-09-05: 3g–3k. Every one of them shipped past a green suite,
+because each lived in a **seam** between two components that were each tested in
+isolation. The lints added for them all carry a floor check and a detector
+self-test, and read their rules from production rather than copying them.
+
 Patterns we've hit repeatedly this session. If any of these shapes shows up again, the fix is usually well-understood.
 
 ### 3a. "Registry written but nobody reads it"
@@ -187,7 +217,20 @@ A feature that declares a registry-backed API but has nothing consuming the regi
 
 **Test smell:** unit test registers an item and checks the atom; no test asserts the item appears in a rendered frame. Every future registry-backed API should have a matching end-to-end test in `test/extension_registration_e2e.test.cljs` or similar.
 
-### 3b. "Scoped API forgot to forward a method"
+### 3b. "Scoped API forgot to forward a method" — CLOSED (2026-09-07)
+
+Verified closed: 65 methods forwarded against 60 on the base API, and the
+apparent gaps are nested config keys (`tokenEstimate` and friends) that no
+extension calls. `test/scoped_api_parity.test.cljs` holds the line.
+
+**But the class moved rather than died** — see 3k. `api.ui` is not a `gate`d
+method; it is an `Object.defineProperty` getter returning
+`#js {:available false}` when the capability is absent, so three extensions lost
+their UI silently. Parity checks on the method list could not see it.
+
+Original entry, for context:
+
+#### 3b (as written)
 
 `extension_scope.cljs/create-scoped-api` manually re-exports each method from `base-api`. Forgetting a forward produces a silent `undefined` — an extension calls it, nothing happens, no error. We hit this with `registerStatusSegment`, `registerToolRenderer`, and `registerCompletionProvider` in the ACP debug session.
 
@@ -232,6 +275,83 @@ The most productive bug class of 2026-08 — five distinct instances, every one 
 **Known callsites worth auditing:** `keybindings.cljs` (user keybindings file), `.nymaignore` if it's JSON, extension configs loaded from `~/.nyma/`. Not urgent unless a user reports a silently-dropped setting.
 
 ---
+
+
+### 3g. "Read with no writer"
+
+**2026-09-07.** `:runtime-model` was read in eight places — including
+`loop.cljs`'s model-resolution fallback and the status line — and written
+nowhere. `setModel` writes `config.model`; the reducer stores `:model`. Every
+read was `(or (:runtime-model …) (:model …))`, so it degraded to silence rather
+than failing, and two comments documented the mechanism as if it existed.
+
+Auditing for the shape found two that were **not** harmless: `gateway/loop.cljs`
+and `pi_rpc.cljs` both read `.-textDelta` off `message_update`, which carries the
+AI SDK v7 fullStream part (field `text`). The gateway's entire streaming path had
+never fired; every pi-rpc `text_delta` was `""`.
+
+**Mitigation:** `test/stream_delta_field.test.cljs` for that field. A general
+state-key lint (reads without writers) is still owed.
+
+### 3h. "Guard makes config inert"
+
+**2026-09-07.** `model_roles/on-resolve` guards `(not= role "default")`, so a
+`default` entry in `settings.roles` can never take effect — verified against the
+compiled module: zero `setModel` calls. The setting is accepted, documented by
+implication, and silently ignored.
+
+Related and larger: **six settings keys were parsed and read by nothing**
+(`steering-mode`, `follow-up-mode`, `tool-display`, `tool-display-max-lines`,
+`scrollback-mode`, `status-line`). Two were never built; four were live before
+`acee030` and deleted with the Ink UI, leaving the key, the README entry, and —
+for scrollback — a doc comment naming two files that no longer exist.
+
+**Mitigation:** `settings/manager.cljs` now owns `inert-keys`, warns at startup
+(pre-TUI, where stderr is safe), and `test/settings_reader_lint.test.cljs` READS
+that map rather than mirroring it. Every key must have a reader or a written
+reason; the allowlist fails if an entry revives or disappears.
+
+### 3i. "Command advertises a command that does nothing"
+
+**2026-09-06.** `/spec start` printed "Use /spec next to advance". `/spec next`
+found the task, emitted its hook, printed it — and dispatched nothing. Both
+commands had passing tests. Separately `/spec` advertised 13 of its 14
+subcommands, leaving `install-skill` undiscoverable.
+
+**Mitigation:** `test/command_surface_lint.test.cljs` diffs the advertised
+subcommand list against the dispatcher's `case` arms, both directions. It
+catches *absence*; the **does-nothing** half needs an integration test per
+command that claims to cause work.
+
+### 3j. "Seed list drifts from the live catalogue"
+
+**2026-09-07.** `opencode-zen` seeds four model ids the provider no longer
+serves and hides thirteen it does. `deepseek` declared a 131k context for a 1M
+model, which drove compaction ~8x too early — the window feeds
+`compaction-point`, so this was behavioural, not cosmetic. `openlux` seeds
+`glm-4.7`, absent from its 110-model catalogue.
+
+**Mitigation:** cannot run in CI (needs credentials). A manual
+`bin/check-seeds.mjs` diffing seeds against each provider's `/models` is owed.
+Until then: verify against the live endpoint before trusting a seed list.
+
+### 3k. "Documented channel that was never wired"
+
+**2026-09-07.** `spec_driven`'s README claimed `spec_task_start`/`_complete`
+"ride the same `claude_hook_bridge` channel that PreToolUse/PostToolUse use".
+The bridge subscribes a fixed list with no `spec_*` entry, and Claude Code has no
+hook name they could map to. `spec_phase_enter` and `spec_task_start` are the
+sole occurrences of those names in the repo — emitted into the void.
+
+Same shape: `api.ui` is a getter returning `#js {:available false}` when the
+capability is absent, not the thrower `gate` installs — so `token_suite`'s token
+widget, `workspace_config`'s entire `/alias` output and `claude_hook_bridge`'s
+mode detection had all silently stopped working.
+
+**Mitigation:** the capability lint now covers the `ui` *property*, not just
+gated methods. For events, prefer a subscriber in-tree or say plainly in the
+docs that the event has no consumer.
+
 
 ## 3.5 Deferred, with a known reason (2026-08)
 

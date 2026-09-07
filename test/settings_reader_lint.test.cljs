@@ -18,21 +18,18 @@
   (:require ["bun:test" :refer [describe it expect]]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [agent.settings.manager :as sm]))
 
 (def ^:private manager-path
   (path/resolve (js/process.cwd) "src" "agent" "settings" "manager.cljs"))
 
-(def known-unread
-  "Keys with no reader, and why. Each entry is a promise to the user that the
-   setting does nothing — which is only acceptable while it is written down."
-  {"steering-mode"          "never built; inject-steer-messages! drains the whole queue"
-   "follow-up-mode"         "never built; the drain is already one-at-a-time"
-   "tool-display"           "removed with the Ink UI (acee030); chat_renderer is one-line only"
-   "tool-display-max-lines" "removed with the Ink UI (acee030); only applied in the expanded branch"
-   "scrollback-mode"        "removed with the Ink UI (acee030); scrollback.cljs and chat_pager.cljs are gone"
-   
-   "status-line"            "removed with the Ink UI (acee030); no preset layer remains"})
+;; READ FROM PRODUCTION, not mirrored. settings/manager.cljs owns the list, so
+;; the startup warning and this lint cannot disagree — a lint that keeps its own
+;; copy of the thing it guards is how the two capability lints drifted.
+;; (A docstring here compiled to the VALUE under squint, silently making this
+;; def a string and swallowing the rest of the file.)
+(def known-unread sm/inert-keys)
 
 (defn default-keys
   "Top-level keys of the settings defaults map."
@@ -100,4 +97,18 @@
       (fn []
         (let [ks    (default-keys (fs/readFileSync manager-path "utf8"))
               stale (->> (keys known-unread) (remove ks) sort vec)]
-          (-> (expect (str/join ", " stale)) (.toBe "")))))))
+          (-> (expect (str/join ", " stale)) (.toBe "")))))
+
+  (it "the startup warning names every allowlisted key"
+      (fn []
+        ;; The allowlist is only acceptable because the user is told. If a key
+        ;; is listed here it must appear in the warning, with its reason.
+        (let [w (sm/inert-warning (into {} (map (fn [k] [k "x"]) (keys known-unread))))]
+          (doseq [k (keys known-unread)]
+            (-> (expect (.includes w k)) (.toBe true))
+            (-> (expect (.includes w (get known-unread k))) (.toBe true))))))
+
+  (it "says nothing when the user set none of them"
+      (fn []
+        (-> (expect (sm/inert-warning {"model" "x" "thinking" "high"})) (.toBeNil))
+        (-> (expect (sm/inert-warning {})) (.toBeNil))))))

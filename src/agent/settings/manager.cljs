@@ -3,7 +3,8 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             [agent.debug :as d]
-            [agent.utils.validation :as v]))
+            [agent.utils.validation :as v]
+            [clojure.string :as str]))
 
 (def defaults
   {:model          "claude-sonnet-4-20250514"
@@ -312,6 +313,43 @@
       (fs/mkdirSync dir #js {:recursive true}))
     (fs/writeFileSync file-path (js/JSON.stringify (clj->js data) nil 2))))
 
+(def inert-keys
+  "Settings keys that are parsed and read by NOTHING, with the reason.
+
+   Six shipped this way. Two were never built; four were live before `acee030`
+   and were deleted with the Ink UI, leaving the key, the README entry and — for
+   scrollback — a doc comment pointing at two files that no longer exist. A user
+   who sets one gets exactly the silence they would get from a typo.
+
+   This is the production copy, and `test/settings_reader_lint.test.cljs` READS
+   it rather than keeping its own — the lints that mirror the thing they guard
+   are the ones that go stale."
+  {"steering-mode"          "never implemented; steers are injected all-at-once"
+   "follow-up-mode"         "never implemented; the follow-up queue is already one-at-a-time"
+   "tool-display"           "removed with the Ink UI; tool calls render on one line"
+   "tool-display-max-lines" "removed with the Ink UI; only applied to the expanded view"
+   "scrollback-mode"        "removed with the Ink UI; there is no pager"
+   "status-line"            "removed with the Ink UI; segments are auto-appended in id order"})
+
+(defn inert-in
+  "Keys of `user-settings` that are known to do nothing, sorted. Pure."
+  [user-settings]
+  (->> (keys (or user-settings {}))
+       (map str)
+       (filter inert-keys)
+       sort
+       vec))
+
+(defn inert-warning
+  "One-line-per-key warning for `user-settings`, or nil when there is nothing to
+   say. Pure so it can be tested without a filesystem."
+  [user-settings]
+  (when-let [ks (seq (inert-in user-settings))]
+    (str "settings: " (count ks) " key(s) in your settings file have no effect:\n"
+         (->> ks
+              (map (fn [k] (str "  " k " — " (get inert-keys k))))
+              (str/join "\n")))))
+
 (defn create-settings-manager
   "Two-scope settings: global + project. Project overrides global.
    Supports :reload to re-read files from disk without restarting.
@@ -331,6 +369,11 @@
                     (or @global-settings {})
                     (or @project-settings {})
                     @overrides))
+
+      ;; Only what the USER actually wrote. `:get` merges `defaults` in, so it
+      ;; always contains every key and cannot answer "did they set this?".
+      :user-settings (fn []
+                       (merge (or @global-settings {}) (or @project-settings {})))
 
       :set-override (fn [k v]
                       (swap! overrides assoc k v))

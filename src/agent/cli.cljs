@@ -11,7 +11,7 @@
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
-            [agent.settings.manager :refer [create-settings-manager]]
+            [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
@@ -439,6 +439,13 @@ Examples:
             (aset js/process.env "NYMA_ONE_SHOT" "1"))
         settings  (create-settings-manager)
         merged    ((:get settings))
+        ;; Say so if the settings file contains keys that do nothing. Emitted
+        ;; here, before the TUI starts, which is the one point where writing to
+        ;; stderr cannot desynchronise pi-tui's renderer. Six keys shipped
+        ;; parsed-but-unread; silence made a dead setting indistinguishable from
+        ;; a typo.
+        _         (when-let [w (inert-warning ((:user-settings settings)))]
+                    (d/warn "settings" w))
         sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
         resources (-> (js-await (discover))
                       (assoc :settings settings)
