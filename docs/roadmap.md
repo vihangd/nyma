@@ -217,6 +217,22 @@ A feature that declares a registry-backed API but has nothing consuming the regi
 
 **Test smell:** unit test registers an item and checks the atom; no test asserts the item appears in a rendered frame. Every future registry-backed API should have a matching end-to-end test in `test/extension_registration_e2e.test.cljs` or similar.
 
+**Swept 2026-09-07**, after `:display` formatters turned out to be the same
+shape (13 formatters, zero of them ever called). Every registry-backed API
+walked from producer to consumer:
+
+| registry | producers | consumer | state |
+|---|---|---|---|
+| `registerShortcut` + keybindings.json | prompt_history `ctrl+r`, model_roles cycle-key, every user binding | **none** — `interactive.cljs` had listeners for Esc and Ctrl+C only | **FIXED** — `keybindings/dispatch-shortcut!`, pinned by `test/keybindings_dispatch.test.cljs` |
+| `registerStatusSegment` | 4 (spec_driven, model_roles, mcp_client, agent_shell) | `status_bar.cljs:36` | works |
+| `registerCompletionProvider` / `mention-providers` | mention_files only | **none** — `autocomplete_provider/complete-all` has zero callers; the editor uses pi-tui's `CombinedAutocompleteProvider`, which does slash + `@file` natively | dead, no user-visible loss. `ac-builtins/register-all!` fills a registry nobody queries |
+| `registerContextProvider` | none | **none** — `:provide` is never invoked | dead |
+| `registerBlockRenderer` / `registerToolRenderer` | none | none | dead |
+
+The last three are dead code, not bugs — do NOT write a test pinning "this has
+no consumer", it locks the deadness in. Deleting the four APIs (and
+`autocomplete_provider`, `tool_renderer_registry`) is a separate call.
+
 ### 3b. "Scoped API forgot to forward a method" — CLOSED (2026-09-07)
 
 Verified closed: 65 methods forwarded against 60 on the base API, and the

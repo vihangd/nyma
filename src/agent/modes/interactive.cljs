@@ -17,6 +17,7 @@
             [agent.ui.width-guard :refer [attach-guarded-children!]]
             [agent.ui.crash-recovery :as crash-recovery]
             [agent.sessions.manager :refer [session->seed-messages]]
+            [agent.keybindings :as keybindings]
             [clojure.string :as str]))
 
 ;;; ---------------------------------------------------------------------------
@@ -686,6 +687,22 @@
                              (when-let [ctrl-atom (:abort-controller agent)]
                                (.abort @ctrl-atom "user-interrupt")))
                            nil))
+
+      ;; Registered shortcuts — extensions' `registerShortcut` and every
+      ;; keybindings.json binding. Both landed in `(:shortcuts agent)` and
+      ;; NOTHING read it at keypress time, so prompt_history's ctrl+r, the
+      ;; role-cycle key and every user binding were inert. Input listeners run
+      ;; before focus dispatch, and `{consume: true}` stops the editor also
+      ;; seeing the key, so a bound combo does one thing rather than two.
+      ;;
+      ;; Not while an overlay is open: a picker owns the keyboard, exactly as
+      ;; the Esc guard above assumes.
+      (.addInputListener tui
+                         (fn [data]
+                           (when (and (zero? (.-length (.-overlayStack tui)))
+                                      (keybindings/dispatch-shortcut!
+                                       @(:shortcuts agent) data matchesKey))
+                             #js {:consume true})))
 
       ;; Global Ctrl+C → graceful exit
       (.addInputListener tui

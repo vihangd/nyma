@@ -46,6 +46,42 @@
                                              (when-let [ext (.-extension-api agent)] (.-ui ext)))
                                     :agent agent})))))}))))
 
+(defn shortcut-handler
+  "The handler registered for the first combo in `shortcuts` that `matches?`
+   the raw input `data`, or nil.
+
+   Two shapes live in this one atom and both have to work: `registerShortcut`
+   stores a BARE FN (extensions.cljs), while `apply-keybindings` above stores
+   `{:action :source :handler f}`. Pure — `matches?` is pi-tui's `matchesKey`
+   in production and a stub in tests."
+  [shortcuts data matches?]
+  (some (fn [[combo entry]]
+          (when (try (matches? data combo) (catch :default _ false))
+            (cond
+              (fn? entry)           entry
+              (:handler entry)      (:handler entry)
+              (get entry "handler") (get entry "handler"))))
+        (seq shortcuts)))
+
+(defn dispatch-shortcut!
+  "Run the shortcut bound to `data`, if any. Returns true when one ran.
+
+   Nothing called this: `registerShortcut` and every keybindings.json entry
+   went into an atom that only `/keys`-style listing read, so prompt_history's
+   ctrl+r and model_roles' role-cycle key did nothing, and a user's custom
+   binding did nothing. The unit test asserted the atom, never a keypress.
+
+   A throwing handler must not take the input pipeline down with it — the key
+   is still reported as handled, because it matched."
+  [shortcuts data matches?]
+  (if-let [h (shortcut-handler shortcuts data matches?)]
+    (do (try (h)
+             (catch :default e
+               (d/warn "keybindings"
+                       (str "shortcut handler failed: " (or (.-message e) (str e))))))
+        true)
+    false))
+
 (defn rebuild-registry!
   "Rebuild the keybinding-registry atom from user overrides.
    Any binding whose action starts with 'app.' is treated as an
