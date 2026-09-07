@@ -68,8 +68,15 @@
                 "too many requests" "usage limit" "capacity"]]
    [:server    ["500" "502" "503" "504" "overloaded" "bad gateway"
                 "service unavailable" "server error" "internal error"]]
+   ;; "unable to connect" is Bun's wording — its fetch reports BOTH a refused
+   ;; port and a dead host as `TypeError: Unable to connect. Is the computer
+   ;; able to access the url?`, with an empty cause. None of the other patterns
+   ;; match it, so a self-hosted box being switched off produced error-kind nil,
+   ;; retryable? false, and no failover at all: the configured fallback chain was
+   ;; decorative. "econnrefused" covers the same case under Node.
    [:network   ["econnreset" "etimedout" "enotfound" "socket hang up"
-                "network error" "fetch failed" "timeout"]]
+                "network error" "fetch failed" "timeout"
+                "unable to connect" "econnrefused"]]
    [:not-found ["model not found" "model_not_found" "no such model"
                 "unknown model" "does not exist"]]])
 

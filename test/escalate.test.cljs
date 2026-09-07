@@ -522,3 +522,54 @@
         (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "boom"))))]
           (-> (expect (fn? (fn [] (esc/try-set-model! api "x/m")))) (.toBe true))
           (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))))
+
+;;; ─── A self-hosted box being switched off must escalate ────────────────────
+;;
+;; `error-kind` classified :network on econnreset/etimedout/enotfound/etc, none
+;; of which Bun produces. Its fetch reports BOTH a refused port and a dead host
+;; as `TypeError: Unable to connect. Is the computer able to access the url?`
+;; with an empty cause — verified against a closed port and an unroutable host.
+;;
+;; So a `local` role pointed at a LAN vllm box would, the moment the box was
+;; off, yield error-kind nil → retryable? false → no failover. The configured
+;; fallback chain was decorative, and the run died with a provider error instead
+;; of switching to the paid model.
+
+(def ^:private bun-connect-failure
+  "Verbatim from Bun for a refused port AND an unreachable host."
+  "TypeError: Unable to connect. Is the computer able to access the url?")
+
+(describe "escalate: unreachable self-hosted provider" (fn []
+
+  (it "classifies Bun's connect failure as a network error"
+      (fn []
+        ;; squint compiles keywords to bare strings — the same fact behind the
+        ;; roles.default guard, so no leading colon here.
+        (-> (expect (str (esc/error-kind bun-connect-failure))) (.toBe "network"))
+        (-> (expect (esc/retryable? bun-connect-failure)) (.toBe true))))
+
+  (it "classifies the Node wording too"
+      (fn []
+        (-> (expect (esc/retryable? "connect ECONNREFUSED 192.168.14.15:8000")) (.toBe true))
+        (-> (expect (esc/retryable? "TypeError: fetch failed")) (.toBe true))))
+
+  (it "still ignores an error no other model would survive"
+      (fn []
+        ;; retryable? must stay narrow — escalating on a genuine 400 would just
+        ;; burn the chain on a request that is wrong everywhere.
+        (-> (expect (esc/retryable? "400 invalid request: bad tool schema")) (.toBe false))
+        (-> (expect (esc/retryable? "")) (.toBe false))))
+
+  (it "picks the configured chain for the failing role"
+      (fn []
+        ;; roles.local -> escalate.fallback.local = ["build"], so a dead box
+        ;; moves to minimax rather than retrying the box.
+        (let [cfg {:fallback {"local" ["build"] :default ["fast"]}}]
+          (-> (expect (vec (esc/chain-for cfg "local"))) (.toEqual #js ["build"]))
+          ;; …and an unlisted role still gets the default chain.
+          (-> (expect (vec (esc/chain-for cfg "other"))) (.toEqual #js ["fast"])))))
+
+  (it "does not re-try a target already burned"
+      (fn []
+        (-> (expect (esc/next-fallback ["build" "fast"] ["build"])) (.toBe "fast"))
+        (-> (expect (esc/next-fallback ["build"] ["build"])) (.toBeNil))))))
