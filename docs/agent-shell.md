@@ -158,6 +158,13 @@ The `agents` object maps agent keys to override values. Supported overrides:
 | `model` | Model ID to set immediately after connecting |
 | `init-mode` | Mode to activate right after the session is created |
 | `command` | Override the spawn command (advanced) |
+
+An override **merges over the shipped agent definition** — supply only the keys
+you want to change and `command`, `args`, `modes` and `features` are inherited.
+That was not always true: an entry without `command` used to be dropped
+silently, and one with `command` replaced the builtin wholesale, blanking
+`modes` so plan mode had no id to resolve. A key that is not a builtin agent
+still needs `command` (or `in-process`), since there is nothing to merge over.
 | `args` | Override the spawn arguments (advanced) |
 
 ---

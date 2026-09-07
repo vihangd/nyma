@@ -115,6 +115,38 @@
     (reduce-kv (fn [acc k v] (assoc acc (->key k) (str v))) {} modes)
     {}))
 
+(defn normalize-agent-override
+  "Normalize a PARTIAL settings entry for an agent that already exists builtin.
+
+   Only the keys actually present are returned, so the caller can merge over the
+   builtin definition instead of replacing it.
+
+   This exists because the documented override shape could not work. Two
+   defects, both silent:
+
+     1. `normalize-agent-config` returns nil without `:command`, so the
+        documented `{\"claude\": {\"init-mode\": \"plan\"}}` was dropped
+        entirely — the setting protecting a planning session from an agent with
+        edit permission simply did nothing.
+     2. Supplying `:command` to get past that made it worse: the registry merge
+        is shallow per agent key, so the entry REPLACED the builtin and blanked
+        `:modes` and `:features` — plan mode then had no mode id to resolve.
+
+   Pure; exposed for tests."
+  [config]
+  (when (map? config)
+    (cond-> {}
+      (some? (:command config))         (assoc :command (:command config))
+      (some? (:args config))            (assoc :args (:args config))
+      (seq (:features config))          (assoc :features (normalize-features (:features config)))
+      (seq (:modes config))             (assoc :modes (normalize-modes (:modes config)))
+      (some? (:model-config-id config)) (assoc :model-config-id (:model-config-id config))
+      (some? (:init-mode config))       (assoc :init-mode (:init-mode config))
+      (some? (:name config))            (assoc :name (:name config))
+      (some? (:model-method config))    (assoc :model-method (->key (:model-method config)))
+      (some? (:in-process? config))     (assoc :in-process? true)
+      (some? (:create-fn config))       (assoc :create-fn (:create-fn config)))))
+
 (defn- normalize-agent-config
   "Normalize an agent config from settings.json into internal format.
    In-process agents (`:in-process? true`) are allowed without `:command`."
@@ -147,10 +179,21 @@
     (if (and raw-agents (map? raw-agents))
       (let [parsed (reduce-kv
                     (fn [acc k v]
-                      (let [key (->key k)]
-                        (if-let [normalized (normalize-agent-config v)]
-                          (assoc acc key (assoc normalized :name (or (:name normalized) (->key key))))
-                          acc)))
+                      (let [key     (->key k)
+                            builtin (get builtin-agents key)]
+                        (if builtin
+                          ;; Known agent: MERGE the override over the shipped
+                          ;; definition. Replacing it dropped :command, :modes
+                          ;; and :features, so a one-line override broke the
+                          ;; agent it meant to tune.
+                          (if-let [ov (normalize-agent-override v)]
+                            (assoc acc key (merge builtin ov))
+                            acc)
+                          ;; Unknown agent: a full definition, which still needs
+                          ;; :command (or :in-process?) to be runnable at all.
+                          (if-let [normalized (normalize-agent-config v)]
+                            (assoc acc key (assoc normalized :name (or (:name normalized) (->key key))))
+                            acc))))
                     {} raw-agents)]
         (reset! config-agents parsed))
       (reset! config-agents {})))

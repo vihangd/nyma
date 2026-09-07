@@ -164,3 +164,62 @@
       (-> (expect (registry/get-agent :dyn)) (.toBeUndefined))
       ;; Builtins still there
       (-> (expect (some? (registry/get-agent :claude))) (.toBe true))))))
+
+;;; ─── Partial overrides merge over the builtin ──────────────────────────────
+;;
+;; `docs/agent-shell.md` documents `agent-shell.agents.<key>` as an OVERRIDE
+;; mechanism, with `{"claude": {"init-mode": "plan"}}` as the example. It could
+;; not work, twice over:
+;;
+;;   1. normalize-agent-config returns nil without :command, so the entry was
+;;      dropped — silently. The one setting that keeps Claude Code out of edit
+;;      mode during a planning session did nothing.
+;;   2. Supplying :command to get past that replaced the builtin wholesale
+;;      (the registry merge is shallow per agent key), blanking :modes and
+;;      :features — so plan mode had no mode id left to resolve.
+
+(describe "agent registry: partial config overrides" (fn []
+
+  (it "applies init-mode without requiring command"
+      (fn []
+        (registry/refresh! {:agents {"claude" {:init-mode "plan"}}})
+        (let [c (registry/get-agent :claude)]
+          (-> (expect (:init-mode c)) (.toBe "plan"))
+          ;; …and the builtin definition survives.
+          (-> (expect (:command c)) (.toBe "npx"))
+          (-> (expect (pos? (count (:args c)))) (.toBe true))
+          (-> (expect (contains? (:features c) :plan-mode)) (.toBe true))
+          (-> (expect (get (:modes c) :plan)) (.toBe "plan")))))
+
+  (it "keeps modes intact even when the override supplies a command"
+      (fn []
+        ;; The second failure mode: an override that names :command used to
+        ;; replace everything, and plan mode lost its mode id.
+        (registry/refresh! {:agents {"claude" {:command "my-claude" :init-mode "plan"}}})
+        (let [c (registry/get-agent :claude)]
+          (-> (expect (:command c)) (.toBe "my-claude"))
+          (-> (expect (get (:modes c) :plan)) (.toBe "plan"))
+          (-> (expect (contains? (:features c) :plan-mode)) (.toBe true)))))
+
+  (it "still requires a command for an agent that is not builtin"
+      (fn []
+        ;; A brand-new agent has nothing to merge over, so it must be runnable.
+        (registry/refresh! {:agents {"nonesuch" {:init-mode "plan"}}})
+        (-> (expect (registry/get-agent :nonesuch)) (.toBeUndefined))
+        (registry/refresh! {:agents {"nonesuch" {:command "x" :args ["y"]}}})
+        (-> (expect (:command (registry/get-agent :nonesuch))) (.toBe "x"))))
+
+  (it "leaves builtins alone when there is no config"
+      (fn []
+        (registry/refresh! {})
+        (let [c (registry/get-agent :claude)]
+          (-> (expect (:init-mode c)) (.toBeNil))
+          (-> (expect (:command c)) (.toBe "npx")))))
+
+  (it "normalize-agent-override returns only the keys present"
+      (fn []
+        ;; Detector self-test: an override that filled in defaults would
+        ;; reintroduce the blanking bug via the merge.
+        (let [o (registry/normalize-agent-override {:init-mode "plan"})]
+          (-> (expect (js/Object.keys (clj->js o))) (.toEqual #js ["init-mode"])))
+        (-> (expect (registry/normalize-agent-override nil)) (.toBeNil))))))
