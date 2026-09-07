@@ -1663,7 +1663,12 @@
                                              "instruction in the spec files."))
                                       "\nStarting. /spec run off to stop."))
                         ;; Begin immediately rather than waiting to be typed at.
-                        (start-turn! continue-prompt))))))
+                        ;; The prompt of the phase we are ENTERING. Arming in
+                        ;; plan and then saying "do the NEXT unchecked task" is
+                        ;; how a scaffold tasks.md got implemented rather than
+                        ;; replaced. Unset phase still resolves to
+                        ;; continue-prompt.
+                        (start-turn! (prompt-for-phase (get-phase))))))))
 
               "phase"
               (let [cfg    (phases/config (safe-settings))
@@ -2106,9 +2111,13 @@
                      #js {:deliverAs "followUp"}))
 
                   "hold"
-                  ;; Stay armed and silent — verify_gate's fix follow-up is the
-                  ;; next turn, and it will resume us when the build is green.
-                  nil
+                  ;; Verify holds silently: verify_gate's fix follow-up is the
+                  ;; next turn and will resume us when the build goes green.
+                  ;; A PLAN hold has no such actor — the loop parks until a
+                  ;; human runs /spec clarify, so staying silent here would be
+                  ;; the same "armed and nothing happens" this whole gate was
+                  ;; built to end.
+                  (when (= phase "plan") (say (str "spec: holding — " (:reason d))))
 
                   "done"
                   (do (disarm!)

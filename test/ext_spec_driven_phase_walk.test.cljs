@@ -139,7 +139,11 @@
                                            (let [r (end)]
                 ;; Held: still in plan, and nothing queued behind it.
                                              (-> (expect (phase)) (.toBe "plan"))
-                                             (-> (expect (:sent r)) (.toBe 0)))
+                                             (-> (expect (:sent r)) (.toBe 0))
+                ;; And it SAYS so. Nothing external resumes a clarification
+                ;; hold — no fix loop, only a human running /spec clarify — so
+                ;; a silent one is the stall this gate exists to end.
+                                             (-> (expect (.includes (:notes r) "clarify")) (.toBe true)))
                                            (fs/writeFileSync (path/join d "spec.md") "# Spec\nauth\n")
                                            (end)
                                            (-> (expect (phase)) (.toBe "execute"))

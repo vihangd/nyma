@@ -647,10 +647,11 @@
         (ready-spec! tmp h agent)
         (spec-cmd! h agent ["run"])
         (-> (expect (count @reqs)) (.toBe 1))
-        ;; The loop's own per-task prompt, not an ad-hoc string — it has to be
-        ;; byte-identical to what :continue sends or the provider cache misses
-        ;; on the very first turn.
-        (-> (expect (first @reqs)) (.toBe spec-driven/continue-prompt))
+        ;; The loop's own prompt for the phase it is entering, not an ad-hoc
+        ;; string — it has to be byte-identical to what the loop sends next or
+        ;; the provider cache misses on the very first turn. /spec start enters
+        ;; at plan, so that is the prompt.
+        (-> (expect (first @reqs)) (.toBe (spec-driven/prompt-for-phase "plan")))
         (-> (expect (.includes (apply str @(:notes h)) "Starting")) (.toBe true))))))
 
 (defn test-run-off-starts-nothing []
@@ -673,7 +674,7 @@
         (ready-spec! tmp h agent)
         (spec-cmd! h agent ["run"])
         (-> (expect (count @sent)) (.toBe 1))
-        (-> (expect (first @sent)) (.toBe spec-driven/continue-prompt))))))
+        (-> (expect (first @sent)) (.toBe (spec-driven/prompt-for-phase "plan")))))))
 
 (defn test-continue-prompt-is-shared []
   ;; It was a `let` binding inside the loop's scope while /spec run referenced
