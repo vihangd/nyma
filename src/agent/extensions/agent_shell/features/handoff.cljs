@@ -59,13 +59,6 @@
                (fn [conn]
                  (reset! shared/active-agent to-key-str)
                  (shared/update-agent-state! to-key-str :connected true)
-                 ;; Install the custom header now that an agent is
-                 ;; active. Same reasoning as agent_switcher: cli.cljs
-                 ;; fires session_ready before the ink app is mounted,
-                 ;; so the session_ready-time call no-ops. This path
-                 ;; runs at user-driven handoff time, when api.ui is
-                 ;; guaranteed live. setup-ui! is idempotent.
-                 (shared/setup-ui!)
                  (notify api (str "Connected to " (:name to-def) ". Sending context..."))
                  (client/send-prompt conn context)))
               (.then

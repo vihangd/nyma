@@ -227,12 +227,6 @@
                     (-> (expect (.-select (.-ui api))) (.toBeNull))
                     (-> (expect (.-input (.-ui api))) (.toBeNull))
                     (-> (expect (.-notify (.-ui api))) (.toBeNull))
-                    (-> (expect (.-setStatus (.-ui api))) (.toBeNull))
-                    (-> (expect (.-setFooter (.-ui api))) (.toBeNull))
-                    (-> (expect (.-setHeader (.-ui api))) (.toBeNull))
-                    (-> (expect (.-setTitle (.-ui api))) (.toBeNull))
-                    (-> (expect (.-setEditorComponent (.-ui api))) (.toBeNull))
-                    (-> (expect (.-onTerminalInput (.-ui api))) (.toBeNull))
                     (-> (expect (.-custom (.-ui api))) (.toBeNull)))))))
 
 (describe "agent.extensions - flag registration"

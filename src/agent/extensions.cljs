@@ -581,12 +581,6 @@
                                  :select      nil
                                  :input       nil
                                  :notify      nil
-                                 :setStatus   nil
-                                 :setFooter   nil
-                                 :setHeader   nil
-                                 :setTitle    nil
-                                 :setEditorComponent nil
-                                 :onTerminalInput nil
                                  :custom      nil
                                  :setEditorValue nil
                                  :getEditorValue nil}}))

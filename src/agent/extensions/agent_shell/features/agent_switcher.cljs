@@ -51,14 +51,6 @@
                                       "\n  /agent-shell__sessions resume to pick it up")))))
                 ;; Initialize agent state
                (shared/update-agent-state! agent-key :connected true)
-                ;; Install the custom header now that an agent is active.
-                ;; setup-ui! is idempotent — the gate short-circuits after
-                ;; the first successful install. We can't rely on the
-                ;; session_ready-time call because cli.cljs emits that
-                ;; BEFORE interactive/start mounts the ink app, so api.ui
-                ;; is still undefined. By the time a user runs /agent the
-                ;; app is guaranteed to be mounted and api.ui is live.
-               (shared/setup-ui!)
                (notify api (str "Connected to " (:name agent-def)
                                 (when-let [sid @(:session-id conn)]
                                   (str " (session: " (subs sid 0 8) "...)"))))

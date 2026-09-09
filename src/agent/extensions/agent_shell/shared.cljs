@@ -70,12 +70,8 @@
 (def api-ref
   "Stores the scoped API reference for lazy UI access.
    UI is not available at extension activation time (useEffect sets it later),
-   so modules that need ui.setFooter etc. must read this atom."
+   so modules that need it must read this atom."
   (atom nil))
-
-(def footer-set?
-  "Whether the custom footer has been installed."
-  (atom false))
 
 ;;; ─── Config ────────────────────────────────────────────────
 
@@ -367,39 +363,11 @@
                                " out:" (format-k (:output-tokens (:turn-usage state))))))]
         (.join (clj->js parts) " ")))))
 
-(defn- header-factory
-  "Returns header text string or nil (for default fallback)."
-  []
-  (let [agent-key @active-agent]
-    (when agent-key
-      (let [state (get @agent-state agent-key)
-            parts (cond-> [(str "nyma × " (kw-name agent-key))]
-                    (:model state) (conj (str "| " (:model state)))
-                    (:mode state)  (conj (str "| " (:mode state)))
-                    (:session-title state) (conj (str "| " (:session-title state))))]
-        (.join (clj->js parts) " ")))))
 
-(defn setup-ui!
-  "Install the custom header. Called lazily on first agent connect,
-   because api.ui is not available at extension activation time.
+;; A `header-factory` + `setup-ui!` pair lived here, installing a rich
+;; "nyma × claude | model | mode" header through `api.ui.setHeader`. No TUI ever
+;; implemented that slot — extensions.cljs declared it as a nil placeholder and
+;; interactive.cljs never assigned it — so the guard bailed on every call and
+;; the header was never drawn. features/status_segments.cljs already puts the
+;; agent, model and mode on the status line, which is a slot that exists.
 
-   Footer was historically installed here via .setFooter, but ACP
-   status now flows through registerStatusSegment in
-   features/status_segments.cljs (registered from index.cljs on
-   session_ready). Only the Header remains here because it's a
-   different slot with different UX requirements.
-
-   `.setHeader` is OPTIONAL and currently unimplemented: extensions.cljs
-   declares it as a nil placeholder and the interactive TUI never assigns it
-   (it wires notify/select/input/custom/setWidget, not the header slot). Calling
-   it unguarded threw `api.ui.setHeader is not a function` from inside
-   /agent connect — i.e. a cosmetic header took the whole connection down.
-   Guard it the way openwiki guards the equally-optional .setStatus, and leave
-   `footer-set?` unset so a TUI that later implements the slot picks it up."
-  []
-  (when-not @footer-set?
-    (when-let [api @api-ref]
-      (let [ui (.-ui api)]
-        (when (and ui (.-available ui) (.-setHeader ui))
-          (reset! footer-set? true)
-          (.setHeader ui header-factory))))))

@@ -641,41 +641,6 @@
                                                  (-> (expect (some #(str/includes? % "No agent") @(.-_notifications api)))
                                                      (.toBe true)))))))
 
-;;; ─── setup-ui! ──────────────────────────────────────────────────────────────
-
-(describe "agent-shell:setup-ui!" (fn []
-
-  (it "does not throw when the TUI provides no .setHeader"
-      (fn []
-        ;; extensions.cljs declares :setHeader as a nil placeholder and the
-        ;; interactive TUI never assigns it — it wires notify/select/input/
-        ;; custom/setWidget, not the header slot. Calling it unguarded threw
-        ;; "api.ui.setHeader is not a function" from inside /agent connect, so a
-        ;; cosmetic header took the entire connection down.
-        (reset! shared/footer-set? false)
-        (reset! shared/api-ref #js {:ui #js {:available true :setHeader nil}})
-        (shared/setup-ui!)
-        (-> (expect @shared/footer-set?) (.toBe false))))
-
-  (it "installs the header when the slot exists"
-      (fn []
-        (reset! shared/footer-set? false)
-        (let [installed (atom nil)]
-          (reset! shared/api-ref
-                  #js {:ui #js {:available true
-                                :setHeader (fn [f] (reset! installed f))}})
-          (shared/setup-ui!)
-          (-> (expect (some? @installed)) (.toBe true))
-          (-> (expect @shared/footer-set?) (.toBe true)))))
-
-  (it "does nothing when the ui is unavailable"
-      (fn []
-        (reset! shared/footer-set? false)
-        (reset! shared/api-ref #js {:ui #js {:available false
-                                             :setHeader (fn [_f] nil)}})
-        (shared/setup-ui!)
-        (-> (expect @shared/footer-set?) (.toBe false))))))
-
 ;;; ─── Input router ───────────────────────────────────────────────────────────
 
 (describe "agent-shell:input-router" (fn []

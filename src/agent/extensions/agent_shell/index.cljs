@@ -76,7 +76,6 @@
       ;; segments and auto-connect.
       (.on api "session_ready"
            (fn [_data]
-             (shared/setup-ui!)
              (status-segments/register-all! api)
           ;; Auto-connect if configured
              (when (and (:default-agent config) (:auto-connect config))
