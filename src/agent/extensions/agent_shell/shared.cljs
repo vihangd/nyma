@@ -67,12 +67,6 @@
    [{:name \"server\" :command \"npx\" :args [...] :env {...}}]"
   (atom []))
 
-(def api-ref
-  "Stores the scoped API reference for lazy UI access.
-   UI is not available at extension activation time (useEffect sets it later),
-   so modules that need it must read this atom."
-  (atom nil))
-
 ;;; ─── Config ────────────────────────────────────────────────
 
 (def default-config

@@ -24,7 +24,7 @@ a compatible API surface.
 | `pi.exec(cmd, args)` | `api.exec(cmd, args)` | Identical |
 | `ctx.ui.notify(msg, type)` | `ctx.ui.notify(msg, type)` | Identical |
 | `ctx.ui.confirm(title, msg)` | `ctx.ui.confirm(msg)` | No title param |
-| `ctx.ui.setStatus(id, text)` | `ctx.ui.setStatus(id, text)` | Identical |
+| `ctx.ui.setStatus(id, text)` | `api.registerStatusSegment(id, {render})` | Different. nyma has no `setStatus`; the status line is a segment registry |
 | `ctx.ui.setWidget(id, lines)` | `ctx.ui.setWidget(id, lines, position)` | Identical |
 | `ctx.isIdle()` | `ctx.isIdle()` | Identical |
 | `ctx.abort()` | `ctx.abort()` | Identical |
@@ -115,14 +115,17 @@ pi.on("agent_end", async (event, ctx) => {
 });
 ```
 
-### Nyma (identical)
+### Nyma
+`ctx.ui.setStatus` does not exist. A segment registers once and renders from
+state the extension owns, so the status line can redraw without the extension
+being asked.
 ```typescript
-api.on("agent_start", async (event, ctx) => {
-  ctx.ui.setStatus("my-ext", "Processing...");
+let phase = "";
+api.registerStatusSegment("my-ext", {
+  render: () => (phase ? {content: phase, visible: true} : {visible: false}),
 });
-api.on("agent_end", async (event, ctx) => {
-  ctx.ui.setStatus("my-ext", "Done");
-});
+api.on("agent_start", async () => { phase = "Processing..."; });
+api.on("agent_end",   async () => { phase = "Done"; });
 ```
 
 ## Schema Conversion Reference

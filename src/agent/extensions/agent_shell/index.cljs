@@ -46,9 +46,6 @@
            (plan-capture/activate api)
            (mcp-discovery/activate api)]]
 
-      ;; Store the api reference for lazy UI access (footer/header setup on connect)
-      (reset! shared/api-ref api)
-
       ;; Hook session shutdown for cleanup
       (.on api "session_shutdown"
            (fn [_ _]
