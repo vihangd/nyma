@@ -289,9 +289,7 @@
                         (and display (.-verbosity display)) (assoc :customVerbosity (.-verbosity display)))))
     (when store
       ((:dispatch! store) :tool-execution-ended
-                          {:exec-id (:exec-id ctx) :duration duration})
-      ((:dispatch! store) :tool-call-ended
-                          {:exec-id (:exec-id ctx) :duration duration :result result-str}))
+                          {:exec-id (:exec-id ctx) :duration duration}))
     ctx))
 
 (defn tool-tracking-interceptor
@@ -315,10 +313,7 @@
                                        display-fields)))
               (when store
                 ((:dispatch! store) :tool-execution-started
-                                    {:tool-name (:tool-name ctx) :exec-id exec-id})
-                ((:dispatch! store) :tool-call-started
-                                    {:tool-name (:tool-name ctx) :exec-id exec-id
-                                     :args (:args ctx) :start-time start-time}))
+                                    {:tool-name (:tool-name ctx) :exec-id exec-id}))
               (assoc ctx :exec-id exec-id :start-time start-time)))
    :leave (fn [ctx]
             (tool-tracking-leave events store ctx))})

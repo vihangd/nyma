@@ -99,7 +99,6 @@
                                  :total-cost          0.0
                                  :turn-count          0
                                  :active-executions   #{}
-                                 :tool-calls          {}
                                  :active-skills       #{}
                                  ;; Two orthogonal axes: :active-role = MODEL role
                                  ;; (drives the model); :permission-mode = permission

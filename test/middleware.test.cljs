@@ -300,36 +300,9 @@
     (-> (expect (get @captured :result)) (.toBe "file-contents"))
     (-> (expect (get @captured :duration)) (.toBeGreaterThanOrEqual 0))))
 
-(defn ^:async test-tracking-dispatches-tool-call-started []
-  (let [events   (create-event-bus)
-        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
-        pipeline (create-pipeline events store)]
-    (let [tool (mock-tool (fn [_] "ok"))]
-      (js-await ((:execute pipeline) "bash" tool {:command "echo hi"})))
-    (let [tc (:tool-calls ((:get-state store)))]
-      ;; There should be exactly one entry
-      (-> (expect (count tc)) (.toBe 1))
-      (let [entry (second (first tc))]
-        (-> (expect (:tool-name entry)) (.toBe "bash"))
-        (-> (expect (:status entry)) (.toBe "done"))
-        (-> (expect (:duration entry)) (.toBeGreaterThanOrEqual 0))))))
-
-(defn ^:async test-tracking-dispatches-tool-call-ended []
-  (let [events   (create-event-bus)
-        store    (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})
-        pipeline (create-pipeline events store)]
-    (let [tool (mock-tool (fn [_] "the-result"))]
-      (js-await ((:execute pipeline) "read" tool {:path "/x"})))
-    (let [tc (:tool-calls ((:get-state store)))
-          entry (second (first tc))]
-      (-> (expect (:result entry)) (.toBe "the-result"))
-      (-> (expect (:duration entry)) (.toBeGreaterThanOrEqual 0)))))
-
 (describe "tool-tracking-interceptor enriched events" (fn []
                                                         (it "emits args in tool_execution_start event" test-tracking-emits-args)
-                                                        (it "emits result in tool_execution_end event" test-tracking-emits-result)
-                                                        (it "dispatches tool-call-started to store" test-tracking-dispatches-tool-call-started)
-                                                        (it "dispatches tool-call-ended to store with result" test-tracking-dispatches-tool-call-ended)))
+                                                        (it "emits result in tool_execution_end event" test-tracking-emits-result)))
 
 ;; ── normalize-tool-result ──────────────────────────────────
 

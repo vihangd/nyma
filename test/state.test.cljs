@@ -114,47 +114,6 @@
         ((:dispatch! store) :model-changed {:model "gpt-4"})
         (-> (expect (:model ((:get-state store)))) (.toBe "gpt-4")))))))
 
-(describe "tool-call-started / tool-call-ended reducers" (fn []
-  (it "tool-call-started adds entry with status running"
-    (fn []
-      (let [store (create-agent-store {:messages [] :active-tools #{} :model nil :tool-calls {}})]
-        ((:dispatch! store) :tool-call-started
-          {:exec-id "abc-123" :tool-name "read" :args {:path "/tmp/x"} :start-time 1000})
-        (let [tc (:tool-calls ((:get-state store)))]
-          (-> (expect (:status (get tc "abc-123"))) (.toBe "running"))
-          (-> (expect (:tool-name (get tc "abc-123"))) (.toBe "read"))))))
-
-  (it "tool-call-started preserves existing tool calls"
-    (fn []
-      (let [store (create-agent-store {:messages [] :active-tools #{} :model nil
-                                       :tool-calls {"existing" {:tool-name "bash" :status "running"}}})]
-        ((:dispatch! store) :tool-call-started
-          {:exec-id "new-1" :tool-name "read" :args {} :start-time 2000})
-        (let [tc (:tool-calls ((:get-state store)))]
-          (-> (expect (get tc "existing")) (.toBeTruthy))
-          (-> (expect (get tc "new-1")) (.toBeTruthy))))))
-
-  (it "tool-call-ended updates status to done with duration and result"
-    (fn []
-      (let [store (create-agent-store {:messages [] :active-tools #{} :model nil
-                                       :tool-calls {"abc" {:tool-name "read" :status "running"}}})]
-        ((:dispatch! store) :tool-call-ended
-          {:exec-id "abc" :duration 150 :result "file contents"})
-        (let [entry (get (:tool-calls ((:get-state store))) "abc")]
-          (-> (expect (:status entry)) (.toBe "done"))
-          (-> (expect (:duration entry)) (.toBe 150))
-          (-> (expect (:result entry)) (.toBe "file contents"))))))
-
-  (it "tool-call-ended does not affect other entries"
-    (fn []
-      (let [store (create-agent-store {:messages [] :active-tools #{} :model nil
-                                       :tool-calls {"a" {:tool-name "read" :status "running"}
-                                                    "b" {:tool-name "bash" :status "running"}}})]
-        ((:dispatch! store) :tool-call-ended {:exec-id "a" :duration 100 :result "done"})
-        (let [tc (:tool-calls ((:get-state store)))]
-          (-> (expect (:status (get tc "a"))) (.toBe "done"))
-          (-> (expect (:status (get tc "b"))) (.toBe "running"))))))))
-
 ;; ── usage: the cache split ────────────────────────────────────────
 ;; The loop read cacheReadTokens per turn for costing and then dropped them, so
 ;; nothing kept a session total and `-p --output-format json` reported

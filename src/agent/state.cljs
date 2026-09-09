@@ -74,18 +74,11 @@
                              (update state :active-executions (fnil conj #{}) (:exec-id data)))
    :tool-execution-ended   (fn [state data]
                              (update state :active-executions (fnil disj #{}) (:exec-id data)))
-   :tool-call-started      (fn [state data]
-                             (update state :tool-calls (fnil assoc {})
-                                     (:exec-id data)
-                                     {:tool-name  (:tool-name data)
-                                      :args       (:args data)
-                                      :status     "running"
-                                      :start-time (:start-time data)}))
-   :tool-call-ended        (fn [state data]
-                             (update-in state [:tool-calls (:exec-id data)]
-                                        merge {:status   "done"
-                                               :duration (:duration data)
-                                               :result   (:result data)}))})
+   ;; There were :tool-call-started/:tool-call-ended reducers here keeping a
+   ;; :tool-calls map of every call's args and result. Nothing ever read it, so
+   ;; it was a per-session leak of full tool payloads. :active-executions above
+   ;; is the live view that IS read.
+   })
 
 (defn create-agent-store
   "Create a state store pre-loaded with agent core reducers.
