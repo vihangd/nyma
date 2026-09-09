@@ -147,7 +147,11 @@
 (defn- handle-commands-update
   "Handle available_commands_update — register agent slash commands in nyma."
   [conn upd api]
-  (let [commands (when-let [c (.-commands upd)] (seq c))
+  ;; The ACP field is `availableCommands`. Reading `.-commands` found nothing,
+  ;; so Claude Code — which pushes its list right after session/new — looked
+  ;; like an agent that publishes none, and `//` always fell back to nyma's own
+  ;; commands. `.-commands` stays as a fallback for any agent using the old name.
+  (let [commands (when-let [c (or (.-availableCommands upd) (.-commands upd))] (seq c))
         agent-key (:agent-key conn)]
     (when commands
       ;; Unregister previous dynamic commands
@@ -277,6 +281,11 @@
           "user_message_chunk"  (replay-turn! conn "user" upd)
           "agent_message_chunk" (replay-turn! conn "assistant" upd)
           "session_info_update" (handle-session-info conn upd api)
+          ;; Not conversation content, so it cannot corrupt the transcript
+          ;; rebuild — and a resumed session is exactly when the agent sends
+          ;; its command list (claude-agent-acp fires it after replaying
+          ;; history), so dropping it here left `//` broken on every resume.
+          "available_commands_update" (handle-commands-update conn upd api)
           nil)
         (case utype
         "agent_message_chunk"       (handle-message-chunk conn upd api)

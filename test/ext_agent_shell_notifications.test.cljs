@@ -208,7 +208,32 @@
                                                     (notifications/dispatch-notification conn
                                                                                          (make-parsed "available_commands_update" {:commands [{:name "new-cmd" :description "New"}]}) api)
                                                     (-> (expect (contains? @(.-_commands api) "old-cmd")) (.toBe false))
-                                                    (-> (expect (contains? @(.-_commands api) "new-cmd")) (.toBe true)))))))
+                                                    (-> (expect (contains? @(.-_commands api) "new-cmd")) (.toBe true)))))
+
+                                            ;; The wire field is `availableCommands`. Every test above
+                                            ;; used `commands`, an invented shape, which is exactly why
+                                            ;; nobody noticed the handler read the wrong key and Claude
+                                            ;; Code always looked like it published nothing.
+                                            (it "reads the ACP `availableCommands` field"
+                                                (fn []
+                                                  (let [conn   (make-mock-conn "claude")
+                                                        api    (make-mock-api)
+                                                        parsed (make-parsed "available_commands_update"
+                                                                            {:availableCommands [{:name "review" :description "Review"}]})]
+                                                    (notifications/dispatch-notification conn parsed api)
+                                                    (-> (expect (contains? @(.-_commands api) "review")) (.toBe true)))))
+
+                                            ;; A resumed session replays its history first and sends the
+                                            ;; command list after, so dropping this update while
+                                            ;; `replaying?` is set left `//` broken on every resume.
+                                            (it "registers commands that arrive during replay"
+                                                (fn []
+                                                  (let [conn   (assoc (make-mock-conn "claude") :replaying? (atom true))
+                                                        api    (make-mock-api)
+                                                        parsed (make-parsed "available_commands_update"
+                                                                            {:availableCommands [{:name "resume-cmd" :description "R"}]})]
+                                                    (notifications/dispatch-notification conn parsed api)
+                                                    (-> (expect (contains? @(.-_commands api) "resume-cmd")) (.toBe true)))))))
 
 ;;; ─── Mode update ────────────────────────────────────────────
 
