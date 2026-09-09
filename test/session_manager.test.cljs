@@ -154,4 +154,21 @@
                     ((:load sm2))
                     (-> (expect (count ((:get-tree sm2)))) (.toBe 1))
                     (-> (expect ((:leaf-id sm2))) (.toBe id))
+                    (.rmSync fs tmp-dir #js {:recursive true}))))
+
+            ;; /name used to set an in-memory atom only, so the name died with
+            ;; the process and listing/explicit-name — its only reader — never
+            ;; had an entry to find.
+            (it "session name survives a reload"
+                (fn []
+                  (let [tmp-dir   (.mkdtempSync fs (str (.tmpdir os) "/nyma-test-"))
+                        tmp-file  (.join path tmp-dir "session.jsonl")
+                        sm1       (create-session-manager tmp-file)]
+                    ((:append sm1) {:role "user" :content "hi"})
+                    ((:set-session-name sm1) "refactor pass")
+                    (let [sm2 (create-session-manager tmp-file)]
+                      ((:load sm2))
+                      (-> (expect ((:get-session-name sm2))) (.toBe "refactor pass"))
+                      ;; Inert for the model: the name is not a conversation turn.
+                      (-> (expect (count ((:build-context sm2)))) (.toBe 1)))
                     (.rmSync fs tmp-dir #js {:recursive true}))))))

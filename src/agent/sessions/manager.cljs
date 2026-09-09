@@ -96,6 +96,14 @@
                 (reset! entries lines)
                 (reset! leaf-id (:id (last lines)))
                 (reset! index (build-index lines))
+                ;; Entries are CLJS maps here (listing.cljs reads the same
+                ;; role off raw JS objects), so this cannot reuse
+                ;; listing/explicit-name.
+                (reset! session-name
+                        (some->> lines
+                                 (filter #(= "session-name" (:role %)))
+                                 last
+                                 :content))
               ;; Sync to SQLite if available
                 (when sqlite-store
                   (doseq [entry lines]
@@ -162,7 +170,16 @@
              :leaf-id          leaf-id-fn
              :search           search-fn
              ;; Session naming and entry labeling (pi-compat)
-             :set-session-name (fn [n] (reset! session-name n))
+             ;; Also persisted as an entry: the atom alone died with the
+             ;; process, so `/name` never survived a restart and
+             ;; listing/explicit-name — the only reader of the name — had no
+             ;; producer at all. build-context-fn whitelists conversation
+             ;; roles, so this entry is inert for the model, compaction and
+             ;; token counts.
+             :set-session-name (fn [n]
+                                 (reset! session-name n)
+                                 (append-fn {:role "session-name" :content (str n)})
+                                 n)
              :get-session-name (fn [] @session-name)
              :set-label        (fn [entry-id label] (swap! entry-labels assoc entry-id label))
              :get-label        (fn [entry-id] (get @entry-labels entry-id))
