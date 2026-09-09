@@ -233,6 +233,33 @@ The last three are dead code, not bugs — do NOT write a test pinning "this has
 no consumer", it locks the deadness in. Deleting the four APIs (and
 `autocomplete_provider`, `tool_renderer_registry`) is a separate call.
 
+**Swept again 2026-09-09**, widening the shape from "registry" to any
+producer/consumer pair (nil UI slots, plain state keys, session-store fns):
+
+| store / slot | producers | consumer | state |
+|---|---|---|---|
+| `api.ui.setHeader` / `setFooter` / `setTitle` / `setStatus` / `setEditorComponent` / `onTerminalInput` | `agent_shell/shared.cljs:403` (header, guarded); orphan factories `agent_shell/ui/header.cljs:45`, `agent_shell/ui/status_line.cljs:62` | **none** — declared `nil` at `extensions.cljs:576-592` and assigned NOWHERE. `interactive.cljs:508-536` sets 6 slots, `overlay_host/install!` sets 5 more; these 6 are never among them | **dead slot, worse than a dead registry**: producer code exists and crashed once (`api.ui.setHeader is not a function`, `shared.cljs:392-405`). Neither `ui/header.cljs` nor `ui/status_line.cljs` is required by any ns — orphan files |
+| `state :tool-calls` | `middleware.cljs:293,319` dispatch `:tool-call-started` / `:tool-call-ended` on EVERY tool call | **none** — `state.cljs:77-88` are the only two occurrences in the repo | dead sink **and** an unbounded leak: full `:args` + `:result` of every call retained for the session's life |
+| session `:set-label` → `:get-label` | none | none — `entry-labels` (`manager.cljs:83`) written by `set-label`, read only by `get-label`, which has zero callers. `api.setLabel` has zero producers | dead both ends; labels are in-memory only and never persisted |
+| `/name` → `listing/explicit-name` | **none** — `set-session-name` (`manager.cljs:165`) only `reset!`s an atom | `listing.cljs:44` filters entries with role `"session-name"`; nothing in the repo ever appends one | **inverse mismatch**: consumer with no producer. `/name` is lost on restart and session rows still fall back to first-user-message. Fix is NOT one line — appending a new entry role touches `load-fn`, `build-context-fn`, compaction and token estimation |
+
+**Resolved 2026-09-09** (see the commits, not this table, for the diffs):
+
+- `api.ui` dead slots — **deleted**. `setStatus`/`setFooter`/`setHeader`/`setTitle`/`setEditorComponent`/`onTerminalInput` are gone from `extensions.cljs`, along with `agent_shell/shared.cljs`'s `header-factory` + `setup-ui!` + `footer-set?`, its three call sites, the orphan `ui/header.cljs` and `ui/status_line.cljs`, and `test/agent_shell_setup_ui.test.cljs` — 100 lines of tests pinning a mechanism that installed into a slot nothing implements. Zero behavior change: every producer already guarded on the slot, and `status_segments` puts agent/model/mode on the status line, a slot that exists. pi-tui has no header or footer slot to wire, only `Terminal.setTitle`, which nothing asked for.
+- `state :tool-calls` — **deleted**. Reducers, the `core.cljs` init key, both `middleware.cljs` dispatches and their four tests. `:tool-execution-started/ended` stays: `:active-executions` is read by `extension_context` and `waitForIdle`.
+- `/name` — **fixed**. `set-session-name` now also appends a `"session-name"` entry and `load-fn` restores the atom from it. `build-context-fn` whitelists conversation roles, so the entry is invisible to the model, compaction and token counts; the tree viewer shows it as `[session-name] …`.
+- `setLabel` / `get-label` — **kept, deliberately**. Inert in both directions and it costs nothing at runtime (nothing calls `setLabel`, so `entry-labels` never grows), but it is published API in `manifest_capabilities` and the capability lint map, so removing it breaks out-of-repo extensions for no gain. Do not build on it: a label is neither persisted nor rendered. Delete it only alongside the other dead extension APIs above, in one breaking pass.
+
+Not defects, do not "fix": `registerModelInfo`, `appendEntry`,
+`get/setSessionName` have zero in-repo producers but working consumer paths.
+That is unused public API, not a broken wire.
+
+**Blast radius for any deletion here:** `extension_scope.cljs:85-99` (the
+`gate` forwards) and `test/extension_capability_lint.test.cljs:42-45` (the
+method→capability map) must be edited in the same commit or the lint test
+fails. Deleting `registerToolRenderer` also orphans
+`ui/tool_renderer_registry.cljs` + its test.
+
 ### 3b. "Scoped API forgot to forward a method" — CLOSED (2026-09-07)
 
 Verified closed: 65 methods forwarded against 60 on the base API, and the
