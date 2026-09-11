@@ -29,6 +29,51 @@ No errors encountered.
 (def ^:private valid-files-read ["src/agent/foo.cljs"])
 (def ^:private valid-files-modified [])
 
+(def ^:private conversation-source
+  "user: let's implement the feature\nassistant: on it — editing src/agent/foo.cljs")
+
+;; ── quote verification ──────────────────────────────────────────
+;; Section 6 always had to CARRY a quote; nothing checked the words were real,
+;; so the one part of the summary that exists to be trustworthy was the one part
+;; nothing verified.
+
+(describe "validate-compaction: section 6 quotes must be real" (fn []
+  (it "accepts a quote that occurs in the source"
+      (fn []
+        (let [errors (validate-compaction valid-summary valid-files-read
+                                          valid-files-modified conversation-source)]
+          (-> (expect (count errors)) (.toBe 0)))))
+
+  (it "rejects a quote the conversation never contained"
+      (fn []
+        (let [fabricated (str/replace valid-summary
+                                      "let's implement the feature"
+                                      "delete the production database")
+              errors     (validate-compaction fabricated valid-files-read
+                                              valid-files-modified conversation-source)]
+          (-> (expect (some #(str/includes? % "quote not found") errors)) (.toBe true)))))
+
+  ;; The model re-wraps long lines. That is not a fabrication, and failing it
+  ;; would burn a fix-retry on every long quote.
+  (it "accepts a quote the model re-wrapped"
+      (fn []
+        (let [wrapped (str/replace valid-summary
+                                   "let's implement the feature"
+                                   "let's implement\n  the feature")
+              errors  (validate-compaction wrapped valid-files-read
+                                           valid-files-modified conversation-source)]
+          (-> (expect (count errors)) (.toBe 0)))))
+
+  ;; Every existing caller passes three args, and compaction must not start
+  ;; failing just because a caller has no source text to check against.
+  (it "checks nothing when no source is supplied"
+      (fn []
+        (let [fabricated (str/replace valid-summary
+                                      "let's implement the feature"
+                                      "delete the production database")
+              errors     (validate-compaction fabricated valid-files-read valid-files-modified)]
+          (-> (expect (count errors)) (.toBe 0)))))))
+
 ;; ── validate-compaction unit tests ──────────────────────────────
 
 (describe "validate-compaction" (fn []
@@ -92,6 +137,12 @@ No errors encountered.
 
 (def ^:private bad-summary "just some prose with no sections")
 
+;; compact-with-retry validates section-6 quotes against the prompt it was
+;; given, so the stub prompt has to contain what `valid-summary` quotes — the
+;; model can only legitimately quote what the prompt showed it.
+(def ^:private stub-prompt
+  "<conversation>\nuser: let's implement the feature\n</conversation>")
+
 (def ^:private call-log (atom []))
 
 (beforeEach (fn [] (reset! call-log [])))
@@ -109,20 +160,20 @@ No errors encountered.
 
 (defn ^:async test-retry-first-pass []
   ;; First call returns valid → no retry, call count 1
-  (let [result (js-await (compact-with-retry "mock-model" "user prompt" [] [] (make-gen valid-summary)))]
+  (let [result (js-await (compact-with-retry "mock-model" stub-prompt [] [] (make-gen valid-summary)))]
     (-> (expect result) (.toBe valid-summary))
     (-> (expect (count @call-log)) (.toBe 1))))
 
 (defn ^:async test-retry-fixes-bad-first []
   ;; First call invalid, second valid → retry fires, final text is second
-  (let [result (js-await (compact-with-retry "mock-model" "user prompt" [] []
+  (let [result (js-await (compact-with-retry "mock-model" stub-prompt [] []
                                              (make-gen bad-summary valid-summary)))]
     (-> (expect result) (.toBe valid-summary))
     (-> (expect (count @call-log)) (.toBe 2))))
 
 (defn ^:async test-retry-falls-back-when-both-bad []
   ;; Both calls invalid → still returns the second (unvalidated) text
-  (let [result (js-await (compact-with-retry "mock-model" "user prompt" [] []
+  (let [result (js-await (compact-with-retry "mock-model" stub-prompt [] []
                                              (make-gen bad-summary bad-summary)))]
     (-> (expect result) (.toBe bad-summary))
     (-> (expect (count @call-log)) (.toBe 2))))
@@ -135,7 +186,7 @@ No errors encountered.
         without-file (str/replace with-file
                                   "src/agent/specific.cljs"
                                   "src/agent/wrong.cljs")
-        result       (js-await (compact-with-retry "mock-model" "user prompt"
+        result       (js-await (compact-with-retry "mock-model" stub-prompt
                                                    ["src/agent/specific.cljs"] []
                                                    (make-gen without-file with-file)))]
     (-> (expect result) (.toBe with-file))

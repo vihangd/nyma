@@ -168,9 +168,43 @@ with every section below present.
    "## 5. Problem Solving"
    "## 6. Pending Tasks and Next Steps"])
 
+(defn- collapse-ws
+  "Whitespace-insensitive form, for comparing a quote against its source."
+  [s]
+  (str/trim (str/replace (str s) #"\s+" " ")))
+
+(defn- unverifiable-quotes
+  "Quotes in `summary` that do not occur in `source`.
+
+   Section 6 already had to contain a `Quote: \"…\"` — but nothing ever checked
+   the quoted words against the conversation, so a summary could invent the one
+   thing the format exists to make trustworthy: the verbatim anchor the next
+   turn plans from. Borrowed from SoL-Pi's receipt validator, which requires
+   every retained quotation to be an exact substring of the archived source.
+
+   Exact match first; a whitespace-collapsed comparison is the fallback, since
+   the model re-wraps long lines and that is not a fabrication. Quotes under
+   `min-quote-chars` are skipped — too short to be evidence either way, and
+   short strings match by accident."
+  [summary source]
+  (let [min-quote-chars 12
+        src             (str source)
+        src-collapsed   (delay (collapse-ws src))]
+    (->> (re-seq #"Quote:\s*\"([^\"]+)\"" summary)
+         (map second)
+         (filter #(>= (count (str/trim %)) min-quote-chars))
+         (remove (fn [q]
+                   (or (str/includes? src q)
+                       (str/includes? @src-collapsed (collapse-ws q)))))
+         distinct
+         vec)))
+
 (defn validate-compaction
-  "Return a vector of error strings. Empty vector = valid."
-  [summary files-read files-modified]
+  "Return a vector of error strings. Empty vector = valid.
+
+   `source` is the text the summary was built from; when supplied, every
+   section-6 quote must actually occur in it."
+  [summary files-read files-modified & [source]]
   (let [errors (atom [])]
     ;; All required headers present in order
     (loop [remaining required-sections
@@ -192,6 +226,10 @@ with every section below present.
           has-quote   (when s6-body (boolean (re-find #"Quote:\s*\"" s6-body)))]
       (when (and has-bullets (not has-quote))
         (swap! errors conj "section 6 has pending tasks but no verbatim quotes")))
+    ;; Section 6 quotes must be real
+    (when (seq (str (or source "")))
+      (doseq [q (unverifiable-quotes summary source)]
+        (swap! errors conj (str "quote not found in the conversation: \"" q "\""))))
     @errors))
 
 (defn build-fix-user-prompt [prior-summary errors]
@@ -331,7 +369,7 @@ with every section below present.
                             :system   compact-system-prompt
                             :messages #js [#js {:role "user" :content user-prompt}]}))
         first-text   (.-text first-result)
-        first-errors (validate-compaction first-text files-read files-modified)]
+        first-errors (validate-compaction first-text files-read files-modified user-prompt)]
     (if (empty? first-errors)
       first-text
       (let [_ (d/warn "compaction" "validation failed, retrying"
@@ -344,7 +382,7 @@ with every section below present.
                                                   :content (build-fix-user-prompt
                                                             first-text first-errors)}]}))
             fix-text   (.-text fix-result)
-            fix-errors (validate-compaction fix-text files-read files-modified)]
+            fix-errors (validate-compaction fix-text files-read files-modified user-prompt)]
         (when (seq fix-errors)
           (d/warn "compaction" "validation failed after retry — using unvalidated summary"
                   #js {:errors (clj->js fix-errors)}))
@@ -446,6 +484,19 @@ with every section below present.
   (boolean (and (not (false? enabled?))
                 (pos? (or limit 0))
                 (> (or usage 0) (compaction-point limit threshold reserve max-working)))))
+
+(defn resolve-settings
+  "`(:settings agent)` is the settings MANAGER, not a settings map — a record of
+   :get/:set-override/:apply-overrides (`settings/manager.cljs:367`). Reading
+   `:compaction` straight off it is always nil, so every option below silently
+   fell back to its default and `{\"compaction\": {\"enabled\": false}}` did
+   nothing at all. `core.cljs:114-117` guards the same trap for its own reads.
+
+   Tests pass a plain map, so accept both — same shape as that guard."
+  [settings]
+  (if (and settings (fn? (:get settings)))
+    ((:get settings))
+    (or settings {})))
 
 (defn settings->opts
   "Read the `:compaction` settings section into compact's option keys.
@@ -721,7 +772,7 @@ Keep the summary concise but preserve all actionable information.")
                                  ;; Without this the compaction is recorded but
                                  ;; the running conversation never shrinks.
                                  :state-atom (:state agent)}
-                                (settings->opts (:settings agent)))))
+                                (settings->opts (resolve-settings (:settings agent))))))
       (catch :default e
         ;; Never let compaction take the turn with it — a failed summary is
         ;; recoverable, a thrown one is not.
@@ -765,7 +816,7 @@ Keep the summary concise but preserve all actionable information.")
                        (merge {:model-registry (:model-registry agent)
                                :model-key (model-info/config-model-key (:config agent))
                                :state-atom (:state agent)}
-                              (settings->opts (:settings agent))
+                              (settings->opts (resolve-settings (:settings agent)))
                               {:force? true})))
     (let [rebuilt ((:build-context session))]
       (aset st-config "messages" (clj->js rebuilt))

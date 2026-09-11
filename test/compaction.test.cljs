@@ -221,6 +221,37 @@
                     (-> (expect (:enabled? o)) (.toBe true))
                     (-> (expect (:threshold o)) (.toBe 0.85)))))))
 
+;;; ─── resolve-settings: the manager is not a settings map ─────────────────
+;;; `(:settings agent)` is the settings MANAGER. Reading :compaction off it is
+;;; always nil, so every threshold, the reserve, the ceiling and `:enabled
+;;; false` silently fell back to defaults — the same trap core.cljs:114 already
+;;; guards for its own reads.
+
+(describe "resolve-settings"
+          (fn []
+            (it "unwraps a settings manager"
+                (fn []
+                  (let [mgr {:get (fn [] {:compaction {:threshold 0.5}})
+                             :set-override (fn [_ _] nil)}
+                        o   (cmp/settings->opts (cmp/resolve-settings mgr))]
+                    (-> (expect (:threshold o)) (.toBe 0.5)))))
+
+            (it "honours a disabled flag through the manager"
+                (fn []
+                  (let [mgr {:get (fn [] {:compaction {:enabled false}})}
+                        o   (cmp/settings->opts (cmp/resolve-settings mgr))]
+                    (-> (expect (:enabled? o)) (.toBe false)))))
+
+            (it "still accepts a plain map, as tests pass"
+                (fn []
+                  (let [o (cmp/settings->opts (cmp/resolve-settings {:compaction {:threshold 0.6}}))]
+                    (-> (expect (:threshold o)) (.toBe 0.6)))))
+
+            (it "tolerates nil"
+                (fn []
+                  (let [o (cmp/settings->opts (cmp/resolve-settings nil))]
+                    (-> (expect (:threshold o)) (.toBe 0.85)))))))
+
 ;;; ─── replay: would this have caught the real collapse? ───────────────────
 ;;; A synthetic threshold test proves the arithmetic, not that the trigger
 ;;; would have helped. This replays a transcript shaped like the session that
