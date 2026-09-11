@@ -21,7 +21,8 @@
             ["node:path" :as path]
             [clojure.string :as str]
             ["./agent/events.mjs" :as events]
-            ["./agent/loop.mjs" :as agent-loop]))
+            ["./agent/loop.mjs" :as agent-loop]
+            ["./agent/dev/event_map.mjs" :as event-map]))
 
 (def ^:private src-root (path/resolve (js/process.cwd) "src"))
 
@@ -98,3 +99,30 @@
                   ;; names it, so it must not be flagged.
                   (-> (expect (count (unemitted ["message_update"] dynamic-emits)))
                       (.toBe 0))))))
+
+;;; ─── The generated map ──────────────────────────────────────
+;;; deepseek-harness ships docs/event-producer-consumer.md as a generated
+;;; matrix: every event's dispatchers AND listeners, with a bare `-` where a
+;;; column is empty. It tolerates an unheard event; it does not tolerate not
+;;; knowing. This test only guards against drift — nothing here fails because a
+;;; column is empty.
+
+(describe "docs/event-map.md"
+          (fn []
+            (it "matches what the source scan produces"
+                (fn []
+                  (let [committed (try (fs/readFileSync "docs/event-map.md" "utf8")
+                                       (catch :default _ ""))]
+                    (-> (expect (str committed))
+                        (.toBe (str (event-map/render-event-map)))))))
+
+            (it "reports both directions, and names a registry nothing fills"
+                (fn []
+                  ;; Guard the guard: a generator that silently emitted an empty
+                  ;; table would pass the drift check above forever.
+                  (let [doc (str (event-map/render-event-map))]
+                    (-> (expect doc) (.toContain "| Event | Emitted in | Listened in |"))
+                    (-> (expect doc) (.toContain "turn_finalize"))
+                    ;; A declared API with no call site still gets a row.
+                    (-> (expect (contains? (event-map/declared-registries) "registerModelInfo"))
+                        (.toBe true)))))))

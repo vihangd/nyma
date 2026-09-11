@@ -19,7 +19,8 @@
     "start": "bun dist/agent/cli.mjs",
     "pretest": "npx squint compile",
     "test": "bun test dist",
-    "repl": "npx squint repl"
+    "repl": "npx squint repl",
+    "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.27",

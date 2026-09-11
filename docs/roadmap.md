@@ -1062,3 +1062,44 @@ this codebase keeps finding: a condition that occurs, matters, and is invisible.
 
 **Deliberately not borrowed:** bash-only (nyma derives permission categories from tool *names*),
 subprocess-per-action, linear-history-as-prompt, Jinja templates as the config surface.
+
+## 2026-09-11 — compared against DeepSeek Harness
+
+[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`, MIT) is a TypeScript agent
+runtime on Cordis where **everything is a plugin** — model adapter, tool registry, session log, sandbox
+and the agent loop are all mounted rows, replaceable from config. The architecture is not the borrow:
+nyma is a deliberate core plus an extension API, and plugins-all-the-way-down is a rewrite with no
+user-visible payoff. What transferred is `docs/defensive-patterns.md` — "hard-won bug-class rules, each
+a defect that actually shipped here" — the same genre of artifact as this file's bug-class sections.
+Checked against nyma it found two live defects.
+
+- **"Report orthogonal outcomes independently."** A process can time out AND exit 0, because it trapped
+  the signal. nyma's bash reported only `exitCode`, so a `trap "exit 0" TERM` — a Makefile, a test
+  runner with cleanup — read as a clean success after being killed at the cap, and a plain timeout read
+  as a bare "exit 143". Measured on Bun 1.4: `proc.killed` is useless (true for every exited process)
+  and a trapped timeout is indistinguishable from success by the process fields, so the deadline itself
+  is the witness. `timedOut` / `signal` now ride beside `exitCode`, and `bash_suite`'s truncation path
+  merges onto the original envelope instead of rebuilding it from three keys — it was dropping
+  `aborted` already, on exactly the large-output path where a long-running command is most likely to
+  have been cut short.
+- **"Never hand untrusted output predictable paths."** The pre-compaction dump wrote the entire span
+  being summarized to `/tmp/nyma-precompact` under a name guessable to the millisecond with the default
+  mode — 0644 under `umask 022`, in a world-readable `/tmp` — and bash's oversized stdout went the same
+  way. Both now use `utils/spill_file`: a 0700 directory, random names, and `wx` + 0600 exclusive
+  writes, so a planted symlink fails the write instead of redirecting it. The compaction dump gets a
+  fresh `mkdtemp` directory per run, because `mkdirSync`'s `:mode` is ignored for a directory that
+  already exists.
+- **The seam rule settled §"dead registries" above.** *"One role alone is not a seam."* See that
+  section; five definitions with no consumer are gone.
+- **The generated matrix.** dsh's `docs/event-producer-consumer.md` lists every event's dispatchers and
+  listeners with a bare `-` where a column is empty — it tolerates an unheard event, it does not
+  tolerate not knowing. nyma now generates `docs/event-map.md` the same way (`bun run gen:event-map`,
+  drift-checked by `test/event_emitter_lint.test.cljs`), covering core events, pi-compat events, and
+  the `registerX` registries. First thing it surfaced: `registerModelInfo` is declared and never
+  called.
+
+**Deliberately not borrowed**, so this is not re-litigated: the Cordis plugin tree and its
+profile/bundle composition; "model-visible means logged" (dsh asserts at runtime that everything
+reaching a model request is reconstructable from the session log — nyma discards tool results at the
+turn boundary by construction, `sessions/manager.cljs:27`); the four-way event mode taxonomy
+(`emit`/`waterfall`/`serial`/`parallel`) against nyma's three; and creator mode.
