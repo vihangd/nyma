@@ -11,6 +11,7 @@
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
+            [agent.sessions.archive :as archive]
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
@@ -367,7 +368,11 @@ Examples:
           interactive?         (new-session-path sessions-dir)
           :else                nil)]
     (when path
-      (fs/mkdirSync (npath/dirname path) #js {:recursive true}))
+      (fs/mkdirSync (npath/dirname path) #js {:recursive true})
+      ;; A resumed session may be sitting on disk compressed. Appending to a zstd
+      ;; frame is not a thing, so it becomes a plain JSONL again BEFORE the
+      ;; manager opens it — reads would have worked either way, writes would not.
+      (archive/restore! path))
     (let [session (create-session-manager path)]
       ;; Stamp the project on a session the first time its file is created, so
       ;; `-r` can scope by it later. Sessions written before this existed have
@@ -451,6 +456,21 @@ Examples:
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
         session   (js-await (resolve-session values mode sessions-dir))
+
+        ;; Compress sessions nobody has touched in a while. Runs after the
+        ;; current session is resolved so the active file is never a candidate,
+        ;; and after settings so it stays off unless asked for. Measured: 0.82MB
+        ;; of JSONL becomes 0.11MB in 2ms, so even a large sweep is unnoticeable
+        ;; next to the model call that follows.
+        _         (let [days (or (:archive-after-days (:sessions merged)) 0)]
+                    (when (pos? days)
+                      (let [{:keys [archived bytes-saved]}
+                            (archive/sweep! sessions-dir days
+                                            (when session ((:get-file-path session))))]
+                        (when (pos? archived)
+                          (d/info "sessions"
+                                  (str "archived " archived " session(s), "
+                                       (js/Math.round (/ bytes-saved 1024)) "KB saved"))))))
 
         active-tools (resolve-tools values merged)
         ;; Create agent first, then resolve model via its provider registry

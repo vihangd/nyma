@@ -2,6 +2,7 @@
   (:require [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
             [agent.sessions.partial :as partial]
+            [agent.sessions.archive :as archive]
             [agent.protocols :refer [ISessionStore_session_load
                                      ISessionStore_session_append
                                      ISessionStore_session_build_context
@@ -88,9 +89,11 @@
         load-fn
         (fn []
           (let [fp @file-path]
-            (when (and fp (fs/existsSync fp))
-              (let [content (.readFileSync fs fp "utf8")
-                    lines   (->> (.split content "\n")
+            ;; read-text takes either shape: an old session may be sitting on
+            ;; disk as <path>.zstd. Appending still requires a plain file, which
+            ;; is why cli restores before opening one for write.
+            (when-let [content (and fp (archive/read-text fp))]
+              (let [lines   (->> (.split content "\n")
                                  (filter seq)
                                  (mapv #(js/JSON.parse %)))]
                 (reset! entries lines)

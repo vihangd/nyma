@@ -3,6 +3,7 @@
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.sessions.project :as project]
+            [agent.sessions.archive :as archive]
             ;; picker_frame takes only pure helpers from pi-tui (visibleWidth,
             ;; truncateToWidth) — no TUI is started, so this is safe on the
             ;; pre-TUI `-r` path.
@@ -83,18 +84,29 @@
   [dir]
   (if-not (and dir (fs/existsSync dir))
     []
+    ;; Archived sessions (`<id>.jsonl.zstd`) list beside live ones — a session
+    ;; that vanished from the picker because it got compressed would be worse
+    ;; than never compressing it.
     (let [files (->> (fs/readdirSync dir)
-                     (filter #(.endsWith % ".jsonl")))]
+                     (filter #(or (.endsWith % ".jsonl")
+                                  (.endsWith % ".jsonl.zstd"))))]
       (->> files
            (map (fn [file]
                   (try
                     (let [full    (path/join dir file)
                           stat    (fs/statSync full)
-                          content (.readFileSync fs full "utf8")
-                          entries (parse-lines content)]
-                      {:path         full
+                          ;; `:path` stays the PLAIN path for an archive, because
+                          ;; that is what every caller opens; archive/read-text
+                          ;; and restore! both take that shape.
+                          plain   (if (archive/archived? full)
+                                    (.slice full 0 (- (count full) 5))
+                                    full)
+                          content (archive/read-text plain)
+                          entries (parse-lines (or content ""))]
+                      {:path         plain
+                       :archived?    (archive/archived? full)
                        :name         (or (explicit-name entries)
-                                         (.replace file ".jsonl" ""))
+                                         (-> file (.replace ".jsonl.zstd" "") (.replace ".jsonl" "")))
                        :file         file
                        :modified     (.-mtimeMs stat)
                        :entry-count  (count entries)

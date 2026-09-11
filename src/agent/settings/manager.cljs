@@ -21,6 +21,13 @@
    ;; this stops the AI SDK loop mid-task; bump it for projects where
    ;; the agent legitimately needs more iterations.
    :max-steps      100
+   ;; Session logs compress to about 13% of their size (0.82MB -> 0.11MB in 2ms,
+   ;; measured), so an old sessions directory is mostly air. Off by default:
+   ;; archive-after-days 0 means never, and any positive number compresses
+   ;; sessions untouched for that long to `<id>.jsonl.zstd` at startup. Reading,
+   ;; listing and resuming all handle either shape — a resumed archive is
+   ;; restored to plain JSONL before anything appends to it.
+   :sessions       {:archive-after-days 0}
    ;; Sampling temperature. nyma sent NONE until now, so every request ran at
    ;; whatever the provider defaulted to — typically 0.7-1.0. Measured cost of
    ;; that: re-running five tasks three times each gave pass^3 0% against
