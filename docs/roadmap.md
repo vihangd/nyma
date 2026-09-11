@@ -1153,12 +1153,18 @@ of this section: each row cost a measurement, and without it someone re-opens th
 | `Bun.serve` `routes` in the gateway | — | the hand-rolled router is a few string compares on a local server |
 | `--smol` | RSS 90→91 MB, heap 14→10 MB, objects 150k→93k | no startup win; maybe worth it for a long-lived gateway |
 
-### Left on the table
+### Both "left on the table" items landed the same day
 
-- **zstd for archived sessions.** `Bun.zstdCompressSync` takes a 0.82 MB session to **0.11 MB (13%) in
-  2 ms**, decompress 1 ms; the whole directory 3.2 MB → 0.6 MB. Cannot apply to the live file (appends
-  are the write path), so it is a pass over sessions older than N days with `load-fn` decompressing
-  transparently — the shape deepseek-harness uses. Not urgent at 8.7 MB.
-- **`bun build --compile --bytecode`.** The flag exists in 1.4.2 and the shipped binary is built without
-  it. Warm startup is already identical for binary and `dist` (~130 ms), so the bytecode cache is the
-  only remaining lever on parse time; build both and measure before claiming anything.
+- **zstd archiving** (`sessions/archive.cljs`, settings `sessions.archive-after-days`, default 0 = off).
+  Verified against a copy of the real sessions directory: 67 archived, **2.4 MB saved of 3.2 MB**, 81
+  picker rows before and after in the same order with the same titles, archived sessions load,
+  restore-then-append keeps history. 26 ms for 67 files; 0.4 ms once there is nothing to do.
+  The three rules that make it safe are in the module docstring: the live session is excluded outright
+  (appends are the write path), the round-trip is verified before the original is unlinked, and the
+  original mtime is carried onto the archive — the picker sorts by mtime, so a sweep would otherwise
+  reorder the list into "most recently compressed".
+- **`--bytecode`** on every bundle target: **100 ms → 30 ms** startup (10-run medians), +12.8 MB binary.
+  **`--format=esm` is load-bearing**: bytecode implies CJS, and out of a CJS binary the extension
+  loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension failed with
+  `Cannot find package 'ai'`, none did with ESM. Pinned by `test/bundle_flags.test.cljs`, because a
+  bytecode binary starts fine and prints help fine and only falls over on the extensions.
