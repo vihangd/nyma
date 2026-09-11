@@ -9,7 +9,7 @@
          :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
          :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
          :structured-context {:files-discovered 0 :hot-tokens 0 :warm-tokens 0 :cache-hits 0}
-         :smart-compaction   {:background-updates 0 :full-compactions 0}
+         :smart-compaction   {:full-compactions 0}
          :anthropic-compaction {:turns 0 :requests-with-context-mgmt 0
                                 :compactions-observed 0}}))
 

@@ -129,8 +129,8 @@
         ;; targets escalation, so skip the retry step that now precedes it
         auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
         st   (atom {:model "zen/cheap-1" :no-op-turns 0
-                    :messages [{:role "user" :content "fix X"}
-                               {:role "tool_call" :content "read"}]})
+                    :escalate-task-in-flight true
+                    :messages [{:role "user" :content "fix X"}]})
         api  (fake-api st (assoc c :settings auto))]
     (js-await (esc/on-turn-finalize api #js {:noOpTurns 3}))
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
@@ -143,16 +143,12 @@
         ;; loop.cljs resets :no-op-turns only on a turn that ran tools, so
         ;; question/answer/question/answer reaches 2 with nothing wrong.
                 (fn []
-                  (-> (expect (esc/stall-reason {:no-op-turns 2
-                                                 :messages [{:role "user" :content "hi"}
-                                                            {:role "assistant" :content "hello"}]}
+                  (-> (expect (esc/stall-reason {:no-op-turns 2 :task-in-flight false}
                                                 (esc/config {})))
                       (.toBeFalsy))))
             (it "does not fire at 3 either when no tool has run since the request"
                 (fn []
-                  (-> (expect (esc/stall-reason {:no-op-turns 3
-                                                 :messages [{:role "user" :content "explain this"}
-                                                            {:role "assistant" :content "sure"}]}
+                  (-> (expect (esc/stall-reason {:no-op-turns 3 :task-in-flight false}
                                                 (esc/config {})))
                       (.toBeFalsy))))
             (it "uses the count the loop reports, not the stale state read"
@@ -163,23 +159,20 @@
                   (let [c    (collector)
                         auto (assoc settings :escalate {:mode "auto"})
                         st   (atom {:model "zen/cheap-1" :no-op-turns 9
-                                    :messages [{:role "user" :content "fix X"}
-                                               {:role "tool_call" :content "read"}]})
+                                    :escalate-task-in-flight true
+                                    :messages [{:role "user" :content "fix X"}]})
                         api  (fake-api st (assoc c :settings auto))]
                     (esc/on-turn-finalize api #js {:noOpTurns 1})
                     (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
 
             (it "fires at 3 no-op turns with a task in flight"
                 (fn []
-                  (-> (expect (esc/stall-reason {:no-op-turns 3
-                                                 :messages [{:role "user" :content "fix X"}
-                                                            {:role "tool_call" :content "read"}
-                                                            {:role "assistant" :content "hmm"}]}
+                  (-> (expect (esc/stall-reason {:no-op-turns 3 :task-in-flight true}
                                                 (esc/config {})))
                       (.toContain "3 turns ran no tools"))))
             (it "fires when the verify gate is out of road"
                 (fn []
-                  (-> (expect (esc/stall-reason {:no-op-turns 0 :verify-exhausted true :messages []}
+                  (-> (expect (esc/stall-reason {:no-op-turns 0 :verify-exhausted true}
                                                 (esc/config {})))
                       (.toContain "verify"))))))
 
@@ -193,8 +186,8 @@
                                          {:role "assistant" :content "ok"}
                                          {:role "user" :content "fix X"}
                                          {:role "assistant" :content "trying"}
-                                         {:role "tool_call" :content "bash"}
-                                         {:role "tool_result" :content "boom"}
+                                         {:role "assistant" :content "ran bash"}
+                                         {:role "assistant" :content "boom"}
                                          {:role "assistant" :content "hmm"}]
                                         "note")]
                     (-> (expect request) (.toBe "fix X"))
@@ -227,7 +220,7 @@
   (let [c   (collector)
         st  (atom {:model "zen/cheap-1"
                    :messages [{:role "user" :content "fix X"}
-                              {:role "tool_call" :content "read"}
+                              {:role "assistant" :content "ran read"}
                               {:role "assistant" :content "hmm"}]})
         api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "3 turns ran no tools mid-task" false))
@@ -298,8 +291,8 @@
         (fn []
           (let [c   (collector)
                 st  (atom {:model "zen/cheap-1" :no-op-turns 3
-                           :messages [{:role "user" :content "fix X"}
-                                      {:role "tool_call" :content "read"}]})
+                           :escalate-task-in-flight true
+                           :messages [{:role "user" :content "fix X"}]})
                 api (fake-api st c)]
             (esc/on-turn-finalize api nil)
             (-> (expect (:escalated-to @st)) (.toBeFalsy))
@@ -308,8 +301,43 @@
     (it "yes prunes, swaps and re-delivers the request exactly once" t-yes-prunes-swaps-redelivers)
     (it "'don't ask again' disarms the session" t-never-disarms)))
 
+(defn ^:async t-latched-stall-escalates []
+  (let [c    (collector)
+        auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
+        st   (atom {:model "zen/cheap-1" :no-op-turns 0
+                    :messages [{:role "user" :content "fix X"}]})
+        api  (fake-api st (assoc c :settings auto))]
+    (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 1})
+    (js-await (esc/on-turn-finalize api #js {:noOpTurns 3 :toolCalls 0}))
+    (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))))
+
 (describe "escalate:guards"
   (fn []
+    ;; The stall gate used to scan state :messages for a "tool_call" role that
+    ;; nothing writes, so it could never fire in production.
+    (it "latches task-in-flight from the turn_finalize tool count"
+        (fn []
+          (let [c   (collector)
+                st  (atom {:model "zen/cheap-1" :no-op-turns 0})
+                api (fake-api st c)]
+            (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 2})
+            (-> (expect (:escalate-task-in-flight @st)) (.toBe true))
+            ;; and the episode boundary clears it
+            (esc/on-user-message api nil)
+            (-> (expect (:escalate-task-in-flight @st)) (.toBeFalsy)))))
+
+    (it "a tool-less turn never latches, so a plain chat cannot stall-escalate"
+        (fn []
+          (let [c    (collector)
+                auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
+                st   (atom {:model "zen/cheap-1" :no-op-turns 0})
+                api  (fake-api st (assoc c :settings auto))]
+            (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 0})
+            (esc/on-turn-finalize api #js {:noOpTurns 3 :toolCalls 0})
+            (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+
+    (it "latched work plus 3 no-op turns escalates end to end" t-latched-stall-escalates)
+
     (it "refuses when the target is the model already running" t-refuses-same-model)
     (it "respects max-per-session" t-respects-cap)
     (it "never touches :active-role, allowed-tools or the permission mode" t-permissions-untouched)
@@ -318,8 +346,8 @@
         (fn []
           (let [c   (collector)
                 st  (atom {:model "zen/cheap-1" :plan-mode true :no-op-turns 9
-                           :messages [{:role "user" :content "fix X"}
-                                      {:role "tool_call" :content "read"}]})
+                           :escalate-task-in-flight true
+                           :messages [{:role "user" :content "fix X"}]})
                 api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
             (esc/on-turn-finalize api nil)
             (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
@@ -387,7 +415,7 @@
         auto (assoc settings :escalate {:mode "auto"})
         st  (atom {:model "zen/cheap-1"
                    :messages [{:role "user" :content "fix X"}
-                              {:role "tool_call" :content "read"}
+                              {:role "assistant" :content "ran read"}
                               {:role "assistant" :content "broken"}]})
         api (fake-api st (assoc c :settings auto))]
     (js-await (esc/escalate! api "tests still failing" false))
@@ -430,7 +458,7 @@
         auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 1})
         st   (atom {:model "zen/cheap-1"
                     :messages [{:role "user" :content "fix X"}
-                               {:role "tool_call" :content "edit"}
+                               {:role "assistant" :content "ran edit"}
                                {:role "assistant" :content "done?"}]})
         handlers (atom {})
         api  (fake-api st (assoc c :settings auto))]

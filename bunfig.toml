@@ -5,5 +5,4 @@ production = false
 bun = true
 
 [test]
-root = ["./test", "./dist/test"]
 preload = ["./scripts/test-preload.mjs"]

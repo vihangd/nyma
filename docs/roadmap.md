@@ -944,3 +944,42 @@ same thing:
 
 That is the honest next step for comparability: expand the runnable set, not tune against a saturated
 subset.
+
+## 2026-09-11 sweep — producer/consumer gaps in extensions and tests
+
+Same hunt as the 2026-07-22 round, run across `src/agent/extensions/` and `test/`. Seven found, all
+fixed in one pass. Recurring shapes worth re-running the detector for:
+
+1. **A test suite green over a shape production never produces.** `model_roles`' stall escalation gated
+   on `task-in-flight?`, which scanned `state :messages` for role `"tool_call"` — never written
+   (`sessions/manager.cljs:27`). Nine fixtures in `test/escalate.test.cljs` hand-built that role, so the
+   branch tested true and shipped false: the no-op-turns escalation could not fire in production. Now
+   latched off `turn_finalize`'s `:toolCalls` count into `:escalate-task-in-flight`, cleared at the
+   episode boundary. Detector: `grep -rn ':role "tool_call"' test/`, then split tests over *session
+   entries* (legitimate — the role exists in the JSONL) from tests over *state messages* (fixtures for
+   a shape that never occurs).
+
+2. **Reading a wire field the peer never sends.** `session_info_update` read `.-title`;
+   claude-agent-acp carries the goal under `_meta` at both emit sites, so `:session-title` stayed `""`
+   forever and the handoff header had nothing to print. Third instance of this class after
+   `availableCommands`. Detector: diff nyma's `.-field` reads against the adapter's emit sites per
+   update type. `usage_update`'s `.-cost` is the benign case — optional in the protocol, absent from
+   this agent, guarded; documented in place rather than "fixed".
+
+3. **A notification with no dispatch branch.** `subagent_spawned` / `subagent_state_update` were
+   dropped, so a delegating agent looked idle for the whole child run. Now tracked per agent and shown
+   by the new `acp.subagents` segment.
+
+4. **A registry maintained and never read.** `:features` sets were normalized, merged, and override-
+   protected with nothing consulting them. `registry/supports?` is the reader; `/model` uses it to say
+   an agent can't switch models instead of sending an RPC the far side rejects. The remaining features
+   (`:plan-mode`, `:sessions`, `:thinking`, `:mcp`, `:cost`) still have no gate — see §7e.
+
+5. **A hook whose own comment admits it can't work.** `smart_compaction` Hook A ran at
+   `after_provider_request`, where messages are not available, and only bumped a counter; its
+   `background-summary` atom had no writer. Deleted, along with the `:background-updates` stat.
+
+6. **A config key the tool ignores.** `bunfig.toml`'s `[test] root` selected nothing usable and is not
+   honoured by bun at all — setting it to `./dist` produced an identical run. `npm test` was therefore
+   red on 50 `bench/tasks/javascript/exercises/**` specs that have nothing to do with nyma. Scope lives
+   in `package.json` now: `"test": "bun test dist"`.

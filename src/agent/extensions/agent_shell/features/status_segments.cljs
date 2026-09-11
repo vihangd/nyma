@@ -115,6 +115,17 @@
         (hidden)))
     (hidden)))
 
+;;; ─── acp.subagents ────────────────────────────────────
+
+(defn- acp-subagents-segment [{:keys [theme]}]
+  (let [running (vals (or (:subagents (active-state)) {}))]
+    (if (seq running)
+      (visible (str "\u21b3 " (count running)
+                    (when-let [n (:name (first running))]
+                      (when (= 1 (count running)) (str " " n))))
+               (get-in theme [:colors :warning] "#e0af68"))
+      (hidden))))
+
 ;;; ─── Registration ─────────────────────────────────────
 
 (def segments
@@ -126,6 +137,7 @@
    "acp.model"      {:render acp-model-segment      :position "left"}
    "acp.mode"       {:render acp-mode-segment       :position "left"}
    "acp.tool"       {:render acp-tool-segment       :position "left"}
+   "acp.subagents"  {:render acp-subagents-segment :position "left"}
    "acp.context"    {:render acp-context-segment    :position "right"}
    "acp.cost"       {:render acp-cost-segment       :position "right"}
    "acp.turn-usage" {:render acp-turn-usage-segment :position "right"}})

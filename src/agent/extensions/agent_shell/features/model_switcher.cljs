@@ -127,8 +127,18 @@
   (.registerCommand api "model"
                     #js {:description "Show, list, or change agent model"
                          :handler (fn [args _ctx]
-                                    (let [first-arg (first args)]
+                                    (let [first-arg (first args)
+                                          k         @shared/active-agent]
                                       (cond
+                                        ;; Agents that never advertised a model
+                                        ;; list (:model-switch absent) answered
+                                        ;; /model with an RPC error from the far
+                                        ;; side, or silence. Say so here instead.
+                                        (and k (not (registry/supports? k :model-switch)))
+                                        (notify api (str (shared/kw-name k)
+                                                         " does not support switching models")
+                                                "warning")
+
                                         (= first-arg "list") (show-model-list api)
                                         (seq args)           (switch-model! api (str/join " " args))
                                         :else                (show-model-picker api))))})

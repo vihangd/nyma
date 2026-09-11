@@ -22,7 +22,8 @@
   "Per-agent runtime state:
    {agent-key -> {:models [], :mode \"\", :usage {}, :turn-usage {},
                   :session-title \"\", :session-id \"\",
-                  :dynamic-commands [], :config-options []}}."
+                  :dynamic-commands [], :config-options [],
+                  :subagents {id -> {:name :task :state}}}}."
   (atom {}))
 
 (def deactivators

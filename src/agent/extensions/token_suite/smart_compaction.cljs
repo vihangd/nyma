@@ -173,27 +173,7 @@ with every section below present.
 
 (defn activate [api]
   (let [config (shared/load-config)
-        sc-cfg (:smart-compaction config)
-        background-summary (atom nil)]
-
-    ;; Hook A: Background summary generation (after_provider_request, priority 10)
-    (.on api "after_provider_request"
-         (fn [event ctx]
-           (let [usage-info (when ctx
-                              (let [get-usage (.-getContextUsage ctx)]
-                                (when (fn? get-usage) (get-usage))))
-              ;; Fallback: use event data for token tracking
-                 input-tokens (or (when usage-info (.-inputTokens usage-info))
-                                  (when event (.-inputTokens (.-usage event)))
-                                  0)
-                 turn-count (or (when event (.-turnCount event)) 0)]
-          ;; Only build summary after a few turns and when we have meaningful context
-             (when (>= turn-count 2)
-            ;; Extract messages from the context usage or build from state
-            ;; For now, we build the summary from the event data
-            ;; The full messages aren't in after_provider_request, so we track incrementally
-               (swap! shared/suite-stats update-in [:smart-compaction :background-updates] inc))))
-         10)
+        sc-cfg (:smart-compaction config)]
 
     ;; Hook C: Structured compaction (before_compact, priority 100)
     (.on api "before_compact"
@@ -303,5 +283,4 @@ with every section below present.
            99))
 
     ;; Return deactivator
-    (fn []
-      (reset! background-summary nil))))
+    (fn [] nil)))

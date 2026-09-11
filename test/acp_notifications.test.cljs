@@ -4,6 +4,7 @@
      - acp_message fires from handle-message-chunk via dispatch-notification
      - Existing acp_thought / acp_tool_start / acp_plan emits are undisturbed"
   (:require ["bun:test" :refer [describe it expect]]
+            [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.acp.notifications :refer [dispatch-notification]]))
 
 ;;; ─── helpers ────────────────────────────────────────────────
@@ -100,3 +101,46 @@
                     (dispatch-notification conn parsed (make-api))
                     (let [ev (filterv #(= (:event %) "acp_tool_start") @(:_emits conn))]
                       (-> (expect (pos? (count ev))) (.toBe true))))))))
+
+;;; ─── subagents / session info ───────────────────────────────
+
+(defn- send! [conn utype extra]
+  (let [upd (js/Object.assign #js {:sessionUpdate utype} extra)]
+    (dispatch-notification conn #js {:method "session/update"
+                                     :params #js {:update upd}}
+                           (make-api))))
+
+(describe "subagent updates"
+          (fn []
+            (it "tracks a spawned subagent and drops it on a terminal state"
+                (fn []
+                  (let [conn (make-conn)]
+                    (send! conn "subagent_spawned"
+                           #js {:subagentSessionId "child-1" :name "explorer" :task "look"})
+                    (-> (expect (count (:subagents (get @shared/agent-state "test-agent"))))
+                        (.toBe 1))
+                    (send! conn "subagent_state_update"
+                           #js {:subagentSessionId "child-1" :state "completed"})
+                    (-> (expect (count (:subagents (get @shared/agent-state "test-agent"))))
+                        (.toBe 0))
+                    ;; and both notifications reached the bus
+                    (-> (expect (count (filterv #(= (:event %) "acp_subagent") @(:_emits conn))))
+                        (.toBe 2)))))))
+
+(describe "session_info_update"
+          (fn []
+            ;; claude-agent-acp sends the goal under _meta and never sends
+            ;; `title`; reading only `.-title` left the title permanently blank.
+            (it "takes the title from _meta.goal when title is absent"
+                (fn []
+                  (let [conn (make-conn)]
+                    (send! conn "session_info_update" #js {:_meta #js {:goal "ship the fix"}})
+                    (-> (expect (:session-title (get @shared/agent-state "test-agent")))
+                        (.toBe "ship the fix")))))
+            (it "an explicit title still wins"
+                (fn []
+                  (let [conn (make-conn)]
+                    (send! conn "session_info_update"
+                           #js {:title "real title" :_meta #js {:goal "goal"}})
+                    (-> (expect (:session-title (get @shared/agent-state "test-agent")))
+                        (.toBe "real title")))))))

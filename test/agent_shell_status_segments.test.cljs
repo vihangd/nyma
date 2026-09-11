@@ -126,7 +126,7 @@
                                                       (fn [id config]
                                                         (swap! calls conj {:id id :config config}))}]
                                     (register-all! mock-api)
-                                    (-> (expect (count @calls)) (.toBe 7))
+                                    (-> (expect (count @calls)) (.toBe 8))
                                     (-> (expect (every? (fn [c] (.startsWith (:id c) "acp.")) @calls))
                                         (.toBe true)))))
 

@@ -226,6 +226,16 @@
   [agent-key & [_config]]
   (get @merged-registry agent-key))
 
+(defn supports?
+  "Does `agent-key`'s definition declare `feature`?
+
+   The :features sets shipped in this file (and the ones users can override)
+   had no reader at all until this predicate: they were maintained, normalized
+   and merged, and then nothing ever asked. Unknown agent → false, so a caller
+   gating on a capability degrades to \"not supported\" rather than throwing."
+  [agent-key feature]
+  (boolean (contains? (:features (get @merged-registry agent-key)) feature)))
+
 (defn list-agents
   "List all available agents as [{:key :claude :name \"Claude Code\"} ...]."
   []

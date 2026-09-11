@@ -110,18 +110,13 @@
 ;; stall detection (pure)
 ;; ---------------------------------------------------------------------------
 
-(defn task-in-flight?
-  "Pure: has any tool run since the last user message? Two no-op turns is a
-   normal conversation (question, answer, question, answer) — it is only a
-   stall if the model was actually working on something."
-  [messages]
-  (let [msgs (vec (or messages []))
-        idx  (loop [i (dec (count msgs))]
-               (cond (neg? i) -1
-                     (= (str (:role (nth msgs i))) "user") i
-                     :else (recur (dec i))))]
-    (boolean (some (fn [m] (= (str (:role m)) "tool_call"))
-                   (subvec msgs (inc idx))))))
+;; Whether a task is in flight used to be derived by scanning `state :messages`
+;; for a `tool_call` role. Nothing writes that role — `state :messages` only
+;; ever holds user/assistant (sessions/manager.cljs:27) — so the scan always
+;; returned false and the no-op-turns branch below could never fire. The signal
+;; lives in the turn_finalize payload instead (`:toolCalls`, loop.cljs:576),
+;; latched across turns in `:escalate-task-in-flight` and cleared at the
+;; episode boundary by on-user-message.
 
 (defn stall-reason
   "Pure: {:no-op-turns n :messages [...] :verify-exhausted bool} + cfg →
@@ -136,7 +131,7 @@
       (and (:verify-exhausted signals) (:verify-exhausted on))
       "the verify command is still failing after the fix attempts ran out"
 
-      (and (pos? thresh) (>= n thresh) (task-in-flight? (:messages signals)))
+      (and (pos? thresh) (>= n thresh) (boolean (:task-in-flight signals)))
       (str n " turns ran no tools mid-task")
 
       :else nil)))
@@ -468,6 +463,11 @@
    Prefers the count carried in the event payload — it is authoritative for the
    turn that just ended."
   [api data]
+  ;; Latch first: a turn that ran tools marks the episode as real work, and the
+  ;; stall that follows is then several tool-less turns LATER — by which time
+  ;; this turn's own count is long gone.
+  (when (pos? (or (and data (.-toolCalls data)) 0))
+    (swap! (state-atom api) assoc :escalate-task-in-flight true))
   (let [s   (cur-state api)
         cfg (config (settings api))]
     (when (and (not= (mode cfg) "off")
@@ -480,7 +480,7 @@
       ;; the loop. Dropping the promise races the prune against the next turn.
       (when-let [reason (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
                                                        (:no-op-turns s))
-                                       :messages    (:messages s)
+                                       :task-in-flight (:escalate-task-in-flight s)
                                        :verify-exhausted (:escalate-verify-exhausted s)}
                                       cfg)]
         (escalate! api reason false)))))
@@ -491,7 +491,8 @@
    the escalation lasts until the next request."
   [api _data]
   (let [st (state-atom api)]
-    (swap! st dissoc :escalate-verify-exhausted :escalate-retries)
+    (swap! st dissoc :escalate-verify-exhausted :escalate-retries
+           :escalate-task-in-flight)
     (when (and (:escalated-to @st)
                (= (str (:revert (config (settings api)))) "next-request"))
       (revert! api)))

@@ -33,8 +33,7 @@
          (:chars-saved de) " chars saved\n"
          "Structured Context:  " (:files-discovered sc) " files, "
          (:hot-tokens sc) " hot + " (:warm-tokens sc) " warm tokens\n"
-         "Smart Compaction:    " (:background-updates sm) " bg updates, "
-         (:full-compactions sm) " full compactions\n"
+         "Smart Compaction:    " (:full-compactions sm) " full compactions\n"
          "─────────────────────────────────────────\n"
          "Total Estimated Token Savings: ~" total-saved " tokens")))
 

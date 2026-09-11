@@ -18,7 +18,7 @@
     "prestart": "npx squint compile",
     "start": "bun dist/agent/cli.mjs",
     "pretest": "npx squint compile",
-    "test": "bun test",
+    "test": "bun test dist",
     "repl": "npx squint repl"
   },
   "dependencies": {

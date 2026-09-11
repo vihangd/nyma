@@ -215,6 +215,9 @@
 (defn- handle-usage-update
   "Handle usage_update — context window usage and cost."
   [conn upd _api]
+  ;; `cost` is optional in the protocol and claude-agent-acp never populates it
+  ;; (its three usage_update emit sites send `used`/`size` only), so the cost
+  ;; field stays absent for that agent by design, not by defect.
   (let [used (.-used upd)
         size (.-size upd)
         cost (when-let [c (.-cost upd)]
@@ -233,10 +236,57 @@
 ;;; ─── Session info ──────────────────────────────────────────
 
 (defn- handle-session-info
-  "Handle session_info_update — session title and metadata."
+  "Handle session_info_update — session title and metadata.
+
+   claude-agent-acp never sends `title`: both of its emit sites carry the
+   payload under `_meta` (a goal derived from the prompt, or a file-change
+   report). Reading only `.-title` meant :session-title stayed \"\" forever and
+   the handoff header (features/handoff.cljs) had nothing to print. Other
+   agents do send `title`, so it still wins when present."
   [conn upd _api]
-  (when-let [title (.-title upd)]
-    (shared/update-agent-state! (:agent-key conn) :session-title title)))
+  (let [meta  (aget upd "_meta")
+        title (or (.-title upd)
+                  (when meta (aget meta "goal")))]
+    (when (seq (str (or title "")))
+      (shared/update-agent-state! (:agent-key conn) :session-title title))))
+
+;;; ─── Subagents ─────────────────────────────────────────────
+
+(defn- handle-subagent-spawned
+  "Handle subagent_spawned — a child session the agent delegated to.
+
+   Tracked per agent so the status line can say how many are running; without
+   this branch the notification was dropped and a delegating agent looked idle
+   for the whole child run."
+  [conn upd _api]
+  (when-let [sid (.-subagentSessionId upd)]
+    (let [k    (:agent-key conn)
+          cur  (or (:subagents (get @shared/agent-state k)) {})
+          name (or (.-name upd) "subagent")]
+      (shared/update-agent-state! k :subagents
+                                  (assoc cur (str sid) {:name  (str name)
+                                                        :task  (str (or (.-task upd) ""))
+                                                        :state "running"}))
+      (when-let [emit (:emit conn)]
+        (emit "acp_subagent" #js {:agent-key k :id (str sid)
+                                  :name (str name) :state "running"})))))
+
+(defn- handle-subagent-state
+  "Handle subagent_state_update — a child session changed state. Terminal
+   states drop the entry so the count reflects what is actually running."
+  [conn upd _api]
+  (when-let [sid (.-subagentSessionId upd)]
+    (let [k     (:agent-key conn)
+          cur   (or (:subagents (get @shared/agent-state k)) {})
+          st    (str (or (.-state upd) "disconnected"))
+          done? (contains? #{"completed" "failed" "cancelled" "disconnected"} st)]
+      (shared/update-agent-state! k :subagents
+                                  (if done?
+                                    (dissoc cur (str sid))
+                                    (assoc cur (str sid)
+                                           (assoc (get cur (str sid) {}) :state st))))
+      (when-let [emit (:emit conn)]
+        (emit "acp_subagent" #js {:agent-key k :id (str sid) :state st})))))
 
 ;;; ─── Main dispatcher ───────────────────────────────────────
 
@@ -299,4 +349,6 @@
         "config_option_update"      (handle-config-update conn upd api)
         "usage_update"              (handle-usage-update conn upd api)
         "session_info_update"       (handle-session-info conn upd api)
+        "subagent_spawned"          (handle-subagent-spawned conn upd api)
+        "subagent_state_update"     (handle-subagent-state conn upd api)
         nil)))))
