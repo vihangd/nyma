@@ -1,6 +1,17 @@
 (ns ext-agent-shell-e2e.test
   "End-to-end tests: spawn real ACP agents, handshake, send prompts, verify responses.
-   Requires: /opt/homebrew/bin/qwen and npx @agentclientprotocol/claude-agent-acp installed."
+
+   OPT-IN. These spawn external agent binaries and make live, billed LLM calls,
+   so `bun test dist` skips them unless NYMA_E2E is set:
+
+     NYMA_E2E=1 bun test dist/ext_agent_shell_e2e.test.mjs
+
+   Run unconditionally, they were the one flaky file in the suite — the opencode
+   prompt test failed at 8s inside a full run and passed in 72s on its own — and
+   the project worked around it by grepping this file out of `verify.cmd`, which
+   is how a test stops being a test. Each suite is also skipped when its binary
+   is absent, so opting in on a machine without `qwen` or `opencode` skips rather
+   than fails."
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
             [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.agents.registry :as registry]
@@ -230,7 +241,21 @@
 
 (def e2e-timeout 60000)  ;; 60s per test — real LLM calls
 
-(describe "agent-shell e2e (qwen)" (fn []
+(def ^:private opted-in?
+  "Live agents and paid tokens are never the default." 
+  (boolean (seq (str (or (.-NYMA_E2E js/process.env) "")))))
+
+(defn- have-binary?
+  "Bun.which, so an opt-in run on a machine missing the agent skips instead of
+   failing 60s later on a spawn that was never going to work."
+  [bin]
+  (boolean (js/Bun.which bin)))
+
+(def ^:private run-qwen?     (and opted-in? (have-binary? "qwen")))
+(def ^:private run-claude?   (and opted-in? (have-binary? "npx")))
+(def ^:private run-opencode? (and opted-in? (have-binary? "opencode")))
+
+((.skipIf describe (not run-qwen?)) "agent-shell e2e (qwen)" (fn []
                                      (it "connects via pool and gets a session ID" test-connect-via-pool e2e-timeout)
                                      (it "sends a prompt and receives a non-empty response" test-send-prompt-gets-response e2e-timeout)
                                      (it "returns usage stats in the response" test-usage-in-response e2e-timeout)
@@ -299,7 +324,7 @@
     (js-await (pool/disconnect "opencode"))
     (-> (expect (nil? (shared/find-conn-by-agent "opencode"))) (.toBe true))))
 
-(describe "agent-shell e2e (claude)" (fn []
+((.skipIf describe (not run-claude?)) "agent-shell e2e (claude)" (fn []
                                        (it "connects via pool and gets a session ID" claude-test-connect e2e-timeout)
                                        (it "sends a prompt and receives a non-empty response" claude-test-send-prompt e2e-timeout)
                                        (it "reports non-zero token usage" claude-test-usage-non-zero e2e-timeout)
@@ -307,7 +332,7 @@
                                        (it "stream-callback invoked with chunks during a real prompt" claude-test-stream-callback e2e-timeout)
                                        (it "disconnects cleanly and clears state" claude-test-disconnect e2e-timeout)))
 
-(describe "agent-shell e2e (opencode/big-pickle)" (fn []
+((.skipIf describe (not run-opencode?)) "agent-shell e2e (opencode/big-pickle)" (fn []
                                                     (it "connects via pool and sets model to big-pickle" opencode-test-connect e2e-timeout)
                                                     (it "sends a prompt and receives a non-empty response" opencode-test-send-prompt e2e-timeout)
                                                     (it "returns usage stats in the response" opencode-test-usage e2e-timeout)
