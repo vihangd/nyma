@@ -233,7 +233,7 @@
       (when (pos? applied-count)
         (js-await (js/Bun.write fpath @content-ref))
 
-        ;; Emit context:file-op for expired_context and repo_map
+        ;; Emit context:file-op for repo_map
         (when-let [events (.-events api)]
           (let [emit-fn (.-emit events)]
             (when (fn? emit-fn)

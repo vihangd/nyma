@@ -260,6 +260,33 @@ method→capability map) must be edited in the same commit or the lint test
 fails. Deleting `registerToolRenderer` also orphans
 `ui/tool_renderer_registry.cljs` + its test.
 
+**Compared against NVIDIA SoL-Pi, 2026-09-11.** SoL-Pi is a Pi extension shipping four
+token-efficiency mechanisms (~45-49% fewer tokens at ~94% of score). nyma is built on the same
+author's `pi-tui` and every SoL-Pi hook point has a nyma counterpart by name, so the port looked
+direct. It was not — the architectures differ where it matters. What came of it:
+
+| SoL-Pi mechanism | outcome in nyma |
+|---|---|
+| ObservationPack | **Adapted, not ported.** It projects a persistent tool-result list, swapping bodies for placeholders on the Nth send. nyma has no such list and no re-send, so the equivalent value lives at result *creation*: handle-backed truncation in `tool_result_policy` + `retrieve_result`. |
+| Evidence-Preserving Reducer | **Verification rule taken, delegation skipped.** `validate-compaction` now requires section-6 quotes to occur in the source, which is SoL-Pi's receipt rule. Delegating log reading to a cheaper model was not adopted. |
+| Action Fusion | **Skipped.** A model-supplied `command` on `edit`/`write` is a privilege-escalation path: permission category is keyed on tool NAME (`middleware.cljs:322`) and allow-listed tools fast-path out of the gate, so allow-listing `edit` would grant arbitrary shell. `verify_gate` already banks the win at turn granularity. A `verify.after-edit` flag would close the granularity gap in ~45 lines with no new trust boundary — unbuilt, needs a `gate-clean?` guard against double-running and must not touch `attempts` or emit `small-model/verify-fail`. |
+| Online Context Compact | **Economics unadoptable; boundary deferred.** No trigger channel (no `api.compact`; `/compact` only works because `builtins.cljs` closes over `agent`), no veto channel (`before_compact` only supplies a summary), and `expectedRemainingRequests` — the denominator — has no source in nyma. Their window-pressure override already exists here with the same 16384 constant. The one novel idea left is compacting at a completed plan step: `todos` already takes the `update_plan` shape, matching on `content` since it replaces the whole list. Needs ~6 core lines (a `compaction_check` emit-collect in `maybe-auto-compact!`) and must NOT use plain `:force?`, which bypasses the `min-messages-between` anti-refire guard. |
+
+**Handle-backed truncation (shipped 2026-09-11).** `tool_result_policy` stores the full string
+before truncating and puts a content-hash id in the notice; `retrieve_result` pages it back. Ids
+are content hashes, not time-seeded: the notice is re-sent on every internal step of a turn, so a
+drifting id would change the prompt prefix each step and cost a cache write.
+Two traps worth remembering, both of which a unit test on `apply-policy` cannot see:
+1. **`apply-policy` runs LAST in the leave chain.** `create-pipeline` seeds
+   `[tool-tracking tool-persistence]` and `addMiddleware` APPENDS, so extension `:leave` handlers
+   run first. `token_suite/tool_truncation` cut every result to ~3k before the policy layer was
+   reached — under every cap, so no handle was minted and content was destroyed exactly as before
+   (measured: an 82KB grep result showed 2970 chars, no handle). It was removed for this reason.
+   Any future middleware that shortens `ctx.result` re-creates the defect.
+2. **A recall tool's own output re-enters the policy.** `retrieve_result` carries
+   `:handle-on-truncate false` or an overshooting page mints a handle for a handle; its page size
+   also stays under the cap.
+
 ### 3b. "Scoped API forgot to forward a method" — CLOSED (2026-09-07)
 
 Verified closed: 65 methods forwarded against 60 on the base API, and the
@@ -685,11 +712,23 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 
 ## 2026-07-22 review leftovers (structural, not quick fixes)
 
-- **expired_context / smart_compaction hook D are structurally dead** even after the event fix:
-  their context_assembly walks look for role tool_call/tool_result messages, but state :messages
-  never contains those roles (sessions/manager.cljs:25 invariant) — needs either tool results in
-  assembled context or reading from the session store. Also expired_context keys staleness off
-  turn_end (per STEP) vs assistant-message counting — two numbering schemes that never align.
+- ~~**expired_context / smart_compaction hook D are structurally dead**~~ — **CLOSED 2026-09-11.**
+  The diagnosis was right and the blast radius was wider than recorded. `state :messages` only
+  ever holds `user`/`assistant` (`sessions/manager.cljs:27` says so outright), so FIVE modules
+  scanned for a role that is never there: `observation_mask`, `smart_compaction` **Hook B** (the
+  entry named Hook D here — the dead offloader was B, which also meant `retrieve_archived`'s store
+  was never populated), `expired_context`, `context_folding`'s fold, and three unreachable entries
+  in `priority_assembly`'s role scores. All removed except `priority_assembly`, which is only
+  *partially* dead — its budget-driven pruning works on the messages that do arrive.
+  Not rewired: `before_provider_request` fires once per turn, before `streamText`, which runs the
+  whole multi-step tool loop internally — so there is no hook at which nyma can see accumulated
+  tool results at all. The layer that CAN reshape a tool result is where it is created, and that
+  is where the replacement went (see the handle-backed truncation entry below).
+  Salvage note: `observation_mask/error-result?` (an `Error:` prefix or a non-zero `exitCode`
+  envelope) was a genuinely more precise error detector than `shared/has-error-pattern?`, which
+  matches the word "error" anywhere and so exempted exactly the largest results. It went with the
+  module because nothing else called it; recreate it rather than reaching for `has-error-pattern?`
+  if error-aware filtering is ever needed again.
 - **emit-js! boundary helper** — event-shape stragglers remain (session_before_switch/
   session_switch/session_before_fork kebab; acp_* mixed #js/clj->js; emit-collect collection-keys
   mix kebab and camel). One helper + a payload-shape lint would make the convention structural.

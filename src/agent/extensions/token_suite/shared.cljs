@@ -4,30 +4,23 @@
 
 ;; ── Stats tracking ───────────────────────────────────────────
 (def suite-stats
-  (atom {:observation-mask {:turns 0 :messages-masked 0 :tokens-saved 0}
-         :kv-cache         {:turns 0 :cache-hits 0 :cache-misses 0 :cached-tokens 0}
-         :expired-context  {:turns 0 :stale-replaced 0 :tokens-saved 0}
+  (atom {:kv-cache         {:turns 0 :cache-hits 0 :cache-misses 0 :cached-tokens 0}
          :repo-map         {:files 0 :symbols 0 :last-index-ms 0}
          :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
          :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
          :structured-context {:files-discovered 0 :hot-tokens 0 :warm-tokens 0 :cache-hits 0}
-         :smart-compaction   {:background-updates 0 :offloads 0 :full-compactions 0
-                              :tokens-archived 0 :re-reads 0}
-         :context-folding    {:foci-started 0 :foci-completed 0 :messages-folded 0
-                              :tokens-freed 0}
+         :smart-compaction   {:background-updates 0 :full-compactions 0}
          :anthropic-compaction {:turns 0 :requests-with-context-mgmt 0
                                 :compactions-observed 0}}))
 
 ;; ── Default configuration ────────────────────────────────────
 (def default-config
-  {:observation-mask {:keep-recent 10 :keep-errors true}
-   :kv-cache         {:enabled true
+  {:kv-cache         {:enabled true
                       :min-system-tokens 500
                       :cache-messages true
                       :checkpoint-every-turns 4
                       :max-message-breakpoints 2
                       :extra-providers {:anthropic [] :google []}}
-   :expired-context  {:track-reads true :track-greps true}
    :repo-map         {:max-tokens 2000 :reindex-on-edit true
                       :extensions #{"js" "ts" "tsx" "cljs" "py" "rs" "go" "java" "rb"}}
    :priority-assembly {:min-keep 3 :always-keep-compaction true}
@@ -41,16 +34,9 @@
                         :file-patterns ["CLAUDE.md" "CONTEXT.md" ".cursorrules"]
                         :mdc-dir ".cursor/rules"}
    :smart-compaction   {:background-threshold 0.50
-                        :offload-threshold 0.70
                         :full-threshold 0.85
-                        :offload-min-tokens 2000
-                        :cache-dir ".nyma/context-cache"
-                        :max-preview-lines 5
                         :use-llm-summary false
                         :summarization-model nil}
-   :context-folding    {:enabled true
-                        :max-depth 3
-                        :inject-instructions true}
    :anthropic-compaction {:enabled true
                           :trigger-tokens 150000
                           :pause-after-compaction false}})

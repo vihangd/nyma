@@ -1336,7 +1336,7 @@
 
 (defn ^:async test-bash-tool-result-still-parses []
   ;; The two extensions that hand-parse exitCode out of the payload must keep
-  ;; working (token_suite/observation_mask, bash_suite/output_handling).
+  ;; working (tool_result_policy, bash_suite/output_handling).
   (let [s (normalize-tool-result (js-await (bash-tool-execute {:command "echo x >&2; exit 3"})))
         p (js/JSON.parse s)]
     (-> (expect (.-exitCode p)) (.toBe 3))

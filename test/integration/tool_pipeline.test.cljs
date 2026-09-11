@@ -12,7 +12,6 @@
             [agent.extensions :refer [create-extension-api]]
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.diff-edit :as diff-edit]
-            [agent.extensions.token-suite.context-folding :as context-folding]
             [agent.extensions.token-suite.structured-context :as structured-context]))
 
 ;; Integration: interceptor chain → middleware pipeline → tool execution
@@ -245,7 +244,6 @@
         api      (create-extension-api agent)
         deact-sc (smart-compaction/activate api)
         deact-de (diff-edit/activate api)
-        deact-cf (context-folding/activate api)
         deact-sx (structured-context/activate api)
         events   (:events agent)
         pipeline (:middleware agent)
@@ -258,7 +256,7 @@
             _      (-> (expect (.-inputSchema t)) (.toBeTruthy))
             schema (.-jsonSchema (asSchema (.-inputSchema t)))]
         (-> (expect (.-type schema)) (.toBe "object"))))
-    (deact-sc) (deact-de) (deact-cf) (deact-sx)))
+    (deact-sc) (deact-de) (deact-sx)))
 
 (describe "extension tool contract validation" (fn []
                                                  (it "all extension-registered tools pass asSchema validation"

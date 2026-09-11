@@ -6,15 +6,12 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.extensions.token-suite.shared :as shared]
-            [agent.extensions.token-suite.observation-mask :as observation-mask]
-            [agent.extensions.token-suite.expired-context :as expired-context]
             [agent.extensions.token-suite.kv-cache :as kv-cache]
             [agent.extensions.token-suite.priority-assembly :as priority-assembly]
             [agent.extensions.token-suite.repo-map :as repo-map]
             [agent.extensions.token-suite.diff-edit :as diff-edit]
             [agent.extensions.token-suite.structured-context :as structured-context]
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
-            [agent.extensions.token-suite.context-folding :as context-folding]
             [agent.extensions :refer [create-extension-api]]
             ["@ai-sdk/provider-utils" :refer [asSchema]]
             [clojure.string :as str]))
@@ -27,17 +24,12 @@
 
 (defn- reset-stats! []
   (reset! shared/suite-stats
-          {:observation-mask {:turns 0 :messages-masked 0 :tokens-saved 0}
-           :kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
-           :expired-context  {:turns 0 :stale-replaced 0 :tokens-saved 0}
+          {           :kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
            :repo-map         {:files 0 :symbols 0 :last-index-ms 0}
            :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
            :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
            :structured-context {:files-discovered 0 :hot-tokens 0 :warm-tokens 0 :cache-hits 0}
-           :smart-compaction   {:background-updates 0 :offloads 0 :full-compactions 0
-                                :tokens-archived 0 :re-reads 0}
-           :context-folding    {:foci-started 0 :foci-completed 0 :messages-folded 0
-                                :tokens-freed 0}}))
+           :smart-compaction   {:background-updates 0 :full-compactions 0}}))
 
 (beforeEach reset-stats!)
 
@@ -75,122 +67,6 @@
                                       (fn []
                                         (-> (expect (shared/has-error-pattern? "TypeError: foo")) (.toBe true))
                                         (-> (expect (shared/has-error-pattern? "all good")) (.toBe false))))))
-
-;; ═══════════════════════════════════════════════════════════════
-;; Observation Masking — async tests extracted as top-level defn
-;; ═══════════════════════════════════════════════════════════════
-
-(defn ^:async test-mask-keeps-recent []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (observation-mask/activate api)
-        seen-msgs (atom nil)]
-    ((:on (:events agent)) "before_provider_request"
-                           (fn [config]
-                             (reset! seen-msgs (.-messages config))
-                             #js {:block true :reason "ok"})
-                           0)
-    (swap! (:state agent) assoc :messages
-           [{:role "user" :content "test"}
-            {:role "tool_call" :content "call1" :metadata {:tool-name "read"}}
-            {:role "tool_result" :content "result line 1\nresult line 2"}
-            {:role "assistant" :content "done"}])
-    (js-await (run agent "another question"))
-    (-> (expect (some? @seen-msgs)) (.toBe true))))
-
-(defn ^:async test-mask-preserves-user-assistant []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (observation-mask/activate api)
-        seen-msgs (atom nil)]
-    ((:on (:events agent)) "before_provider_request"
-                           (fn [config]
-                             (reset! seen-msgs (.-messages config))
-                             #js {:block true :reason "ok"})
-                           0)
-    (swap! (:state agent) assoc :messages
-           [{:role "user" :content "hello world"}
-            {:role "assistant" :content "hi there"}])
-    (js-await (run agent "test"))
-    (let [first-msg (aget @seen-msgs 0)]
-      (-> (expect (.-content first-msg)) (.toContain "hello world")))))
-
-(defn ^:async test-mask-zero-results []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (observation-mask/activate api)]
-    ((:on (:events agent)) "before_provider_request"
-                           (fn [_] #js {:block true :reason "ok"}))
-    (js-await (run agent "test"))
-    (-> (expect true) (.toBe true))))
-
-(defn ^:async test-mask-keeps-error-results []
-  ;; 12 old tool_results (keep-recent 10): the oldest two are maskable, but
-  ;; one is an error result — it must survive verbatim (failure evidence).
-  (let [handler (atom nil)
-        api     #js {:on (fn [evt h _prio]
-                           (when (= evt "context_assembly") (reset! handler h)))
-                     :estimateTokens (fn [s] (count (str s)))}
-        _       (observation-mask/activate api)
-        msgs    (concat
-                 [{:role "tool_result" :content "Error: disk on fire"}
-                  {:role "tool_result" :content "old ok result 1 with lots of text"}
-                  {:role "tool_result" :content "old ok result 2 with lots of text"}]
-                 (map (fn [i] {:role "tool_result" :content (str "recent " i)}) (range 10)))
-        arr     (clj->js (vec msgs))
-        event   #js {:messages arr}]
-    (@handler event nil)
-    (-> (expect (.-content (aget arr 0))) (.toBe "Error: disk on fire"))
-    ;; The oldest non-error results got masked instead
-    (-> (expect (.-content (aget arr 1))) (.toContain "[tool_result:"))))
-
-(describe "ext-observation-mask error preservation" (fn []
-                                                      (it "error-result? detects Error: prefix and non-zero exitCode"
-                                                          (fn []
-                                                            (-> (expect (observation-mask/error-result? "Error: nope")) (.toBe true))
-                                                            (-> (expect (observation-mask/error-result? "{\"stdout\":\"\",\"exitCode\":1}")) (.toBe true))
-                                                            (-> (expect (observation-mask/error-result? "{\"stdout\":\"ok\",\"exitCode\":0}")) (.toBe false))
-                                                            (-> (expect (observation-mask/error-result? "all fine")) (.toBe false))))
-                                                      (it "old error results survive masking" test-mask-keeps-error-results)))
-
-(describe "ext-observation-mask" (fn []
-                                   (it "masks old tool_results keeping recent ones" test-mask-keeps-recent)
-                                   (it "never modifies user or assistant messages" test-mask-preserves-user-assistant)
-                                   (it "handles zero tool_results gracefully" test-mask-zero-results)
-                                   (it "placeholder utils compute correctly"
-                                       (fn []
-                                         (let [content "line1\nline2\nline3\nline4"]
-                                           (-> (expect (shared/count-lines content)) (.toBe 4))
-                                           (-> (expect (shared/count-chars content)) (.toBe (count content))))))))
-
-;; ═══════════════════════════════════════════════════════════════
-;; Expired Context Pruning
-;; ═══════════════════════════════════════════════════════════════
-
-(describe "ext-expired-context" (fn []
-                                  (it "activates without error"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              deact (expired-context/activate api)]
-                                          (-> (expect (fn? deact)) (.toBe true)))))
-
-                                  (it "deactivate resets state"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              deact (expired-context/activate api)]
-                                          (deact)
-                                          (-> (expect true) (.toBe true)))))
-
-                                  (it "tracks file operations via tool_execution_end"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              _deact (expired-context/activate api)]
-                                          ((:emit (:events agent)) "tool_execution_end"
-                                                                   #js {:toolName "read" :args #js {:path "/src/foo.cljs"} :duration 100})
-                                          (-> (expect true) (.toBe true)))))))
 
 ;; ═══════════════════════════════════════════════════════════════
 ;; KV Cache Optimization
@@ -707,75 +583,7 @@
                                                api   (make-api agent)
                                                deact (smart-compaction/activate api)]
                                            (-> (expect (fn? deact)) (.toBe true))
-                                           (deact)
-        ;; retrieve_archived should be unregistered
-                                           (-> (expect (nil? (get ((:get-active (:tool-registry agent))) "retrieve_archived"))) (.toBe true)))))
-
-                                   (it "registers retrieve_archived tool"
-                                       (fn []
-                                         (let [agent (make-agent)
-                                               api   (make-api agent)
-                                               _deact (smart-compaction/activate api)
-                                               tools ((:get-active (:tool-registry agent)))]
-                                           (-> (expect (some? (get tools "retrieve_archived"))) (.toBe true)))))
-
-                                   (it "offloads large tool_result in context_assembly"
-                                       (fn []
-                                         (let [agent (make-agent)
-                                               api   (make-api agent)
-                                               _deact (smart-compaction/activate api)
-            ;; Create a large tool_result message
-                                               large-content (str/join "\n" (map #(str "line " % " — this is a detailed description of what happened during the test execution run number " %) (range 500)))
-                                               messages #js [#js {:role "user" :content "test"}
-                                                             #js {:role "tool_result" :content large-content}]
-                                               event #js {:messages messages
-                                                          :systemPrompt "test prompt"
-                                                          :tokenBudget #js {:contextWindow 10000
-                                                                            :inputBudget 7000
-                                                                            :tokensUsed 5500
-                                                                            :model "test"}}]
-        ;; Emit context_assembly — offload threshold is 0.70, 5500/7000 = 0.786
-                                           ((:emit (:events agent)) "context_assembly" event)
-        ;; The large result should be archived
-                                           (let [result-content (.-content (aget messages 1))]
-                                             (-> (expect (.includes (str result-content) "Archived")) (.toBe true))))))
-
-                                   (it "preserves error-containing tool results"
-                                       (fn []
-                                         (let [agent (make-agent)
-                                               api   (make-api agent)
-                                               _deact (smart-compaction/activate api)
-                                               error-content (str (str/join "\n" (map #(str "line " %) (range 500)))
-                                                                  "\nTypeError: Cannot read property")
-                                               messages #js [#js {:role "user" :content "test"}
-                                                             #js {:role "tool_result" :content error-content}]
-                                               event #js {:messages messages
-                                                          :systemPrompt "test"
-                                                          :tokenBudget #js {:contextWindow 10000
-                                                                            :inputBudget 7000
-                                                                            :tokensUsed 5500
-                                                                            :model "test"}}]
-                                           ((:emit (:events agent)) "context_assembly" event)
-        ;; Error content should NOT be archived
-                                           (let [result-content (.-content (aget messages 1))]
-                                             (-> (expect (.includes (str result-content) "Archived")) (.toBe false))))))
-
-                                   (it "skips already-masked results"
-                                       (fn []
-                                         (let [agent (make-agent)
-                                               api   (make-api agent)
-                                               _deact (smart-compaction/activate api)
-                                               messages #js [#js {:role "user" :content "test"}
-                                                             #js {:role "tool_result" :content "[tool_result: read — 100 lines]"}]
-                                               event #js {:messages messages
-                                                          :systemPrompt "test"
-                                                          :tokenBudget #js {:contextWindow 10000
-                                                                            :inputBudget 7000
-                                                                            :tokensUsed 5500
-                                                                            :model "test"}}]
-                                           ((:emit (:events agent)) "context_assembly" event)
-                                           (let [result-content (.-content (aget messages 1))]
-                                             (-> (expect (.startsWith (str result-content) "[tool_result:")) (.toBe true))))))
+                                           (deact))))
 
                                    (it "structured compaction sets evt-ctx.summary via before_compact"
                                        (fn []
@@ -818,26 +626,6 @@
 ;; Smart Compaction — Schema Contract Validation
 ;; ═══════════════════════════════════════════════════════════════
 
-(defn test-retrieve-archived-has-input-schema []
-  ;; Contract guard: retrieve_archived must use AI SDK tool() with inputSchema,
-  ;; NOT a raw JS object with parameters. asSchema must produce {type: "object"}.
-  (let [agent (make-agent)
-        api   (make-api agent)
-        deact (smart-compaction/activate api)
-        tools ((:all (:tool-registry agent)))
-        t     (get tools "retrieve_archived")]
-    ;; Tool must be registered
-    (-> (expect t) (.toBeTruthy))
-    ;; Must have inputSchema (tool() sets this), NOT parameters (raw object pattern)
-    (-> (expect (.-inputSchema t)) (.toBeTruthy))
-    (-> (expect (.-parameters t)) (.toBeUndefined))
-    ;; asSchema must produce a valid JSON Schema with type: "object"
-    (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
-      (-> (expect (.-type schema)) (.toBe "object"))
-      ;; hash property must exist
-      (-> (expect (.. schema -properties -hash)) (.toBeTruthy)))
-    (deact)))
-
 (defn test-all-token-suite-tools-pass-schema-validation []
   ;; Contract guard: every tool registered by token-suite sub-modules must
   ;; pass asSchema validation — the same check the AI SDK runs before sending
@@ -846,7 +634,6 @@
         api   (make-api agent)
         deact-sc (smart-compaction/activate api)
         deact-de (diff-edit/activate api)
-        deact-cf (context-folding/activate api)
         deact-sx (structured-context/activate api)
         all-tools ((:all (:tool-registry agent)))]
     ;; Check every registered tool
@@ -854,156 +641,11 @@
       (-> (expect (.-inputSchema t)) (.toBeTruthy))
       (let [schema (.-jsonSchema (asSchema (.-inputSchema t)))]
         (-> (expect (.-type schema)) (.toBe "object"))))
-    (deact-sc) (deact-de) (deact-cf) (deact-sx)))
+    (deact-sc) (deact-de) (deact-sx)))
 
 (describe "ext-smart-compaction-schema" (fn []
-                                          (it "retrieve_archived has valid AI SDK inputSchema"
-                                              test-retrieve-archived-has-input-schema)
                                           (it "all token-suite tools pass asSchema validation"
                                               test-all-token-suite-tools-pass-schema-validation)))
-
-;; ═══════════════════════════════════════════════════════════════
-;; Context Folding
-;; ═══════════════════════════════════════════════════════════════
-
-(defn ^:async test-start-focus-pushes []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (context-folding/activate api)
-        tools ((:get-active (:tool-registry agent)))
-        start-tool (get tools "start_focus")]
-    (when start-tool
-      (let [result (js-await ((.-execute start-tool)
-                              #js {:objective "find the bug"}))]
-        (-> (expect result) (.toContain "FOCUS_START"))
-        (-> (expect result) (.toContain "find the bug"))
-        (-> (expect (:foci-started (:context-folding @shared/suite-stats))) (.toBe 1))))))
-
-(defn ^:async test-complete-focus-pops []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (context-folding/activate api)
-        tools ((:get-active (:tool-registry agent)))
-        start-tool (get tools "start_focus")
-        complete-tool (get tools "complete_focus")]
-    (when (and start-tool complete-tool)
-      (js-await ((.-execute start-tool) #js {:objective "explore"}))
-      (let [result (js-await ((.-execute complete-tool)
-                              #js {:summary "Found the issue in auth.ts"
-                                   :key_artifacts #js ["/src/auth.ts"]}))]
-        (-> (expect result) (.toContain "FOCUS_END"))
-        (-> (expect (:foci-completed (:context-folding @shared/suite-stats))) (.toBe 1))))))
-
-(defn ^:async test-complete-without-start []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (context-folding/activate api)
-        tools ((:get-active (:tool-registry agent)))
-        complete-tool (get tools "complete_focus")]
-    (when complete-tool
-      (let [result (js-await ((.-execute complete-tool)
-                              #js {:summary "oops"}))]
-        (-> (expect result) (.toContain "Error"))))))
-
-(defn ^:async test-max-depth []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (context-folding/activate api)
-        tools ((:get-active (:tool-registry agent)))
-        start-tool (get tools "start_focus")]
-    (when start-tool
-      ;; Push 3 foci (max-depth default = 3)
-      (js-await ((.-execute start-tool) #js {:objective "focus 1"}))
-      (js-await ((.-execute start-tool) #js {:objective "focus 2"}))
-      (js-await ((.-execute start-tool) #js {:objective "focus 3"}))
-      ;; Fourth should fail
-      (let [result (js-await ((.-execute start-tool) #js {:objective "focus 4"}))]
-        (-> (expect result) (.toContain "Error"))
-        (-> (expect result) (.toContain "depth"))))))
-
-(defn ^:async test-fold-applied-in-context-assembly []
-  (let [agent (make-agent)
-        api   (make-api agent)
-        _deact (context-folding/activate api)
-        tools ((:get-active (:tool-registry agent)))
-        start-tool (get tools "start_focus")
-        complete-tool (get tools "complete_focus")]
-    (when (and start-tool complete-tool)
-      ;; Start a focus and complete it
-      (let [start-result (js-await ((.-execute start-tool) #js {:objective "search codebase"}))]
-        (js-await ((.-execute complete-tool)
-                   #js {:summary "Found bug in auth.ts:42"
-                        :key_artifacts #js ["/src/auth.ts"]}))
-        ;; Now simulate context_assembly with messages containing the markers
-        (let [messages #js [#js {:role "user" :content "fix the bug"}
-                            #js {:role "tool_result" :content start-result}
-                            #js {:role "assistant" :content "Let me search..."}
-                            #js {:role "tool_result" :content "file contents"}
-                            #js {:role "tool_result"
-                                 :content (str "[FOCUS_END:" (.substring start-result
-                                                                         (+ (.indexOf start-result ":") 1)
-                                                                         (.indexOf start-result "]"))
-                                               "] Focus completed.")}]
-              event #js {:messages messages
-                         :systemPrompt "test"
-                         :tokenBudget #js {:contextWindow 100000
-                                           :inputBudget 70000
-                                           :tokensUsed 5000
-                                           :model "test"}}]
-          ;; Emit context_assembly to apply the fold
-          ((:emit (:events agent)) "context_assembly" event)
-          ;; Messages should be fewer after folding
-          (-> (expect (.-length messages)) (.toBeLessThan 5)))))))
-
-(describe "ext-context-folding" (fn []
-                                  (it "activates and deactivates cleanly"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              deact (context-folding/activate api)]
-                                          (-> (expect (fn? deact)) (.toBe true))
-                                          (deact)
-                                          (-> (expect (nil? (get ((:get-active (:tool-registry agent))) "start_focus"))) (.toBe true))
-                                          (-> (expect (nil? (get ((:get-active (:tool-registry agent))) "complete_focus"))) (.toBe true)))))
-
-                                  (it "registers start_focus and complete_focus tools"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              _deact (context-folding/activate api)
-                                              tools ((:get-active (:tool-registry agent)))]
-                                          (-> (expect (some? (get tools "start_focus"))) (.toBe true))
-                                          (-> (expect (some? (get tools "complete_focus"))) (.toBe true)))))
-
-                                  (it "start_focus pushes to stack" test-start-focus-pushes)
-                                  (it "complete_focus pops and creates pending fold" test-complete-focus-pops)
-                                  (it "complete without start returns error" test-complete-without-start)
-                                  (it "max depth enforcement" test-max-depth)
-                                  (it "pending fold applied in context_assembly" test-fold-applied-in-context-assembly)
-
-                                  (it "focus instructions injected via prompt-section"
-                                      (fn []
-                                        (let [agent (make-agent)
-                                              api   (make-api agent)
-                                              _deact (context-folding/activate api)
-                                              result (atom nil)]
-        ;; Capture before_agent_start result
-                                          ((:on (:events agent)) "before_provider_request"
-                                                                 (fn [config]
-                                                                   (reset! result (.-system config))
-                                                                   #js {:block true :reason "ok"})
-                                                                 0)
-        ;; The instructions should be in the system prompt via prompt-sections
-                                          (-> (expect true) (.toBe true)))))
-
-                                  (it "stats tracking works"
-                                      (fn []
-                                        (swap! shared/suite-stats assoc-in [:context-folding :foci-started] 5)
-                                        (swap! shared/suite-stats assoc-in [:context-folding :foci-completed] 4)
-                                        (swap! shared/suite-stats assoc-in [:context-folding :messages-folded] 23)
-                                        (-> (expect (:foci-started (:context-folding @shared/suite-stats))) (.toBe 5))
-                                        (-> (expect (:foci-completed (:context-folding @shared/suite-stats))) (.toBe 4))
-                                        (-> (expect (:messages-folded (:context-folding @shared/suite-stats))) (.toBe 23))))))
 
 ;; ═══════════════════════════════════════════════════════════════
 ;; Integration Tests
@@ -1012,8 +654,6 @@
 (defn ^:async test-integration-full-pipeline []
   (let [agent (make-agent)
         api   (make-api agent)
-        _d1   (observation-mask/activate api)
-        _d2   (expired-context/activate api)
         _d3   (kv-cache/activate api)
         _d4   (priority-assembly/activate api)]
     ((:on (:events agent)) "before_provider_request"
@@ -1026,41 +666,32 @@
     (-> (expect true) (.toBe true))))
 
 (describe "token-suite integration" (fn []
-                                      (it "all 9 extensions activate without conflict"
+                                      (it "all 6 extensions activate without conflict"
                                           (fn []
                                             (let [agent (make-agent)
                                                   api   (make-api agent)
-                                                  d2    (observation-mask/activate api)
                                                   d3    (kv-cache/activate api)
                                                   d4    (priority-assembly/activate api)
                                                   d5    (diff-edit/activate api)
                                                   d6    (structured-context/activate api)
-                                                  d7    (smart-compaction/activate api)
-                                                  d8    (context-folding/activate api)]
-                                              (-> (expect (fn? d2)) (.toBe true))
+                                                  d7    (smart-compaction/activate api)]
                                               (-> (expect (fn? d3)) (.toBe true))
                                               (-> (expect (fn? d4)) (.toBe true))
                                               (-> (expect (fn? d5)) (.toBe true))
                                               (-> (expect (fn? d6)) (.toBe true))
                                               (-> (expect (fn? d7)) (.toBe true))
-                                              (-> (expect (fn? d8)) (.toBe true))
         ;; Deactivate all
-                                              (d2) (d3) (d4) (d5) (d6) (d7) (d8))))
+                                              (d3) (d4) (d5) (d6) (d7))))
 
                                       (it "full pipeline runs without error" test-integration-full-pipeline)
 
                                       (it "stats tracking works"
                                           (fn []
-                                            (swap! shared/suite-stats assoc-in [:observation-mask :messages-masked] 42)
                                             (swap! shared/suite-stats assoc-in [:kv-cache :cache-hits] 10)
-                                            (-> (expect (:messages-masked (:observation-mask @shared/suite-stats))) (.toBe 42))
                                             (-> (expect (:cache-hits (:kv-cache @shared/suite-stats))) (.toBe 10))))
 
                                       (it "shared config loads defaults when no settings file"
                                           (fn []
                                             (let [config (shared/load-config)]
-                                              (-> (expect (get-in config [:observation-mask :keep-recent])) (.toBe 10))
                                               (-> (expect (get-in config [:diff-edit :fuzzy-enabled])) (.toBe true))
-                                              (-> (expect (get-in config [:structured-context :hot-budget])) (.toBe 2000))
-                                              (-> (expect (get-in config [:smart-compaction :offload-threshold])) (.toBe 0.70))
-                                              (-> (expect (get-in config [:context-folding :max-depth])) (.toBe 3)))))))
+                                              (-> (expect (get-in config [:structured-context :hot-budget])) (.toBe 2000)))))))

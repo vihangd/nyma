@@ -1,10 +1,6 @@
 (ns agent.extensions.token-suite.smart-compaction
-  (:require ["ai" :refer [generateText tool]]
-            ["zod" :as z]
-            ["node:fs" :as fs]
-            ["node:path" :as path]
+  (:require ["ai" :refer [generateText]]
             [agent.extensions.token-suite.shared :as shared]
-            [agent.token-estimation :as te]
             [agent.sessions.compaction :as compaction]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [clojure.string :as str]))
@@ -173,35 +169,12 @@ with every section below present.
            (str/join "\n" all-paths)
            "[none yet]"))))
 
-;; ── Filesystem Offloading ──────────────────────────────────────
-
-(defn- ensure-cache-dir [cache-dir]
-  (let [abs-dir (if (path/isAbsolute cache-dir)
-                  cache-dir
-                  (path/join (js/process.cwd) cache-dir))]
-    (when-not (fs/existsSync abs-dir)
-      (fs/mkdirSync abs-dir #js {:recursive true}))
-    abs-dir))
-
-(defn- offload-to-file [content cache-dir max-preview-lines]
-  (let [hash (shared/hash-content content)
-        abs-dir (ensure-cache-dir cache-dir)
-        fpath (path/join abs-dir (str hash ".txt"))
-        lines (.split (str content) "\n")
-        preview-lines (.slice lines 0 (min max-preview-lines (.-length lines)))
-        preview (.join preview-lines "\n")
-        tokens (te/estimate-tokens content)]
-    (fs/writeFileSync fpath content "utf8")
-    {:hash hash :path fpath :tokens tokens :preview preview}))
-
 ;; ── Activate / Deactivate ──────────────────────────────────────
 
 (defn activate [api]
   (let [config (shared/load-config)
         sc-cfg (:smart-compaction config)
-        background-summary (atom nil)
-        tool-result-cache (atom {})
-        read-history (atom #{})]
+        background-summary (atom nil)]
 
     ;; Hook A: Background summary generation (after_provider_request, priority 10)
     (.on api "after_provider_request"
@@ -221,50 +194,6 @@ with every section below present.
             ;; The full messages aren't in after_provider_request, so we track incrementally
                (swap! shared/suite-stats update-in [:smart-compaction :background-updates] inc))))
          10)
-
-    ;; Hook B: Filesystem offloading (context_assembly, priority 85).
-    ;; Skipped when the request runs against a model that supports the
-    ;; Anthropic server-side compaction API — Anthropic handles older
-    ;; tool-result pruning transparently in that mode.
-    (.on api "context_assembly"
-         (fn [event _ctx]
-           (let [budget       (.-tokenBudget event)
-                 tokens-used  (when budget (.-tokensUsed budget))
-                 input-budget (when budget (.-inputBudget budget))
-                 model-id     (when budget (str (or (.-model budget) "")))
-                 server-side? (and (:enabled (:anthropic-compaction config))
-                                   (shared/model-supports-compaction? model-id))
-                 threshold    (:offload-threshold sc-cfg)
-                 messages     (.-messages event)]
-             (when (and (not server-side?)
-                        tokens-used input-budget
-                        (> (/ tokens-used input-budget) threshold))
-               (let [total (.-length messages)
-                     cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
-                     max-preview (:max-preview-lines sc-cfg)
-                     min-tokens (:offload-min-tokens sc-cfg)]
-                 (doseq [i (range total)]
-                   (let [msg (aget messages i)
-                         role (shared/msg-role msg)
-                         content (str (shared/msg-content msg))]
-                     (when (= role "tool_result")
-                    ;; Skip already-masked results
-                       (when-not (.startsWith content "[tool_result:")
-                      ;; Skip error-containing results
-                         (when-not (shared/has-error-pattern? content)
-                           (let [est (te/estimate-tokens content)]
-                             (when (> est min-tokens)
-                               (let [info (offload-to-file content cache-dir max-preview)]
-                                 (aset msg "content"
-                                       (str "[Archived: " (:tokens info) " tokens — use retrieve_archived(\"" (:hash info) "\") to recover]\n"
-                                            "Preview:\n" (:preview info) "\n"
-                                            "Cache: " (:hash info) ".txt"))
-                                 (swap! tool-result-cache assoc (:hash info) info)
-                                 (swap! shared/suite-stats update-in [:smart-compaction :offloads] inc)
-                                 (swap! shared/suite-stats update-in [:smart-compaction :tokens-archived]
-                                        + (:tokens info))))))))))))
-             nil))
-         85)
 
     ;; Hook C: Structured compaction (before_compact, priority 100)
     (.on api "before_compact"
@@ -373,46 +302,6 @@ with every section below present.
                        nil))))))
            99))
 
-    ;; Hook D: Re-read detection (tool_execution_end, priority 0)
-    (.on api "tool_execution_end"
-         (fn [event _ctx]
-           (let [tool (or (.-toolName event) "")
-                 args (.-args event)
-                 fpath (when args (or (.-path args) ""))]
-             (when (and (= tool "read") (seq fpath))
-               (if (contains? @read-history fpath)
-              ;; Re-read detected — check if this file was previously archived
-                 (when (some (fn [[_hash info]]
-                               (let [cached-content (when (fs/existsSync (:path info))
-                                                      (fs/readFileSync (:path info) "utf8"))]
-                                 (when cached-content
-                                   (.includes cached-content fpath))))
-                             @tool-result-cache)
-                   (swap! shared/suite-stats update-in [:smart-compaction :re-reads] inc))
-                 (swap! read-history conj fpath)))))
-         0)
-
-    ;; Tool: retrieve_archived
-    (.registerTool api "retrieve_archived"
-                   (tool
-                    #js {:description "Retrieve previously archived tool result content from the context cache. Use the hash from archive notices."
-                         :inputSchema (.object z
-                                               #js {:hash (-> (.string z)
-                                                              (.describe "The hash from the archive notice (e.g., 'a1b2c3d4')"))})
-                         :execute (fn [args]
-                                    (let [hash (or (.-hash args) (aget args "hash") "")
-                                          cache-dir (or (:cache-dir sc-cfg) ".nyma/context-cache")
-                                          abs-dir (if (path/isAbsolute cache-dir)
-                                                    cache-dir
-                                                    (path/join (js/process.cwd) cache-dir))
-                                          fpath (path/join abs-dir (str hash ".txt"))]
-                                      (if (fs/existsSync fpath)
-                                        (fs/readFileSync fpath "utf8")
-                                        (str "No cached content found for hash: " hash))))}))
-
     ;; Return deactivator
     (fn []
-      (.unregisterTool api "retrieve_archived")
-      (reset! background-summary nil)
-      (reset! tool-result-cache {})
-      (reset! read-history #{}))))
+      (reset! background-summary nil))))

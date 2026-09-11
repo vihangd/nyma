@@ -129,7 +129,7 @@
    the exit code as STRUCTURED metadata instead of only inside an opaque string.
 
    Consumers previously had to re-parse the payload to learn whether a command
-   failed — `token_suite/observation_mask` and `bash_suite/output_handling` both
+   failed — `tool_result_policy` and `bash_suite/output_handling` both
    do exactly that by hand. `:details` rides the `tool_result` event
    (`middleware.cljs:154`), so the signal is available without the parsing.
 
