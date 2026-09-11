@@ -95,7 +95,7 @@
                                                 :model      (str (or model "unknown"))
                                                 :extensions extensions-count})))
 
-(defn- resolve-model-via-registry
+(defn resolve-model-via-registry
   "Resolve a model through the agent's provider registry.
    Falls back to the provider name as a direct model ID.
    Handles OAuth credential refresh for providers that need it.
@@ -111,6 +111,17 @@
    setModel)."
   [provider-registry values merged]
   (let [raw-model (or (:model values) (:model merged) "claude-sonnet-4-20250514")
+        ;; A bare `--model build` is a ROLE name, not a model id. Roles are how
+        ;; the rest of nyma talks about models (/role, escalate's chains,
+        ;; bench's --model), and one-shot mode was the only place the word was
+        ;; taken literally: `--model local` went out as the model id "local" and
+        ;; came back "Unknown Model, please check the model code" from whichever
+        ;; provider happened to be the default.
+        role      (when-not (str/includes? (str raw-model) "/")
+                    (get (:roles merged) (keyword (str raw-model))))
+        raw-model (if (and role (:model role))
+                    (str (:provider role) "/" (:model role))
+                    raw-model)
         ;; Parse provider/model slash syntax when no explicit --provider is given
         ;; --model provider/model slash syntax overrides the settings-default provider.
         ;; Only an explicit --provider CLI flag takes precedence over it.
@@ -119,7 +130,17 @@
         (if (and (not cli-provider) (str/includes? raw-model "/"))
           (registry-utils/split-model-spec raw-model)
           [(or cli-provider (:provider merged) "anthropic") raw-model])
-        p-config  ((:get provider-registry) provider)]
+        p-config  ((:get provider-registry) provider)
+        _ (when-not p-config
+            ;; Naming the provider beats the generic "No model configured. Set
+            ;; ANTHROPIC_API_KEY…" the caller prints when resolution returns
+            ;; nil — that sentence sends you to /login for a provider that was
+            ;; never registered. Note the registered list: a provider declared
+            ;; in ~/.nyma/settings.json can be hidden by a project settings file
+            ;; replacing the whole `local-models` array.
+            (d/warn "nyma" (str "Unknown provider '" provider "' in --model "
+                                raw-model)
+                    #js {:registered (clj->js (vec (sort (keys ((:list provider-registry))))))}))]
     ;; Auto-refresh OAuth credentials if needed
     (when-let [oauth-cfg (:oauth p-config)]
       (let [creds (oauth/load-credentials provider)]
@@ -131,7 +152,10 @@
                   "expires-at" (:expires-at creds)})
             (catch :default e
               (d/warn (str "OAuth refresh failed for " provider ": " (.-message e))))))))
-    {:model    ((:resolve provider-registry) provider model-id)
+    {:model    (try ((:resolve provider-registry) provider model-id)
+                     ;; An unknown provider throws here; the caller still needs
+                     ;; to know WHAT was asked for to say so.
+                     (catch :default _ nil))
      :provider provider
      :model-id model-id}))
 
@@ -496,6 +520,9 @@ Examples:
         ;; The configured DEFAULT model spec (-m / settings :model / fallback).
         ;; The "default" role resolves to this — so /role default|reset and
         ;; plan-exit restore the user's chosen model, not a hardcoded sonnet.
+        ;; Recorded even when resolution FAILED: it is the only record of what
+        ;; the user asked for, and the loop's "no model configured" error reads
+        ;; it to name the spec instead of sending everyone to /login.
         _ (when (and provider (:model-id resolved))
             (swap! (:state agent) assoc :base-model-spec
                    (str provider "/" (:model-id resolved))))

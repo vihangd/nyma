@@ -77,3 +77,33 @@
                   (let [a (fake-agent {:messages [{:role "user" :content "q"}]} nil)
                         r (result-object a 5 nil)]
                     (-> (expect (.-is_error r)) (.toBe true)))))))
+
+;;; ─── reasoning in one-shot output ───────────────────────────
+;;; A reasoning model hands back <think>…</think> around its answer. Printing
+;;; that as `result` gives an orchestrator the deliberation instead of the
+;;; answer — but blanking a reply that is ONLY reasoning would be worse, so
+;;; that case passes through intact.
+
+(describe "one-shot output strips reasoning"
+  (fn []
+    (it "keeps the answer and drops the think block"
+        (fn []
+          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                              {:role "assistant"
+                                               :content "<think>let me see</think>\nThe answer is 42."}]} nil)
+                r     (result-object agent 10 nil)]
+            (-> (expect (.-result r)) (.toBe "The answer is 42."))
+            (-> (expect (.-is_error r)) (.toBe false)))))
+
+    (it "passes a reasoning-only reply through rather than blanking it"
+        (fn []
+          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                              {:role "assistant" :content "<think>ok then</think>\n\n"}]} nil)
+                r     (result-object agent 10 nil)]
+            (-> (expect (.-result r)) (.toContain "ok then")))))
+
+    (it "leaves a plain answer untouched"
+        (fn []
+          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                              {:role "assistant" :content "ok"}]} nil)]
+            (-> (expect (.-result (result-object agent 10 nil))) (.toBe "ok")))))))

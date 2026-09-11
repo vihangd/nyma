@@ -1,5 +1,6 @@
 (ns agent.modes.print
   (:require [agent.loop :refer [run]]
+            [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [clojure.string :as str]))
 
 (defn ^:async start [agent prompt]
@@ -20,19 +21,32 @@
 ;; contract, so headless orchestrators (e.g. cw) can consume nyma like claude:
 ;;   { type, is_error, result, session_id, total_cost_usd, usage{…}, duration_ms }
 
+(defn- strip-reasoning
+  "Drop <think> blocks from one-shot output — unless that leaves nothing.
+
+   A reasoning model answering \"say ok\" returns the whole reply inside
+   <think>…</think>; printing that as the result hands an orchestrator the
+   model's deliberation instead of its answer. Blanking it would be worse, so a
+   reply that is ONLY reasoning is passed through intact."
+  [text]
+  (let [stripped (str/trim (str (strip-think-tags (str text))))]
+    (if (seq stripped) stripped (str text))))
+
 (defn- last-assistant-text
-  "The final assistant message's text (string or array-of-{type text} content)."
+  "The final assistant message's text (string or array-of-{type text} content),
+   with reasoning stripped."
   [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))
         c (when a (or (:content a) (get a "content")))]
-    (cond
-      (string? c) c
-      (and (js/Array.isArray c) (pos? (count c)))
-      (str/join "\n" (->> c
-                          (filter #(= "text" (or (.-type %) (get % "type"))))
-                          (map #(or (.-text %) (get % "text")))))
-      (some? c) (str c)
-      :else "")))
+    (strip-reasoning
+     (cond
+       (string? c) c
+       (and (js/Array.isArray c) (pos? (count c)))
+       (str/join "\n" (->> c
+                           (filter #(= "text" (or (.-type %) (get % "type"))))
+                           (map #(or (.-text %) (get % "text")))))
+       (some? c) (str c)
+       :else ""))))
 
 (defn- session-id [agent]
   (or (when-let [s @(:session agent)]

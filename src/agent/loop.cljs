@@ -124,6 +124,25 @@
         (when (seq out)
           (if (> (count out) 300) (str (.slice out 0 300) "…") out))))))
 
+(defn stream-error-message
+  "Pure: the human-readable message inside a fullStream `error` chunk.
+
+   The AI SDK puts the provider's real failure here and then, if no step ever
+   completed, rejects `.text` with the generic \"No output generated. Check the
+   stream for errors.\" nyma had no mapping for the `error` chunk type, so
+   `event-type` returned nil, the chunk was emitted under a nil event name that
+   nothing listens to, and the only thing the user ever saw was the sentence
+   telling them to check a stream they could not see."
+  [chunk]
+  (let [e (.-error chunk)]
+    (cond
+      (nil? e)      nil
+      (string? e)   (when (seq (str/trim e)) (str/trim e))
+      :else (let [m (or (.-message e)
+                        (some-> (.-error e) .-message)
+                        (try (js/JSON.stringify e) (catch :default _ nil)))]
+              (when (and m (seq (str/trim (str m)))) (str/trim (str m)))))))
+
 (defn- with-provider-detail!
   "Append the provider's explanation to `e`'s message, in place. Mutating
    rather than rewrapping keeps the error's type and fields intact — callers
@@ -217,7 +236,17 @@
                                                :turnCount (or (:turn-count @state) 0)}))
             active-model (or (get resolve-result "model") (:model config))
             _ (when-not active-model
-                (throw (js/Error. "No model configured. Set ANTHROPIC_API_KEY or configure a provider via /login")))
+                ;; Say WHICH model failed to resolve. The bare sentence sent
+                ;; people to /login for a provider that was never registered —
+                ;; e.g. one declared in ~/.nyma/settings.json and then hidden by
+                ;; a project settings file replacing the whole local-models
+                ;; array.
+                (let [spec (or (:base-model-spec @state)
+                               (aget (:config agent) "active-provider-name"))]
+                  (throw (js/Error.
+                          (str "No model configured"
+                               (when (seq (str (or spec ""))) (str " for '" spec "'"))
+                               ". Set ANTHROPIC_API_KEY or configure a provider via /login")))))
 
             ;; Compute token budget for context_assembly
             model-id       (str (or (.-modelId active-model) active-model "unknown"))
@@ -444,7 +473,11 @@
                                   ;; only place the raw error is still in hand.
                                   (throw (with-provider-detail! e)))))))
                         accumulated (atom "")
-                        aborted     (atom false)]
+                        aborted     (atom false)
+                        ;; The provider's own explanation, if the stream carried
+                        ;; one. Kept so it can be attached to whatever the SDK
+                        ;; throws afterwards.
+                        stream-error (atom nil)]
 
                   ;; Stream events with stream_filter on text deltas
                     (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
@@ -454,6 +487,14 @@
                           (when (and (not (.-done chunk)) (not @aborted))
                             (let [chunk-val (.-value chunk)
                                   evt-type  (event-type chunk-val)]
+                              ;; An error part is a real turn outcome, not a
+                              ;; chunk to forward under a nil event name.
+                              (when (= "error" (.-type chunk-val))
+                                (let [msg (stream-error-message chunk-val)]
+                                  (reset! stream-error (or msg "stream error"))
+                                  (dbg/error "[loop] provider stream error:" (or msg chunk-val))
+                                  (emit "provider_error" #js {:message (or msg "stream error")
+                                                              :source  "stream"})))
                               (if (= evt-type "message_update")
                                 (do
                                   ;; AI SDK v7 fullStream: the text-delta part
@@ -493,7 +534,28 @@
                                              :finishReason "stream-filter-aborted"})))
 
                     ;; Normal completion — capture final state, track usage
-                      (let [final-text     (js-await (.-text result))
+                      (let [final-text     (try
+                                             (js-await (.-text result))
+                                             (catch :default e
+                                               ;; "No output generated. Check the stream for
+                                               ;; errors." is what the SDK throws when no step
+                                               ;; completed. The stream said why; say it here,
+                                               ;; because this is the last point that still has
+                                               ;; both halves in hand.
+                                               (when-let [se @stream-error]
+                                                 (try (aset e "message"
+                                                            (str (or (.-message e) "") " — " se))
+                                                      (aset e "cause" se)
+                                                      (catch :default _ nil)))
+                                               (throw e)))
+                            ;; A stream that carried an error and produced no
+                            ;; text is a FAILED turn, not an empty one. Some
+                            ;; providers end such a stream cleanly, so `.text`
+                            ;; resolves "" and the failure would otherwise be
+                            ;; reported as a model that answered with nothing.
+                            _              (when (and @stream-error
+                                                      (str/blank? (str final-text)))
+                                             (throw (js/Error. @stream-error)))
                             usage          (let [u (js-await (.-totalUsage result))]
                                              ;; Aborted runs resolve null-usage; the
                                              ;; per-step sum is the truth then.
