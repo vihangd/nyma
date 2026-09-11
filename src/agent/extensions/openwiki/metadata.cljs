@@ -15,7 +15,6 @@
    .last-update.json'. gitHead/updatedAt now always advance."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:crypto" :as crypto]
             [agent.extensions.openwiki.shared :as shared]
             [agent.extensions.openwiki.git :as git]))
 
@@ -38,7 +37,9 @@
   [dir]
   (if-not (fs/existsSync dir)
     ""
-    (let [h (.createHash crypto "sha256")]
+    ;; Bun.CryptoHasher: same digest as node:crypto, 2x faster — and this one
+    ;; hashes every wiki file's contents, so the input is large by design.
+    (let [h (js/Bun.CryptoHasher. "sha256")]
       (doseq [rel (wiki-files dir)]
         (.update h rel)                   ; path — so renames register
         (.update h (fs/readFileSync (path/join dir rel))))

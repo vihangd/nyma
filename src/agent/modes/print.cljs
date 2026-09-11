@@ -1,6 +1,5 @@
 (ns agent.modes.print
   (:require [agent.loop :refer [run]]
-            ["nanoid" :refer [nanoid]]
             [clojure.string :as str]))
 
 (defn ^:async start [agent prompt]
@@ -42,7 +41,9 @@
             (-> (str fp) (.split "/") last (.replace ".jsonl" "")))))
       (when-let [s @(:session agent)]
         (when-let [gl (:get-leaf-id s)] (gl)))
-      (nanoid)))
+      ;; Fallback id when there is no session file and no leaf id. Was nanoid;
+      ;; the platform has this built in, so the dependency went.
+      (.randomUUID js/crypto)))
 
 (defn result-object
   "Build the claude-style result object from the agent's final state.

@@ -22,7 +22,6 @@
    soft-block on `/spec start`."
   (:require ["node:path" :as path]
             ["node:fs"   :as fs]
-            ["node:crypto" :as crypto]
             [clojure.string :as str]
             [agent.extensions.spec-driven.speckit-adapter :as adapter]))
 
@@ -266,7 +265,8 @@ Now produce the report.
                       (or plan-content "") "\n--\n"
                       (or tasks-content "") "\n--\n"
                       (or constitution-content ""))
-        h        (.createHash crypto "sha256")]
+        ;; Bun.CryptoHasher: same digest as node:crypto, 2x faster.
+        h        (js/Bun.CryptoHasher. "sha256")]
     (.update h combined)
     (.digest h "hex")))
 

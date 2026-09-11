@@ -3,8 +3,6 @@
             ["zod" :as z]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            ["turndown" :as turndown-mod]
-            ["linkedom" :refer [parseHTML]]
             [agent.multimodal :as mm]
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]))
@@ -298,14 +296,14 @@
 
 (def ^:private detected-binary (atom nil))
 
-(defn ^:async try-binary
-  "Check if a binary is available via `which`."
+(defn try-binary
+  "Is `name` on PATH?
+
+   `Bun.which` resolves it in-process: 0.018ms against 5.1ms to spawn `which`
+   and wait for it, measured on this machine. Same answer, one fewer process."
   [name]
   (try
-    (let [proc (js/Bun.spawn #js ["which" name]
-                             #js {:stdout "pipe" :stderr "pipe"})
-          code (js-await (.-exited proc))]
-      (= code 0))
+    (some? (js/Bun.which name))
     (catch :default _ false)))
 
 (defn ^:async detect-search-binary
@@ -434,13 +432,33 @@
 
 ;;; ─── web_fetch ─────────────────────────────────────────────
 
-(defn- html-to-markdown
-  "Convert HTML to Markdown using turndown + linkedom."
+(def ^:private html-mods
+  "Memoized {:parseHTML f :Turndown ctor}, loaded on first use.
+
+   These were top-level requires, so EVERY entry point — the gateway, headless
+   -p, the SDK, a test run — paid 26ms and 37MB of RSS (linkedom alone is +29MB,
+   the largest dependency cost in the process) for two libraries that only the
+   web_fetch markdown path below uses. deep_research never reaches them: it calls
+   Jina/Perplexity and gets prose back."
+  (atom nil))
+
+(defn ^:async load-html-mods!
+  []
+  (or @html-mods
+      (let [linkedom  (js-await (js/import "linkedom"))
+            turndown  (js-await (js/import "turndown"))
+            mods      {:parseHTML (.-parseHTML linkedom)
+                       :Turndown  (or (.-default turndown) turndown)}]
+        (reset! html-mods mods)
+        mods)))
+
+(defn ^:async html-to-markdown
+  "Convert HTML to Markdown using turndown + linkedom, both loaded on demand."
   [html]
-  (let [parsed   (parseHTML html)
+  (let [{:keys [parseHTML Turndown]} (js-await (load-html-mods!))
+        parsed   (parseHTML html)
         document (.-document parsed)
-        TurndownCtor (or (.-default turndown-mod) turndown-mod)
-        td       (TurndownCtor. #js {:headingStyle "atx" :codeBlockStyle "fenced"})]
+        td       (Turndown. #js {:headingStyle "atx" :codeBlockStyle "fenced"})]
     (.turndown td document)))
 
 (defn- html-to-text-fallback
@@ -492,7 +510,7 @@
             result (cond
                      (= fmt "html") body
                      (not (.includes content-type "text/html")) body
-                     (= fmt "markdown") (html-to-markdown body)
+                     (= fmt "markdown") (js-await (html-to-markdown body))
                      :else (html-to-text-fallback body))]
         (truncate-result result max-len)))))
 

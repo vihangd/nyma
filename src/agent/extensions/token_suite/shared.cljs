@@ -43,10 +43,18 @@
 
 ;; ── Utility functions ────────────────────────────────────────
 
-(defn count-lines [s]
+(defn count-lines
+  "Line count without allocating. `(count (re-seq #\"\\n\" s))` built one string
+   per newline — ~5k throwaway allocations for a 200 KB file, once per file
+   indexed by repo_map / structured_context."
+  [s]
   (if (or (nil? s) (= s "")) 0
-      (let [matches (re-seq #"\n" s)]
-        (inc (count matches)))))
+      (let [str' (str s)
+            len  (count str')]
+        (loop [i 0 n 1]
+          (if (>= i len)
+            n
+            (recur (inc i) (if (= 10 (.charCodeAt str' i)) (inc n) n)))))))
 
 (defn count-chars [s]
   (count (str s)))

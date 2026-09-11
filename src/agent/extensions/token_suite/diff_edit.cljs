@@ -143,8 +143,13 @@
 (defn- find-line-number
   "Find the 1-based line number at a character offset."
   [content offset]
-  (let [prefix (subs content 0 (min offset (count content)))]
-    (inc (count (re-seq #"\n" prefix)))))
+  ;; Counted in place: the old version sliced a prefix AND built a string per
+  ;; newline in it, twice the garbage for a number.
+  (let [end (min offset (count content))]
+    (loop [i 0 n 1]
+      (if (>= i end)
+        n
+        (recur (inc i) (if (= 10 (.charCodeAt content i)) (inc n) n))))))
 
 (defn- count-occurrences
   "Count non-overlapping exact occurrences of `sub` in `content`."
