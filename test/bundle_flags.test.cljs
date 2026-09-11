@@ -21,10 +21,15 @@
       (js/JSON.parse)
       (aget "scripts")))
 
-(defn bundle-scripts []
+(defn bundle-scripts
+  "The scripts that actually invoke `bun build` — `bundle:all` only chains the
+   others, so including it would fail every flag check on a script that carries
+   no flags."
+  []
   (->> (js/Object.keys scripts)
        (filter (fn [k] (str/starts-with? k "bundle")))
-       (map (fn [k] [k (aget scripts k)]))))
+       (map (fn [k] [k (aget scripts k)]))
+       (filter (fn [[_ cmd]] (str/includes? cmd "bun build")))))
 
 (describe "bundle scripts"
           (fn []
@@ -38,6 +43,27 @@
                     (when (str/includes? cmd "--bytecode")
                       (-> (expect (str name ": " (str/includes? cmd "--format=esm")))
                           (.toBe (str name ": true")))))))
+
+            ;; Minification is size-only here — bytecode already caches the
+            ;; parse, so startup did not move (40ms both ways) while the binary
+            ;; went 94.6MB -> 89.3MB. Pinned so a target cannot quietly ship
+            ;; 5MB heavier than its siblings.
+            (it "every compile target is minified"
+                (fn []
+                  (doseq [[name cmd] (bundle-scripts)]
+                    (when (str/includes? cmd "--compile")
+                      (-> (expect (str name ": " (str/includes? cmd "--minify")))
+                          (.toBe (str name ": true")))))))
+
+            (it "bundle:all builds every target"
+                (fn []
+                  (let [all (get scripts "bundle:all")]
+                    (-> (expect (some? all)) (.toBe true))
+                    (doseq [[name _] (bundle-scripts)]
+                      (when-not (= name "bundle:all")
+                        (-> (expect (str name " in bundle:all: "
+                                         (str/includes? (str all) (str "run " name))))
+                            (.toBe (str name " in bundle:all: true"))))))))
 
             (it "every compile target is a --compile build"
                 (fn []
