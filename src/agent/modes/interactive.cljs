@@ -7,7 +7,6 @@
             [agent.commands.resolver :refer [resolve-command]]
             [agent.ui.themes :refer [default-dark]]
             [agent.ui.theme-catalog :as theme-catalog]
-            [agent.ui.autocomplete-builtins :as ac-builtins]
             [agent.ui.chat-pane :refer [create-chat-pane]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.app-reducers :as reducers]
@@ -221,7 +220,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn ^:async start [agent session resources]
-  (ac-builtins/register-all! agent)
   (let [theme     (or (.-theme resources)
                       (theme-catalog/active-theme (.-themes resources) default-dark))
         terminal  (new ProcessTerminal)

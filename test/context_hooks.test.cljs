@@ -107,16 +107,14 @@
       (fn [data]
         (reset! seen {:has-messages     (some? (.-messages data))
                       :has-systemPrompt (some? (.-systemPrompt data))
-                      :has-tokenBudget  (some? (.-tokenBudget data))
-                      :has-providers    (some? (.-providers data))})
+                      :has-tokenBudget  (some? (.-tokenBudget data))})
         nil))
     ((:on (:events agent)) "before_provider_request"
       (fn [_] #js {:block true :reason "ok"}))
     (js-await (run agent "test"))
     (-> (expect (:has-messages @seen)) (.toBe true))
     (-> (expect (:has-systemPrompt @seen)) (.toBe true))
-    (-> (expect (:has-tokenBudget @seen)) (.toBe true))
-    (-> (expect (:has-providers @seen)) (.toBe true))))
+    (-> (expect (:has-tokenBudget @seen)) (.toBe true))))
 
 (defn ^:async test-assembly-token-budget-fields []
   (let [agent  (make-test-agent)

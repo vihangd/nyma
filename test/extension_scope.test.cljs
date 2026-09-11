@@ -141,30 +141,6 @@
                                         (-> (expect (fn [] (.registerStatusSegment scoped "x" #js {})))
                                             (.toThrow "missing capability")))))
 
-                                (it "forwards registerToolRenderer when :renderers is granted"
-                                    (fn []
-                                      (let [agent    (make-test-agent)
-                                            base-api (create-extension-api agent)
-                                            scoped   (create-scoped-api base-api "rendtest" #{:renderers})]
-                                        (-> (expect (fn? (.-registerToolRenderer scoped))) (.toBe true))
-                                        (-> (expect (fn? (.-unregisterToolRenderer scoped))) (.toBe true)))))
-
-                                (it "gates registerToolRenderer on :renderers"
-                                    (fn []
-                                      (let [agent    (make-test-agent)
-                                            base-api (create-extension-api agent)
-                                            scoped   (create-scoped-api base-api "nortr" #{:tools})]
-                                        (-> (expect (fn [] (.registerToolRenderer scoped "x" (fn [_]))))
-                                            (.toThrow "missing capability")))))
-
-                                (it "forwards registerCompletionProvider when :ui is granted"
-                                    (fn []
-                                      (let [agent    (make-test-agent)
-                                            base-api (create-extension-api agent)
-                                            scoped   (create-scoped-api base-api "cptest" #{:ui})]
-                                        (-> (expect (fn? (.-registerCompletionProvider scoped))) (.toBe true))
-                                        (-> (expect (fn? (.-unregisterCompletionProvider scoped))) (.toBe true)))))
-
                                ;; End-to-end: register a segment through the SAME API path
                                ;; agent_shell uses (scoped API → registerStatusSegment → base
                                ;; API → status-line-segments registry) and verify it lands in

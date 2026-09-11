@@ -11,7 +11,7 @@
             [agent.tool-metadata :as tool-metadata]
             [agent.keybinding-registry :as kbr]
             [agent.thinking :as thinking-util]
-            [agent.ui.autocomplete-provider :as ac]))
+))
 
 (defn- filter-tools-by-policy
   "Filter a tools map using capability/mode constraints.
@@ -77,7 +77,6 @@
         ;; + optional user overrides (applied later by cli.cljs).
         keybinding-registry (atom (kbr/create-registry))
         ;; Autocomplete provider registry — fresh per agent.
-        autocomplete-registry (ac/create-provider-registry)
         ;; Phase 2 additions
         provider-registry (create-provider-registry builtin-providers)
         ;; Seeded from --thinking / settings :thinking, both of which used to be
@@ -87,10 +86,7 @@
         abort-controller  (atom (js/AbortController.))
         inter-events      (create-event-bus)  ;; Inter-extension communication bus
         flags             (atom {})           ;; Extension CLI flags {name → {:description :type :default :value}}
-        context-providers (atom {})           ;; name → {:priority :estimate :provide}
         model-registry    (create-model-registry)
-        block-renderers   (atom {})
-        mention-providers (atom {})
         state             (atom {:messages           []
                                  :model              model
                                  :active-tools       (set (keys filtered-builtins))
@@ -150,7 +146,6 @@
                  :commands          commands
                  :shortcuts         shortcuts
                  :keybinding-registry keybinding-registry
-                 :autocomplete-registry autocomplete-registry
                  :state             state
                  :store             store
                  :extensions        extensions
@@ -160,10 +155,7 @@
                  :abort-controller  abort-controller
                  :inter-events      inter-events
                  :flags             flags
-                 :context-providers context-providers
                  :model-registry    model-registry
-                 :block-renderers   block-renderers
-                 :mention-providers  mention-providers
                  ;; Settings manager (injected by cli.cljs)
                  :settings          settings
                  ;; Session is attached later by cli.cljs

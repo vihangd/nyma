@@ -17,7 +17,6 @@
             ;; extension (which varies — some use `…name`, others
             ;; `…name.index`) doesn't affect the test's ability to load.
             ["./agent/extensions/custom_provider_qwen_cli/index.mjs" :as qwen-ext]
-            ["./agent/extensions/mention_files/index.mjs" :as mention-files-ext]
             ["./agent/extensions/model_roles/index.mjs" :as model-roles-ext]
             ["./agent/extensions/stats_dashboard/index.mjs" :as stats-dashboard-ext]))
 
@@ -89,22 +88,6 @@
         (-> (expect (contains? @(.-_providers api) "qwen-cli")) (.toBe true))
         (deact)
         (-> (expect (contains? @(.-_providers api) "qwen-cli")) (.toBe false)))))))
-
-;;; ─── mention_files ────────────────────────────────────────
-
-(describe "extension-smoke:mention_files" (fn []
-  (it "loads the module and exports a default function"
-    (fn []
-      (-> (expect (fn? (.-default mention-files-ext))) (.toBe true))))
-
-  (it "activates and registers a 'files' mention provider"
-    (fn []
-      (let [api   (make-mock-api)
-            deact ((.-default mention-files-ext) api)]
-        (-> (expect (fn? deact)) (.toBe true))
-        (-> (expect (contains? @(.-_mentions api) "files")) (.toBe true))
-        (deact)
-        (-> (expect (contains? @(.-_mentions api) "files")) (.toBe false)))))))
 
 ;;; ─── model_roles ──────────────────────────────────────────
 

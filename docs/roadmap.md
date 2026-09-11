@@ -260,6 +260,21 @@ method→capability map) must be edited in the same commit or the lint test
 fails. Deleting `registerToolRenderer` also orphans
 `ui/tool_renderer_registry.cljs` + its test.
 
+**DONE 2026-09-11 — all four deleted.** deepseek-harness states the rule this
+table had been circling: *"A seam is a swappable capability with three roles: a
+Service Definition, a Service Provider, and a Consumer… one role alone is not a
+seam."* These were definitions alone. Gone: `registerBlockRenderer`,
+`registerToolRenderer`, `registerCompletionProvider`, `registerMentionProvider`,
+`registerContextProvider` and their `unregister*` twins, plus
+`ui/autocomplete_provider.cljs`, `ui/autocomplete_builtins.cljs`,
+`ui/tool_renderer_registry.cljs`, the whole `extensions/mention_files/`, and the
+three test files that pinned them. Two pieces of surface the table had missed,
+because "no consumer" was about the `:provide` call and not the whole API:
+`loop.cljs` put the provider map on the `context_assembly` payload as
+`:providers`, and `extension_context.cljs` exposed `ctx.getContextProviders` —
+both removed with it. The editor loses nothing: completion comes from pi-tui's
+`CombinedAutocompleteProvider`, which does slash and `@file` natively.
+
 **Compared against NVIDIA SoL-Pi, 2026-09-11.** SoL-Pi is a Pi extension shipping four
 token-efficiency mechanisms (~45-49% fewer tokens at ~94% of score). nyma is built on the same
 author's `pi-tui` and every SoL-Pi hook point has a nyma counterpart by name, so the port looked

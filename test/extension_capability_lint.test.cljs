@@ -39,11 +39,7 @@
    "exec" "exec" "spawn" "spawn"
    "appendEntry" "session" "setSessionName" "session" "getSessionName" "session"
    "setLabel" "session"
-   "registerBlockRenderer" "renderers" "unregisterBlockRenderer" "renderers"
-   "registerToolRenderer" "renderers" "unregisterToolRenderer" "renderers"
    "registerStatusSegment" "ui" "unregisterStatusSegment" "ui"
-   "registerCompletionProvider" "ui" "unregisterCompletionProvider" "ui"
-   "registerMentionProvider" "ui" "unregisterMentionProvider" "ui"
    "registerProvider" "providers" "unregisterProvider" "providers"
    "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"})
 

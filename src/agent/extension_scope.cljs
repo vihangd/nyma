@@ -82,21 +82,13 @@
                     :getSessionName   (gate capabilities :session (.-getSessionName base-api))
                     :setLabel         (gate capabilities :session (.-setLabel base-api))
                     ;; Block renderers (streaming markdown)
-                    :registerBlockRenderer   (gate capabilities :renderers (.-registerBlockRenderer base-api))
-                    :unregisterBlockRenderer (gate capabilities :renderers (.-unregisterBlockRenderer base-api))
                     ;; Tool renderers (per-tool display in chat view)
-                    :registerToolRenderer    (gate capabilities :renderers (.-registerToolRenderer base-api))
-                    :unregisterToolRenderer  (gate capabilities :renderers (.-unregisterToolRenderer base-api))
                     ;; Status line segments — extensions can contribute segments
                     ;; that appear in the status line above the editor.
                     :registerStatusSegment   (gate capabilities :ui (.-registerStatusSegment base-api))
                     :unregisterStatusSegment (gate capabilities :ui (.-unregisterStatusSegment base-api))
                     ;; Autocomplete providers (slash/at/path completion)
-                    :registerCompletionProvider   (gate capabilities :ui (.-registerCompletionProvider base-api))
-                    :unregisterCompletionProvider (gate capabilities :ui (.-unregisterCompletionProvider base-api))
                     ;; Mention providers (@-mention system)
-                    :registerMentionProvider   (gate capabilities :ui (.-registerMentionProvider base-api))
-                    :unregisterMentionProvider (gate capabilities :ui (.-unregisterMentionProvider base-api))
                     ;; Provider management
                     :registerProvider   (gate capabilities :providers (.-registerProvider base-api))
                     :unregisterProvider (gate capabilities :providers (.-unregisterProvider base-api))
@@ -115,8 +107,6 @@
                                                    :emit (fn [event data]
                                                            (.emit bus (prefix event) data))}))
                     ;; Context providers (gated)
-                    :registerContextProvider   (gate capabilities :context (.-registerContextProvider base-api))
-                    :unregisterContextProvider (gate capabilities :context (.-unregisterContextProvider base-api))
                     :getTokenBudget            (gate capabilities :context (.-getTokenBudget base-api))
                     ;; Model info & token estimation (ungated — read-only utilities)
                     :getModelInfo      (.-getModelInfo base-api)

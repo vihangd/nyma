@@ -272,8 +272,7 @@
                                                     ;; Broken out so a consumer can tell how much
                                                     ;; of `tokensUsed` is not its own content.
                                                     :overheadTokens overhead
-                                                    :model         model-id}
-                                  :providers   (clj->js @(:context-providers agent))}))
+                                                    :model         model-id}}))
 
               ;; Apply replacements from context_assembly
               effective-prompt (if-let [sys (get assembly-result "system")]

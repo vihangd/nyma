@@ -100,9 +100,7 @@
                                   (if mr
                                     (clj->js ((:get mr) id))
                                     #js {:context-window 100000})))
-         :estimateTokens      (fn [text] (te/estimate-tokens text))
-         :getContextProviders  (fn []
-                                 (clj->js @(:context-providers agent)))}))
+         :estimateTokens      (fn [text] (te/estimate-tokens text))}))
 
 (defn create-command-context
   "Extended context for command handlers. Includes waitForIdle, newSession,

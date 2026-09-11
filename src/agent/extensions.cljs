@@ -5,7 +5,6 @@
             [agent.providers.registry :as registry-utils :refer [build-provider-entry]]
             [agent.model-info :as model-info]
             [agent.pricing :as pricing]
-            [agent.ui.tool-renderer-registry :as tool-renderers]
             [agent.ui.status-line-segments :as status-segments]
             [agent.debug :as dbg]))
 
@@ -212,22 +211,6 @@
                                 (when-let [f (:set-label session)]
                                   (f entry-id label))))
 
-       ;; ── Block renderers (streaming markdown) ──────────────
-         :registerBlockRenderer
-         (fn [type-key render-fn]
-           (swap! (:block-renderers agent) assoc (str type-key) render-fn))
-         :unregisterBlockRenderer
-         (fn [type-key]
-           (swap! (:block-renderers agent) dissoc (str type-key)))
-
-       ;; ── Tool renderers (per-tool display in chat view) ──
-         :registerToolRenderer
-         (fn [tool-name renderer]
-           (tool-renderers/register-renderer (str tool-name) renderer))
-         :unregisterToolRenderer
-         (fn [tool-name]
-           (tool-renderers/unregister-renderer (str tool-name)))
-
        ;; ── Status line segments ────────────────────────────
          :registerStatusSegment
          (fn [id config]
@@ -242,32 +225,6 @@
          :unregisterStatusSegment
          (fn [id]
            (status-segments/unregister-segment (str id)))
-
-       ;; ── Completion providers (autocomplete) ─────────────
-         :registerCompletionProvider
-         (fn [id config]
-           (when-let [reg (:autocomplete-registry agent)]
-             ((:register reg) (str id)
-                              {:trigger  (or (.-trigger config) :any)
-                               :priority (or (.-priority config) 0)
-                               :complete (.-complete config)})))
-         :unregisterCompletionProvider
-         (fn [id]
-           (when-let [reg (:autocomplete-registry agent)]
-             ((:unregister reg) (str id))))
-
-       ;; ── Mention providers (@-mention system) ─────────────
-         :registerMentionProvider
-         (fn [id config]
-           (swap! (:mention-providers agent) assoc (str id)
-                  {:id       (str id)
-                   :trigger  (or (.-trigger config) "@")
-                   :label    (or (.-label config) (str id))
-                   :search   (.-search config)
-                   :resolve  (.-resolve config)}))
-         :unregisterMentionProvider
-         (fn [id]
-           (swap! (:mention-providers agent) dissoc (str id)))
 
        ;; ── Provider management ─────────────────────────────
          :registerProvider  (fn [name config]
@@ -480,17 +437,6 @@
                                (if (some? (:value flag))
                                  (:value flag)
                                  (:default flag))))
-
-       ;; ── Context providers ──────────────────────────────────────
-         :registerContextProvider
-         (fn [name config]
-           (swap! (:context-providers agent) assoc name
-                  {:priority       (or (when config (.-priority config)) 0)
-                   :tokenEstimate  (when config (.-tokenEstimate config))
-                   :provide        (when config (.-provide config))}))
-         :unregisterContextProvider
-         (fn [name]
-           (swap! (:context-providers agent) dissoc name))
 
        ;; ── Token budget ───────────────────────────────────────
          :getTokenBudget    (fn []

@@ -1,5 +1,0 @@
-{
-  "namespace": "mention-files",
-  "capabilities": ["ui"],
-  "dependsOn": []
-}

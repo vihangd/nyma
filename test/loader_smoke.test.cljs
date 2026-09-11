@@ -6,7 +6,7 @@
    extension loads with the expected kebab-case namespace.
 
    This is the test that would have caught the recent loader bug where four
-   manifest-less directory extensions (mention_files, model_roles,
+   manifest-less directory extensions (model_roles,
    prompt_history, stats_dashboard) all derived the namespace `\"index\"`
    from `derive-namespace`, collided in topo-sort's by-ns map, and silently
    dropped 3 of 4 from the load list."
@@ -37,7 +37,6 @@
     "desktop-notify"
     "lsp-suite"
     "mcp-client"
-    "mention-files"
     "model-roles"
     "refine"
     "prompt-history"
@@ -109,7 +108,7 @@
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "all 31 expected namespaces load and none collide on 'index'"
+            (it "all 30 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)
