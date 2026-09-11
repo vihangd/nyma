@@ -6,7 +6,6 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.extensions.token-suite.shared :as shared]
-            [agent.extensions.token-suite.tool-truncation :as tool-truncation]
             [agent.extensions.token-suite.observation-mask :as observation-mask]
             [agent.extensions.token-suite.expired-context :as expired-context]
             [agent.extensions.token-suite.kv-cache :as kv-cache]
@@ -31,7 +30,6 @@
           {:observation-mask {:turns 0 :messages-masked 0 :tokens-saved 0}
            :kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
            :expired-context  {:turns 0 :stale-replaced 0 :tokens-saved 0}
-           :tool-truncation  {:calls 0 :chars-saved 0}
            :repo-map         {:files 0 :symbols 0 :last-index-ms 0}
            :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
            :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
@@ -47,7 +45,7 @@
 ;; Tool Result Truncation
 ;; ═══════════════════════════════════════════════════════════════
 
-(describe "ext-tool-truncation" (fn []
+(describe "token-suite shared: head/tail helpers" (fn []
                                   (it "passes short results unchanged"
                                       (fn []
                                         (let [short "line1\nline2\nline3"]
@@ -1028,11 +1026,10 @@
     (-> (expect true) (.toBe true))))
 
 (describe "token-suite integration" (fn []
-                                      (it "all 10 extensions activate without conflict"
+                                      (it "all 9 extensions activate without conflict"
                                           (fn []
                                             (let [agent (make-agent)
                                                   api   (make-api agent)
-                                                  d1    (tool-truncation/activate api)
                                                   d2    (observation-mask/activate api)
                                                   d3    (kv-cache/activate api)
                                                   d4    (priority-assembly/activate api)
@@ -1040,7 +1037,6 @@
                                                   d6    (structured-context/activate api)
                                                   d7    (smart-compaction/activate api)
                                                   d8    (context-folding/activate api)]
-                                              (-> (expect (fn? d1)) (.toBe true))
                                               (-> (expect (fn? d2)) (.toBe true))
                                               (-> (expect (fn? d3)) (.toBe true))
                                               (-> (expect (fn? d4)) (.toBe true))
@@ -1049,7 +1045,7 @@
                                               (-> (expect (fn? d7)) (.toBe true))
                                               (-> (expect (fn? d8)) (.toBe true))
         ;; Deactivate all
-                                              (d1) (d2) (d3) (d4) (d5) (d6) (d7) (d8))))
+                                              (d2) (d3) (d4) (d5) (d6) (d7) (d8))))
 
                                       (it "full pipeline runs without error" test-integration-full-pipeline)
 
@@ -1064,7 +1060,6 @@
                                           (fn []
                                             (let [config (shared/load-config)]
                                               (-> (expect (get-in config [:observation-mask :keep-recent])) (.toBe 10))
-                                              (-> (expect (get-in config [:tool-truncation :max-chars])) (.toBe 10000))
                                               (-> (expect (get-in config [:diff-edit :fuzzy-enabled])) (.toBe true))
                                               (-> (expect (get-in config [:structured-context :hot-budget])) (.toBe 2000))
                                               (-> (expect (get-in config [:smart-compaction :offload-threshold])) (.toBe 0.70))

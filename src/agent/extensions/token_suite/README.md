@@ -1,10 +1,10 @@
 # token-suite
 
-> Eleven-module token-optimization suite — observation masking, KV cache, smart compaction, tool truncation, repo map, structured context, and more.
+> Ten-module token-optimization suite — observation masking, KV cache, smart compaction, tool truncation, repo map, structured context, and more.
 
 ## What it does
 
-The most ambitious extension in the tree. `token-suite` is a *suite of suites* — eleven cooperating sub-modules that each save tokens in a different way. Together they let nyma run usefully on small context windows and stay efficient on large ones. The shared `:tokens-saved` counter is exposed through `/token-stats`.
+The most ambitious extension in the tree. `token-suite` is a *suite of suites* — ten cooperating sub-modules that each save tokens in a different way. Together they let nyma run usefully on small context windows and stay efficient on large ones. The shared `:tokens-saved` counter is exposed through `/token-stats`.
 
 The single hard rule: when context usage crosses **80%**, the suite disables expensive tools (`web_fetch`, `web_search`) via `tool_access_check` so the next turn can't blow past the budget.
 
@@ -42,7 +42,6 @@ The single hard rule: when context usage crosses **80%**, the suite disables exp
 
 | File | Role |
 |---|---|
-| `tool_truncation.cljs` | Truncate oversized tool outputs to a per-tool policy |
 | `observation_mask.cljs` | Mask non-essential message parts (read results, etc.) once they're stale |
 | `expired_context.cljs` | Prune tool results the model is unlikely to re-read |
 | `kv_cache.cljs` | Memoize provider requests by content hash |

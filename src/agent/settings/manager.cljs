@@ -73,6 +73,13 @@
    ;; axis (modes-as-roles): /mode switches the active role; the gate asks/denies
    ;; per the policy. :default asks before writes/shell/network (the safe Claude
    ;; default); accept-edits auto-approves edits; full-auto allows everything.
+   ;;
+   ;; Every :allowed-tools list below carries `retrieve_result` because every
+   ;; one of them allows `read`, and any capped tool result can hand the model a
+   ;; truncation handle. A role that allowed the tool but not the recall would
+   ;; leave the model holding an id it cannot spend. NOTE: a user :roles map
+   ;; REPLACES this one rather than merging, so a custom role that narrows tools
+   ;; has to carry `retrieve_result` itself.
    :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
                      :policy {"write" "ask" "exec" "ask" "network" "ask"}}
            :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
@@ -84,35 +91,35 @@
            ;; Falls back to :deep, then current model, if unset by user.
            :advisor {:provider "anthropic" :model "claude-opus-4-20250514"}
            :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
-                     :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
+                     :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch" "retrieve_result"]
                      :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
            :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                     :allowed-tools ["read" "bash" "glob" "grep" "edit" "write"]}
+                     :allowed-tools ["read" "bash" "glob" "grep" "edit" "write" "retrieve_result"]}
            ;; --- Subagent roles (used by the `subagent` tool) ---
            ;; Read-only by default: the evidence boundary for coding agents
            ;; is single-threaded edits + isolated read-only exploration.
            ;; A subagent role is just a role with :description + :system-prompt.
            :scout      {:provider "anthropic" :model "claude-haiku-4-20250901"
-                        :allowed-tools ["read" "glob" "grep" "ls"]
+                        :allowed-tools ["read" "glob" "grep" "ls" "retrieve_result"]
                         :description "Fast read-only codebase recon. Returns a compressed map/summary."
                         :system-prompt "You are a scout. Investigate the codebase read-only and return a compressed, structured summary (files, symbols, where things live). Do not propose edits."}
            :planner    {:provider "anthropic" :model "claude-opus-4-20250514"
-                        :allowed-tools ["read" "glob" "grep" "ls" "web_search" "web_fetch"]
+                        :allowed-tools ["read" "glob" "grep" "ls" "web_search" "web_fetch" "retrieve_result"]
                         :description "Read-only implementation planner. Returns a numbered plan."
                         :system-prompt "You are a planner. Analyze read-only and return a detailed numbered plan under a 'Plan:' header. Do not modify files."}
            :reviewer   {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                        :allowed-tools ["read" "glob" "grep" "ls"]
+                        :allowed-tools ["read" "glob" "grep" "ls" "retrieve_result"]
                         :description "Read-only code reviewer. Returns findings, one per line."
                         :system-prompt "You are a reviewer. Examine the code read-only and return concise findings (path:line — problem — fix). Do not modify files."}
            :researcher {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                        :allowed-tools ["read" "web_search" "web_fetch"]
+                        :allowed-tools ["read" "web_search" "web_fetch" "retrieve_result"]
                         :description "Web/docs research. Returns sourced findings."
                         :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}
            ;; Editing subagent — DISABLED by default. Editing subagents
            ;; fragment shared state; prefer keeping edits on the single
            ;; main thread. Enable per-call only when truly independent.
            :worker     {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                        :allowed-tools ["read" "glob" "grep" "ls" "edit" "write" "bash"]
+                        :allowed-tools ["read" "glob" "grep" "ls" "edit" "write" "bash" "retrieve_result"]
                         :enabled false
                         :description "Implementation worker with edit tools (opt-in)."
                         :system-prompt "You are a worker. Implement the delegated task and return a concise summary of changes (files touched, what changed)."}}

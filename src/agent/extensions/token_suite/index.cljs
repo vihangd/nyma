@@ -1,6 +1,5 @@
 (ns agent.extensions.token-suite.index
   (:require [agent.extensions.token-suite.shared :as shared]
-            [agent.extensions.token-suite.tool-truncation :as tool-truncation]
             [agent.extensions.token-suite.observation-mask :as observation-mask]
             [agent.extensions.token-suite.expired-context :as expired-context]
             [agent.extensions.token-suite.kv-cache :as kv-cache]
@@ -19,7 +18,6 @@
         om  (:observation-mask s)
         kv  (:kv-cache s)
         ec  (:expired-context s)
-        tt  (:tool-truncation s)
         rm  (:repo-map s)
         pa  (:priority-assembly s)
         de  (:diff-edit s)
@@ -37,8 +35,6 @@
          (:cached-tokens kv) " cached tokens\n"
          "Expired Context:     " (:stale-replaced ec) " stale reads pruned, ~"
          (:tokens-saved ec) " tokens saved\n"
-         "Tool Truncation:     " (:calls tt) " results truncated, "
-         (:chars-saved tt) " chars saved\n"
          "Repo Map:            " (:files rm) " files indexed, "
          (:symbols rm) " symbols\n"
          "Priority Assembly:   " (:messages-pruned pa) " messages pruned, ~"
@@ -61,7 +57,6 @@
   (let [deactivators (atom [])]
 
     ;; Activate each sub-extension
-    (swap! deactivators conj (tool-truncation/activate api))
     (swap! deactivators conj (observation-mask/activate api))
     (swap! deactivators conj (expired-context/activate api))
     (swap! deactivators conj (kv-cache/activate api))

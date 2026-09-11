@@ -6,6 +6,7 @@
             ["turndown" :as turndown-mod]
             ["linkedom" :refer [parseHTML]]
             [agent.multimodal :as mm]
+            [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]))
 
 (def read-default-line-cap 2000)
@@ -986,6 +987,50 @@
         :execute view-image-execute
         :toModelOutput mm/tool-model-output}))
 
+;;; ─── retrieve_result ───────────────────────────────────────
+;;; Recall for anything tool-result-policy truncated. A builtin rather than an
+;;; extension because truncation is core and unconditional — put recall in an
+;;; extension and every handle dangles whenever that extension is off.
+
+(def ^:private recall-page-chars
+  "Default page size. Under the 12000 cap this tool's own output is subject to,
+   with room for the header and footer, so a page is never itself truncated."
+  8000)
+
+(defn- retrieve-result-execute [args]
+  (let [id     (str (or (.-id args) ""))
+        offset (let [n (.-offset args)] (if (number? n) (js/Math.max 0 (js/Math.floor n)) 0))
+        limit  (let [n (.-limit args)]
+                 (if (number? n)
+                   (js/Math.min recall-page-chars (js/Math.max 1 (js/Math.floor n)))
+                   recall-page-chars))
+        {:keys [found? tool total start end body eof?]} (policy/store-read id offset limit)]
+    (if-not found?
+      ;; Never throw: an unknown id is a normal thing for a model to hit after
+      ;; eviction, and the recovery it needs is to re-run the tool.
+      (str "retrieve_result: no stored output for id \"" id "\" "
+           "(handles are per-session and bounded; re-run the tool)")
+      (str "[retrieve_result " id " (" tool ") — chars " start "–" end " of " total "]\n"
+           body "\n"
+           (if eof?
+             (str "[eof — " total " chars total]")
+             (str "[nextOffset=" end " — retrieve_result(id=\"" id "\", offset=" end ") for more]"))))))
+
+(def retrieve-result-tool
+  (tool
+   #js {:description (str "Retrieve the part of a tool result that was truncated. "
+                          "Use the id and offset from a `retrieve_result(...)` truncation notice. "
+                          "Reach for this when the truncated head is not enough to answer — "
+                          "it pages, so follow nextOffset until eof.")
+        :inputSchema (.object z
+                              #js {:id     (-> (.string z)
+                                               (.describe "The id from the truncation notice"))
+                                   :offset (-> (.number z) (.optional)
+                                               (.describe "Character offset to resume from; use the notice's offset, then each reply's nextOffset. Default 0."))
+                                   :limit  (-> (.number z) (.optional)
+                                               (.describe (str "Max characters to return (default and max " recall-page-chars ")")))})
+        :execute retrieve-result-execute}))
+
 ;;; ─── builtin tools map ─────────────────────────────────────
 
 (def builtin-tools
@@ -1000,4 +1045,5 @@
    "grep"       grep-tool
    "web_fetch"     web-fetch-tool
    "web_search"    web-search-tool
-   "deep_research" deep-research-tool})
+   "deep_research" deep-research-tool
+   "retrieve_result" retrieve-result-tool})

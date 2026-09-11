@@ -7,14 +7,19 @@
      - model-string  (envelope → model-visible string extraction)
      - register-policy! / unregister-policy! lifecycle
      - tool_metadata :result-policy bridge
-     - middleware integration (policy applied in tool-tracking-leave)"
+     - middleware integration (policy applied in tool-tracking-leave)
+     - handle-backed truncation + paged recall via store-read"
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
+            ["./agent/middleware.mjs" :refer [create-pipeline]]
+            [agent.events :refer [create-event-bus]]
             [agent.tool-result-policy :refer [policy-for
                                               apply-policy
                                               model-string
                                               register-policy!
                                               unregister-policy!
-                                              reset-policies!]]
+                                              reset-policies!
+                                              store-read
+                                              reset-store!]]
             [agent.tool-metadata :refer [register-metadata!
                                          unregister-metadata!
                                          reset-extension-metadata!]]))
@@ -354,3 +359,114 @@
                   (register-policy! "bash" {:max-string-length 30000})
                   (unregister-policy! "bash")
                   (-> (expect (:max-string-length (policy-for "bash"))) (.toBe 12000))))))
+
+;;; ─── handle-backed truncation ────────────────────────────
+;;; Truncation used to destroy the tail outright: the model could not ask for
+;;; what was cut. Everything except bash (which brings its own handle) lost
+;;; content with no way back, including every MCP and extension tool on the
+;;; bare default cap.
+
+(describe "apply-policy — truncated content stays recoverable"
+  (fn []
+    (beforeEach (fn [] (reset-store!) (reset-policies!)))
+
+    ;; The whole contract in one comparison: head + every page must rebuild the
+    ;; original exactly. Fails on an unstable id, an evicted entry, a notice
+    ;; offset that disagrees with the cut, an off-by-one, a lost line-boundary
+    ;; cut-back, or an eof that fires early or never.
+    (it "pages back to the exact original"
+        (fn []
+          (let [raw   (repeat-str "abcdefghij klmnopqrst\n" 900)
+                head  (model-string (apply-policy raw "grep"))   ;; cap 8000
+                id    (second (re-find #"id=\"([^\"]+)\"" head))]
+            (-> (expect (some? id)) (.toBe true))
+            (loop [offset 8000 acc "" pages 0]
+              (let [r (store-read id offset 8000)]
+                (if (:eof? r)
+                  (do (-> (expect (str (.slice raw 0 8000) acc (:body r))) (.toBe raw))
+                      (-> (expect (> pages 0)) (.toBe true)))
+                  (do (-> (expect (> (:end r) offset)) (.toBe true))
+                      (recur (:end r) (str acc (:body r)) (inc pages)))))))))
+
+    ;; The notice is re-sent on every internal step of the turn. A drifting id
+    ;; would change the prompt prefix each step and break the provider cache.
+    (it "mints a byte-identical notice for identical content"
+        (fn []
+          (let [raw (repeat-str "same content here\n" 900)]
+            (-> (expect (model-string (apply-policy raw "grep")))
+                (.toBe (model-string (apply-policy raw "grep")))))))
+
+    (it "leaves a result that fits untouched, and mints nothing"
+        (fn []
+          (let [e (apply-policy "short result" "grep")]
+            (-> (expect (:data e)) (.toBe "short result"))
+            (-> (expect (.includes (:data e) "retrieve_result")) (.toBe false)))))
+
+    ;; Load-bearing: the recall tool's own output comes back through here, and
+    ;; an overshooting page must not mint a handle for a handle.
+    (it "never mints a handle for the recall tool itself"
+        (fn []
+          (let [raw (repeat-str "x" 20000)
+                out (model-string (apply-policy raw "retrieve_result"))]
+            (-> (expect (.includes out "retrieve_result(id=")) (.toBe false)))))
+
+    (it "reports a miss for an unknown id rather than throwing"
+        (fn []
+          (-> (expect (:found? (store-read "nope" 0 100))) (.toBe false))))
+
+    ;; A tool author opts out through the existing four-layer policy
+    ;; precedence; no new config mechanism.
+    (it "honours :handle-on-truncate false from a registered policy"
+        (fn []
+          (register-policy! "quiet_tool" {:max-string-length 100
+                                          :handle-on-truncate false})
+          (let [out (model-string (apply-policy (repeat-str "y" 500) "quiet_tool"))]
+            (-> (expect (.includes out "truncated")) (.toBe true))
+            (-> (expect (.includes out "retrieve_result")) (.toBe false)))
+          (unregister-policy! "quiet_tool")))))
+
+;;; ─── the pre-emption trap ────────────────────────────────
+;;; apply-policy runs LAST in the leave chain: `create-pipeline` seeds
+;;; [tool-tracking tool-persistence] and `addMiddleware` APPENDS, so an
+;;; extension's :leave runs first and apply-policy sees whatever it left
+;;; behind. token_suite's tool_truncation used to cut every result to ~3k
+;;; before this was reached — under every cap, so no handle was ever minted
+;;; and the content was destroyed exactly as before. Unit-testing apply-policy
+;;; directly cannot see that; only running the real pipeline can.
+
+(describe "pipeline — the model-visible result is recoverable end to end"
+  (fn []
+    (beforeEach (fn [] (reset-store!) (reset-policies!)))
+
+    (it "mints a handle that recalls the untruncated tool output"
+        (fn []
+          (let [pipeline (create-pipeline (create-event-bus))
+                 raw      (repeat-str "some grep hit line here\n" 3000)
+                 tool     #js {:execute (fn [_] (js/Promise.resolve raw))}]
+             (-> ((:execute pipeline) "grep" tool #js {})
+                 (.then (fn [out]
+                          (let [shown (str (or (.-result out) out))
+                                id    (second (re-find #"id=\"([^\"]+)\"" shown))]
+                            (-> (expect (some? id)) (.toBe true))
+                            (loop [offset 8000 acc ""]
+                              (let [r (store-read id offset 8000)]
+                                (if (:eof? r)
+                                  (-> (expect (str (.slice raw 0 8000) acc (:body r))) (.toBe raw))
+                                  (recur (:end r) (str acc (:body r)))))))))))))
+
+    ;; A middleware that shortens the result before apply-policy sees it takes
+    ;; the content beyond recovery. Guards the ordering, not any one module.
+    (it "a :leave that pre-shortens the result destroys recoverability"
+        (fn []
+          (let [pipeline (create-pipeline (create-event-bus))
+                 raw      (repeat-str "some grep hit line here\n" 3000)
+                 tool     #js {:execute (fn [_] (js/Promise.resolve raw))}]
+             ((:add pipeline) #js {:name "pre-shortener"
+                                   :leave (fn [ctx]
+                                            (aset ctx "result" (.slice (str (.-result ctx)) 0 2000))
+                                            ctx)})
+             (-> ((:execute pipeline) "grep" tool #js {})
+                 (.then (fn [out]
+                          (let [shown (str (or (.-result out) out))]
+                            ;; Documents the trap: no handle, content gone.
+                            (-> (expect (.includes shown "retrieve_result(id=")) (.toBe false)))))))))))

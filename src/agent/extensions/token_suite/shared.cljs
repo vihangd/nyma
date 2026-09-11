@@ -7,7 +7,6 @@
   (atom {:observation-mask {:turns 0 :messages-masked 0 :tokens-saved 0}
          :kv-cache         {:turns 0 :cache-hits 0 :cache-misses 0 :cached-tokens 0}
          :expired-context  {:turns 0 :stale-replaced 0 :tokens-saved 0}
-         :tool-truncation  {:calls 0 :chars-saved 0}
          :repo-map         {:files 0 :symbols 0 :last-index-ms 0}
          :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
          :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
@@ -29,12 +28,6 @@
                       :max-message-breakpoints 2
                       :extra-providers {:anthropic [] :google []}}
    :expired-context  {:track-reads true :track-greps true}
-   :tool-truncation  {:max-chars 10000
-                      :head-lines 100
-                      :tail-lines 50
-                      :per-tool {"bash" {:head-lines 20 :tail-lines 80}
-                                 "read" {:head-lines 100 :tail-lines 50}
-                                 "grep" {:max-per-match 500}}}
    :repo-map         {:max-tokens 2000 :reindex-on-edit true
                       :extensions #{"js" "ts" "tsx" "cljs" "py" "rs" "go" "java" "rb"}}
    :priority-assembly {:min-keep 3 :always-keep-compaction true}

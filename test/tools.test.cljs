@@ -211,13 +211,13 @@
 
 (describe "agent.tools - builtin-tools map"
           (fn []
-            (it "contains exactly 12 tools"
+            (it "contains exactly 13 tools"
                 (fn []
-                  (-> (expect (count builtin-tools)) (.toBe 12))))
+                  (-> (expect (count builtin-tools)) (.toBe 13))))
 
             (it "has all builtin tool keys"
                 (fn []
-                  (doseq [name ["read" "view_image" "write" "edit" "bash" "think" "ls" "glob" "grep" "web_fetch" "web_search" "deep_research"]]
+                  (doseq [name ["read" "view_image" "write" "edit" "bash" "think" "ls" "glob" "grep" "web_fetch" "web_search" "deep_research" "retrieve_result"]]
                     (-> (expect (get builtin-tools name)) (.toBeTruthy)))))))
 
 ;; --- Tool definitions must have the properties the AI SDK reads ---

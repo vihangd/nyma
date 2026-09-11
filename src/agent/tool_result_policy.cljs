@@ -31,7 +31,13 @@
 
 (def ^:private default-policy
   {:max-string-length   12000
-   :prefer-summary-only false})
+   :prefer-summary-only false
+   ;; Truncation used to simply destroy the tail: the model could not ask for
+   ;; the rest, whatever it was. Every tool below except bash (which brings its
+   ;; own handle via bash_suite) lost content with no way back — including every
+   ;; MCP and extension-registered tool, which all land on the 12000 default.
+   ;; With this on, the cut content is stored and the notice carries an id.
+   :handle-on-truncate  true})
 
 (def ^:private builtin-policies
   "Tighter limits for tools that typically produce large list output.
@@ -47,7 +53,11 @@
    ;; single-line files, not the primary limit — 12000 would truncate EVERY
    ;; default read and eat the "read with range …" continuation hint.
    "read"       {:max-string-length 200000}
-   "think"      {:max-string-length 4000}})
+   "think"      {:max-string-length 4000}
+   ;; The recall tool's own output is a tool result and comes back through
+   ;; here. :handle-on-truncate false is load-bearing — otherwise an
+   ;; overshooting chunk mints a handle for a handle.
+   "retrieve_result" {:max-string-length 12000 :handle-on-truncate false}})
 
 ;;; ─── Extension-contributed policies ─────────────────────
 
@@ -91,16 +101,97 @@
            (when meta-policy meta-policy)
            (get @ext-policies (str tool-name) {}))))
 
+;;; ─── Truncated-result store ──────────────────────────────
+
+(def ^:private max-store-chars
+  "Ceiling on everything held at once; oldest entries evict past it."
+  (* 8 1024 1024))
+
+(def ^:private result-store
+  "id → {:s full-string :tool tool-name :at ms}.
+
+   In memory, not the session JSONL, because a handle's useful life is ONE
+   turn: the truncation notice lives only inside the AI SDK's internal step
+   messages and is discarded at the turn boundary (tool results never enter
+   `state :messages` — see `sessions/manager.cljs:27`). Durability across
+   restarts would buy nothing, and an on-disk store would still need this
+   fallback for headless `-p`, the gateway, and tests."
+  (atom {}))
+
+(defn reset-store!
+  "Drop every stored result. Test helper, mirroring `reset-policies!`."
+  []
+  (reset! result-store {}))
+
+(defn- evict-if-needed!
+  "Keep the store under `max-store-chars`, dropping oldest first."
+  []
+  (let [total (reduce + 0 (map #(count (:s %)) (vals @result-store)))]
+    (when (> total max-store-chars)
+      (swap! result-store
+             (fn [m]
+               (loop [entries (sort-by :at (map (fn [[k v]] (assoc v :id k)) m))
+                      acc     m
+                      sz      total]
+                 (if (or (<= sz max-store-chars) (empty? entries))
+                   acc
+                   (let [e (first entries)]
+                     (recur (rest entries)
+                            (dissoc acc (:id e))
+                            (- sz (count (:s e)))))))))) ))
+
+(defn store!
+  "Store `s` and return its id.
+
+   Keyed by CONTENT hash, never by time or a counter. The truncation notice is
+   re-sent on every internal step of the turn, so an id that drifted between
+   steps would change the prompt prefix each time and break the provider's
+   cache. Identical output also dedups for free."
+  [s tool-name]
+  (let [id (.toString (js/Bun.hash (str s)) 16)]
+    (swap! result-store assoc id {:s (str s) :tool (str tool-name) :at (js/Date.now)})
+    (evict-if-needed!)
+    id))
+
+(defn store-read
+  "Read a page of a stored result.
+
+   Offsets are CHARACTER offsets. The value never round-trips through bytes
+   here, so character slicing cannot split a multi-byte sequence, and it lines
+   up exactly with `:max-string-length`, which is also a character count.
+   Cuts back to the last newline when not at the end, so pages land on whole
+   lines."
+  [id offset limit]
+  (if-let [entry (get @result-store (str id))]
+    (let [s      (:s entry)
+          total  (count s)
+          start  (max 0 (min (or offset 0) total))
+          want   (max 1 (or limit 8000))
+          raw-end (min total (+ start want))
+          nl      (.lastIndexOf (.slice s start raw-end) "\n")
+          end     (if (and (< raw-end total) (> nl 0)) (+ start nl 1) raw-end)]
+      {:found? true :tool (:tool entry) :total total
+       :start start :end end :body (.slice s start end) :eof? (>= end total)})
+    {:found? false}))
+
 ;;; ─── String helpers ──────────────────────────────────────
 
 (defn- truncate-at
   "Right-truncate `s` to at most `max-len` chars, appending a
-   byte-count note. Returns the input unchanged when it fits."
-  [s max-len]
-  (if (> (count s) max-len)
-    (str (.slice s 0 max-len)
-         "\n… (" (- (count s) max-len) " bytes truncated)")
-    s))
+   byte-count note. Returns the input unchanged when it fits.
+
+   With `tool-name` and a truthy `handle?`, the full string is stored first and
+   the note carries the id plus the offset to resume at — so the model picks up
+   exactly at the cut and re-reads nothing."
+  ([s max-len] (truncate-at s max-len nil false))
+  ([s max-len tool-name handle?]
+   (if (> (count s) max-len)
+     (let [id (when handle? (store! s tool-name))]
+       (str (.slice s 0 max-len)
+            "\n… (" (- (count s) max-len) " bytes truncated)"
+            (when id
+              (str "\nContinue reading: retrieve_result(id=\"" id "\", offset=" max-len ")"))))
+     s)))
 
 (defn- short-summary
   "A ≤200-char first-line summary of `s`, used for the :summary key.
@@ -142,7 +233,8 @@
    model-visible string (see `model-string`)."
   [raw tool-name]
   (let [policy  (policy-for tool-name)
-        max-len (:max-string-length policy)]
+        max-len (:max-string-length policy)
+        handle? (not (false? (:handle-on-truncate policy)))]
     (cond
       ;; nil / empty → silent success
       (or (nil? raw) (= raw ""))
@@ -156,13 +248,13 @@
         {:ok false
          :summary (truncate-at msg 200)
          :data    nil
-         :error   (truncate-at msg max-len)
+         :error   (truncate-at msg max-len tool-name handle?)
          :error-kind kind})
 
       ;; String (the normal case after normalize-tool-result)
       :else
       (let [s   (if (string? raw) raw (str raw))
-            dat (truncate-at s max-len)]
+            dat (truncate-at s max-len tool-name handle?)]
         {:ok         true
          :summary    (short-summary s)
          :data       dat
