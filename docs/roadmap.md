@@ -1103,3 +1103,62 @@ profile/bundle composition; "model-visible means logged" (dsh asserts at runtime
 reaching a model request is reconstructable from the session log — nyma discards tool results at the
 turn boundary by construction, `sessions/manager.cljs:27`); the four-way event mode taxonomy
 (`emit`/`waterfall`/`serial`/`parallel`) against nyma's three; and creator mode.
+
+## 2026-09-11 — dependency, Bun and performance sweep
+
+All numbers measured on an M-series Mac, Bun 1.4.2, against `dist/`. The ruled-out table is the point
+of this section: each row cost a measurement, and without it someone re-opens the idea every quarter.
+
+### Landed
+
+- **`estimate-tokens` allocated a string per character.** `(count (re-seq #"[^a-zA-Z\s]" s))` builds one
+  single-character string per match — ~100k allocations to measure a 230 KB message, **13.8 ms a call**,
+  from sixteen call sites that mostly walk every message every turn. A charCode loop is **1.0–1.5 ms**
+  and allocates nothing. The whitespace set matches JS `\s` exactly (nbsp included — it is ordinary in
+  `web_fetch` output, and miscounting it flips the 20% "looks like code" branch and inflates estimates,
+  which compacts early, which is a full prompt-cache miss). Pinned by a differential test over every
+  message in `~/.nyma/sessions`. Same shape fixed in `token_suite/shared count-lines` and
+  `diff_edit/find-line-number`.
+- **`turndown` + `linkedom` were top-level requires in `tools.cljs`**, so the gateway, headless `-p`, the
+  SDK and every test run paid ~26 ms and ~20 MB RSS for two libraries only `web_fetch`'s markdown path
+  uses (`deep_research` never reaches them). Loaded on demand, memoized.
+- **`Bun.which` replaced a spawned `which`** in `try-binary`: 0.018 ms vs 5.1 ms.
+- **`Bun.CryptoHasher` replaced `node:crypto`** at three sha256 sites: same digest, 2× faster.
+- **`nanoid` dropped** for `crypto.randomUUID()` (one call site).
+- **Deps:** `@ai-sdk/*`, `zod`, `squint-cljs`, `vscode-jsonrpc`, `claude-agent-sdk`, `concurrently` as a
+  batch; `ai` 7.0.48 → 7.0.97 alone, verified with a live `bench/run.mjs --only python/wordy` against
+  vllm/Qwen3.8-27B (pass, 7 turns, 8 tool calls, usage accounted) because the unit tests block the
+  provider. **squint 0.14.208 changed its binding suffix from `name68` to `name_68`**, which silently
+  disarmed `compiled_scope_lint` — both shapes are accepted now.
+
+### Held
+
+- **`marked` stays at 17.** `marked-terminal@7.3.0` is the latest and declares peer `marked ">=1 <16"`,
+  so the range is already violated and works; 18 widens a gap nobody tests. Dropping `marked-terminal`
+  (47 ms, +17 MB, the largest single import) means adopting pi-tui's `Markdown`, which is a
+  `Component` (`render(width) → string[]`) needing a 14-function theme, not a `string → string` swap —
+  a `chat_renderer` change, not a dependency change. `marked` itself stays regardless:
+  `markdown_blocks` uses its lexer.
+- **`headroom-ai` stays at 0.22.4** — fifteen minor versions on a pre-1.0 package for one export.
+
+### Ruled out, with numbers
+
+| idea | measurement | verdict |
+|---|---|---|
+| `node:fs`/`path`/`os` → Bun (155 files) | `readFileSync` 0.24 ms vs `Bun.file().text()` 0.23 ms (0.8 MB) | no gain, and `Bun.file` is async — an async refactor for nothing |
+| dir walkers → `Bun.Glob` | walk 256 files 2.1 ms vs Glob 2.6 ms | Glob is *slower* here |
+| `node:child_process` → `Bun.spawnSync` | builtin either way | no dep removed, loses `execSync`'s shell-string convenience |
+| sessions → `bun:sqlite` | reading all 77 session files fully: **3 ms** | there is no listing problem to solve |
+| `linkedom` → `HTMLRewriter` | — | `turndown` needs a DOM; `HTMLRewriter` is a streaming rewriter |
+| `Bun.serve` `routes` in the gateway | — | the hand-rolled router is a few string compares on a local server |
+| `--smol` | RSS 90→91 MB, heap 14→10 MB, objects 150k→93k | no startup win; maybe worth it for a long-lived gateway |
+
+### Left on the table
+
+- **zstd for archived sessions.** `Bun.zstdCompressSync` takes a 0.82 MB session to **0.11 MB (13%) in
+  2 ms**, decompress 1 ms; the whole directory 3.2 MB → 0.6 MB. Cannot apply to the live file (appends
+  are the write path), so it is a pass over sessions older than N days with `load-fn` decompressing
+  transparently — the shape deepseek-harness uses. Not urgent at 8.7 MB.
+- **`bun build --compile --bytecode`.** The flag exists in 1.4.2 and the shipped binary is built without
+  it. Warm startup is already identical for binary and `dist` (~130 ms), so the bytecode cache is the
+  only remaining lever on parse time; build both and measure before claiming anything.
