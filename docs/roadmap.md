@@ -1226,3 +1226,26 @@ binary is Bun, and that floor is not ours to move. `--minify` took the JS bundle
 the binary 94.6 MB → 89.3 MB with **no startup change**, because `--bytecode` already caches the parse.
 `bundle:all` builds all five targets so their flags cannot drift; `test/bundle_flags.test.cljs` pins
 `--bytecode` + `--format=esm` + `--minify` together.
+
+## 2026-09-11 — the flaky test was a live test
+
+`test/ext_agent_shell_e2e.test.cljs` spawned `qwen`, `claude-agent-acp` and `opencode` and made live,
+billed LLM calls on **every** `bun test`. It was the single flaky file in the suite: the opencode prompt
+test failed at 8 s inside a full run and passed in 72 s on its own, because its dependencies are
+external processes, the network and a paid model.
+
+The tell was already in the repo: `.nyma/settings.json`'s `verify.cmd` greps this file out
+(`bun test $(ls dist/*.test.mjs | grep -v ext_agent_shell_e2e)`). A test excluded from the command that
+verifies the project is not protecting anything.
+
+It is opt-in now (`NYMA_E2E=1`), and each suite additionally skips when its binary is absent
+(`Bun.which`), so opting in on a machine without the agent skips instead of failing 60 s later on a
+spawn that was never going to work.
+
+**The default suite went from ~105 s to ~23 s** — those live calls were four fifths of the wall clock —
+at 4298 pass / 18 skip / 0 fail across consecutive runs. With the file no longer flaky by default,
+`verify.cmd` can drop its `grep -v`.
+
+General rule this leaves behind: a test that needs a binary, a network or a credential belongs behind an
+opt-in flag, and must skip — not fail — when what it needs is missing. Otherwise the suite teaches
+people to ignore it.
