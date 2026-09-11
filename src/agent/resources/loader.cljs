@@ -3,16 +3,16 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             [clojure.string :as str]
-            [agent.resources.skills :as skills]))
+            [agent.resources.skills :as skills]
+            [agent.builtin-extensions :as builtin-extensions]))
 
 (def global-dir (path/join (os/homedir) ".nyma"))
 (def project-dir ".nyma")
 
-;; Built-in extensions dir: resolved relative to this module's compiled location.
-;; This module compiles to dist/agent/resources/loader.mjs,
-;; so ../extensions/ resolves to dist/agent/extensions/.
-(def builtin-extensions-dir
-  (path/resolve (js* "import.meta.dir") ".." "extensions"))
+;; Builtins are no longer discovered by scanning dist/agent/extensions: that path
+;; resolves INSIDE a single-file binary, where it does not exist, so a bundled
+;; nyma loaded 2 of 40 extensions and nothing reported it. They come from
+;; agent.builtin-extensions, which imports each one statically.
 
 (def default-system-prompt
   "You are Nyma, an interactive CLI coding agent. You help users with software engineering tasks: fixing bugs, writing features, refactoring code, answering questions, and exploring codebases.
@@ -321,9 +321,16 @@ When multiple independent tool calls are needed, make them in parallel.
               (when (seq agents-md) (str "\n\n" agents-md))
               (when append (str "\n\n" append)))))
 
+     ;; User extension directories only. These are real directories on the
+     ;; machine running nyma, so scanning them works from a source tree and from
+     ;; a binary alike.
      :extension-dirs
-     (let [user-dirs [(path/join global-dir "extensions")
-                      (path/join project-dir "extensions")]]
-       (if (.-NYMA_NO_BUILTIN_EXT js/process.env)
-         user-dirs
-         (into [builtin-extensions-dir] user-dirs)))}))
+     [(path/join global-dir "extensions")
+      (path/join project-dir "extensions")]
+
+     ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them
+     ;; off wholesale — it was the only thing the old dir-list branch did.
+     :builtin-extensions
+     (if (.-NYMA_NO_BUILTIN_EXT js/process.env)
+       []
+       builtin-extensions/registry)}))

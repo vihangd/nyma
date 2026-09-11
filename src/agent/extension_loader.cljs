@@ -183,9 +183,24 @@
    Extensions may return a deactivate function for cleanup.
    If an extension.json manifest exists, it provides namespace, capabilities, and dependsOn.
    Extensions are loaded in dependency order (topological sort)."
-  [dirs api]
-  ;; Pass 1: Scan and collect metadata
-  (let [scan-results (atom [])]
+  [dirs api & [builtins]]
+  ;; Pass 1: collect metadata — the statically compiled builtins first, then
+  ;; whatever the user directories hold.
+  ;;
+  ;; Builtins arrive already resolved (see agent.builtin-extensions) because a
+  ;; single-file binary has no directory to scan: the old scan-only path found
+  ;; nothing there and shipped a nyma with 2 of 40 extensions. They still go
+  ;; through the same topological sort, capability parsing and activation as a
+  ;; scanned file — one pipeline, so a builtin cannot drift from a user
+  ;; extension in how it is loaded.
+  (let [scan-results (atom (vec (for [{:keys [namespace module manifest]} (or builtins [])]
+                                  {:path      (str "builtin:" namespace)
+                                   :entry     "index.cljs"
+                                   :namespace namespace
+                                   :manifest  manifest
+                                   :module    module
+                                   :deps      (when (and manifest (.-dependsOn manifest))
+                                                (vec (js/Array.from (.-dependsOn manifest))))})))]
     (doseq [dir dirs]
       (when (js-await (-> (.stat fsp dir) (.then (constantly true)) (.catch (constantly false))))
         (let [entries (js-await (.readdir fsp dir #js {:recursive true}))]
@@ -226,17 +241,21 @@
       ;; Pass 3: Load in sorted order; skip anything whose dependency failed
       ;; (loading against a half-initialized dependency is worse than not
       ;; loading at all).
-      (doseq [{:keys [path entry namespace manifest deps]} sorted]
+      (doseq [{:keys [path entry namespace manifest deps module]} sorted]
         (if-let [bad (first (filter @failed (or deps [])))]
           (do (swap! failed conj namespace)
               (d/error
                (str "[nyma] Skipping extension " namespace
                     " — its dependency " bad " failed to load")))
           (try
-            ;; Resolve npm dependencies before loading
-            (when manifest
+            ;; Resolve npm dependencies before loading. A builtin's deps are
+            ;; nyma's own and already installed, so this only has work to do for
+            ;; something found on disk.
+            (when (and manifest (not module))
               (js-await (resolve-dependencies manifest)))
-            (let [ext-fn (js-await (load-extension path))
+            (let [ext-fn (if module
+                           (.-default module)
+                           (js-await (load-extension path)))
                   caps   (parse-capabilities
                           (when manifest (.-capabilities manifest))
                           namespace)
@@ -246,7 +265,12 @@
                   (swap! extensions conj
                          {:path       path
                           :namespace  namespace
-                          :type       (if (cljs-extension? entry) :squint :ts)
+                          :type       (cond module :builtin
+                                            (cljs-extension? entry) :squint
+                                            :else :ts)
+                          ;; Carried so filter-by-mode can read `modes` off it;
+                          ;; it takes :manifest and got nil from every entry.
+                          :manifest   manifest
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
               (swap! failed conj namespace)

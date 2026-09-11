@@ -1,9 +1,13 @@
 (ns loader-smoke.test
   "Smoke test for the built-in extension loader.
 
-   Single test that calls `discover-and-load` against the actual
-   `dist/agent/extensions/` tree and asserts every expected built-in
-   extension loads with the expected kebab-case namespace.
+   Calls `discover-and-load` with the statically compiled builtin registry —
+   the path production takes — and asserts every expected built-in extension
+   activates under the expected kebab-case namespace.
+
+   It used to scan `dist/agent/extensions/` instead. That directory exists in a
+   source tree and not inside a single-file binary, which is exactly how a
+   bundled nyma came to load 2 of 40 extensions with this test green.
 
    This is the test that would have caught the recent loader bug where four
    manifest-less directory extensions (model_roles,
@@ -11,10 +15,10 @@
    from `derive-namespace`, collided in topo-sort's by-ns map, and silently
    dropped 3 of 4 from the load list."
   (:require ["bun:test" :refer [describe it expect]]
-            ["node:path" :as path]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.extension-loader :refer [discover-and-load deactivate-all]]))
+            [agent.extension-loader :refer [discover-and-load deactivate-all]]
+            [agent.builtin-extensions :refer [registry]]))
 
 ;; The full set of built-in extension namespaces shipped under
 ;; src/agent/extensions/. If you ADD a new built-in, add it here.
@@ -58,15 +62,10 @@
     "handoff"
     "budget"})
 
-(defn- builtin-dir []
-  ;; This test file compiles to dist/loader_smoke.test.mjs, so
-  ;; agent extensions sit at dist/agent/extensions/ — one level down.
-  (path/resolve (js* "import.meta.dir") "agent" "extensions"))
-
 (defn ^:async test-all-builtins-load-with-correct-namespaces []
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
         api    (create-extension-api agent)
-        loaded (js-await (discover-and-load [(builtin-dir)] api))
+        loaded (js-await (discover-and-load [] api registry))
         nses   (set (map :namespace loaded))]
     (try
       ;; All expected namespaces present
@@ -85,7 +84,7 @@
 (defn ^:async test-no-duplicate-namespaces []
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
         api    (create-extension-api agent)
-        loaded (js-await (discover-and-load [(builtin-dir)] api))
+        loaded (js-await (discover-and-load [] api registry))
         nses   (map :namespace loaded)]
     (try
       ;; Set count must equal vec count — duplicates would shrink the set.
@@ -98,7 +97,7 @@
   ;; some other value. Catches accidental return-shape regressions.
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
         api    (create-extension-api agent)
-        loaded (js-await (discover-and-load [(builtin-dir)] api))]
+        loaded (js-await (discover-and-load [] api registry))]
     (try
       (doseq [ext loaded]
         (let [d (:deactivate ext)]

@@ -575,7 +575,8 @@ Examples:
     (set! (.-extension-api agent) api)
 
     ;; Load all extensions (both .cljs and .ts/.js)
-    (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api))
+    (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
+                                                         (:builtin-extensions resources)))
           extensions-atom   (atom loaded-extensions)
           ;; Shared by the SIGINT handler, the `exit` handler and the one-shot
           ;; finisher so shutdown runs exactly once.

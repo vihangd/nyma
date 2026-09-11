@@ -20,7 +20,8 @@
     "pretest": "npx squint compile",
     "test": "bun test dist",
     "repl": "npx squint repl",
-    "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs"
+    "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",
+    "gen:builtins": "bun scripts/gen-builtin-extensions.mjs && npx squint compile"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.52",

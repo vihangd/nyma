@@ -53,7 +53,8 @@
     ;; Load extensions
     (js-await (discover-and-load
                (:extension-dirs resources)
-               (create-extension-api agent)))
+               (create-extension-api agent)
+               (:builtin-extensions resources)))
 
     {:agent     agent
      :session   session

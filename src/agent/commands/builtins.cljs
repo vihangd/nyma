@@ -164,7 +164,8 @@
     (when (and extensions-atom (.-extension-api agent))
       (let [loaded (js-await (discover-and-load
                               (:extension-dirs new-resources)
-                              (.-extension-api agent)))]
+                              (.-extension-api agent)
+                              (:builtin-extensions new-resources)))]
         (reset! extensions-atom loaded)))
     ;; 6. Re-resolve CLI flags
     (when resolve-flags-fn
