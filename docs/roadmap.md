@@ -1182,3 +1182,47 @@ of this section: each row cost a measurement, and without it someone re-opens th
   loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension failed with
   `Cannot find package 'ai'`, none did with ESM. Pinned by `test/bundle_flags.test.cljs`, because a
   bytecode binary starts fine and prints help fine and only falls over on the extensions.
+
+## 2026-09-11 — the swallowed stream error, and the binary's shape
+
+**Bug class: an error the code is told to look for and doesn't.** `-p` reported
+`No output generated. Check the stream for errors.` for three different failures on two providers. That
+sentence is the AI SDK's, thrown when no step completed — and the real cause was in the stream as an
+`error` part that nyma dropped, because `stream-event-types` (`loop.cljs:14`) has no mapping for
+`"error"`, so `event-type` returned nil and the chunk was emitted under a **nil event name** that
+nothing listens to. The message asks you to check the stream for errors; nothing did.
+
+The loop reads that part now: logs it, emits `provider_error` (where escalate's failover already
+looks), attaches it to whatever the SDK throws, and treats an error stream that produced no text as a
+failed turn rather than an empty one — some providers end such a stream cleanly, so `.text` resolves
+`""` and the failure was reported as a model that answered with nothing.
+
+Both underlying bugs then took minutes:
+
+- **`--model <role>` was taken literally in one-shot.** Roles are how the rest of nyma talks about
+  models (`/role`, escalate's chains, `bench/run.mjs --model`), but `-p` sent the word itself as a model
+  id: `--model local` reached MiniMax as the model `"local"` → *"Unknown Model, please check the model
+  code"*. A bare `--model` value naming a role now expands to its provider/model.
+- **An unknown provider pointed at `/login`.** `"No model configured. Set ANTHROPIC_API_KEY or configure
+  a provider via /login"` for a provider that was never registered. It names the spec now and logs the
+  registered list. The instance that started this: `.nyma/settings.json` in this repo replaces the whole
+  `local-models` array from `~/.nyma/settings.json`, so `vllm` exists globally and not here — user
+  config, but undiagnosable from the old message.
+
+One-shot output also strips `<think>` blocks (an orchestrator wants the answer, not the deliberation),
+passing a reasoning-only reply through intact rather than blanking it.
+
+### Binary shape, measured
+
+| | size | startup (10-run median) |
+|---|---|---|
+| `bun` itself | 61.9 MB | — |
+| `./nyma` before this week | 69 MB (no bytecode, **2 of 40 extensions**) | 100 ms |
+| `./nyma` now | **89.3 MB** | **40 ms** |
+| `bun dist/agent/cli.mjs` | — | 160 ms |
+
+So nyma is **1.53× bun**, and the app half is ~27 MB of a 89 MB binary — most of a standalone Bun
+binary is Bun, and that floor is not ours to move. `--minify` took the JS bundle 10.4 MB → 6.3 MB and
+the binary 94.6 MB → 89.3 MB with **no startup change**, because `--bytecode` already caches the parse.
+`bundle:all` builds all five targets so their flags cannot drift; `test/bundle_flags.test.cljs` pins
+`--bytecode` + `--format=esm` + `--minify` together.
