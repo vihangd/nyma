@@ -1008,3 +1008,42 @@ Follow-on to the sweep above; same classes, found by pushing the detectors furth
   `tool_call`, `tool_result`, `agent_end`) are exempted by READING `loop.cljs`'s `stream-event-types`
   map rather than by a hand-written allow-list — an allow-list maintained by hand is the same
   never-validated static data the lint exists to catch.
+
+## 2026-09-11 — borrowed from mini-swe-agent
+
+[mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) is the SWE-bench team's 100-line agent:
+bash as the only tool, `subprocess.run` per action, linear history, YAML templates, >74% on SWE-bench
+verified. Its architecture does not transfer — nyma is a tool-using, permissioned, extensible agent and
+mini's whole point is to have none of that. Four **turn-outcome details** did, all of them the class
+this codebase keeps finding: a condition that occurs, matters, and is invisible.
+
+1. **A response cut off at the output-token cap.** `finishReason "length"` was read by nothing. The
+   turn ended mid-sentence with no explanation, and — worse — it fed `:no-op-turns`, so the two-turn
+   progress warning and escalate's stall detection both prescribed their remedy (swap the model, prune
+   the tail) for a response that was merely too long. `loop/turn-outcome` now classifies the turn:
+   a cut-off turn is never a stall, and the model gets mini's remedy (`cut-off-nudge`) as a follow-up.
+   The nudge is deliberately NOT conditioned on the tool count — a turn that ran five tools and got cut
+   off on the sixth needs it too. `turn_finalize` carries `:finishReason` so consumers stop re-deriving
+   it; escalate stands down on it.
+2. **The step cap fired in silence.** `stopWhen (stepCountIs max-steps)` just returns, so a capped run
+   looked like a finished one. Detected by COUNTING (`steps-this-run` >= `max-steps`), never by
+   inferring from `finishReason "tool-calls"` — an abort (budget, stream filter) produces that too.
+   Notifies and names the setting; no auto-continue, that is the user's money.
+3. **Wall-clock budget** (`{"budget": {"wall-seconds": N}}`). It is a TIMER armed at
+   `before_agent_start` and disarmed at `agent_end`, NOT a check on `turn_end`: a run wedged inside one
+   provider call — the case the cap exists for — finishes no step and would never reach a turn_end
+   check. Armed once per run, not re-armed per step, or it would quietly become an inactivity timeout
+   that a long healthy run never trips.
+4. **Truncation keeps the tail and teaches.** `tool_result_policy/truncate-at` was head-only, so a test
+   run's failure summary, a build log's error and a stack trace's cause — all at the END — were exactly
+   what got cut, for every tool except bash (which has its own middle-truncation). Now 60/40 head/tail
+   with the elision in the middle, the handle offset pointing at the GAP, and mini's coaching line.
+   Both cut points are line-aligned (head rounds back, tail rounds forward) because `store-read` snaps
+   a page start to the last newline — an arbitrary cut would make the recalled middle overlap the head.
+
+**Already ahead, not borrowed:** mini's text-based action parsing (fenced bash, XML, bracket tags) is
+`utils/toolcall_rescue.cljs`, which handles four malformed formats. Its cost/step config is
+`settings#budget` + `:max-steps`; its `<returncode>` observation is nyma's bash JSON envelope.
+
+**Deliberately not borrowed:** bash-only (nyma derives permission categories from tool *names*),
+subprocess-per-action, linear-history-as-prompt, Jinja templates as the config surface.

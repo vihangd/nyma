@@ -62,3 +62,62 @@
                                     :off (fn [evt _] (swap! handlers dissoc evt))}]
                   (b/activate api)
                   (-> (expect (count @handlers)) (.toBe 0))))))
+
+;;; ─── Wall clock ─────────────────────────────────────────────
+;;; A run wedged inside one provider call finishes no step, so the token checks
+;;; on turn_end never run. The wall-clock cap is a timer for exactly that case.
+
+(defn ^:async t-wall-clock-aborts-a-run-with-no-steps []
+  (let [handlers (atom {})
+        aborted  (atom false)
+        api      #js {:getSettings (fn [] #js {:budget #js {:wall-seconds 0.05}})
+                      :on  (fn [evt h] (swap! handlers assoc evt h))
+                      :off (fn [evt _] (swap! handlers dissoc evt))}
+        _        (b/activate api)
+        ctx      #js {:abort (fn [] (reset! aborted true))}]
+    ((get @handlers "before_agent_start") #js {} ctx)
+    ;; No turn_end ever fires — the provider is hung.
+    (js-await (js/Promise. (fn [res _] (js/setTimeout res 90))))
+    (-> (expect @aborted) (.toBe true))))
+
+(defn ^:async t-wall-clock-disarms-on-agent-end []
+  (let [handlers (atom {})
+        aborted  (atom false)
+        api      #js {:getSettings (fn [] #js {:budget #js {:wall-seconds 0.05}})
+                      :on  (fn [evt h] (swap! handlers assoc evt h))
+                      :off (fn [evt _] (swap! handlers dissoc evt))}
+        _        (b/activate api)
+        ctx      #js {:abort (fn [] (reset! aborted true))}]
+    ((get @handlers "before_agent_start") #js {} ctx)
+    ((get @handlers "agent_end") #js {} ctx)
+    (js-await (js/Promise. (fn [res _] (js/setTimeout res 90))))
+    (-> (expect @aborted) (.toBe false))))
+
+(describe "budget wall clock" (fn [])
+          (it "config carries wall-seconds and turns the extension on"
+              (fn []
+                (let [cfg (shared/config #js {:budget #js {:wall-seconds 900}})]
+                  (-> (expect (:wall-seconds cfg)) (.toBe 900))
+                  (-> (expect (shared/enabled? cfg)) (.toBe true)))))
+
+          ;; It is NOT part of over-budget: that runs on turn_end, which a hung
+          ;; run never reaches.
+          (it "stays out of the token check"
+              (fn []
+                (-> (expect (shared/over-budget {:wall-seconds 1} {:turn 0 :session 0}))
+                    (.toBeFalsy))))
+
+          (it "aborts a run that never finishes a step" t-wall-clock-aborts-a-run-with-no-steps)
+          (it "disarms when the run ends normally" t-wall-clock-disarms-on-agent-end)
+
+          (it "arms nothing when unset"
+              (fn []
+                (let [handlers (atom {})
+                      api      #js {:getSettings (fn [] #js {:budget #js {:turn-tokens 100}})
+                                    :on  (fn [evt h] (swap! handlers assoc evt h))
+                                    :off (fn [evt _] (swap! handlers dissoc evt))}
+                      _        (b/activate api)
+                      ctx      #js {:abort (fn [] (throw (js/Error. "must not abort")))}]
+                  ;; No throw = no timer was armed.
+                  ((get @handlers "before_agent_start") #js {} ctx)
+                  (-> (expect true) (.toBe true))))))

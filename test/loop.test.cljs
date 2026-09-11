@@ -2,7 +2,7 @@
   (:require ["bun:test" :refer [describe it expect]]
             ["ai" :refer [tool]]
             ["zod" :as z]
-            [agent.loop :refer [steer follow-up stream-event-types wrap-tools-with-before-hook]]
+            [agent.loop :as l :refer [steer follow-up stream-event-types wrap-tools-with-before-hook]]
             [agent.events :refer [create-event-bus]]))
 
 ;; --- stream-event-types map ---
@@ -183,3 +183,52 @@
             (-> (expect result) (.toBe "got:test"))
             ;; Verify properties preserved
             (-> (expect (.-description (get wrapped "real"))) (.toBe "real tool"))))))))
+
+;;; ─── Turn outcome (mini-swe-agent borrows) ──────────────────
+;;; Two limits that used to fire in silence: a response truncated at the
+;;; output-token cap, and the step cap stopping a model mid-task.
+
+(defn- outcome [fr tools steps max-steps]
+  (l/turn-outcome fr tools steps max-steps))
+
+(describe "turn-outcome"
+          (fn []
+            (it "a plain text turn is a stall candidate"
+                (fn []
+                  (-> (expect (:count-stall? (outcome "stop" 0 1 100))) (.toBe true))
+                  (-> (expect (:cut-off? (outcome "stop" 0 1 100))) (.toBe false))))
+
+            (it "a turn that ran tools is never a stall"
+                (fn []
+                  (-> (expect (:count-stall? (outcome "stop" 3 4 100))) (.toBe false))))
+
+            ;; The model was still talking when the cap hit. Counting it drove
+            ;; the two-turn warning and escalate's model swap — the wrong remedy
+            ;; for a response that was merely too long.
+            (it "a cut-off turn with no tools is NOT counted as a stall"
+                (fn []
+                  (let [o (outcome "length" 0 1 100)]
+                    (-> (expect (:cut-off? o)) (.toBe true))
+                    (-> (expect (:count-stall? o)) (.toBe false)))))
+
+            ;; mini-swe-agent's case is "cut off before producing a tool call on
+            ;; THIS step" — earlier tool calls in the same turn don't change it.
+            (it "a cut-off turn still reports cut-off after five tool calls"
+                (fn []
+                  (-> (expect (:cut-off? (outcome "length" 5 6 100))) (.toBe true))))
+
+            (it "the step cap is counted, not inferred from finishReason"
+                (fn []
+                  (-> (expect (:step-capped? (outcome "tool-calls" 2 100 100))) (.toBe true))
+                  (-> (expect (:step-capped? (outcome "tool-calls" 2 99 100))) (.toBe false))
+                  ;; An abort produces the same finishReason without hitting the cap.
+                  (-> (expect (:step-capped? (outcome "tool-calls" 2 3 100))) (.toBe false))))
+
+            (it "no cap configured means never capped"
+                (fn []
+                  (-> (expect (:step-capped? (outcome "stop" 1 500 0))) (.toBe false))))
+
+            (it "the nudge names the limit and asks for the next action"
+                (fn []
+                  (-> (expect l/cut-off-nudge) (.toContain "output token limit"))
+                  (-> (expect l/cut-off-nudge) (.toContain "concisely"))))))

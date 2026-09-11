@@ -26,6 +26,38 @@
    ;; aborted at half its cap, per-turn counters ran 2x).
    "finish"          "agent_end"})
 
+(defn turn-outcome
+  "Pure: how did the turn end, and what should react to it?
+
+   `finish-reason` is the provider's own verdict. \"length\" means the response
+   was CUT OFF at the output-token cap — until this existed, nothing in the
+   codebase read that value, so a truncated response was indistinguishable from
+   a model that had stopped working, and fed the stall counter that drives the
+   two-turn warning and escalate's model swap.
+
+   Returns:
+     :cut-off?     the response hit the output cap — nudge for concision, and it
+                   is NOT a stall no matter how many tools ran first
+     :count-stall? whether :no-op-turns should be incremented
+     :step-capped? the step limit stopped a model that was still working. Counted,
+                   never inferred from finish-reason, which an abort path
+                   (budget, stream filter) produces too."
+  [finish-reason tool-calls steps max-steps]
+  (let [cut-off? (= (str finish-reason) "length")
+        no-tools? (zero? (or tool-calls 0))]
+    {:cut-off?     cut-off?
+     :count-stall? (and no-tools? (not cut-off?))
+     :step-capped? (boolean (and (pos? (or max-steps 0))
+                                 (>= (or steps 0) max-steps)))}))
+
+(def cut-off-nudge
+  "Borrowed from mini-swe-agent's format_error_template, which answers a
+   length-truncated response with an instruction instead of silence."
+  (str "Your previous response reached the output token limit and was "
+       "cut off before it finished. Continue from where you stopped, and "
+       "respond more concisely — take the next concrete action with a tool "
+       "rather than restating the plan."))
+
 (defn- event-type [chunk]
   (get stream-event-types (.-type chunk)))
 
@@ -356,6 +388,11 @@
           ;; re-surface it. Without this, a flaky planning turn skipped
           ;; turn_finalize and left plan mode silently stuck ON.
           (let [turn-error (atom nil)
+                ;; The provider's own verdict on how the turn ended, carried out
+                ;; to the finalize block below. "length" means the response was
+                ;; CUT OFF at the output-token cap — a fact, not a heuristic, and
+                ;; until now read by nothing at all.
+                turn-finish (atom nil)
                 ;; One overflow recovery per turn — a second is a real error.
                 overflow-recovered? (atom false)
                 ;; A block is NOT a real turn outcome (no plan/answer produced) —
@@ -477,6 +514,7 @@
                                                (string? fr) fr
                                                (and (object? fr) (.-unified fr)) (str (.-unified fr))
                                                :else (str fr)))
+                            _              (reset! turn-finish finish-reason)
                             store          (:store agent)]
 
                       ;; message_before_store — extensions can modify content before storage
@@ -560,21 +598,53 @@
            ;; stall (escalation) read this on the very turn that finished, and
            ;; updating afterwards made every one of them a turn stale.
             (when-not @turn-error
-              (let [st (:state agent)]
-                (if (zero? @tools-this-turn)
-                  (swap! st update :no-op-turns (fnil inc 0))
-                  (swap! st assoc :no-op-turns 0))
+              (let [st        (:state agent)
+                    ;; The provider stopped mid-response at the output-token cap.
+                    ;; Borrowed from mini-swe-agent, which answers this case with
+                    ;; a specific instruction instead of silence.
+                    {:keys [cut-off? count-stall? step-capped?]}
+                    (turn-outcome @turn-finish @tools-this-turn
+                                  @steps-this-run (:max-steps config))
+                    ui        (some-> (.-extension-api agent) .-ui)
+                    notify!   (fn [msg] (when (and ui (.-notify ui)) (.notify ui msg "warning")))]
+                ;; A cut-off turn that ran no tools is NOT a stall: the model was
+                ;; still talking when the cap hit. Counting it drove the two-turn
+                ;; warning and escalate's stall detection to the wrong remedy —
+                ;; swap the model and prune the tail — for a response that was
+                ;; merely too long.
+                (cond
+                  count-stall?             (swap! st update :no-op-turns (fnil inc 0))
+                  (pos? @tools-this-turn)  (swap! st assoc :no-op-turns 0)
+                  :else                    nil)
+
+                ;; The nudge is NOT conditioned on the tool count: a turn that ran
+                ;; five tools and got cut off on the sixth needs it just as much.
+                (when cut-off?
+                  (dbg/warn "[loop] response hit the output-token cap and was cut off")
+                  (notify! "The model's response hit its output-token limit and was cut off. Asking it to continue more concisely.")
+                  (follow-up agent {:role "user" :content cut-off-nudge}))
+
+                ;; The step cap is a limit that fired in silence: streamText just
+                ;; returns, so a capped run was indistinguishable from a finished
+                ;; one. Counted, not inferred from finishReason, which an abort
+                ;; path can produce too.
+                (when step-capped?
+                  (dbg/warn (str "[loop] step limit reached (" (:max-steps config) ") — the model was still working"))
+                  (notify! (str "Step limit reached (" (:max-steps config)
+                                ") with work still in progress. Send a message to continue, "
+                                "or raise `max-steps` in settings.")))
+
                 (when (= 2 (:no-op-turns @st))
                   (dbg/warn "[loop] two turns in a row ran no tools — the model may have stopped making progress (/refine)")
-                  (when-let [ui (some-> (.-extension-api agent) .-ui)]
-                    (when (.-notify ui)
-                      (.notify ui "Two turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."
-                               "warning"))))))
+                  (notify! "Two turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."))))
 
             (js-await ((:emit-async events) "turn_finalize"
-                                            #js {:error     (or (boolean @turn-error) blocked?)
-                                                 :toolCalls @tools-this-turn
-                                                 :noOpTurns (:no-op-turns @(:state agent))}))
+                                            #js {:error        (or (boolean @turn-error) blocked?)
+                                                 :toolCalls    @tools-this-turn
+                                                 :noOpTurns    (:no-op-turns @(:state agent))
+                                                 ;; So a consumer can tell a stall from a
+                                                 ;; response that was merely cut off.
+                                                 :finishReason @turn-finish}))
 
            ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
            ;; mid-task is documented to send the model off the rails. Skipped on

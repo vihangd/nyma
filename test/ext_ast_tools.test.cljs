@@ -104,7 +104,7 @@
                                                tool       (get @(.-_tools api) "ast_grep")]
                                            (-> ((:execute tool) #js {:pattern "foo" :path "." :language nil :json false})
                                                (.then (fn [result]
-                                                        (-> (expect (count result)) (.toBeLessThanOrEqual 5100))
+                                                        (-> (expect (count result)) (.toBeLessThanOrEqual 5400))
                                                         (-> (expect result) (.toContain "truncated"))))))))
 
                                    (it "truncation marker appended when output exceeds limit"
@@ -115,7 +115,7 @@
                                                tool       (get @(.-_tools api) "ast_grep")]
                                            (-> ((:execute tool) #js {:pattern "foo" :path "." :language nil :json false})
                                                (.then (fn [result]
-                                                        (-> (expect result) (.toContain "bytes truncated"))))))))
+                                                        (-> (expect result) (.toContain "truncated from the middle"))))))))
 
                                    (it "empty output returns 'No matches found.' without policy path"
                                        (fn []

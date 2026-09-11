@@ -13,9 +13,40 @@
 (defn ^:export activate [api]
   (let [cfg    (shared/config (try (.getSettings api) (catch :default _ nil)))
         totals (atom {:turn 0 :session 0})
+        ;; Wall clock is a TIMER, not a turn_end check: a hung provider call
+        ;; finishes no step, so a check that rides turn_end never runs in the
+        ;; case the cap is for. Borrowed from mini-swe-agent's
+        ;; wall_time_limit_seconds, which sits beside its step and cost limits.
+        timer  (atom nil)
+        cancel-timer!
+        (fn [] (when-let [t @timer] (js/clearTimeout t) (reset! timer nil)) nil)
+
+        ;; Armed ONCE per run and never re-armed per step: this caps the run's
+        ;; total wall time, which is what the name says. Re-arming on each step
+        ;; would quietly turn it into an inactivity timeout that a long but
+        ;; healthy run never trips.
+        arm!
+        (fn [ctx]
+          (cancel-timer!)
+          (when-let [secs (:wall-seconds cfg)]
+            (reset! timer
+                    (js/setTimeout
+                     (fn []
+                       (reset! timer nil)
+                       (d/warn "budget" (str "wall-clock budget exceeded (" secs "s) — aborting run"))
+                       (when (and ctx (.-abort ctx)) ((.-abort ctx))))
+                     (* 1000 secs))))
+          nil)
 
         on-start
-        (fn [_data _ctx] (swap! totals assoc :turn 0) nil)
+        (fn [_data ctx]
+          (swap! totals assoc :turn 0)
+          (arm! ctx)
+          nil)
+
+        ;; agent_end fires once per run, unlike turn_end (per step), so this is
+        ;; the only hook that can disarm without disarming after step one.
+        on-end (fn [_data _ctx] (cancel-timer!) nil)
 
         on-step
         (fn [step ctx]
@@ -36,8 +67,11 @@
     (when (shared/enabled? cfg)
       (.on api "before_agent_start" on-start)
       (.on api "turn_end" on-step)
+      (.on api "agent_end" on-end)
       (fn []
+        (cancel-timer!)
         (.off api "before_agent_start" on-start)
-        (.off api "turn_end" on-step)))))
+        (.off api "turn_end" on-step)
+        (.off api "agent_end" on-end)))))
 
 (def ^:export default activate)

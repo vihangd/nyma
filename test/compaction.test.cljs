@@ -413,8 +413,10 @@
                   (let [src (str (fs/readFileSync "dist/agent/loop.mjs" "utf8"))]
                     ;; the per-turn counter is incremented from step results
                     (-> (expect (.includes src "tools_this_turn")) (.toBe true))
-                    ;; …and it is actually tested for zero
-                    (-> (expect (boolean (re-find #"tools_this_turn\d*\)?\s*===\s*0" src))) (.toBe true))
+                    ;; …and it is actually classified (the zero test moved into
+                    ;; loop/turn-outcome, which also decides cut-off vs stall)
+                    (-> (expect (.includes src "turn_outcome")) (.toBe true))
+                    (-> (expect (boolean (re-find #"count-stall\?" src))) (.toBe true))
                     ;; …and the streak is both incremented and reset
                     (-> (expect (boolean (re-find #"no-op-turns\", squint_core\.fnil" src))) (.toBe true))
                     (-> (expect (boolean (re-find #"no-op-turns\", 0\)" src))) (.toBe true)))))))

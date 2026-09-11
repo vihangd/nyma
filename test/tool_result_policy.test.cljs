@@ -189,17 +189,21 @@
                         e (apply-policy s "ls")]
                     (-> (expect (:data e)) (.toBe s)))))
 
-            (it "string above the limit is truncated with a byte-count note"
+            (it "string above the limit keeps the head AND the tail"
                 (fn []
-                  ;; ls limit = 4000
-                  (let [s   (repeat-str "z" 5000)
-                        e   (apply-policy s "ls")
+                  ;; ls limit = 4000. Head-only truncation threw away the half
+                  ;; that usually carries the answer — a failure summary, an
+                  ;; error, a stack trace's cause all sit at the END.
+                  (let [s   (str (repeat-str "z" 2000) "\nMIDDLE\n" (repeat-str "z" 2000) "\nLAST LINE")
+                        _   (register-policy! "my_small_tool" {:max-string-length 4000})
+                        e   (apply-policy s "my_small_tool")
                         dat (:data e)]
-                    (-> (expect (.includes dat "truncated")) (.toBe true))
-                    ;; The truncated marker says how many bytes were cut
-                    (-> (expect (.includes dat "1000 bytes")) (.toBe true))
-                    ;; Preserved prefix is exactly 4000 chars before the note
-                    (-> (expect (.startsWith dat (repeat-str "z" 4000))) (.toBe true)))))
+                    (-> (expect (.startsWith dat "zzz")) (.toBe true))
+                    (-> (expect (.includes dat "LAST LINE")) (.toBe true))
+                    (-> (expect (.includes dat "truncated from the middle")) (.toBe true))
+                    ;; and it says how to not truncate next time
+                    (-> (expect (.includes dat "narrow the pattern")) (.toBe true))
+                    (unregister-policy! "my_small_tool"))))
 
             (it "custom ext policy limit is respected"
                 (fn []
@@ -207,7 +211,8 @@
                   (let [s (repeat-str "q" 50)
                         e (apply-policy s "my_tool")]
                     (-> (expect (.includes (:data e) "truncated")) (.toBe true))
-                    (-> (expect (.includes (:data e) "40 bytes")) (.toBe true)))
+                    ;; 10-char budget: 6 head + 4 tail, 40 elided.
+                    (-> (expect (.includes (:data e) "40 chars truncated")) (.toBe true)))
                   (unregister-policy! "my_tool")))))
 
 ;;; ─── apply-policy — isError maps ─────────────────────────
@@ -374,17 +379,26 @@
     ;; original exactly. Fails on an unstable id, an evicted entry, a notice
     ;; offset that disagrees with the cut, an off-by-one, a lost line-boundary
     ;; cut-back, or an eof that fires early or never.
-    (it "pages back to the exact original"
+    (it "head ++ recalled middle ++ tail rebuilds the exact original"
         (fn []
-          (let [raw   (repeat-str "abcdefghij klmnopqrst\n" 900)
-                head  (model-string (apply-policy raw "grep"))   ;; cap 8000
-                id    (second (re-find #"id=\"([^\"]+)\"" head))]
+          (let [raw    (repeat-str "abcdefghij klmnopqrst\n" 900)
+                shown  (model-string (apply-policy raw "grep"))   ;; cap 8000
+                id     (second (re-find #"id=\"([^\"]+)\"" shown))
+                ;; The notice names the gap it elided; both numbers are the
+                ;; contract, not decoration.
+                gap    (re-find #"offset (\d+)–(\d+)" shown)
+                start  (js/parseInt (second gap) 10)
+                end    (js/parseInt (nth gap 2) 10)]
             (-> (expect (some? id)) (.toBe true))
-            (loop [offset 8000 acc "" pages 0]
+            ;; Head and tail are what the model actually sees.
+            (-> (expect (.startsWith shown (.slice raw 0 start))) (.toBe true))
+            (-> (expect (.includes shown (.slice raw end))) (.toBe true))
+            ;; And the elided middle pages back exactly, so nothing is lost.
+            (loop [offset start acc "" pages 0]
               (let [r (store-read id offset 8000)]
-                (if (:eof? r)
-                  (do (-> (expect (str (.slice raw 0 8000) acc (:body r))) (.toBe raw))
-                      (-> (expect (> pages 0)) (.toBe true)))
+                (if (or (:eof? r) (>= (:end r) end))
+                  (-> (expect (.startsWith (str acc (:body r)) (.slice raw start end)))
+                      (.toBe true))
                   (do (-> (expect (> (:end r) offset)) (.toBe true))
                       (recur (:end r) (str acc (:body r)) (inc pages)))))))))
 

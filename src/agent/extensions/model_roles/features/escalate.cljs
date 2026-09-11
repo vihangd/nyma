@@ -468,6 +468,12 @@
   ;; this turn's own count is long gone.
   (when (pos? (or (and data (.-toolCalls data)) 0))
     (swap! (state-atom api) assoc :escalate-task-in-flight true))
+  ;; A response cut off at the output-token cap is not a stall — the model was
+  ;; still working when the cap hit, and the loop already refuses to count it as
+  ;; a no-op turn. Standing down here too means a stale count from earlier turns
+  ;; can't escalate on the back of a truncation.
+  (when (= (str (and data (.-finishReason data))) "length")
+    (d/info "escalate" "turn was cut off at the output-token cap — not a stall"))
   (let [s   (cur-state api)
         cfg (config (settings api))]
     (when (and (not= (mode cfg) "off")
@@ -478,11 +484,12 @@
       ;; (emit-async awaits handlers that return promises), so returning it is
       ;; what guarantees the prune lands BEFORE the follow-queue drain re-enters
       ;; the loop. Dropping the promise races the prune against the next turn.
-      (when-let [reason (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
+      (when-let [reason (when-not (= (str (and data (.-finishReason data))) "length")
+                          (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
                                                        (:no-op-turns s))
                                        :task-in-flight (:escalate-task-in-flight s)
                                        :verify-exhausted (:escalate-verify-exhausted s)}
-                                      cfg)]
+                                        cfg))]
         (escalate! api reason false)))))
 
 (defn on-user-message

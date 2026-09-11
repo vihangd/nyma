@@ -176,22 +176,64 @@
 
 ;;; ─── String helpers ──────────────────────────────────────
 
+(defn- line-start-before
+  "The start of the line containing `idx`, or `idx` when there is no newline
+   before it."
+  [s idx]
+  (let [nl (.lastIndexOf s "\n" idx)]
+    (if (pos? nl) (inc nl) idx)))
+
+(defn- line-start-after
+  "The start of the next line at or after `idx`, or `idx` when none follows.
+
+   Both cut points are line-aligned because `store-read` snaps a page's start
+   back to the last newline — an arbitrary character cut would make the recalled
+   middle overlap the head, and head ++ middle ++ tail would no longer be the
+   original. The head rounds BACK and the tail rounds FORWARD so line alignment
+   can only shrink the kept text, never push it past the budget."
+  [s idx]
+  (let [nl (.indexOf s "\n" idx)]
+    (if (neg? nl) idx (inc nl))))
+
 (defn- truncate-at
-  "Right-truncate `s` to at most `max-len` chars, appending a
-   byte-count note. Returns the input unchanged when it fits.
+  "Truncate `s` to about `max-len` chars, keeping the HEAD and the TAIL and
+   eliding the middle. Returns the input unchanged when it fits.
+
+   Head-only truncation threw away the half that usually matters: a test run's
+   failure summary, a build log's error, a stack trace's cause all live at the
+   END. bash escapes this via bash_suite's own middle-truncation; every other
+   tool — grep, web_fetch, deep_research, every MCP and extension tool — landed
+   here and lost its tail. Shape borrowed from mini-swe-agent's observation
+   template (head + elided count + tail), including its coaching: the notice
+   says how to not truncate next time, because the cheapest fix is a narrower
+   command.
 
    With `tool-name` and a truthy `handle?`, the full string is stored first and
-   the note carries the id plus the offset to resume at — so the model picks up
-   exactly at the cut and re-reads nothing."
+   the notice carries the id plus the offset of the GAP, so the model can read
+   exactly what was elided and nothing it has already seen."
   ([s max-len] (truncate-at s max-len nil false))
   ([s max-len tool-name handle?]
-   (if (> (count s) max-len)
-     (let [id (when handle? (store! s tool-name))]
-       (str (.slice s 0 max-len)
-            "\n… (" (- (count s) max-len) " bytes truncated)"
-            (when id
-              (str "\nContinue reading: retrieve_result(id=\"" id "\", offset=" max-len ")"))))
-     s)))
+   (if (<= (count s) max-len)
+     s
+     (let [id        (when handle? (store! s tool-name))
+           ;; 60/40: the head carries what the command was doing, the tail
+           ;; carries how it came out.
+           head-end  (line-start-before s (js/Math.floor (* max-len 0.6)))
+           tail-len  (max 0 (- max-len head-end))
+           tail-start (line-start-after s (max head-end (- (count s) tail-len)))
+           elided    (- tail-start head-end)]
+       (if (<= elided 0)
+         ;; Line alignment ate the gap — nothing to elide, keep it whole.
+         s
+         (str (.slice s 0 head-end)
+              "\n… (" elided " chars truncated from the middle, offset "
+              head-end "–" tail-start ")\n"
+              (.slice s tail-start)
+              (if id
+                (str "\nMiddle: retrieve_result(id=\"" id "\", offset=" head-end "). ")
+                "\n")
+              "To avoid truncating: narrow the pattern, read a line range, or "
+              "write the output to a file and search that."))))))
 
 (defn- short-summary
   "A ≤200-char first-line summary of `s`, used for the :summary key.
