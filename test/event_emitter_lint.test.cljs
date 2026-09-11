@@ -43,12 +43,13 @@
        (str/join "\n")))
 
 (defn literal-emits
-  "Event names passed to any emit call in `source`. Covers the several shapes
-   the codebase uses: ((:emit events) \"x\"), ((:emit-async events) \"x\"),
-   (.emitGlobal api \"x\"), (emit \"x\"), (emit-fn \"x\")."
-  [source]
-  (set (map second (re-seq #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\""
-                           (str source)))))
+  "Event names with at least one emit site, from the generator's own scan.
+
+   Deliberately NOT a second copy of the regex: the doc this lint pairs with
+   claims \"the lint fails when the emitters column is empty\", which is only
+   true while the two scans agree. One source, one claim."
+  [_source]
+  (set (keys (:emitters (event-map/scan)))))
 
 (def ^:private dynamic-emits
   "Names emitted by mapping a provider stream chunk type through
@@ -116,13 +117,30 @@
                     (-> (expect (str committed))
                         (.toBe (str (event-map/render-event-map)))))))
 
-            (it "reports both directions, and names a registry nothing fills"
+            ;; Guard the guard, against the SCAN rather than the rendering. The
+            ;; first version of this asserted on a hardcoded header literal, a row
+            ;; key taken from core-event-types, and a registry list read straight
+            ;; out of extensions.cljs — all three pass against a map whose every
+            ;; cell is `-`, which is exactly what a broken scan produces. A `-` in
+            ;; the listener column is the evidence used to delete things, so it
+            ;; has to be earned.
+            (it "the scan actually finds producers and consumers"
                 (fn []
-                  ;; Guard the guard: a generator that silently emitted an empty
-                  ;; table would pass the drift check above forever.
-                  (let [doc (str (event-map/render-event-map))]
-                    (-> (expect doc) (.toContain "| Event | Emitted in | Listened in |"))
-                    (-> (expect doc) (.toContain "turn_finalize"))
+                  (let [{:keys [emitters listeners registry-calls]} (event-map/scan)]
+                    (-> (expect (seq (get emitters "turn_finalize"))) (.toBeTruthy))
+                    ;; pi_rpc subscribes through a table of ["event" fn] pairs, the
+                    ;; shape a `.on`-proximity scan missed entirely.
+                    (-> (expect (seq (get listeners "agent_start"))) (.toBeTruthy))
+                    (-> (expect (seq (get listeners "turn_end"))) (.toBeTruthy))
+                    (-> (expect (seq (get registry-calls "registerTool"))) (.toBeTruthy)))))
+
+            (it "resolves where each registry is read back"
+                (fn []
+                  ;; The column that would have caught registerToolRenderer: 12
+                  ;; producers, nothing reading what they wrote.
+                  (let [storage (event-map/registry-storage)]
+                    (-> (expect (get storage "registerTool")) (.toBe ":tool-registry"))
+                    (-> (expect (get storage "registerStatusSegment")) (.toBe "status-segments/"))
                     ;; A declared API with no call site still gets a row.
                     (-> (expect (contains? (event-map/declared-registries) "registerModelInfo"))
                         (.toBe true)))))))

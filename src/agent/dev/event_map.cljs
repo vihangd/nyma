@@ -43,6 +43,14 @@
 (def ^:private listen-re
   #"(?:\.on|\(:on|:on\b)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
 
+(def ^:private table-listen-re
+  ;; Table-driven subscription: a vector of ["event" handler] pairs fed through
+  ;; `(doseq [[ev h] handlers] (on ev h))`. pi_rpc.cljs registers all thirteen of
+  ;; its handlers this way, and a scan that only looked for a name near `.on`
+  ;; printed `-` for five events it consumes — in a column whose `-` is the
+  ;; evidence used to delete things.
+  #"\[\s*\"([a-zA-Z][a-zA-Z0-9_]*)\"\s+(?:\(fn|[a-z])")
+
 (def ^:private register-re
   ;; Both call shapes: `(.registerX api …)` and the guarded
   ;; `(when-let [reg (.-registerX api)] (reg …))` that status segments use.
@@ -59,7 +67,8 @@
            add (fn [m k] (update m k (fnil conj #{}) r))]
        (-> acc
            (update :emitters  (fn [m] (reduce add m (names-matching emit-re src))))
-           (update :listeners (fn [m] (reduce add m (names-matching listen-re src))))
+           (update :listeners (fn [m] (reduce add m (into (names-matching listen-re src)
+                                                          (names-matching table-listen-re src)))))
            (update :registry-calls
                    (fn [m] (reduce add m (set (map second (re-seq register-re src)))))))))
    {:emitters {} :listeners {} :registry-calls {}}
@@ -93,6 +102,37 @@
   #{"src/agent/extensions.cljs" "src/agent/extension_scope.cljs"
     "src/agent/dev/event_map.cljs"})
 
+(defn registry-storage
+  "For each `registerX` defined in extensions.cljs, the token its body writes to:
+   a `(:some-key agent)` atom, or an `alias/fn` on a registry module.
+
+   Derived from the definition rather than declared in a table here — a
+   hand-written map of API → storage is the same never-validated static data this
+   file exists to replace."
+  []
+  (let [lines (vec (.split (fs/readFileSync (path/join src-root "agent" "extensions.cljs") "utf8") "\n"))]
+    (reduce
+     (fn [acc i]
+       (if-let [api (second (re-find #"^\s+:(register[A-Z][a-zA-Z]*)" (nth lines i)))]
+         ;; Take the lines up to the NEXT API entry rather than balancing parens.
+         ;; The stop pattern is an entry (`:someName (fn` or a key on its own
+         ;; line), not any `:keyword` — nested map literals are full of those,
+         ;; and stopping at the first one cut registerProvider's body 26 lines
+         ;; short of the registry it writes to.
+         (let [body (loop [j (inc i) acc []]
+                      (if (or (>= j (count lines))
+                              (>= (- j i) 80)
+                              (re-find #"^\s+:[a-zA-Z]+\s*(?:\(fn\s*\[|$)" (nth lines j)))
+                        (str/join "\n" acc)
+                        (recur (inc j) (conj acc (nth lines j)))))
+               atom-key (second (re-find #"\(:([a-z][a-z-]*) agent\)" body))
+               mod-fn   (second (re-find #"\(([a-z][a-z-]*)/[a-z-]+ " body))]
+           (assoc acc api (or (when atom-key (str ":" atom-key))
+                              (when mod-fn (str mod-fn "/")))))
+         acc))
+     {}
+     (range (count lines)))))
+
 (defn declared-registries
   "The `registerX` keys `extensions.cljs` actually defines. Rows come from HERE,
    not from the call sites, so an API that nothing calls still gets a row with a
@@ -102,10 +142,48 @@
   (let [src (fs/readFileSync (path/join src-root "agent" "extensions.cljs") "utf8")]
     (set (map second (re-seq #":(register[A-Z][a-zA-Z]*)\s" src)))))
 
+(defn- alias->path
+  "`status-segments/` → `agent/ui/status_line_segments`, by reading
+   extensions.cljs's own require list. A module-backed registry's readers are the
+   files that use that namespace, not the alias, which exists only here."
+  [token]
+  (when (str/ends-with? (str token) "/")
+    (let [a   (str/replace (str token) "/" "")
+          src (fs/readFileSync (path/join src-root "agent" "extensions.cljs") "utf8")
+          ns' (second (re-find (js/RegExp. (str "\\[([a-z0-9.-]+) :as " a "\\]")) src))]
+      (when ns'
+        (-> (str ns')
+            (str/replace "." "/")
+            (str/replace "-" "_"))))))
+
+(defn- readers-of
+  "Files that mention `token` — the registry's storage — other than the API
+   definition itself. This is the column the deletions turned on: a registry with
+   producers and no reader is `registerToolRenderer`, which had twelve callers
+   and nothing that ever looked at what they wrote."
+  [token]
+  (when token
+    (let [needle (or (alias->path token) token)]
+      (->> (cljs-files src-root)
+           (filter (fn [f]
+                     (and (not (contains? non-producers (rel f)))
+                          (or (str/includes? (fs/readFileSync f "utf8") needle)
+                              ;; Namespaces are written dotted in a require and
+                              ;; slashed on disk; match either.
+                              (str/includes? (fs/readFileSync f "utf8")
+                                             (str/replace (str/replace needle "/" ".") "_" "-"))))))
+           (map rel)
+           (remove (fn [r] (str/starts-with? r "src/agent/extensions/")))
+           (into #{})))))
+
 (defn- registry-rows [scanned]
-  (let [calls (:registry-calls scanned)]
+  (let [calls   (:registry-calls scanned)
+        storage (registry-storage)]
     (for [n (sort (declared-registries))]
-      (str "| `" n "` | " (cell (remove non-producers (get calls n))) " |"))))
+      (let [token (get storage n)]
+        (str "| `" n "` | " (cell (remove non-producers (get calls n)))
+             " | " (if token (str "`" token "` in " (cell (readers-of token))) "-")
+             " |")))))
 
 (defn render-event-map
   "The full document. Pure apart from reading src."
@@ -144,13 +222,15 @@
       [""
        "## Extension-API registries"
        ""
-       "Producers of each `registerX` on the extension API. The consumer is the code"
-       "that reads the registry back; a registry with producers and no reader is the"
-       "shape that got `registerBlockRenderer`, `registerToolRenderer`,"
-       "`registerCompletionProvider`, `registerMentionProvider` and"
-       "`registerContextProvider` deleted on 2026-09-11."
+       "Producers of each `registerX`, and who reads the registry back. Producers"
+       "with no reader is the shape that got `registerBlockRenderer`,"
+       "`registerToolRenderer`, `registerCompletionProvider`,"
+       "`registerMentionProvider` and `registerContextProvider` deleted on"
+       "2026-09-11. The reader column lists files outside `src/agent/extensions/`"
+       "that mention the registry's storage, since an extension touching it is"
+       "another producer, not a consumer."
        ""
-       "| API | Called from |"
-       "| --- | --- |"]
+       "| API | Called from | Read back in |"
+       "| --- | --- | --- |"]
       (registry-rows scanned)
       [""]))))
