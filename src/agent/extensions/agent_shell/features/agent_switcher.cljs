@@ -110,16 +110,26 @@
                        " to resume, /agent disconnect to stop it.")))
     (notify api "No agent connected")))
 
+(defn format-features
+  "Pure: an agent's declared capabilities as one stable, sorted line.
+   Empty set → \"(none declared)\", so a blank definition reads as missing data
+   rather than as an agent that can do nothing."
+  [features]
+  (if (seq features)
+    (str/join ", " (sort (map shared/kw-name features)))
+    "(none declared)"))
+
 (defn- list-agents
-  "Show available agents and highlight the active one."
+  "Show available agents, their declared capabilities, and the active one."
   [api]
   (let [agents  (registry/list-agents)
         active  @shared/active-agent
-        lines   (mapv (fn [{agent-key :key agent-name :name}]
-                        (if (= agent-key active)
-                          (str "  > " (shared/kw-name agent-key) " - " agent-name " (active)")
-                          (str "    " (shared/kw-name agent-key) " - " agent-name)))
-                      agents)]
+        lines   (mapcat (fn [{agent-key :key agent-name :name features :features}]
+                          [(if (= agent-key active)
+                             (str "  > " (shared/kw-name agent-key) " - " agent-name " (active)")
+                             (str "    " (shared/kw-name agent-key) " - " agent-name))
+                           (str "        " (format-features features))])
+                        agents)]
     (notify api (str "Available agents:\n" (str/join "\n" lines)))))
 
 (defn activate

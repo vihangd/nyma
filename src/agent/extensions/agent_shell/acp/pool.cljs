@@ -7,6 +7,38 @@
             [agent.extensions.agent-shell.shared :as shared]
             [clojure.string :as str]))
 
+;;; ─── MCP transport filtering ───────────────────────────────
+
+(defn servers-for-agent
+  "Pure: the discovered MCP servers this agent can actually be given.
+
+   `object->array` tags remote servers `:type \"http\"` / `\"sse\"` and leaves
+   stdio ones untagged, and the ACP handshake advertises which remote transports
+   the agent speaks under `agentCapabilities.mcpCapabilities`. Forwarding an
+   http server to an agent that only speaks stdio fails the whole session/new,
+   taking the stdio servers down with it.
+
+   Strict only where there is evidence: the filter applies ONLY when the agent
+   actually sent an `mcpCapabilities` object. Missing entirely → forward
+   everything, because five of the six builtin agents' handshakes are unverified
+   and \"absent means unsupported\" would silently break working setups. Note
+   this is why `shared/agent-supports?` is not used here — it defaults an absent
+   capability to true per key, which would wave `http` through on an agent whose
+   mcpCapabilities says `{sse: true}` alone.
+
+   Returns {:kept [...] :dropped [...]}; stdio servers are never dropped."
+  [servers caps]
+  (let [mcp    (when (and caps (object? caps)) (aget caps "mcpCapabilities"))
+        known? (and mcp (object? mcp))
+        ok?    (fn [srv]
+                 (let [t (str (or (:type srv) ""))]
+                   (cond
+                     (or (= t "") (= t "stdio")) true
+                     (not known?)                true
+                     :else                       (boolean (aget mcp t)))))
+        parts  (group-by ok? (vec (or servers [])))]
+    {:kept (vec (get parts true)) :dropped (vec (get parts false))}))
+
 ;;; ─── Spawn + handshake ─────────────────────────────────────
 
 (defn- create-connection
@@ -115,11 +147,23 @@
                                       "). Log in via the agent's own CLI (e.g. `claude /login`, `gemini auth`) and reconnect.")
                                  "warning"))))
                     ;; Phase 2: Create session (pass discovered MCP servers + optional extra dirs)
-                  (let [base-params {:cwd        project-root
-                                     :mcpServers (let [servers @shared/mcp-servers]
-                                                   (if (seq servers)
-                                                     (clj->js servers)
-                                                     []))}
+                  (let [{:keys [kept dropped]}
+                        (servers-for-agent @shared/mcp-servers
+                                           (shared/get-agent-state agent-key :capabilities))
+
+                        _ (when (seq dropped)
+                            ;; Say which and why — forwarding fewer servers in
+                            ;; silence is how a fix turns into a mystery.
+                            (when (and (.-ui api) (.-available (.-ui api)))
+                              (.notify (.-ui api)
+                                       (str (:name agent-def) " does not support "
+                                            (str/join "/" (sort (set (map (fn [d] (str (:type d))) dropped))))
+                                            " MCP transports — not forwarding: "
+                                            (str/join ", " (map (fn [d] (str (:name d))) dropped)))
+                                       "warning")))
+
+                        base-params {:cwd        project-root
+                                     :mcpServers (if (seq kept) (clj->js kept) [])}
                         extra-dirs  (:additional-directories agent-def)
                         params      (if (seq extra-dirs)
                                       (assoc base-params :additionalDirectories (vec extra-dirs))

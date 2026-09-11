@@ -13,7 +13,6 @@
             [agent.extensions.agent-shell.features.effort-switcher :as effort-switcher]
             [agent.extensions.agent-shell.features.permission-ui :as permission-ui]
             [agent.extensions.agent-shell.features.session-mgmt :as session-mgmt]
-            [agent.extensions.agent-shell.features.cost-tracker :as cost-tracker]
             [agent.extensions.agent-shell.features.handoff :as handoff]
             [agent.extensions.agent-shell.features.mcp-discovery :as mcp-discovery]
             [agent.extensions.agent-shell.features.plan-capture :as plan-capture]
@@ -41,7 +40,6 @@
            (effort-switcher/activate api)
            (permission-ui/activate api)
            (session-mgmt/activate api)
-           (cost-tracker/activate api)
            (handoff/activate api)
            (plan-capture/activate api)
            (mcp-discovery/activate api)]]

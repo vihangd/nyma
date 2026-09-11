@@ -665,12 +665,11 @@ The `agent_shell` extension implements ACP (Agent Client Protocol — Zed's JSON
 
 ### 7e. Capability-driven behavior beyond `loadSession`
 
-- **Status:** infrastructure ready (`shared/agent-supports?` helper, capabilities recorded at handshake) but only `loadSession` is consulted today.
+- **Status:** `mcpCapabilities` is **done** (2026-09-11) — `pool/servers-for-agent` filters http/sse servers to what the agent advertised, and says which it dropped. It deliberately does NOT use `shared/agent-supports?`: that helper defaults an absent capability to true *per key*, which would wave `http` through on an agent whose `mcpCapabilities` names only `sse`. The filter applies only when the object is actually present; missing entirely → forward everything, because five of six builtin handshakes are unverified and "absent means unsupported" breaks working setups silently.
 - **Outstanding gates:**
   - `promptCapabilities` (image / audio / embedded-context blocks) — we currently only send text, but if a future feature wants to forward an image we should refuse on agents that don't claim support rather than letting the agent reject mid-stream.
-  - `mcpCapabilities` (`http`, `sse`, `stdio` transports) — today we forward every discovered MCP server regardless of transport. Should filter to what the agent supports.
   - Optional reverse-request handlers — if an agent doesn't implement `terminal/*`, advertise our ability anyway (we do today) but don't expect the agent to ever call it.
-- **Estimate:** half a day, mechanical now that the helper exists.
+- **Not a gate: the registry's `:features` sets.** They are display data for `/agents` and nothing else. The set went unread for five releases, and unread data is uncorrected data — `:mcp` was declared by one of six agents when all six support MCP servers. Four of the five remaining flags already have a live signal that is authoritative and self-correcting (`:plan-mode` → the `:modes` map, `:sessions` → `sessionCapabilities.resume`, `:cost` → cost present in `usage_update`, `:subagents` → the tracked subagent map); a second static gate over the same decision can only disagree with the live one. The fifth, `:thinking`, means "streams thought chunks" and was never the right signal for `/effort`, which needs an `effort` **config option** — claude declares `:thinking` and advertises no such option.
 
 ### 7f. Multimodal block handling in `session/update`
 
@@ -983,3 +982,29 @@ fixed in one pass. Recurring shapes worth re-running the detector for:
    honoured by bun at all — setting it to `./dist` produced an identical run. `npm test` was therefore
    red on 50 `bench/tasks/javascript/exercises/**` specs that have nothing to do with nyma. Scope lives
    in `package.json` now: `"test": "bun test dist"`.
+
+## 2026-09-11 — capability gates, and two more inert modules
+
+Follow-on to the sweep above; same classes, found by pushing the detectors further.
+
+- **A config option nobody advertised.** `/effort` sent `session/set_config_option configId="effort"`
+  to any connected agent. It now refuses when the agent's pushed `:config-options` list is populated
+  and contains no `effort` entry, and still sends when the list is empty — pre-handshake proves
+  nothing, and the agent's own error beats a wrong refusal.
+- **`cost_tracker` was a handler with an empty body.** Registered on `acp_usage`, returned `nil`, and
+  its two tests asserted only that it had been registered. Deleted.
+- **`editor_change` had no emitter.** token_suite's live token-count widget subscribed, debounced,
+  wrote a footer widget and had passing tests over all of it; the event never fired, so it never drew
+  once. Emitted now from the editor's `onChange` in `interactive.cljs`, throttled at the emit site —
+  `rpc.cljs` subscribes a println-JSON handler to every declared event, so an unthrottled per-keystroke
+  emit is a JSON line per keystroke.
+- **Seven phantom event names** (`overlay_open`/`dismiss`, `autocomplete_open`/`close`/`select`,
+  `keybinding_activated`, `acp_permission`) had no emitter, no listener, no docs and no pi provenance.
+  Removed. Five more with no producer turned out to be deliberate pi-compat declarations, so
+  `events.cljs` now splits `core-event-types` from `pi-compat-event-types` and `all-event-types` is
+  their union — the distinction that used to live only in a reviewer's head.
+- **The detector is a test now.** `test/event_emitter_lint.test.cljs` fails if any name in
+  `core-event-types` has no emit site in `src`. The stream-mapped names (`message_*`, `reasoning_*`,
+  `tool_call`, `tool_result`, `agent_end`) are exempted by READING `loop.cljs`'s `stream-event-types`
+  map rather than by a hand-written allow-list — an allow-list maintained by hand is the same
+  never-validated static data the lint exists to catch.

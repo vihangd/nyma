@@ -1,10 +1,20 @@
 (ns agent.events
   (:require [agent.debug :as d]))
 
-(def all-event-types
+(def pi-compat-event-types
+  "Names declared for pi API parity that NYMA ITSELF NEVER EMITS.
+
+   Kept so a pi extension can subscribe without erroring, and separated from
+   the core list so `test/event_emitter_lint.test.cljs` can insist that every
+   core name has a producer. Anything moved in here is inert by design; adding
+   a producer means moving the name back out."
+  ["session_before_tree" "session_tree" "session_directory"
+   "branch_summarized" "context"])
+
+(def core-event-types
+  "Event names nyma emits. The lint requires a producer for every one."
   ["session_start" "session_end" "session_before_switch" "session_switch"
-   "session_before_fork" "session_before_tree" "session_tree"
-   "session_directory" "session_shutdown"
+   "session_before_fork" "session_shutdown"
    "agent_start" "agent_end"
    "turn_start" "turn_end"
    ;; Awaited post-turn boundary (emit-async). Fires after agent_end on the
@@ -18,23 +28,25 @@
    "tool_execution_start" "tool_execution_update" "tool_execution_end"
    "before_tool_call"
    "before_provider_request"
-   "context" "before_agent_start" "input"
+   "before_agent_start" "input"
    "compact" "before_compact"
-   "before_branch_switch" "branch_summarized"
+   "before_branch_switch"
    "resources_discover" "model_select" "user_bash" "reload"
    "context_assembly" "after_provider_request"
    ;; ACP agent shell events
    "acp_connect" "acp_disconnect" "acp_message"
    "acp_tool_start" "acp_tool_update"
-   "acp_usage" "acp_permission" "acp_mode_change"
+   "acp_usage" "acp_mode_change"
    "acp_thought" "acp_plan" "acp_commands_update"
    ;; Native provider reasoning events (AI SDK interleaved-thinking)
    "reasoning_start" "reasoning_delta" "reasoning_end"
-   ;; UI events
+   ;; UI events. Seven more sat here — overlay_open/dismiss,
+   ;; autocomplete_open/close/select, keybinding_activated, acp_permission —
+   ;; with no emitter, no listener and no mention in pi, so extensions could
+   ;; subscribe to them forever and rpc mode advertised them as channels that
+   ;; could never carry traffic. The permission flow's real future name is
+   ;; acp_permission_request (roadmap §7c).
    "editor_change"
-   "overlay_open" "overlay_dismiss"
-   "keybinding_activated"
-   "autocomplete_open" "autocomplete_close" "autocomplete_select"
    "notification"
    ;; Session lifecycle
    "session_clear"
@@ -51,6 +63,11 @@
    ;; interactive mode owns the submit path (lock, streaming state, UI
    ;; wiring), so it subscribes and dispatches; nothing else can.
    "turn_request"])
+
+(def all-event-types
+  "Everything an extension may subscribe to: the events nyma produces, plus the
+   pi-compat names it does not."
+  (into core-event-types pi-compat-event-types))
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys

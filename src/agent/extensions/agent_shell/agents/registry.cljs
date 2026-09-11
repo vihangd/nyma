@@ -32,7 +32,7 @@
    {:name           "Gemini CLI"
     :command        "gemini"
     :args           ["--acp"]
-    :features       #{:plan-mode :model-switch :sessions :thinking :subagents :cost}
+    :features       #{:plan-mode :model-switch :sessions :thinking :subagents :mcp :cost}
     :modes          {:plan      "plan"
                      :yolo      "yolo"
                      :approve   "default"
@@ -44,7 +44,7 @@
    {:name           "OpenCode"
     :command        "opencode"
     :args           ["acp"]
-    :features       #{:model-switch :sessions :cost}
+    :features       #{:model-switch :sessions :mcp :cost}
     :modes          {:approve "default"}
     :model-config-id "model"
     :model-method    :set_model
@@ -54,7 +54,7 @@
    {:name           "Qwen Code"
     :command        "qwen"
     :args           ["--acp"]
-    :features       #{:model-switch :cost}
+    :features       #{:model-switch :mcp :cost}
     :modes          {:yolo    "yolo"
                      :approve "default"}
     :model-config-id "model"
@@ -64,7 +64,7 @@
    {:name           "Goose"
     :command        "goose"
     :args           ["acp"]
-    :features       #{:model-switch :cost}
+    :features       #{:model-switch :mcp :cost}
     :modes          {:auto    "auto"
                      :approve "approve"}
     :model-config-id "model"
@@ -74,7 +74,7 @@
    {:name           "Kiro"
     :command        "kiro"
     :args           ["--acp"]
-    :features       #{:model-switch :sessions :cost}
+    :features       #{:model-switch :sessions :mcp :cost}
     :modes          {:approve "default"}
     :model-config-id "model"
     :init-mode       nil}})
@@ -237,9 +237,16 @@
   (boolean (contains? (:features (get @merged-registry agent-key)) feature)))
 
 (defn list-agents
-  "List all available agents as [{:key :claude :name \"Claude Code\"} ...]."
+  "List all available agents as [{:key :claude :name \"Claude Code\" :features #{…}} ...].
+
+   `:features` rides along because /agents is the one place the set is visible.
+   It went five releases unread, and unread data is uncorrected data — the :mcp
+   flag was set on one of six agents when five of them support MCP servers.
+   Displaying it is what makes a wrong entry a bug report instead of a silent
+   gate; gates themselves use live signals (handshake capabilities, the :modes
+   map, the pushed config-option list), never this set."
   []
-  (mapv (fn [[k v]] {:key k :name (:name v)}) @merged-registry))
+  (mapv (fn [[k v]] {:key k :name (:name v) :features (:features v)}) @merged-registry))
 
 (defn reset-dynamic!
   "Reset dynamic agents (for testing / deactivation)."

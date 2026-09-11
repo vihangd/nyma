@@ -552,6 +552,26 @@
 
     ;; Wire editor
     (set! (.-onSubmit editor) on-submit)
+
+    ;; `editor_change` had no emitter anywhere in src, so token_suite's live
+    ;; token-count widget — subscribed, debounced, tested — never once drew.
+    ;; Throttled HERE rather than in the consumer: rpc mode subscribes a
+    ;; println-JSON handler to every event name, so an unthrottled per-keystroke
+    ;; emit would be one JSON line per keystroke on that channel.
+    (let [last-emit (atom 0)
+          pending   (atom nil)
+          emit-text (fn [text]
+                      (reset! last-emit (js/Date.now))
+                      ((:emit (:events agent)) "editor_change" #js {:text (str text)}))]
+      (set! (.-onChange editor)
+            (fn [text]
+              (let [now (js/Date.now)]
+                (when @pending (js/clearTimeout @pending) (reset! pending nil))
+                (if (>= (- now @last-emit) 100)
+                  (emit-text text)
+                  ;; Trailing edge, so the last keystroke of a fast burst still
+                  ;; reaches the widget.
+                  (reset! pending (js/setTimeout #(emit-text text) 100)))))))
     (.setAutocompleteProvider editor
                               (new CombinedAutocompleteProvider
                                    (build-slash-commands agent)

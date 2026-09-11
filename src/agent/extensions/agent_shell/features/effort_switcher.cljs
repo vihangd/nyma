@@ -10,6 +10,24 @@
   (when (and (.-ui api) (.-available (.-ui api)))
     (.notify (.-ui api) msg (or level "info"))))
 
+(defn effort-unsupported?
+  "Pure: does this agent's pushed config-option list prove it has no `effort`
+   option?
+
+   The agent definition's `:thinking` feature is NOT the signal — it means the
+   agent streams thought chunks, which is a different capability: claude-agent-acp
+   declares `:thinking` and advertises no effort option at all. The live list
+   arrives on config_option_update and is stored as :config-options.
+
+   An EMPTY list proves nothing (pre-handshake, or an agent that never pushes
+   options), so the send goes ahead and the agent's own error is the answer —
+   today's behaviour. Only a populated list without `effort` is a refusal."
+  [config-options]
+  (let [opts (vec (or config-options []))]
+    (boolean (and (seq opts)
+                  (not-any? (fn [o] (= (str (or (:configId o) (get o "configId"))) "effort"))
+                            opts)))))
+
 (defn- set-effort!
   "Send session/set_config_option to set effort level on the active agent."
   [api level]
@@ -21,6 +39,13 @@
 
       (not conn)
       (notify api "Agent not connected" "error")
+
+      (effort-unsupported? (shared/get-agent-state agent-key :config-options))
+      (notify api (str (shared/kw-name agent-key)
+                       " has no effort setting — it advertised "
+                       (count (shared/get-agent-state agent-key :config-options))
+                       " config option(s), none of them `effort`.")
+              "warning")
 
       :else
       (let [sid @(:session-id conn)]

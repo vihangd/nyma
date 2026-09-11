@@ -10,7 +10,6 @@
             [agent.extensions.agent-shell.features.mode-switcher :as mode-switcher]
             [agent.extensions.agent-shell.features.session-mgmt :as session-mgmt]
             [agent.extensions.agent-shell.acp.notifications :as notifications]
-            [agent.extensions.agent-shell.features.cost-tracker :as cost-tracker]
             [agent.extensions.agent-shell.features.permission-ui :as permission-ui]
             [agent.extensions.agent-shell.features.input-router :as input-router]
             [agent.extensions.agent-shell.features.handoff :as handoff]
@@ -791,22 +790,6 @@
                                                                                       [{:status "active" :content "plan B"}] 4)]
                                                (-> (expect (count result)) (.toBe 2))
                                                (-> (expect (:prompt-id (second result))) (.toBe 4)))))))
-
-;;; ─── Cost tracker ───────────────────────────────────────────────────────────
-
-(describe "agent-shell:cost-tracker" (fn []
-                                       (it "hooks acp_usage event on activate"
-                                           (fn []
-                                             (let [api (make-mock-api)
-                                                   _   (cost-tracker/activate api)]
-                                               (-> (expect (pos? (count (get @(.-_events api) "acp_usage" [])))) (.toBe true)))))
-
-                                       (it "deactivator removes the handler"
-                                           (fn []
-                                             (let [api   (make-mock-api)
-                                                   deact (cost-tracker/activate api)]
-                                               (deact)
-                                               (-> (expect (count (get @(.-_events api) "acp_usage" []))) (.toBe 0)))))))
 
 ;;; ─── ACP permission request handler ────────────────────────────────────────
 

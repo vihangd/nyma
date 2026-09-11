@@ -76,7 +76,6 @@ file changes — a declined write changed nothing. Set plan mode once with
 | `handoff.cljs` | `/handoff` with context capture and transfer |
 | `permission_ui.cljs` | `--auto-approve` flag handling |
 | `mcp_discovery.cljs` | Finds `.mcp.json` / `.cursor/mcp.json` MCP server configs |
-| `cost_tracker.cljs` | Aggregates per-agent usage |
 | `acp/*` | ACP transport — JSON-RPC framing, pool, schema, sessions |
 
 ## Flags
