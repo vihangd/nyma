@@ -6,6 +6,7 @@
             ["zod" :as z]
             [agent.extensions.bash-suite.shared :as shared]
             [agent.tool-result-policy :as policy]
+            [agent.utils.spill-file :as spill]
             [clojure.string :as str]))
 
 ;; ── Output registry ──────────────────────────────────────────
@@ -40,15 +41,16 @@
         (when (> stdout-size max-bytes)
           (let [id       (shared/generate-id)
                 temp-dir (shared/temp-output-dir config)
-                fpath    (path/join temp-dir (str "nyma-bash-" id ".txt"))]
-            ;; Save full output to temp file
+                ;; Random name + 0600 + `wx`, in a 0700 directory: command output
+                ;; is model-visible content (env dumps, logs, configs) and used to
+                ;; land world-readable at a guessable path in a shared /tmp.
+                fpath    (path/join temp-dir (spill/random-name ".txt"))]
             (try
-              (when-not (fs/existsSync temp-dir)
-                (fs/mkdirSync temp-dir #js {:recursive true}))
-              (fs/writeFileSync fpath stdout "utf8")
-              (swap! output-registry assoc id
-                     {:path fpath :byte-size stdout-size :created-at (js/Date.now)})
-              (swap! shared/suite-stats update-in [:output-handling :temp-files-created] inc)
+              (when (spill/ensure-private-dir! temp-dir)
+                (when (spill/write! fpath stdout)
+                  (swap! output-registry assoc id
+                         {:path fpath :byte-size stdout-size :created-at (js/Date.now)})
+                  (swap! shared/suite-stats update-in [:output-handling :temp-files-created] inc)))
               (catch :default _e nil))
             ;; Middle-truncate
             (let [head-lines (:head-lines config)
@@ -61,10 +63,14 @@
                      (fn [s] (-> s
                                  (update :truncations inc)
                                  (update :bytes-saved + saved))))
-              (js/JSON.stringify
-               #js {:stdout   truncated
-                    :stderr   stderr
-                    :exitCode exit-code}))))))))
+              ;; Merge onto the ORIGINAL envelope rather than rebuilding it from
+              ;; three keys: that dropped `aborted` and would drop `timedOut` /
+              ;; `signal` — on exactly the path that fires for a large, long
+              ;; running command, the one most likely to have been cut short.
+              (let [out (js/Object.assign #js {} (:raw parsed)
+                                          #js {:stdout truncated :stderr stderr
+                                               :exitCode exit-code})]
+                (js/JSON.stringify out)))))))))
 
 ;; ── Retrieve tool ────────────────────────────────────────────
 

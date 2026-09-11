@@ -104,8 +104,10 @@
         :execute edit-execute}))
 
 (defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
-  (let [proc     (js/Bun.spawn #js ["sh" "-c" command]
-                               #js {:timeout (or timeout 30000)
+  (let [limit-ms (or timeout 30000)
+        started  (js/Date.now)
+        proc     (js/Bun.spawn #js ["sh" "-c" command]
+                               #js {:timeout limit-ms
                                     :stdout  "pipe"
                                     :stderr  "pipe"})
         signal   (when ext-ctx (aget ext-ctx "abortSignal"))
@@ -116,13 +118,32 @@
                      (.addEventListener signal "abort" on-abort #js {:once true})))
         stdout   (js-await (.text (js/Response. (.-stdout proc))))
         stderr   (js-await (.text (js/Response. (.-stderr proc))))
-        code     (js-await (.-exited proc))]
+        code     (js-await (.-exited proc))
+        ;; Orthogonal outcomes, reported independently. A run can time out AND
+        ;; exit 0, because the command trapped the signal — `trap "exit 0" TERM`
+        ;; in a Makefile or a test runner's cleanup. Measured on Bun 1.4: a plain
+        ;; timeout gives exitCode 143 + signalCode SIGTERM, a trapping one gives
+        ;; exitCode 0 + signalCode null, indistinguishable from success by the
+        ;; process fields alone. (`proc.killed` is no help: it reads true for
+        ;; EVERY exited process, timeout or not.) So the deadline itself is the
+        ;; witness — the fact reported is "this run reached its limit", which is
+        ;; exactly what the exit code cannot say.
+        ;; ponytail: wall-clock is the ceiling of this approach — the elapsed
+        ;; time includes draining the pipes, so a command that exits quickly but
+        ;; leaves a background child holding stdout can read as timed out. The
+        ;; upgrade path is a `timedOut` flag from the spawner itself, if Bun ever
+        ;; exposes one.
+        elapsed  (- (js/Date.now) started)
+        aborted? (boolean (and signal (.-aborted signal)))
+        timed-out? (and (not aborted?) (>= elapsed limit-ms))]
     (when signal (.removeEventListener signal "abort" on-abort))
     (js/JSON.stringify
      #js {:stdout   stdout
           :stderr   stderr
           :exitCode code
-          :aborted  (boolean (and signal (.-aborted signal)))})))
+          :timedOut timed-out?
+          :signal   (.-signalCode proc)
+          :aborted  aborted?})))
 
 (defn ^:async bash-tool-execute
   "Tool-facing wrapper: the same JSON payload the model has always seen, plus
@@ -152,11 +173,14 @@
    (`ui/editor_bash.cljs`) and the tool tests parse it directly."
   [args & [ext-ctx]]
   (let [payload (js-await (bash-execute args ext-ctx))
-        code    (try (let [parsed (js/JSON.parse payload)]
-                       (aget parsed "exitCode"))
-                     (catch :default _ nil))]
+        parsed  (try (js/JSON.parse payload) (catch :default _ nil))
+        code    (when parsed (aget parsed "exitCode"))
+        ;; Rides `tool_result` beside the exit code: a consumer asking "did this
+        ;; command succeed?" cannot answer from exitCode alone once a timeout
+        ;; can be trapped into a 0.
+        timed?  (boolean (when parsed (aget parsed "timedOut")))]
     #js {:content #js [#js {:type "text" :text payload}]
-         :details #js {:exitCode code}}))
+         :details #js {:exitCode code :timedOut timed?}}))
 
 (def bash-tool
   (tool

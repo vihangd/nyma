@@ -8,6 +8,7 @@
             [agent.token-estimation :as te]
             [agent.debug :as d]
             [agent.model-info :as model-info]
+            [agent.utils.spill-file :as spill]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]))
 
 (defn- valid-cut-position?
@@ -393,21 +394,24 @@ with every section below present.
    before_compact event fires. Returns {:json-path ... :text-path ...} or nil."
   [session to-summarize to-keep]
   (try
-    (let [tmp-dir      (path/join (os/tmpdir) "nyma-precompact")
-          _            (fs/mkdirSync tmp-dir #js {:recursive true})
-          session-name (try
-                         (let [fp ((:get-file-path session))]
-                           (if fp (path/basename (str fp) ".jsonl") "session"))
-                         (catch :default _ "session"))
-          ts           (js/Date.now)
-          base         (str session-name "-" ts)
-          json-path    (path/join tmp-dir (str base ".json"))
-          text-path    (path/join tmp-dir (str base ".txt"))
+    ;; This dump is the whole span being summarized: every prompt, every
+    ;; assistant message, whatever the model read out of the repo. It used to go
+    ;; to a fixed directory under a name guessable to the millisecond, written
+    ;; with the default mode — 0644 in a world-readable /tmp. A fresh 0700
+    ;; mkdtemp directory per compaction, with 0600 exclusive writes, keeps it to
+    ;; this user; nothing needs to find it again, since cleanup below holds the
+    ;; paths.
+    (let [tmp-dir      (spill/private-temp-dir! "nyma-precompact")
+          _            (when-not tmp-dir (throw (js/Error. "no private temp dir")))
+          json-path    (path/join tmp-dir (spill/random-name ".json"))
+          text-path    (path/join tmp-dir (spill/random-name ".txt"))
           payload      #js {:toSummarize (clj->js to-summarize)
                             :toKeep      (clj->js to-keep)}]
-      (fs/writeFileSync json-path (js/JSON.stringify payload nil 2))
-      (fs/writeFileSync text-path (format-messages to-summarize))
-      {:json-path json-path :text-path text-path})
+      (when-not (spill/write! json-path (js/JSON.stringify payload nil 2))
+        (throw (js/Error. "precompact json write failed")))
+      (when-not (spill/write! text-path (format-messages to-summarize))
+        (throw (js/Error. "precompact text write failed")))
+      {:json-path json-path :text-path text-path :dir tmp-dir})
     (catch :default e
       (d/warn "compaction" "precompact-dump failed" #js {:error (str e)})
       nil)))
@@ -415,7 +419,10 @@ with every section below present.
 (defn- cleanup-precompact-dump [dump]
   (when dump
     (try (fs/unlinkSync (:json-path dump)) (catch :default _ nil))
-    (try (fs/unlinkSync (:text-path dump)) (catch :default _ nil))))
+    (try (fs/unlinkSync (:text-path dump)) (catch :default _ nil))
+    ;; The mkdtemp directory is ours alone, and empty by now — rmdir (never a
+    ;; recursive rm) so it can only remove a real, empty directory.
+    (try (fs/rmdirSync (:dir dump)) (catch :default _ nil))))
 
 (def default-threshold
   "Fraction of the window at which to compact.

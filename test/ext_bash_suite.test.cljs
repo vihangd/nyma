@@ -333,6 +333,24 @@
                                                  (-> (expect (:temp-files-created stats)) (.toBe 1))
                                                  (-> (expect (:truncations stats)) (.toBe 1)))))
 
+                                         ;; The envelope used to be rebuilt from
+                                         ;; three keys, dropping every other fact
+                                         ;; — on the path that fires for a large,
+                                         ;; long-running command, i.e. the one
+                                         ;; most likely to have been cut short.
+                                         (it "keeps timedOut/signal/aborted through truncation"
+                                             (fn []
+                                               (let [big-text (str/join "\n" (map (fn [i] (str "line-" i " " (str/join (repeat 100 "x"))))
+                                                                                  (range 500)))
+                                                     result   (js/JSON.stringify #js {:stdout big-text :stderr "" :exitCode 0
+                                                                                      :timedOut true :signal "SIGTERM" :aborted false})
+                                                     config   (:output-handling shared/default-config)
+                                                     parsed   (js/JSON.parse (output-handling/truncate-and-save result config))]
+                                                 (-> (expect (.-timedOut parsed)) (.toBe true))
+                                                 (-> (expect (.-signal parsed)) (.toBe "SIGTERM"))
+                                                 (-> (expect (.-aborted parsed)) (.toBe false))
+                                                 (-> (expect (.-stdout parsed)) (.toContain "truncated")))))
+
                                          (it "tracks bytes saved"
                                              (fn []
                                                (let [big-text (str/join "\n" (map (fn [i] (str "line-" i " " (str/join (repeat 100 "x"))))
