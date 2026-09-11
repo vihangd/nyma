@@ -1,7 +1,9 @@
 (ns compiled-scope-lint.test
   "One squint trap, checked where it actually bit.
 
-   Squint suffixes let bindings (`tools_this_turn68`). A closure written ABOVE
+   Squint suffixes let bindings (`tools_this_turn68`, and `tools_this_turn_68`
+   since 0.14.208 — the regexes below accept either, since the separator is the
+   compiler's business and changing it must not silently disarm this lint). A closure written ABOVE
    the binding it uses compiles to a bare `tools_this_turn` — a different symbol,
    declared nowhere, a ReferenceError the moment the closure runs. The compiler
    is happy and `node --check` is happy; only the code path that invokes the
@@ -26,7 +28,7 @@
   "Pure: does `src` declare NAME<digits> while also using a bare NAME? That bare
    use cannot resolve — it is the escaped-binding bug."
   [src name]
-  (let [declared? (some? (.match src (js/RegExp. (str "(?:const|let|var)\\s+" name "\\d+\\s*="))))
+  (let [declared? (some? (.match src (js/RegExp. (str "(?:const|let|var)\\s+" name "_?\\d+\\s*="))))
         bare?     (some? (.match src (js/RegExp. (str "(?<![\\w$.])" name "(?![\\w$\\d])"))))]
     (and declared? bare?)))
 
@@ -52,8 +54,8 @@
         ;; the increment and the declaration must name the SAME symbol
                 (fn []
                   (let [src  (fs/readFileSync loop-mjs "utf8")
-                        decl (.match src (js/RegExp. "const (tools_this_turn\\d+) = squint_core.atom"))
-                        used (.match src (js/RegExp. "swap_BANG_\\((tools_this_turn\\d*)"))]
+                        decl (.match src (js/RegExp. "const (tools_this_turn_?\\d+) = squint_core.atom"))
+                        used (.match src (js/RegExp. "swap_BANG_\\((tools_this_turn_?\\d*)"))]
                     (-> (expect (some? decl)) (.toBe true))
                     (-> (expect (some? used)) (.toBe true))
                     (-> (expect (aget used 1)) (.toBe (aget decl 1))))))))
