@@ -1163,7 +1163,21 @@ of this section: each row cost a measurement, and without it someone re-opens th
   (appends are the write path), the round-trip is verified before the original is unlinked, and the
   original mtime is carried onto the archive — the picker sorts by mtime, so a sweep would otherwise
   reorder the list into "most recently compressed".
+- **The bundled binary loaded 2 of 40 extensions**, and had for a long time.
+  `builtin-extensions-dir` was `(path/resolve import.meta.dir ".." "extensions")`, which inside a
+  single-file binary resolves into the bundle where no directory exists; an empty scan is not an error,
+  so it shipped silently — no agent_shell, no bash_suite, no token_suite, no model_roles, no custom
+  providers (3 of 20). Builtins are now a **generated static registry**
+  (`src/agent/builtin_extensions.cljs`, `bun run gen:builtins`, drift-tested): static requires put them
+  in the bundle graph and their manifests are inlined, since a file read has nowhere to read from
+  inside a binary either. They run through the same topo-sort/capability/activation pipeline as a
+  scanned file. User extension directories are still scanned — they are real directories on the machine
+  running nyma. Binary now reports **40 extensions / 20 providers**, matching `bun dist/agent/cli.mjs`.
+  Two side-findings: `loader_smoke` scanned `dist/agent/extensions` directly, so it stayed green while
+  the binary loaded nothing; and the activation loop never stored `:manifest`, so `filter-by-mode` read
+  nil from every entry and allowed everything in every mode.
 - **`--bytecode`** on every bundle target: **100 ms → 30 ms** startup (10-run medians), +12.8 MB binary.
+  With the builtins bundled it is **40 ms / 95 MB**, still 4× faster than the 160 ms dist entry point.
   **`--format=esm` is load-bearing**: bytecode implies CJS, and out of a CJS binary the extension
   loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension failed with
   `Cannot find package 'ai'`, none did with ESM. Pinned by `test/bundle_flags.test.cljs`, because a
