@@ -60,3 +60,45 @@
                     (-> (expect (spill/ensure-private-dir! dir)) (.toBe dir))
                     (-> (expect (mode-of dir)) (.toBe 0700))
                     (fs/rmdirSync dir))))))
+
+
+;;; ─── never tighten what is not ours ─────────────────────────
+
+(describe "ensure-private-dir! refuses shared directories"
+          (fn []
+            (it "will not chmod the OS temp root"
+                (fn []
+                  ;; As root — every default container — chmodding /tmp to 0700
+                  ;; SUCCEEDS and takes the temp directory away from every other
+                  ;; process on the machine. Measured in a bun container: /tmp
+                  ;; went 1777 -> 700 after a single oversized bash output.
+                  ;;
+                  ;; The invariant is about the mode, not the return value: on
+                  ;; macOS the temp root is a per-user 0700 directory already, so
+                  ;; there is nothing to refuse and nothing to change.
+                  (let [before (mode-of (os/tmpdir))]
+                    (spill/ensure-private-dir! (os/tmpdir))
+                    (-> (expect (mode-of (os/tmpdir))) (.toBe before))
+                    ;; Where it is the shared 1777 /tmp, it must also decline to
+                    ;; hand the caller a directory to spill into.
+                    (when (not= before 0700)
+                      (-> (expect (spill/ensure-private-dir! (os/tmpdir))) (.toBeNil))))))
+
+            (it "recognises the temp root through a non-normalised path"
+                (fn []
+                  (-> (expect (spill/shared-root? (path/join (os/tmpdir) "x" ".."))) (.toBe true))
+                  (-> (expect (spill/shared-root? (path/join (os/tmpdir) "nyma-bash-output")))
+                      (.toBe false))))
+
+            (it "still creates and tightens a directory of our own"
+                (fn []
+                  ;; Guard the guard: the refusal above must not have turned the
+                  ;; whole function off.
+                  (let [dir (path/join (fs/mkdtempSync (path/join (os/tmpdir) "nyma-spill-t-")) "sub")]
+                    (-> (expect (spill/ensure-private-dir! dir)) (.toBe dir))
+                    (-> (expect (bit-and (.-mode (fs/statSync dir)) 0777)) (.toBe 0700))
+                    ;; …including loosening that an older nyma may have left.
+                    (fs/chmodSync dir 0755)
+                    (-> (expect (spill/ensure-private-dir! dir)) (.toBe dir))
+                    (-> (expect (bit-and (.-mode (fs/statSync dir)) 0777)) (.toBe 0700))
+                    (fs/rmSync dir #js {:recursive true :force true}))))))

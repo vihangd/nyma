@@ -162,9 +162,18 @@
   (.toString (js/Bun.hash (str (js/Date.now) "-" (js/Math.random))) 16))
 
 (defn temp-output-dir
-  "Return configured temp directory or OS temp."
+  "The directory oversized bash output is spilled into.
+
+   Defaults to a nyma-owned subdirectory, NOT the OS temp root. It used to
+   return `os.tmpdir()` itself, which nyma then tried to make 0700: on macOS
+   that is a per-user directory already owned and already 0700, so it worked and
+   nobody noticed. On Linux it is /tmp — root-owned 1777 — so an unprivileged
+   nyma failed the chmod and silently never spilled at all, while a nyma running
+   as root (any default container) succeeded and took /tmp away from every other
+   process on the machine."
   [config]
-  (or (:temp-dir (:output-handling config)) (os/tmpdir)))
+  (or (:temp-dir (:output-handling config))
+      (path/join (os/tmpdir) "nyma-bash-output")))
 
 (defn truncate-middle
   "Keep first head-lines and last tail-lines, with truncation notice in the middle."

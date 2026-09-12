@@ -30,19 +30,47 @@
   [ext]
   (str (.. js/crypto (randomUUID)) ext))
 
+(defn- our-uid
+  "The current uid, or nil where the platform has no such notion (Windows)."
+  []
+  (when (fn? (.-getuid js/process)) (.getuid js/process)))
+
+(defn shared-root?
+  "Is `dir` the OS temp root itself (/tmp, /var/folders/…/T)?
+
+   Never to be tightened, whoever owns it. As root — which is every default
+   container — chmodding /tmp to 0700 SUCCEEDS, and takes the temp directory
+   away from every other process on the machine. Measured in a bun container:
+   /tmp went from 1777 to 700 after one spill."
+  [dir]
+  (= (path/resolve (str dir)) (path/resolve (os/tmpdir))))
+
 (defn ensure-private-dir!
   "Create `dir` 0700, and tighten it when it already exists with looser bits.
 
    The tightening branch exists because a persistent spill directory (bash's,
    which `retrieve_bash_output` reads from later) may have been created by an
    older nyma, and because its path is user-configurable — we cannot assume we
-   made it. Returns the directory, or nil when it cannot be made usable."
+   made it. Which is exactly why it does not tighten unconditionally: we only
+   chmod a directory we own, and never the OS temp root.
+
+   Returns the directory, or nil when it cannot be made usable — a caller that
+   cannot get a private directory must not spill, not spill anyway."
   [dir]
   (try
     (if (fs/existsSync dir)
-      (let [mode (bit-and (.-mode (fs/statSync dir)) 0777)]
-        (when (not= mode dir-mode) (fs/chmodSync dir dir-mode))
-        dir)
+      (let [st   (fs/statSync dir)
+            mode (bit-and (.-mode st) 0777)
+            uid  (our-uid)]
+        (cond
+          (= mode dir-mode) dir
+          ;; Someone else's directory, or the shared temp root. Refuse rather
+          ;; than change permissions on something that is not ours.
+          (or (shared-root? dir)
+              (and (some? uid) (not= uid (.-uid st))))
+          nil
+
+          :else (do (fs/chmodSync dir dir-mode) dir)))
       (do (fs/mkdirSync dir #js {:recursive true :mode dir-mode})
           dir))
     (catch :default _ nil)))
