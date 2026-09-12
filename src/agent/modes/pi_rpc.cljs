@@ -20,7 +20,7 @@
 
 ;; ── stdout: the one and only protocol writer ───────────────────
 
-(defn- write-event!
+(defn write-event!
   "Serialize a CLJS map to one JSONL line on stdout. The sole stdout writer."
   [m]
   (println (js/JSON.stringify (clj->js m))))
@@ -131,8 +131,14 @@
            {:toolCallId (or (.-toolCallId r) "")
             :toolName   (or (.-toolName r) "")
             :result     {:content [{:type "text"
+                                    ;; `(or o nil)` would turn a literal false
+                                    ;; into the text "null". Squint's `or` uses
+                                    ;; CLJS truthiness so 0 and "" survive it,
+                                    ;; but false does not.
                                     :text (let [o (.-output r)]
-                                            (if (string? o) o (js/JSON.stringify (or o nil))))}]
+                                            (cond (string? o)    o
+                                                  (undefined? o) ""
+                                                  :else          (js/JSON.stringify o)))}]
                          :details {}}}))))
 
 (defn drain-queues!
@@ -154,6 +160,16 @@
     {:steering (drain :steer-queue)
      :followUp (drain :follow-queue)}))
 
+(defn open-turn!
+  "Emit a pi `turn_start` unless one is already unmatched.
+
+   Idempotent so it can be called from both nyma's own turn_start and from the
+   first turn_end of a step that began without one."
+  [st]
+  (when-not @(:turn-open? st)
+    (reset! (:turn-open? st) true)
+    (write-event! {:type "turn_start"})))
+
 (defn turn-end-event
   "A nyma `turn_end` StepResult → pi's `{type, message, toolResults}`.
 
@@ -167,7 +183,7 @@
                 (step-usage step)    (assoc :usage (step-usage step)))
      :toolResults (tool-results step)}))
 
-(defn- subscribe-events!
+(defn subscribe-events!
   "Wire nyma events → pi wire events. Returns an unsubscribe thunk."
   [agent st]
   (let [events (:events agent)
@@ -270,11 +286,20 @@
          ;; and they are the pair every RPC consumer keys its turn accounting
          ;; on — pi's documented flow is
          ;;   agent_start -> turn_start -> message_* -> turn_end -> agent_end.
+         ;; nyma emits turn_start once per run-loop iteration and turn_end once
+         ;; per STEP (loop.cljs:411, from onStepFinish), so a 5-tool turn
+         ;; upstream is 1 start and 5 ends. pi's contract is a pair, and a
+         ;; consumer that finalises its turn accounting on turn_end would
+         ;; finalise after the first tool call. So the wire alternates strictly:
+         ;; every turn_end is preceded by exactly one turn_start.
          ["turn_start"
-          (fn [_] (write-event! {:type "turn_start"}))]
+          (fn [_] (open-turn! st))]
 
          ["turn_end"
-          (fn [step] (write-event! (turn-end-event step)))]
+          (fn [step]
+            (open-turn! st)                       ;; no-op if already open
+            (reset! (:turn-open? st) false)
+            (write-event! (turn-end-event step)))]
 
          ["agent_end"
           (fn [_]
@@ -285,7 +310,22 @@
          ;; and no queued follow-up will continue it. Distinct from agent_end,
          ;; which fires per run.
          ["turn_finalize"
-          (fn [_] (write-event! {:type "agent_settled"}))]]]
+          (fn [_]
+            ;; A provider error skips agent_end — it is emitted inside the try
+            ;; whose catch only stashes the error (loop.cljs:645-649) — while
+            ;; turn_finalize always runs. Without this the wire shows
+            ;; agent_settled with no agent_end, and `streaming?` (reset only by
+            ;; the agent_end handler) stays true, so get_state.isStreaming lies
+            ;; until the next run and a frontend waiting on it hangs.
+            (when @(:streaming? st)
+              (reset! (:streaming? st) false)
+              (write-event! {:type "agent_end" :messages []}))
+            ;; turn_finalize fires once per TURN and before the follow-queue
+            ;; drain (loop.cljs:707 vs 725), so the loop can recur into another
+            ;; turn afterwards. agent_settled means the run will not continue on
+            ;; its own, so it waits until nothing is queued.
+            (when (empty? @(:follow-queue agent))
+              (write-event! {:type "agent_settled"})))]]]
     (doseq [[ev h] handlers] (on ev h))
     (fn [] (doseq [[ev h] handlers] (off ev h)))))
 
@@ -505,6 +545,10 @@
             :streaming?    (atom false)
             :running?      (atom false)
             :compacting?   (atom false)
+            ;; Is a pi `turn_start` currently unmatched? nyma's turn_start is
+            ;; per run-loop iteration while turn_end is per STEP, so the two are
+            ;; not a pair upstream — this makes them one on the wire.
+            :turn-open?    (atom false)
             :pending-ui    (atom {})}
         unsub      (subscribe-events! agent st)
         perm-h     (make-permission-handler st)

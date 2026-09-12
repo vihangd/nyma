@@ -399,11 +399,20 @@ pi can drive nyma. It implements `prompt`, `steer`, `abort`, `fork`,
 queries, and the event flow pi documents:
 
 ```
-response/prompt → agent_start → turn_start → message_* → turn_end → agent_end → agent_settled
+response/prompt → agent_start → (turn_start → message_* → turn_end)+ → agent_end → agent_settled
 ```
+
+A turn is one assistant response plus the tool calls it causes, so a run that
+uses tools sends several `turn_start`/`turn_end` pairs. They always alternate:
+every `turn_end` is preceded by exactly one `turn_start`.
 
 `turn_end` carries the assistant message with its `usage` and `stopReason`, plus
 `toolResults` — consumers derive per-turn token accounting from those fields.
+
+`agent_settled` means the run will not continue on its own: it is withheld while
+a follow-up is queued, because the loop will recur into another turn. A frontend
+can unlock input on it. On a provider error `agent_end` is synthesised before it,
+so the pair is always closed.
 
 #### Driving nyma from [pilish](https://github.com/dnouri/pilish) (Emacs)
 
