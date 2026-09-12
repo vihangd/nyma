@@ -14,10 +14,17 @@
       (-> (expect (.-hello parsed)) (.toBe "world"))
       (-> (expect (.-n parsed)) (.toBe 42)))))
 
+(defn- outcome
+  "exit code plus stderr. run-command returns exit-code 1 both for a command
+   that exited 1 and for a spawn that threw, so an assertion on the bare number
+   cannot say which — and on CI it was the second."
+  [r]
+  (str "exit=" (:exit-code r) " stderr=" (:stderr r)))
+
 (defn ^:async test-exit-zero-plain-stdout []
   (let [r (js-await (run-command {:command "echo hello"
                                   :stdin-json {}}))]
-    (-> (expect (:exit-code r)) (.toBe 0))
+    (-> (expect (outcome r)) (.toBe "exit=0 stderr="))
     (-> (expect (.includes (:stdout r) "hello")) (.toBe true))))
 
 (defn ^:async test-exit-non-zero-stderr []
@@ -31,7 +38,8 @@
   ;; A hook returning exit 2 with stderr indicates a blocking error.
   (let [r (js-await (run-command {:command "sh -c 'echo blocked >&2; exit 2'"
                                   :stdin-json {}}))]
-    (-> (expect (:exit-code r)) (.toBe 2))
+    (-> (expect (str "exit=" (:exit-code r))) (.toBe "exit=2"))
+    (-> (expect (:stderr r)) (.not.toContain "spawn error"))
     (-> (expect (.includes (:stderr r) "blocked")) (.toBe true))))
 
 (defn ^:async test-timeout-kills-process []
