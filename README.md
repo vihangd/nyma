@@ -387,10 +387,36 @@ Like print mode but outputs structured JSON.
 ### RPC Mode
 
 ```bash
-bun run start -- --mode rpc
+bun run start -- --mode rpc        # nyma's own minimal JSONL protocol
+bun run start -- --mode pi-rpc     # pi-compatible JSONL protocol
 ```
 
-Starts a JSONL stdio protocol for external process communication.
+Both are JSONL over stdio, one command per line, `\n` as the only delimiter.
+
+`--mode pi-rpc` speaks the protocol pi's frontends use, so tools written against
+pi can drive nyma. It implements `prompt`, `steer`, `abort`, `fork`,
+`clear_queue`, `switch_session`, `set_model`, `set_thinking_level`, the `get_*`
+queries, and the event flow pi documents:
+
+```
+response/prompt → agent_start → turn_start → message_* → turn_end → agent_end → agent_settled
+```
+
+`turn_end` carries the assistant message with its `usage` and `stopReason`, plus
+`toolResults` — consumers derive per-turn token accounting from those fields.
+
+#### Driving nyma from [pilish](https://github.com/dnouri/pilish) (Emacs)
+
+pilish builds its argv as `<executable> --mode rpc <extra-args>`, and a repeated
+`--mode` takes the last value, so no patch is needed on either side:
+
+```elisp
+(setq pilish-executable '("/path/to/nyma"))
+(setq pilish-extra-args '("--mode" "pi-rpc"))
+```
+
+pilish probes `--version` and warns when it is below pi's own `0.85.0`. It is a
+warning, not a gate.
 
 ### Gateway Mode (`nyma-gateway`)
 

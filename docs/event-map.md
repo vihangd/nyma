@@ -62,10 +62,10 @@ The listeners column is reported only.
 | `tool_execution_start` | src/agent/middleware.cljs | src/agent/extensions/openwiki/events.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs |
 | `tool_execution_update` | src/agent/middleware.cljs | src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs |
 | `tool_result` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - |
-| `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/extensions/thinking_renderer/index.cljs |
-| `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/sessions/manager.cljs |
+| `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/modes/pi_rpc.cljs, src/extensions/thinking_renderer/index.cljs |
+| `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs |
 | `turn_request` | src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs |
-| `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/middleware/self_reminder.cljs, src/extensions/thinking_renderer/index.cljs |
+| `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs, src/extensions/thinking_renderer/index.cljs |
 | `user_bash` | src/agent/ui/editor_bash.cljs | - |
 | `user_eval` | src/agent/ui/editor_eval.cljs | - |
 

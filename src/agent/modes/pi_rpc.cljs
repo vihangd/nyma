@@ -112,6 +112,61 @@
 (defn- assistant-msg [text]
   {:role "assistant" :content [{:type "text" :text text}] :timestamp (js/Date.now)})
 
+(defn step-usage
+  "AI SDK StepResult usage → pi's `{inputTokens, outputTokens}`.
+
+   Pi carries usage on the turn's message, and `@agentproto/adapter-pi` derives
+   its own `usage_update` from it rather than from a separate event — so
+   dropping this field silently costs a consumer its token accounting."
+  [step]
+  (when-let [u (and step (.-usage step))]
+    {:inputTokens  (or (.-inputTokens u) 0)
+     :outputTokens (or (.-outputTokens u) 0)}))
+
+(defn tool-results
+  "StepResult toolResults → pi's wire shape, one entry per result."
+  [step]
+  (let [rs (and step (.-toolResults step))]
+    (vec (for [r (vec (or rs #js []))]
+           {:toolCallId (or (.-toolCallId r) "")
+            :toolName   (or (.-toolName r) "")
+            :result     {:content [{:type "text"
+                                    :text (let [o (.-output r)]
+                                            (if (string? o) o (js/JSON.stringify (or o nil))))}]
+                         :details {}}}))))
+
+(defn drain-queues!
+  "Empty both message queues and return what was in them, as pi's
+   `{steering, followUp}` of plain strings.
+
+   Returned rather than discarded because the frontend shows the user what it
+   just threw away — dropping the text silently is the difference between
+   \"cancelled\" and \"lost\"."
+  [agent]
+  (let [text-of (fn [m] (let [c (:content m)] (if (string? c) c (str c))))
+        ;; (get agent k), not (k agent): squint compiles a keyword to a plain
+        ;; string, so calling it as a function is a TypeError at runtime.
+        drain   (fn [k]
+                  (let [a (get agent k)
+                        q @a]
+                    (reset! a [])
+                    (mapv text-of q)))]
+    {:steering (drain :steer-queue)
+     :followUp (drain :follow-queue)}))
+
+(defn turn-end-event
+  "A nyma `turn_end` StepResult → pi's `{type, message, toolResults}`.
+
+   Pure so the mapping can be pinned field by field: a wrongly-named field here
+   is invisible — the event still arrives, the consumer just reads nothing."
+  [step]
+  (let [text (or (and step (.-text step)) "")]
+    {:type    "turn_end"
+     :message (cond-> (assistant-msg text)
+                true                 (assoc :stopReason (or (and step (.-finishReason step)) "stop"))
+                (step-usage step)    (assoc :usage (step-usage step)))
+     :toolResults (tool-results step)}))
+
 (defn- subscribe-events!
   "Wire nyma events → pi wire events. Returns an unsubscribe thunk."
   [agent st]
@@ -210,10 +265,27 @@
             (reset! (:compacting? st) false)
             (write-event! {:type "compaction_end"}))]
 
+         ;; A turn is one assistant response plus the tool calls it caused.
+         ;; nyma's loop already emits both; they were simply never forwarded,
+         ;; and they are the pair every RPC consumer keys its turn accounting
+         ;; on — pi's documented flow is
+         ;;   agent_start -> turn_start -> message_* -> turn_end -> agent_end.
+         ["turn_start"
+          (fn [_] (write-event! {:type "turn_start"}))]
+
+         ["turn_end"
+          (fn [step] (write-event! (turn-end-event step)))]
+
          ["agent_end"
           (fn [_]
             (reset! (:streaming? st) false)
-            (write-event! {:type "agent_end" :messages []}))]]]
+            (write-event! {:type "agent_end" :messages []}))]
+
+         ;; The session-level run has settled: no retry, no compaction retry
+         ;; and no queued follow-up will continue it. Distinct from agent_end,
+         ;; which fires per run.
+         ["turn_finalize"
+          (fn [_] (write-event! {:type "agent_settled"}))]]]
     (doseq [[ev h] handlers] (on ev h))
     (fn [] (doseq [[ev h] handlers] (off ev h)))))
 
@@ -326,6 +398,11 @@
         "steer"
         (do (steer agent {:role "user" :content (.-message cmd)})
             (write-response! cmd))
+
+        "clear_queue"
+        ;; Remove queued steering and follow-up messages and hand their text
+        ;; back, so the frontend can show what was dropped.
+        (write-response! cmd (drain-queues! agent))
 
         "abort"
         ;; Abort the in-flight turn AND release any pending permission dialog so
