@@ -26,8 +26,8 @@ The listeners column is reported only.
 | `acp_tool_update` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - |
 | `acp_usage` | src/agent/extensions/agent_shell/acp/notifications.cljs | - |
 | `after_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs |
-| `agent_end` | src/agent/loop.cljs, src/agent/loop.cljs (stream-event-types) | src/agent/extensions/budget/index.cljs, src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/finalize_warn.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/pi_rpc.cljs |
-| `agent_start` | src/agent/loop.cljs | src/agent/extensions/mcp_client/index.cljs, src/agent/modes/pi_rpc.cljs |
+| `agent_end` | src/agent/loop.cljs, src/agent/loop.cljs (stream-event-types) | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/finalize_warn.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/pi_rpc.cljs |
+| `agent_start` | src/agent/loop.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/pi_rpc.cljs |
 | `before_agent_start` | src/agent/loop.cljs | src/agent/extensions/add_dir/index.cljs, src/agent/extensions/bash_suite/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/handoff/index.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/memory/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/evidence.cljs, src/agent/extensions/small_model/knowledge_inject.cljs, src/agent/extensions/small_model/self_tune.cljs, src/agent/extensions/todos/index.cljs, src/agent/extensions/token_suite/repo_map.cljs, src/agent/extensions/token_suite/structured_context.cljs, src/agent/middleware/self_reminder.cljs |
 | `before_branch_switch` | src/agent/sessions/manager.cljs | - |
 | `before_compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/smart_compaction.cljs, src/agent/modes/pi_rpc.cljs |
@@ -43,7 +43,7 @@ The listeners column is reported only.
 | `message_update` | src/agent/loop.cljs (stream-event-types) | src/agent/loop.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs |
 | `model_select` | src/agent/extensions.cljs | src/agent/modes/interactive.cljs |
 | `notification` | src/agent/extensions/desktop_notify/index.cljs | - |
-| `permission_request` | src/agent/extensions/agent_shell/acp/handlers.cljs, src/agent/middleware.cljs | src/agent/extensions/bash_suite/permissions.cljs, src/agent/extensions/claude_hook_bridge/events/permission_request.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/modes/pi_rpc.cljs |
+| `permission_request` | src/agent/extensions/agent_shell/acp/handlers.cljs, src/agent/middleware.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/bash_suite/permissions.cljs, src/agent/extensions/claude_hook_bridge/events/permission_request.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/modes/pi_rpc.cljs |
 | `reasoning_delta` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs, src/extensions/thinking_renderer/index.cljs |
 | `reasoning_end` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
 | `reasoning_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
@@ -52,8 +52,8 @@ The listeners column is reported only.
 | `session_before_fork` | src/agent/commands/builtins.cljs | - |
 | `session_before_switch` | src/agent/sessions/manager.cljs | - |
 | `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs |
-| `session_end` | src/agent/cli.cljs | src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs |
-| `session_shutdown` | src/agent/cli.cljs, src/agent/commands/builtins.cljs, src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/mcp_client/index.cljs |
+| `session_end` | src/agent/cli.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs |
+| `session_shutdown` | src/agent/cli.cljs, src/agent/commands/builtins.cljs, src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/mcp_client/index.cljs |
 | `session_start` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/interactive.cljs |
 | `session_switch` | src/agent/sessions/manager.cljs | - |
 | `tool_call` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - |

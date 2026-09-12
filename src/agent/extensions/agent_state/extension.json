@@ -1,0 +1,5 @@
+{
+  "namespace": "agent-state",
+  "capabilities": ["events", "spawn"],
+  "dependsOn": []
+}

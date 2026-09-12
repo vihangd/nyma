@@ -25,6 +25,7 @@
 (def expected-builtin-namespaces
   #{"advisor"
     "agent-runner-claude-sdk"
+    "agent-state"
     "agent-shell"
     "ast-tools"
     "bash-suite"

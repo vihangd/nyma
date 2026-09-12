@@ -512,8 +512,15 @@
 
        ;; ── Settings access ────────────────────────────────────
          :getSettings       (fn []
-                              (when-let [sm (:settings agent)]
-                                ((:get sm))))
+                              ;; Guarded: `:settings` is not always a full
+                              ;; settings manager — test harnesses and the
+                              ;; loader smoke build minimal agents — and an
+                              ;; extension asking for settings at activation
+                              ;; time should get nil, not a TypeError that
+                              ;; fails the whole load.
+                              (let [sm (:settings agent)]
+                                (when (and sm (fn? (:get sm)))
+                                  ((:get sm)))))
 
        ;; ── Token estimation ───────────────────────────────────
          :estimateTokens    (fn [text] (te/estimate-tokens text))

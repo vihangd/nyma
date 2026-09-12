@@ -19,6 +19,7 @@
             [agent.extensions.advisor.index :as ext-advisor]
             [agent.extensions.agent-runner-claude-sdk.index :as ext-agent-runner-claude-sdk]
             [agent.extensions.agent-shell.index :as ext-agent-shell]
+            [agent.extensions.agent-state.index :as ext-agent-state]
             [agent.extensions.ast-tools.index :as ext-ast-tools]
             [agent.extensions.bash-suite.index :as ext-bash-suite]
             [agent.extensions.budget.index :as ext-budget]
@@ -71,6 +72,9 @@
    {:namespace "agent-shell"
     :module    ext-agent-shell
     :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "session" "renderers" "context" "flags" "state"] "dependsOn" #js []}}
+   {:namespace "agent-state"
+    :module    ext-agent-state
+    :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js []}}
    {:namespace "ast-tools"
     :module    ext-ast-tools
     :manifest  #js {"namespace" "ast-tools" "capabilities" #js ["tools" "exec"]}}
