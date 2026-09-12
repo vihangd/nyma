@@ -25,6 +25,17 @@
 
 (defn- now [] (.now js/Date))
 
+(defn- swallow-epipe!
+  "Attach a no-op rejection handler to `x` when it is thenable.
+
+   Bun's subprocess stdin returns a promise that rejects with EPIPE when the
+   child has already exited. Nobody awaits it, so it surfaces as an unhandled
+   rejection and takes down whatever is watching for those."
+  [x]
+  (when (and x (fn? (.-catch x)))
+    (.catch x (fn [_] nil)))
+  x)
+
 (defn- expand-tilde [p]
   (let [s (str p)]
     (if (.startsWith s "~/")
@@ -96,8 +107,21 @@
                          (string? stdin-json) stdin-json
                          (some? stdin-json)   (js/JSON.stringify (clj->js stdin-json))
                          :else                "{}")]
-        (.write stdin json-body)
-        (.end stdin)
+        ;; A hook command is under no obligation to read stdin. `echo hello`
+        ;; and `ls` exit immediately, and writing to a pipe whose reader is
+        ;; already gone gives EPIPE — not a failure of the command, but it was
+        ;; reported as one (`exit=1 spawn error: EPIPE: broken pipe, write`).
+        ;; It is a race, so it showed up as a flaky CI failure on Linux and
+        ;; never on macOS, where the write reaches the buffer first.
+        ;;
+        ;; Bun's stdin sink delivers that EPIPE as a REJECTED PROMISE, not a
+        ;; synchronous throw — measured: with a listener installed it arrives as
+        ;; `unhandledRejection: EPIPE` while the try/catch sees nothing. So both
+        ;; halves are needed, and the promise half is the one that matters.
+        (try
+          (swallow-epipe! (.write stdin json-body))
+          (swallow-epipe! (.end stdin))
+          (catch :default _e nil))
 
         ;; Race exited vs timeout vs abort.
         (let [timed-out (atom false)

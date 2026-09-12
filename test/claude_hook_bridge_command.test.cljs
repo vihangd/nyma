@@ -27,6 +27,30 @@
     (-> (expect (outcome r)) (.toBe "exit=0 stderr="))
     (-> (expect (.includes (:stdout r) "hello")) (.toBe true))))
 
+(defn ^:async test-stdin-ignored-by-the-command []
+  ;; The command never reads stdin and exits at once, so the pipe's reader can
+  ;; be gone before the payload is written: EPIPE, which Bun delivers as a
+  ;; rejected promise nobody awaits.
+  ;;
+  ;; Honest about what this does and does not prove: it is a smoke test, not a
+  ;; mutation-verified guard. Removing the fix does not make it fail on macOS or
+  ;; in an arm64 Linux container — the race does not reproduce through
+  ;; run-command there, while a direct Bun.spawn of the same shape reproduces it
+  ;; every time. What is pinned here is the observable rule (a command that
+  ;; ignores stdin must produce no unhandled rejection and exit 0); the
+  ;; behaviour it guards was measured with that direct probe.
+  (let [seen (atom [])
+        on-rej (fn [e] (swap! seen conj (or (.-code e) (str e))))]
+    (.on js/process "unhandledRejection" on-rej)
+    (let [big (.repeat "x" 200000)
+          r   (js-await (run-command {:command "true"
+                                      :stdin-json {:blob big}}))]
+      ;; Give a rejection a turn of the loop to surface before we look.
+      (js-await (js/Promise. (fn [res] (js/setTimeout res 100))))
+      (.off js/process "unhandledRejection" on-rej)
+      (-> (expect (vec @seen)) (.toEqual #js []))
+      (-> (expect (outcome r)) (.toBe "exit=0 stderr=")))))
+
 (defn ^:async test-exit-non-zero-stderr []
   (let [r (js-await (run-command {:command "ls /no/such/path/exists/12345"
                                   :stdin-json {}}))]
@@ -77,7 +101,9 @@
 (describe "command/exit-codes" (fn []
                                  (it "captures stdout on exit 0" test-exit-zero-plain-stdout)
                                  (it "captures stderr on non-zero exit" test-exit-non-zero-stderr)
-                                 (it "captures exit 2 with stderr (blocking)" test-exit-2-blocking)))
+                                 (it "captures exit 2 with stderr (blocking)" test-exit-2-blocking)
+                                 (it "survives a command that never reads stdin"
+                                     test-stdin-ignored-by-the-command)))
 
 (defn ^:async test-timeout-returns-when-the-shell-forked []
   ;; `sleep 5` alone is exec'd by bash, so killing the shell kills sleep and the
