@@ -71,9 +71,27 @@
                                  (it "captures stderr on non-zero exit" test-exit-non-zero-stderr)
                                  (it "captures exit 2 with stderr (blocking)" test-exit-2-blocking)))
 
+(defn ^:async test-timeout-returns-when-the-shell-forked []
+  ;; `sleep 5` alone is exec'd by bash, so killing the shell kills sleep and the
+  ;; pipes close. `sleep 5; true` makes bash fork instead — the shell dies, the
+  ;; orphan keeps stdout open, and an unbounded drain waits the full 5s for a
+  ;; process we did not spawn. That is the Linux default for far more command
+  ;; shapes than macOS, and it timed out three CI tests at exactly 5000ms while
+  ;; passing here.
+  (let [start (js/Date.now)
+        r     (js-await (run-command {:command "echo hi; sleep 5; true"
+                                      :timeout-ms 100
+                                      :stdin-json {}}))]
+    (-> (expect (- (js/Date.now) start)) (.toBeLessThan 2000))
+    (-> (expect (:timed-out? r)) (.toBe true))
+    ;; Partial output survives the kill.
+    (-> (expect (:stdout r)) (.toContain "hi"))))
+
 (describe "command/timeout-and-abort" (fn []
                                         (it "kills a hung process on timeout" test-timeout-kills-process)
-                                        (it "kills a process when abort signal fires" test-abort-signal-kills-process)))
+                                        (it "kills a process when abort signal fires" test-abort-signal-kills-process)
+                                        (it "returns promptly when the shell forked and the child outlives it"
+                                            test-timeout-returns-when-the-shell-forked)))
 
 (describe "command/json-roundtrip" (fn []
                                      (it "passes through JSON in both directions" test-json-stdout-roundtrip)))

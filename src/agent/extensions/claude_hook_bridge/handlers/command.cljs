@@ -18,7 +18,8 @@
        agent indefinitely."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:os" :as os]))
+            ["node:os" :as os]
+            [agent.utils.stream-drain :as drain]))
 
 (def default-timeout-ms 600000)
 
@@ -48,13 +49,11 @@
                 :else      "-c")]
     [shell flag s]))
 
-(defn- read-stream-text
-  "Drain a Bun stream into a string. Bun.spawn returns
-   ReadableStreams for stdout/stderr."
-  [stream]
-  (if (or (nil? stream) (false? stream))
-    (js/Promise.resolve "")
-    (.text stream)))
+;; How long to keep draining after the process itself has exited. Killing a
+;; shell does not kill what it forked, and the orphan keeps stdout open — so an
+;; unbounded drain here waited for `sleep 5` long after the shell was gone. See
+;; agent.utils.stream-drain.
+(def ^:private post-exit-drain-ms 300)
 
 (defn ^:async run-command
   "Spawn the configured command, pipe the JSON event to stdin, and
@@ -113,13 +112,23 @@
                           (try (.kill proc) (catch :default _e nil)))
               _         (when abort-signal
                           (.addEventListener abort-signal "abort" abort-fn))
+              ;; Started BEFORE awaiting exit: a command that fills the 64KB
+              ;; pipe buffer blocks on write until someone reads it, so draining
+              ;; only after `exited` would deadlock.
+              stop      (drain/deferred-stop)
+              out-p     (drain/read-text-until (.-stdout proc) (:promise stop))
+              err-p     (drain/read-text-until (.-stderr proc) (:promise stop))
               exit-code (js-await (.-exited proc))
               _         (js/clearTimeout timer)
               _         (when abort-signal
                           (try (.removeEventListener abort-signal "abort" abort-fn)
                                (catch :default _e nil)))
-              stdout    (js-await (read-stream-text (.-stdout proc)))
-              stderr    (js-await (read-stream-text (.-stderr proc)))]
+              ;; The process is gone; anything still holding the pipe is an
+              ;; orphan we did not spawn and will not wait for. Whatever the
+              ;; command managed to say before the kill is kept.
+              _         ((:stop-in! stop) post-exit-drain-ms)
+              stdout    (js-await out-p)
+              stderr    (js-await err-p)]
           {:exit-code   (or exit-code 1)
            :stdout      (or stdout "")
            :stderr      (or stderr "")

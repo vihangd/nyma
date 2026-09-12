@@ -328,10 +328,18 @@
                                                                                   (range 500)))
                                                      result   (js/JSON.stringify #js {:stdout big-text :stderr "" :exitCode 0})
                                                      config   (:output-handling shared/default-config)
+                                                     ;; Deltas, not absolutes. suite-stats is a
+                                                     ;; module-level atom and `bun test` runs every
+                                                     ;; file in one process, so an absolute count
+                                                     ;; asserts about whatever else touched it first
+                                                     ;; — which is file-order dependent, and the file
+                                                     ;; order is not the same on every platform.
+                                                     before   (:output-handling @shared/suite-stats)
                                                      _        (output-handling/truncate-and-save result config)
-                                                     stats    (:output-handling @shared/suite-stats)]
-                                                 (-> (expect (:temp-files-created stats)) (.toBe 1))
-                                                 (-> (expect (:truncations stats)) (.toBe 1)))))
+                                                     after    (:output-handling @shared/suite-stats)
+                                                     delta    (fn [k] (- (or (get after k) 0) (or (get before k) 0)))]
+                                                 (-> (expect (delta :temp-files-created)) (.toBe 1))
+                                                 (-> (expect (delta :truncations)) (.toBe 1)))))
 
                                          ;; The envelope used to be rebuilt from
                                          ;; three keys, dropping every other fact

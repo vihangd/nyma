@@ -5,7 +5,8 @@
             ["node:path" :as path]
             [agent.multimodal :as mm]
             [agent.tool-result-policy :as policy]
-            [agent.utils.ansi :refer [truncate-text]]))
+            [agent.utils.ansi :refer [truncate-text]]
+            [agent.utils.stream-drain :as drain]))
 
 (def read-default-line-cap 2000)
 
@@ -114,8 +115,12 @@
                    (if (.-aborted signal)
                      (on-abort)
                      (.addEventListener signal "abort" on-abort #js {:once true})))
-        stdout   (js-await (.text (js/Response. (.-stdout proc))))
-        stderr   (js-await (.text (js/Response. (.-stderr proc))))
+        ;; Drains START here, before `exited` is awaited: a command that fills
+        ;; the 64KB pipe buffer blocks on write until someone reads it, so
+        ;; reading only after exit would deadlock.
+        stop     (drain/deferred-stop)
+        out-p    (drain/read-text-until (.-stdout proc) (:promise stop))
+        err-p    (drain/read-text-until (.-stderr proc) (:promise stop))
         code     (js-await (.-exited proc))
         ;; Orthogonal outcomes, reported independently. A run can time out AND
         ;; exit 0, because the command trapped the signal — `trap "exit 0" TERM`
@@ -126,12 +131,17 @@
         ;; EVERY exited process, timeout or not.) So the deadline itself is the
         ;; witness — the fact reported is "this run reached its limit", which is
         ;; exactly what the exit code cannot say.
-        ;; ponytail: wall-clock is the ceiling of this approach — the elapsed
-        ;; time includes draining the pipes, so a command that exits quickly but
-        ;; leaves a background child holding stdout can read as timed out. The
-        ;; upgrade path is a `timedOut` flag from the spawner itself, if Bun ever
-        ;; exposes one.
+        ;; Measured at EXIT, not after the pipes drain. It used to include the
+        ;; drain, so a command that exited immediately but left a background
+        ;; child holding stdout read as timed out — the ceiling this comment
+        ;; used to name. The drain is now bounded and happens after this line.
         elapsed  (- (js/Date.now) started)
+        ;; Anything still holding the pipe is an orphan we did not spawn: kill a
+        ;; shell and whatever it forked keeps stdout open. Partial output beats
+        ;; waiting for a process that is not ours.
+        _        ((:stop-in! stop) 300)
+        stdout   (js-await out-p)
+        stderr   (js-await err-p)
         aborted? (boolean (and signal (.-aborted signal)))
         timed-out? (and (not aborted?) (>= elapsed limit-ms))]
     (when signal (.removeEventListener signal "abort" on-abort))
