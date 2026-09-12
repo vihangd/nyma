@@ -13,7 +13,7 @@
 
    stdout is the protocol channel — only JSONL goes there. Everything else
    (errors, debug) goes to stderr via js/console.error."
-  (:require ["node:readline" :as readline]
+  (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run steer follow-up]]
             [agent.model-info :as model-info]
             [clojure.string :as str]))
@@ -433,14 +433,18 @@
         perm-h     (make-permission-handler st)
         events     (:events agent)]
     ((:on events) "permission_request" perm-h)
-    (let [rl (readline/createInterface
-              #js {:input js/process.stdin :output js/process.stdout :terminal false})]
-      (.on rl "line" (fn [line] (handle-line agent st line)))
-      ;; On stdin EOF (Emacs exited) release any pending dialog so a wedged
-      ;; permission gate can't keep the process alive, then tear down.
-      (.on rl "close" (fn [] (drain-pending-ui! st #js {:confirmed false :cancelled true})))
+    ;; Not node:readline: it also splits on U+2028/U+2029, which are legal
+    ;; inside a JSON string and routine in model output, so one record arrived
+    ;; as two unparseable fragments. See agent.utils.jsonl-stdin.
+    (let [stop-reading
+          (read-lines! js/process.stdin
+                       (fn [line] (handle-line agent st line))
+                       ;; On stdin EOF (the frontend exited) release any pending
+                       ;; dialog so a wedged permission gate can't keep the
+                       ;; process alive.
+                       (fn [] (drain-pending-ui! st #js {:confirmed false :cancelled true})))]
       (fn []
         (unsub)
         ((:off events) "permission_request" perm-h)
         (drain-pending-ui! st #js {:confirmed false :cancelled true})
-        (.close rl)))))
+        (stop-reading)))))

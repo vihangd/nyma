@@ -1,5 +1,5 @@
 (ns agent.modes.rpc
-  (:require ["node:readline" :as readline]
+  (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
             [agent.events :refer [all-event-types]]))
 
@@ -16,10 +16,7 @@
       (js/console.error (str "RPC error: " (.-message e))))))
 
 (defn ^:async start [agent]
-  (let [rl (readline/createInterface
-            #js {:input    js/process.stdin
-                 :output   js/process.stdout
-                 :terminal false})]
+  (let [stop-reading (atom nil)]
 
     ;; Subscribe to agent events → write as JSONL to stdout.
     ;; Retain refs so start returns a cleanup thunk (allows clean teardown if
@@ -33,10 +30,13 @@
                     [event-type h]))
                 all-event-types)]
 
-      ;; Read commands from stdin as JSONL
-      (.on rl "line" (partial handle-line agent))
+      ;; Read commands from stdin as JSONL. Not node:readline — it also splits
+      ;; on U+2028/U+2029, which are legal inside a JSON string.
+      (reset! stop-reading
+              (read-lines! js/process.stdin (partial handle-line agent)))
 
       ;; Return a cleanup thunk — call it to deregister all handlers
       (fn []
+        (when-let [stop @stop-reading] (stop))
         (doseq [[ev h] handler-refs]
           ((:off (:events agent)) ev h))))))
