@@ -95,12 +95,32 @@ bun run dev
 npx squint compile
 bun dist/agent/cli.mjs
 
+# Standalone binary (~89MB, ~40ms start vs ~160ms via dist)
+bun run bundle            # ./nyma for this machine; runs the compile itself
+bun run bundle:all        # all five targets
+bun run gen:builtins      # after ADDING an extension: regenerates the compiled-in registry
+
 # Run tests
 bun test
 
 # REPL
 npx squint repl
 ```
+
+### Adding a built-in extension
+
+A directory under `src/agent/extensions/<name>/` with `index.cljs` + `extension.json`, then:
+
+```bash
+bun run gen:builtins
+```
+
+Built-ins are **compiled into** the standalone binary through the generated registry
+(`src/agent/builtin_extensions.cljs`), because a single-file binary has no directory to scan — that is
+how a bundled nyma once shipped with 2 of 40 extensions, silently, since an empty scan is not an error.
+`test/builtin_extensions.test.cljs` fails when the registry and the source tree disagree, so forgetting
+the regenerate is a red test rather than a mystery. User extensions in `~/.nyma/extensions` need none
+of this; they are still scanned at runtime.
 
 ## Squint Conventions & Pitfalls
 

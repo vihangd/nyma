@@ -110,6 +110,35 @@ bun run build
 
 Compiles all `.cljs` files from `src/` and `test/` to `.mjs` (ES modules) in `dist/`. JSX files (Ink components) compile to `.jsx`. JSON resources are copied as-is.
 
+### Standalone binary
+
+```bash
+bun run bundle        # ./nyma for this machine
+bun run bundle:all    # all five targets (macos arm64/x64, linux x64/arm64, windows)
+```
+
+`bun run bundle` runs the squint compile itself, so it is the only command needed. It produces a
+single ~89 MB executable that starts in **~40 ms**, against ~160 ms for `bun dist/agent/cli.mjs`. The
+binary is gitignored.
+
+**It is a snapshot.** Editing anything under `src/` does not change `./nyma` until you rebuild — while
+developing nyma itself, `npx squint compile && bun dist/agent/cli.mjs` remains the faster loop. The
+binary is for *using* nyma elsewhere.
+
+The flags are not arbitrary, and `test/bundle_flags.test.cljs` fails if they drift apart:
+
+| flag | why |
+|---|---|
+| `--compile` | single-file executable with the Bun runtime embedded |
+| `--bytecode` | caches the parse: 100 ms → 40 ms startup, at +13 MB |
+| `--format=esm` | **load-bearing.** `--bytecode` implies CJS, and out of a CJS binary the extension loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension fails with `Cannot find package 'ai'`, silently, since an empty scan is not an error |
+| `--minify` | −5.9 MB; startup unchanged, because bytecode already did the parse |
+
+Extensions in the binary: the 38 builtins are compiled in via the generated registry
+(`src/agent/builtin_extensions.cljs` — regenerate with `bun run gen:builtins` after adding one), and
+user extensions are still discovered by scanning `~/.nyma/extensions` and `.nyma/extensions` at
+runtime. A bundled nyma reports the same 40 extensions and 20 providers as the dist entry point.
+
 ### REPL
 
 ```bash
