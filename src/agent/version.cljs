@@ -8,4 +8,4 @@
    read, and Bun does not autoload one into a standalone executable."
   )
 
-(def version "0.7.0")
+(def version "0.7.1")
