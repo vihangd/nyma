@@ -151,11 +151,17 @@ counts and last error messages — useful when something's red.
 
 ## Lifecycle
 
-- **Spawn**: eager at `session_start` — every configured server
-  spawns in parallel. A failure on one doesn't gate others.
-- **Tool registration**: as each server hands off `tools/list` at
-  handshake, its tools land in nyma's tool registry. Any server
-  slow to handshake just misses turn 1; its tools appear at turn 2.
+- **Spawn**: started at `session_ready` / `session_start` and **not
+  waited for** — every configured server spawns in parallel, and a
+  failure on one doesn't gate others. The prompt paints immediately;
+  awaiting five servers here used to cost 3–6 seconds before nyma
+  drew anything.
+- **Tool registration**: the bring-up is joined at `agent_start`, the
+  last hook before the turn reads the tool registry. So a slow server
+  delays the first turn rather than missing it — its tools are present
+  on turn 1, not turn 2. A user who spends a couple of seconds typing
+  waits for nothing; one who hits enter immediately waits only for
+  what is left.
 - **Auto-restart**: if a subprocess dies mid-session, the client
   reconnects with exponential backoff (`500ms · 2^n`, capped at
   `max-restarts`). After the cap, state is `:stopped-error` and

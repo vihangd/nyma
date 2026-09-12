@@ -77,6 +77,31 @@ user input → loop.cljs → middleware pipeline → tool.execute
   - `OPENAI_API_KEY` for OpenAI
   - `GOOGLE_GENERATIVE_AI_API_KEY` for Google
 
+## Install
+
+Every `vX.Y.Z` tag publishes a standalone binary for seven platforms — no Bun or Node needed
+on the target machine. Grab one from [the releases
+page](https://github.com/vihangd/nyma/releases/latest):
+
+```bash
+# macOS (arm64) — swap in your platform's archive name
+curl -LO https://github.com/vihangd/nyma/releases/latest/download/nyma-macos-arm64.tar.gz
+tar -xzf nyma-macos-arm64.tar.gz
+./nyma --version
+```
+
+| platform | archive |
+|---|---|
+| macOS arm64 / x64 | `nyma-macos-arm64.tar.gz` · `nyma-macos-x64.tar.gz` |
+| Linux x64 / arm64 (glibc) | `nyma-linux-x64.tar.gz` · `nyma-linux-arm64.tar.gz` |
+| Linux x64 / arm64 (musl, e.g. Alpine) | `nyma-linux-x64-musl.tar.gz` · `nyma-linux-arm64-musl.tar.gz` |
+| Windows x64 | `nyma-windows-x64.zip` |
+
+Each archive unpacks to a plain `nyma` (or `nyma.exe`), and `SHA256SUMS` covers all of them.
+Use the musl build on Alpine — a glibc binary will not run there.
+
+To build from source instead, or to work on nyma itself, read on.
+
 ## Quick Start
 
 ```bash
@@ -118,7 +143,7 @@ bun run bundle:all    # all seven targets
 ```
 
 `bun run bundle` runs the squint compile itself, so it is the only command needed. It produces a
-single ~89 MB executable that starts in **~40 ms**, against ~160 ms for `bun dist/agent/cli.mjs`. The
+single ~85 MB executable that starts in **~40 ms**, against ~160 ms for `bun dist/agent/cli.mjs`. The
 binary is gitignored.
 
 **It is a snapshot.** Editing anything under `src/` does not change `./nyma` until you rebuild — while
@@ -292,7 +317,7 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-**Total: 3,780+ assertions across 224 test files** (run `bun test` to see live counts).
+**Total: 9,700+ assertions across 259 test files** (run `bun test` to see live counts).
 
 Coverage spans the full stack:
 
@@ -331,6 +356,9 @@ Nyma ships **two binaries**:
 |---|---|---|
 | `nyma` | `dist/agent/cli.mjs` | Interactive TUI / print / JSON / RPC modes |
 | `nyma-gateway` | `dist/gateway/entry.mjs` | Run nyma as a daemon behind chat channels (Telegram, Slack, HTTP, Email) |
+
+`nyma --help` lists every flag; `nyma --version` prints the version alone, so it composes in a
+shell substitution.
 
 ### Interactive Mode (Default)
 
