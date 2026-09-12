@@ -30,7 +30,9 @@
             [agent.extension-scope :refer [create-scoped-api]]))
 
 (def ^:private dist-mcp-dir
-  "/Users/vihangd/projects/pers/nyma/dist/agent/extensions/mcp_client")
+  ;; Anchored to this compiled test's own directory — see
+  ;; claude_hook_bridge_load_smoke for why it is not a literal path.
+  (path/join (js* "import.meta.dir") "agent" "extensions" "mcp_client"))
 
 (defn- collect-mjs
   "Recursively list every .mjs under `dir`."

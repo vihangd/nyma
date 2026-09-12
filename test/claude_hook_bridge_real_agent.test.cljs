@@ -66,7 +66,9 @@
     (try
       ;; Activate the bridge against the real agent.
       (let [bridge-mod (js-await
-                        (js/import "/Users/vihangd/projects/pers/nyma/dist/agent/extensions/claude_hook_bridge/index.mjs"))
+                        (js/import (path/join (js* "import.meta.dir")
+                                     "agent" "extensions"
+                                     "claude_hook_bridge" "index.mjs")))
             dispose    ((.-default bridge-mod) api)]
         (try
           ;; Now emit before_tool_call the way agent.middleware does.

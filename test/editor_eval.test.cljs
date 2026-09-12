@@ -179,7 +179,13 @@
   (let [result (js-await (run-eval! "(map inc [1 2 3])"))]
     (-> (expect (.includes (:stdout result) "(2 3 4)")) (.toBe true))))
 
-(describe "run-eval! (integration — requires bb on PATH)"
+(def ^:private have-bb?
+  "bb is a real dependency of these three tests, not of nyma. Skip rather than
+   fail where it is absent — a CI runner has no babashka, and a red suite that
+   means \"this machine lacks an optional tool\" trains people to ignore red."
+  (boolean (js/Bun.which "bb")))
+
+((.skipIf describe (not have-bb?)) "run-eval! (integration — requires bb on PATH)"
           (fn []
             (it "evaluates a simple expression and captures stdout"
                 test-run-eval-happy-path)

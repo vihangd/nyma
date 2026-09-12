@@ -19,7 +19,9 @@
             [agent.extension-loader :refer [discover-and-load]]))
 
 (def ^:private builtin-dir
-  "/Users/vihangd/projects/pers/nyma/dist/agent/extensions")
+  ;; Anchored to this compiled test's own directory — see
+  ;; test/absolute_path_lint.test.cljs for why it is not a literal path.
+  (path/join (js* "import.meta.dir") "agent" "extensions"))
 
 (defn ^:async test-every-loaded-tool-validates []
   (let [agent  (create-agent {:model #js {:modelId "test"}

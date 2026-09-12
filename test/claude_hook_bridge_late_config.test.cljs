@@ -4,7 +4,8 @@
    hooks-compat (or adding a `hooks` block) AFTER nyma started
    silently has no effect — the watcher updates the atom but
    nothing is listening on the event bus."
-  (:require ["bun:test" :refer [describe it expect]]))
+  (:require ["bun:test" :refer [describe it expect]]
+            ["node:path" :as path]))
 
 ;; Build a tiny mock api the bridge can register against, then
 ;; check whether it added a listener for `before_tool_call`.
@@ -28,7 +29,9 @@
          :__listeners listeners}))
 
 (defn ^:async test-handlers-subscribed-even-with-empty-hooks []
-  (let [mod (js-await (js/import "/Users/vihangd/projects/pers/nyma/dist/agent/extensions/claude_hook_bridge/index.mjs"))
+  (let [mod (js-await (js/import (path/join (js* "import.meta.dir")
+                                     "agent" "extensions"
+                                     "claude_hook_bridge" "index.mjs")))
         api (mock-api)]
     ;; Important: this test runs in a tmpdir-like environment where
     ;; the user's real settings.json IS present. We can't fully

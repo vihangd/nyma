@@ -24,7 +24,12 @@
             ["node:path" :as path]))
 
 (def ^:private dist-bridge-dir
-  "/Users/vihangd/projects/pers/nyma/dist/agent/extensions/claude_hook_bridge")
+  ;; Anchored to this compiled test's own directory (dist/), not hardcoded and
+  ;; not cwd-relative. It was an absolute path into one developer's home, so it
+  ;; passed there and failed on every other machine — which is what the first
+  ;; CI run found. cwd is no good either: tests that chdir into a temp project
+  ;; would break it.
+  (path/join (js* "import.meta.dir") "agent" "extensions" "claude_hook_bridge"))
 
 (defn- collect-mjs
   "Recursively list every .mjs file under `dir`."
