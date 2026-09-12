@@ -130,17 +130,7 @@
         (if (and (not cli-provider) (str/includes? raw-model "/"))
           (registry-utils/split-model-spec raw-model)
           [(or cli-provider (:provider merged) "anthropic") raw-model])
-        p-config  ((:get provider-registry) provider)
-        _ (when-not p-config
-            ;; Naming the provider beats the generic "No model configured. Set
-            ;; ANTHROPIC_API_KEY…" the caller prints when resolution returns
-            ;; nil — that sentence sends you to /login for a provider that was
-            ;; never registered. Note the registered list: a provider declared
-            ;; in ~/.nyma/settings.json can be hidden by a project settings file
-            ;; replacing the whole `local-models` array.
-            (d/warn "nyma" (str "Unknown provider '" provider "' in --model "
-                                raw-model)
-                    #js {:registered (clj->js (vec (sort (keys ((:list provider-registry))))))}))]
+        p-config  ((:get provider-registry) provider)]
     ;; Auto-refresh OAuth credentials if needed
     (when-let [oauth-cfg (:oauth p-config)]
       (let [creds (oauth/load-credentials provider)]
@@ -157,7 +147,14 @@
                      ;; to know WHAT was asked for to say so.
                      (catch :default _ nil))
      :provider provider
-     :model-id model-id}))
+     :model-id model-id
+     ;; Reported rather than warned about: this function runs TWICE, and the
+     ;; first pass — before extensions load — is expected to miss every
+     ;; extension-registered provider (minimax, zai, qwen-cli, every
+     ;; custom_provider_*). Warning there told users their working config was
+     ;; broken. Only the late caller, after extensions have registered, can say
+     ;; that truthfully.
+     :provider-known? (some? p-config)}))
 
 (defn- resolve-tools
   "Returns an explicit tool restriction list, or nil if all builtins should be active.
@@ -619,6 +616,16 @@ Examples:
         (try
           (when-let [late-resolved (resolve-model-via-registry
                                     (:provider-registry agent) values merged)]
+            ;; Now it is a real finding: every provider extension has had its
+            ;; chance to register. Names the registered set, because a provider
+            ;; declared in ~/.nyma/settings.json can be hidden by a project
+            ;; settings file replacing the whole `local-models` array — which
+            ;; looks identical to a missing credential from the outside.
+            (when-not (:provider-known? late-resolved)
+              (d/warn "nyma"
+                      (str "Unknown provider '" (:provider late-resolved)
+                           "' for model '" (:model-id late-resolved) "'")
+                      #js {:registered (clj->js (vec (sort (keys ((:list (:provider-registry agent)))))))}))
             (when-let [m (:model late-resolved)]
               (set! (.-model (:config agent)) m)
               (aset (:config agent) "active-provider-name"

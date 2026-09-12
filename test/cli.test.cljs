@@ -124,4 +124,22 @@
           ;; for a provider that was never registered.
           (let [r (resolve-model-via-registry (fake-registry false) {:model "vllm/m"} {})]
             (-> (expect (:model r)) (.toBeFalsy))
-            (-> (expect (:provider r)) (.toBe "vllm")))))))
+            (-> (expect (:provider r)) (.toBe "vllm")))))
+
+    ;; This function runs TWICE: once before extensions load, once after. The
+    ;; first pass is EXPECTED to miss every extension-registered provider
+    ;; (minimax, zai, qwen-cli, every custom_provider_*), so it must report the
+    ;; miss rather than announce it — a warning there told users with a working
+    ;; config that their provider was unknown, listing the three builtins as
+    ;; proof.
+    (it "reports whether the provider was known, for the caller to judge"
+        (fn []
+          (let [known   (resolve-model-via-registry
+                         {:get (fn [_] {}) :list (fn [] {}) :resolve (fn [_ _] #js {})}
+                         {:model "anthropic/claude"} {})
+                unknown (resolve-model-via-registry
+                         {:get (fn [_] nil) :list (fn [] {}) :resolve (fn [_ _] nil)}
+                         {:model "zai/glm-5.3-flash"} {})]
+            (-> (expect (:provider-known? known)) (.toBe true))
+            (-> (expect (:provider-known? unknown)) (.toBe false))
+            (-> (expect (:provider unknown)) (.toBe "zai")))))))
