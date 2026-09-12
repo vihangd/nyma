@@ -168,7 +168,17 @@ Two things the workflow does on purpose:
   of shipping a nyma missing most of its extensions.
 
 Only the two builds whose runner can execute them (linux-x64, macos-arm64) are smoke-tested; the rest
-are cross-compiled and verified by the archive step alone.
+are cross-compiled and verified by the archive step alone. The smoke test checks `--version` against
+`package.json`, which also catches a binary built from a tree where the version generator did not run.
+
+`.github/workflows/ci.yml` runs the same suite on every push and PR, plus a drift check on the three
+generated files (`src/agent/version.cljs`, `src/agent/builtin_extensions.cljs`, `docs/event-map.md`)
+and one real `--compile` build, since the flag pairing that makes extensions work is only observable
+by compiling.
+
+`src/agent/version.cljs` is generated from `package.json` by `bun run build`, so it cannot go stale —
+bump the version in `package.json`, never in the generated file. It exists because a compiled binary
+has no `package.json` to read.
 
 ### REPL
 

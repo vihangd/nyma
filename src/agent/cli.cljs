@@ -12,6 +12,7 @@
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.sessions.archive :as archive]
+            [agent.version :refer [version]]
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
@@ -227,6 +228,7 @@ Extensions:
 
 Other:
   -h, --help             Show this help and exit.
+  -v, --version          Print the version and exit.
 
 Examples:
   nyma                                  Start the interactive UI
@@ -237,6 +239,12 @@ Examples:
 
 (defn- print-help! []
   (js/process.stdout.write help-text))
+
+(defn- print-version! []
+  ;; Bare, so `nyma --version` is usable in a shell substitution. The version
+  ;; is baked in at build time (see agent.version) because a compiled binary
+  ;; has no package.json to read.
+  (js/process.stdout.write (str version "\n")))
 
 (defn- temp-session-path []
   (str "/tmp/nyma-session-" (js/Date.now) ".jsonl"))
@@ -418,6 +426,7 @@ Examples:
          #js {:args    (clj->js (remove #(.startsWith % "--ext-")
                                         (.slice js/process.argv 2)))
               :options #js {:help         #js {:type "boolean" :short "h"}
+                            :version      #js {:type "boolean" :short "v"}
                             :provider     #js {:type "string"}
                             :model        #js {:type "string" :short "m"}
                             :mode         #js {:type "string"}
@@ -445,6 +454,10 @@ Examples:
 
         _ (when (:help values)
             (print-help!)
+            (js/process.exit 0))
+
+        _ (when (:version values)
+            (print-version!)
             (js/process.exit 0))
 
         mode      (or (:mode values)

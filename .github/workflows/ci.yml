@@ -1,0 +1,78 @@
+name: CI
+
+# Runs on every push and pull request. Release builds are in release.yml and
+# run this same gate before their matrix — this workflow exists so a branch
+# finds out before the tag, not after.
+
+on:
+  push:
+    # Branch pushes only — a tag push does not match a branch filter, so
+    # release.yml owns tags and this does not double-run alongside it.
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes the run in flight for the same branch or PR.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Compile ClojureScript
+        run: bun run build
+
+      - name: Test
+        run: bun test dist
+
+      # `bun run build` regenerates agent/version.cljs, and gen:builtins and
+      # gen:event-map write files that are committed. If any of them differ from
+      # what is in the tree, someone edited a generated file by hand or forgot
+      # to regenerate — both of which ship a binary that disagrees with source.
+      - name: Generated files are up to date
+        run: |
+          bun run gen:builtins
+          bun run gen:event-map
+          if ! git diff --quiet; then
+            echo "::error::generated files are stale — run 'bun run gen:builtins && bun run gen:event-map && bun run build' and commit"
+            git diff --stat
+            exit 1
+          fi
+
+  # The flag pairing that makes extensions work in a compiled binary is only
+  # observable by compiling one, so build the host target and check that a real
+  # binary starts and reports itself correctly. The full platform matrix stays
+  # in release.yml; this is the cheap version of it.
+  binary:
+    name: Binary smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run bundle:linux-x64
+
+      - name: Smoke test
+        run: |
+          chmod +x nyma-linux-x64
+          got="$(./nyma-linux-x64 --version)"
+          want="$(node -p 'require("./package.json").version')"
+          [ "$got" = "$want" ] || { echo "::error::binary reports $got, package.json says $want"; exit 1; }
+          ./nyma-linux-x64 --help > /dev/null

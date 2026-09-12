@@ -94,6 +94,11 @@ jobs:
         if: matrix.smoke
         run: |
           chmod +x "${{ matrix.artifact }}"
+          # The version is baked in at build time, so this also catches a
+          # binary built from a tree where gen-version did not run.
+          got="$(./"${{ matrix.artifact }}" --version)"
+          want="$(node -p 'require("./package.json").version')"
+          [ "$got" = "$want" ] || { echo "::error::binary reports $got, package.json says $want"; exit 1; }
           ./"${{ matrix.artifact }}" --help > /dev/null
 
       - uses: actions/upload-artifact@v4
