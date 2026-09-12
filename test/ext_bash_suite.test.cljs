@@ -328,18 +328,25 @@
                                                                                   (range 500)))
                                                      result   (js/JSON.stringify #js {:stdout big-text :stderr "" :exitCode 0})
                                                      config   (:output-handling shared/default-config)
-                                                     ;; Deltas, not absolutes. suite-stats is a
-                                                     ;; module-level atom and `bun test` runs every
-                                                     ;; file in one process, so an absolute count
-                                                     ;; asserts about whatever else touched it first
-                                                     ;; — which is file-order dependent, and the file
-                                                     ;; order is not the same on every platform.
-                                                     before   (:output-handling @shared/suite-stats)
+                                                     ;; Assert the thing this test is named for —
+                                                     ;; the file on disk holding the full output —
+                                                     ;; not a module-level counter. `bun test` runs
+                                                     ;; every file in one process, so suite-stats
+                                                     ;; reflects whatever else ran first, and the
+                                                     ;; file order is not the same everywhere: the
+                                                     ;; counter version of this test passed on two
+                                                     ;; machines and a Linux container, and failed
+                                                     ;; only on CI.
+                                                     _        (reset! output-handling/output-registry {})
                                                      _        (output-handling/truncate-and-save result config)
-                                                     after    (:output-handling @shared/suite-stats)
-                                                     delta    (fn [k] (- (or (get after k) 0) (or (get before k) 0)))]
-                                                 (-> (expect (delta :temp-files-created)) (.toBe 1))
-                                                 (-> (expect (delta :truncations)) (.toBe 1)))))
+                                                     entries  (vals @output-handling/output-registry)
+                                                     entry    (first entries)]
+                                                 (-> (expect (count entries)) (.toBe 1))
+                                                 (-> (expect (fs/existsSync (:path entry))) (.toBe true))
+                                                 ;; The whole output is recoverable, which is the
+                                                 ;; entire point of spilling it to a file.
+                                                 (-> (expect (fs/readFileSync (:path entry) "utf8")) (.toBe big-text))
+                                                 (-> (expect (:byte-size entry)) (.toBe (js/Buffer.byteLength big-text "utf8"))))))
 
                                          ;; The envelope used to be rebuilt from
                                          ;; three keys, dropping every other fact
