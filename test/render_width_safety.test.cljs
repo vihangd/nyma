@@ -14,7 +14,7 @@
    These tests measure with pi-tui's own `visibleWidth`, because that is the
    function whose verdict crashes us."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [clojure.string :as str]
             [agent.utils.ansi :as ansi]
             [agent.ui.chat-pane :refer [create-chat-pane]]

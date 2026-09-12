@@ -11,7 +11,7 @@
    Each render call walks the registry fresh, so there's no caching
    layer to invalidate when extensions add/remove segments at
    runtime."
-  (:require ["@mariozechner/pi-tui" :refer [truncateToWidth visibleWidth]]
+  (:require ["@earendil-works/pi-tui" :refer [truncateToWidth visibleWidth]]
             [agent.ui.status-line-segments :as segs]
             [agent.debug :as dbg]))
 

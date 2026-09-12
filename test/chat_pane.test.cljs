@@ -2,7 +2,7 @@
   "Tests for create-chat-pane — covers appendChunk, setMessages, pushMessage,
    replaceMessage, getMessages, and the widget role used by thinking-renderer."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [agent.ui.chat-pane :refer [create-chat-pane]]))
 
 (def ^:private theme

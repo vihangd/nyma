@@ -1,6 +1,6 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
-  (:require ["@mariozechner/pi-tui" :refer [TUI ProcessTerminal Editor
+  (:require ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                             CombinedAutocompleteProvider
                                             matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
@@ -223,7 +223,10 @@
   (let [theme     (or (.-theme resources)
                       (theme-catalog/active-theme (.-themes resources) default-dark))
         terminal  (new ProcessTerminal)
-        tui       (new TUI terminal)
+        ;; pi-tui 0.85 split the concrete TUI class in two — `TUI` is now a
+        ;; type-only export, with TuiMainScreen (scrollback, what nyma uses) and
+        ;; TuiAltScreen (full-screen) as the implementations.
+        tui       (new TuiMainScreen terminal)
 
         ;; ── Message + UI state ─────────────────────────────────────────────
         messages     (atom [])

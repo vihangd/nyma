@@ -6,7 +6,7 @@
    soft-wraps and silently desynchronizes pi-tui's line accounting. The guard
    covers both halves, which a crash handler cannot."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth TUI ProcessTerminal Editor]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth TuiMainScreen ProcessTerminal Editor]]
             ["node:fs" :as fs]
             [agent.ui.width-guard :refer [guard-render! attach-guarded-children! clamps]]))
 
@@ -127,7 +127,7 @@
 
 (defn- make-editor []
   ;; Editor's theme is a map of STYLING FUNCTIONS, not strings.
-  (let [tui   (new TUI (new ProcessTerminal))
+  (let [tui   (new TuiMainScreen (new ProcessTerminal))
         theme (new js/Proxy #js {} #js {:get (fn [& _] (fn [s] s))})]
     (new Editor tui theme #js {:paddingX 1})))
 

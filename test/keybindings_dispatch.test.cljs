@@ -16,7 +16,7 @@
    Interactive's listener is one line over `dispatch-shortcut!`; the byte→combo
    matching, the two stored shapes, and the error isolation all live here."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [matchesKey]]
+            ["@earendil-works/pi-tui" :refer [matchesKey]]
             [agent.keybindings :as kb]))
 
 ;; Real terminal bytes, not key names — the layer where this broke. Built from

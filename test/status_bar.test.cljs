@@ -3,7 +3,7 @@
    basic render contract, AND extension auto-append segment integration
    (regression: register-segment used to write to a registry no consumer read)."
   (:require ["bun:test" :refer [describe it expect afterEach]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.status-line-segments :as segs]))
 

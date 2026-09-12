@@ -23,13 +23,13 @@
    already-narrowed inner width to `render`, so we deliberately hand the
    picker the terminal width instead — otherwise the 60% would be applied
    twice and every picker would render as a sliver."
-  (:require ["@mariozechner/pi-tui" :refer [matchesKey]]
+  (:require ["@earendil-works/pi-tui" :refer [matchesKey]]
             ;; decodePrintableKey covers BOTH escape encodings a terminal can be
             ;; put in (see printable-char). Only its Kitty half is re-exported
             ;; from the package index, so this reaches the module directly —
             ;; pi-tui ships all of dist/ and declares no "exports" map, and a
             ;; rename would fail the build loudly rather than silently.
-            ["@mariozechner/pi-tui/dist/keys.js" :refer [decodePrintableKey]]
+            ["@earendil-works/pi-tui/dist/keys.js" :refer [decodePrintableKey]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame overlay-max-width set-theme!
                                            truncate-to truncate-tail two-col-row]]

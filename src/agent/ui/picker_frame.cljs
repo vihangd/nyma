@@ -15,7 +15,7 @@
    arrow-down past the last visible row immediately scrolls. The
    older centred strategy hides scrolling for the first ~half of
    the visible count and makes the list feel stuck."
-  (:require ["@mariozechner/pi-tui" :refer [visibleWidth truncateToWidth]]
+  (:require ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [clojure.string :as str]
             [agent.ui.picker-math :refer [safe-index window-trailing]]))
 

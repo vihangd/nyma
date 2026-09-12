@@ -14,7 +14,7 @@
    byte constants, so they were green throughout. These use the encodings a
    real terminal actually sends."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [TUI Editor]]
+            ["@earendil-works/pi-tui" :refer [TuiMainScreen Editor]]
             [agent.ui.overlay-host :as oh :refer [printable-char install! enter-key?]]
             [agent.modes.interactive :refer [abort-on-escape?]]))
 
@@ -87,35 +87,57 @@
 ;;; routing AND lets it use legacy bytes a real terminal would not send — which
 ;;; is why it stayed green while every overlay was unusable.
 
-(defn- fake-terminal []
-  #js {:columns 100 :rows 30
-       :start (fn [_ _] nil) :stop (fn [] nil) :write (fn [_] nil)
-       :hideCursor (fn [] nil) :showCursor (fn [] nil)})
+;; pi-tui 0.85 removed the public `handleInput` on the TUI — input now arrives
+;; only through the callback the TUI hands to `terminal.start`. So the fake
+;; terminal has to capture that callback, and the TUI has to actually be
+;; started, which is closer to how a real terminal drives it anyway.
+(defn- fake-terminal
+  "Returns [terminal on-input-atom]; the atom holds the TUI's input callback
+   once `start` has been called."
+  []
+  (let [on-input (atom nil)]
+    [#js {:columns 100 :rows 30
+          :start (fn [oi _] (reset! on-input oi) nil)
+          :stop (fn [] nil) :write (fn [_] nil)
+          :drainInput (fn [& _] (js/Promise.resolve))
+          :hideCursor (fn [] nil) :showCursor (fn [] nil)
+          :clearLine (fn [] nil) :clearFromCursor (fn [] nil)
+          :clearScreen (fn [] nil) :moveBy (fn [_] nil)
+          :setTitle (fn [_] nil) :setProgress (fn [_] nil)
+          :kittyProtocolActive true}
+     on-input]))
+
+(defn- feed!
+  "Deliver `data` the way the terminal would."
+  [on-input data]
+  (when-let [f @on-input] (f data)))
 
 (defn- host []
-  (let [tui (new TUI (fake-terminal))
+  (let [[term on-input] (fake-terminal)
+        tui (new TuiMainScreen term)
         ui  #js {}]
+    (.start tui)
     (install! ui tui {:restore-focus (fn [] nil) :request-render (fn [] nil)})
-    {:tui tui :ui ui}))
+    {:tui tui :ui ui :on-input on-input}))
 
-(defn- type-str! [tui s]
+(defn- type-str! [on-input s]
   ;; Send each character the way a Kitty-protocol terminal would.
   (doseq [ch (vec (.split s ""))]
-    (.handleInput tui (kitty (.charCodeAt ch 0)))))
+    (feed! on-input (kitty (.charCodeAt ch 0)))))
 
 (describe "typing reaches an overlay through the real TUI"
           (fn []
             (it "filters the picker by what was typed"
                 (^:async
                  fn []
-                 (let [{:keys [tui ui]} (host)
+                 (let [{:keys [tui ui on-input]} (host)
                        p (.select ui "Pick" #js ["alpha" "beta" "gamma"])]
                    ;; Narrow to the only entry containing "bet", then accept.
                    ;; With typing dropped the filter stays empty and Enter
                    ;; takes index 0 — "alpha" — which is exactly how the bug
                    ;; presented: an apparently arbitrary answer.
-                   (type-str! tui "bet")
-                   (.handleInput tui (str ESC "[13u"))
+                   (type-str! on-input "bet")
+                   (feed! on-input (str ESC "[13u"))
                    (-> (expect (js-await p)) (.toBe "beta")))))
 
             (it "arrows and Enter still work alongside typing"
@@ -123,19 +145,19 @@
                  fn []
                  ;; These went through matchesKey and were never broken; the
                  ;; test exists so a fix to typing cannot regress them.
-                 (let [{:keys [tui ui]} (host)
+                 (let [{:keys [tui ui on-input]} (host)
                        p (.select ui "Pick" #js ["alpha" "beta" "gamma"])]
-                   (.handleInput tui (str ESC "[B"))
-                   (.handleInput tui (str ESC "[13u"))
+                   (feed! on-input (str ESC "[B"))
+                   (feed! on-input (str ESC "[13u"))
                    (-> (expect (js-await p)) (.toBe "beta")))))
 
             (it "types into an input overlay, as /login does"
                 (^:async
                  fn []
-                 (let [{:keys [tui ui]} (host)
+                 (let [{:keys [tui ui on-input]} (host)
                        p (.input ui "API key" "" nil)]
-                   (type-str! tui "sk-abc123")
-                   (.handleInput tui (str ESC "[13u"))
+                   (type-str! on-input "sk-abc123")
+                   (feed! on-input (str ESC "[13u"))
                    (-> (expect (js-await p)) (.toBe "sk-abc123")))))))
 
 ;;; ─── Escape while an overlay is open ─────────────────────────────────────
@@ -202,11 +224,11 @@
                                 (str ESC "[13u")
                                 (str ESC "[27;1;13~")
                                 (str ESC "[57414u")]]
-                   (let [{:keys [tui ui]} (host)
+                   (let [{:keys [tui ui on-input]} (host)
                          p (.select ui "Allow 'web_search'?"
                                     #js ["Allow once" "Allow always (this project)" "Deny"])]
-                     (.handleInput tui (str ESC "[B"))
-                     (.handleInput tui enter)
+                     (feed! on-input (str ESC "[B"))
+                     (feed! on-input enter)
                      (-> (expect (js-await p)) (.toBe "Allow always (this project)"))))))))
 
 ;;; ─── stacked overlays ────────────────────────────────────────────────────
@@ -220,7 +242,8 @@
 ;;; is a prompt arriving while a picker is already open.
 
 (defn- host-with-editor []
-  (let [tui    (new TUI (fake-terminal))
+  (let [[term on-input] (fake-terminal)
+        tui    (new TuiMainScreen term)
         theme  (new js/Proxy #js {} #js {:get (fn [& _] (fn [s] s))})
         editor (new Editor tui theme #js {:paddingX 1})
         ui     #js {}]
@@ -228,23 +251,24 @@
     (.setFocus tui editor)
     (install! ui tui {:restore-focus (fn [] (.setFocus tui editor))
                       :request-render (fn [] nil)})
-    {:tui tui :ui ui :editor editor}))
+    (.start tui)
+    {:tui tui :ui ui :editor editor :on-input on-input}))
 
 (describe "two overlays at once"
           (fn []
             (it "keeps the remaining overlay usable after the top one closes"
                 (^:async
                  fn []
-                 (let [{:keys [tui ui]} (host-with-editor)
+                 (let [{:keys [tui ui on-input]} (host-with-editor)
                        first-p  (.select ui "Allow 'web_search'?" #js ["Allow once" "Deny"])
                        second-p (.select ui "Allow 'web_fetch'?"  #js ["Allow once" "Deny"])]
                    (-> (expect (.-length (.-overlayStack tui))) (.toBe 2))
                    ;; Answer the focused (second) prompt.
-                   (.handleInput tui (str ESC "[13u"))
+                   (feed! on-input (str ESC "[13u"))
                    (-> (expect (js-await second-p)) (.toBe "Allow once"))
                    ;; The first is still up — and must still take input.
                    (-> (expect (.-length (.-overlayStack tui))) (.toBe 1))
-                   (.handleInput tui (str ESC "[13u"))
+                   (feed! on-input (str ESC "[13u"))
                    (-> (expect (js-await first-p)) (.toBe "Allow once")))))
 
             (it "returns focus to the editor once the stack is empty"
@@ -252,9 +276,9 @@
                  fn []
                  ;; The behaviour the unconditional refocus existed for; it must
                  ;; survive the fix.
-                 (let [{:keys [tui ui editor]} (host-with-editor)
+                 (let [{:keys [tui ui editor on-input]} (host-with-editor)
                        p (.select ui "Pick" #js ["a" "b"])]
-                   (.handleInput tui (str ESC "[13u"))
+                   (feed! on-input (str ESC "[13u"))
                    (js-await p)
                    (-> (expect (.-length (.-overlayStack tui))) (.toBe 0))
                    (-> (expect (identical? (.-focusedComponent tui) editor)) (.toBe true)))))
@@ -262,10 +286,10 @@
             (it "leaves focus on the survivor, not the editor"
                 (^:async
                  fn []
-                 (let [{:keys [tui ui editor]} (host-with-editor)
+                 (let [{:keys [tui ui editor on-input]} (host-with-editor)
                        _ (.select ui "outer" #js ["a"])
                        inner (.select ui "inner" #js ["a"])]
-                   (.handleInput tui (str ESC "[13u"))
+                   (feed! on-input (str ESC "[13u"))
                    (js-await inner)
                    (-> (expect (identical? (.-focusedComponent tui) editor)) (.toBe false))
                    (-> (expect (identical? (.-focusedComponent tui)

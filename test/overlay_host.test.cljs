@@ -1,6 +1,6 @@
 (ns overlay-host.test
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             ["./agent/ui/overlay_host.mjs"
              :refer [printable-char data->key should-dismiss? close-signal?
                      adapt-component make-select-picker make-input-picker

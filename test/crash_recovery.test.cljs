@@ -9,7 +9,7 @@
    These tests pin the policy (when to restart vs give up) and the mechanism
    (that a restart actually happens and a repeat does not loop)."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [TUI]]
+            ["@earendil-works/pi-tui" :refer [TuiMainScreen]]
             [agent.ui.width-guard :refer [attach-guarded-children! clamps]]
             [agent.ui.crash-recovery :refer [width-error? decide resume-hint install!]]))
 
@@ -245,7 +245,7 @@
             (it "never throws in the first place once the child is guarded"
                 (^:async
                  fn []
-                 (let [tui       (new TUI (fake-terminal))
+                 (let [tui       (new TuiMainScreen (fake-terminal))
                        wide?     (atom false)
                        recovered (atom 0)
                        exits     (atom [])

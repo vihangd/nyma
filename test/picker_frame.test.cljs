@@ -3,7 +3,7 @@
    render-frame gets an assertion — focus prefix placement, empty
    state, above/below overflow markers, item formatter plumbing."
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [clojure.string :as str]
             [agent.ui.picker-frame :refer [render-frame pad-lines truncate-to
                                            fit-lines overlay-max-width

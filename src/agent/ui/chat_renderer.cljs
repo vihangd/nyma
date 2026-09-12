@@ -1,6 +1,6 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require ["@mariozechner/pi-tui" :refer [visibleWidth truncateToWidth]]
+  (:require ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [agent.utils.ansi :as ansi]
             [agent.utils.markdown-blocks :as mb]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]))

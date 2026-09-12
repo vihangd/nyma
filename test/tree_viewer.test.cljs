@@ -1,6 +1,6 @@
 (ns tree-viewer.test
   (:require ["bun:test" :refer [describe it expect]]
-            ["@mariozechner/pi-tui" :refer [visibleWidth]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]))
 
 (defn- make-session [entries]

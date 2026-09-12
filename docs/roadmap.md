@@ -1367,3 +1367,95 @@ highlighter. Still deferred: it is a `chat_renderer` + theme change, and `marked
 nyma is the smallest self-contained binary of the compiled agents and ties crush for fastest cold
 start, beating the one peer on the same toolchain by 6×. 59 of the 85 MB are the Bun runtime — the
 price of shipping one file. pi is 11 MB precisely because it does not, and needs node or bun installed.
+
+## 2026-09-12 — what changed in pi, and in the agents built on it
+
+Asked what moved upstream in pi, ohmypi and little-coder, and what nyma should borrow. Checked against
+the npm registry and the projects' repos. Every "nyma already has this" below was checked against the
+source: a first pass matched features by filename and got two rows wrong in **each** direction.
+
+### The fork, and the deprecation
+
+| scope | latest | last published |
+|---|---|---|
+| `@mariozechner/pi-tui`, `pi-ai`, `pi-coding-agent`, `pi-agent-core` | 0.73.1 | 2026-05-07 |
+| `@earendil-works/pi-tui`, `pi-ai`, `pi-coding-agent`, `pi-agent-core` | **0.85.1** | **2026-09-05** |
+
+nyma depends on `@mariozechner/pi-tui@^0.73.1`, and that package is **formally deprecated**:
+
+```
+$ npm view @mariozechner/pi-tui deprecated
+please use @earendil-works/pi-tui instead going forward
+```
+
+Not a judgement call about following upstream — upstream said where it went, and `npm install` has
+been printing it. `little-coder` moved months ago (`@earendil-works/pi-coding-agent@^0.83.0`).
+
+Three lineages exist now, not two: `badlogic/pi-mono` (original), `earendil-works/pi` (live), and
+`can1357/oh-my-pi` (a Rust rewrite). The live scope also grew packages that did not exist before:
+`pi-protocol` (CBOR for remote sessions), `chord` (service/RPC composition), `pi-telemetry`,
+`pi-client`/`pi-server`, `pi-session-backend-sqlite-node`, `gondolin` (Alpine sandbox). A third-party
+ecosystem formed around it: `@cmdctrl/pi`, `pi-quotas`, `pi-aimail`, `monopi`,
+`narumiruna/pi-extensions`.
+
+### `@ai-sdk/harness` — the find that dissolved on inspection
+
+The AI SDK team is building **HarnessV1**, a standard interface for driving other coding agents, with
+adapters published for pi, claude-code, codex, opencode, cline, cursor, copilot, deepagents and
+**ACP**. nyma is an AI SDK v7 app whose `agent_shell` drives exactly those agents, so this looked like
+the biggest item in the survey.
+
+It is not, and the reason is the useful part: **nyma already speaks ACP, and `@ai-sdk/harness-acp` is
+a wrapper over ACP.** nyma's per-agent code is a 256-line registry, not a pile of bespoke adapters, so
+there is no maintenance burden for HarnessV1 to relieve. Revisit only if nyma should be driven *by*
+other tools — a product decision, not an optimisation.
+
+### little-coder: mostly already absorbed, and ahead in two places
+
+`little-coder@1.19.0` reproduces *Honey, I Shrunk the Coding Agent* as pi extensions. nyma's
+`small_model/` implements the same list:
+
+| little-coder | nyma | verdict |
+|---|---|---|
+| output-parser (3 shapes: ```` ```tool ````, bare JSON, `<tool_call>`) | `utils/toolcall_rescue.cljs` — JSON-in-fences, qwen XML, mistral bracket, rehearsal, think-tag stripping | **nyma ahead** |
+| compaction watchdog at 80% | `sessions/compaction.cljs:427` — 0.85 **and** a window-size-aware floor | **nyma ahead** |
+| quality-monitor, profiles, evidence, read-guard, thinking-budget, knowledge-inject | the same modules under `small_model/` | covered |
+| checkpoint | `checkpoints/` + `/rewind` | covered |
+| plan-model / action-model | `model_roles` + `escalate` | covered |
+| **write-guard + read-guard-edit** | **nothing** — no read-before-edit enforcement in `tools.cljs` or `read_guard.cljs` | **gap** |
+| **ShellStart** — long commands wake the model on `match`/`silence`/`exit`, urgent events interrupt the turn | `bash_suite/background_jobs.cljs` is a ring buffer the model must **pull** from | **gap** |
+
+nyma also has `supervisor`, `self_tune` and `respond_tool`, which little-coder does not.
+
+### oh-my-pi: three gaps
+
+nyma ported 10 omp **UI** features in April (`docs/plan-omp-ui-ports.md`). omp is now a ~80k-line Rust
+agent with 31 tools. Most of its headline items are already covered here — `advisor`, checkpoints,
+memory, ACP, model roles, `lsp_suite`, `ast_tools`, background jobs. Three are not:
+
+- **Hashline edits** — the model points at content-hash anchors instead of retyping lines; omp
+  measures **61% fewer output tokens**. nyma's edit strategy is Aider-style `patch|whole`.
+  Note before building: lean-ctx already solves this exact coupling (`ctx_read(mode="anchored")` →
+  `ctx_patch`), and `mcp_client`'s `:tool-overrides` can delegate native `edit` to an MCP equivalent —
+  so a from-scratch anchor scheme in `tools.cljs` is not the only shape.
+- **Stream rules** — abort mid-token on a regex match, inject a reminder, retry from the same point.
+  nyma has the mechanism already (`loop.cljs:449`, bounded at 2 retries); the rule layer is missing.
+- **Worktree isolation for subagents** — `subagent` is context-isolated but shares the working tree
+  (`subagent/index.cljs:14`); omp gives each child a worktree via APFS clones / reflinks / overlayfs.
+
+### Ruled out, so the next sweep does not re-derive them
+
+| item | why not |
+|---|---|
+| `pi-protocol` / `pi-client` / `pi-server` | nyma has its own gateway plus ACP and RPC modes. A foreign session protocol is a rewrite, not a borrow. |
+| `@ai-sdk/harness` adapters | nyma already speaks ACP, which `harness-acp` wraps. |
+| `gondolin` sandbox | permission modes + the `ask` gate are the current answer; a container runtime is a product decision. |
+| `pi-telemetry` | `stats_dashboard` + `budget` cover what nyma measures. |
+| little-coder's browser / Playwright | a large dependency for research nyma routes through MCP. |
+| omp's GitHub-as-filesystem, atomic commits, `conflict://`, snapcompact | large, orthogonal, and nyma's compaction is already measured. |
+
+### Deferred, named so they are not rediscovered
+
+- **ShellStart-style event-driven wake** for background jobs. A real gap, but it needs an interrupt
+  path into a running turn — bigger than the ring-buffer change it looks like.
+- **Worktree isolation** for `subagent`.
