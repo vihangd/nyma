@@ -16,6 +16,8 @@
      evidence         — EvidenceAdd/Get/List tools that survive compaction
      read-guard       — oversized file-read trimming with search hint, and
                         read-before-edit enforcement on edit/write
+     stream-rules     — settings-driven regex table that aborts a turn mid-stream
+                        and retries with a reminder (empty by default)
      thinking-budget  — cap thinking tokens; retry without thinking on overflow
      supervisor       — proactive babysitter: escalates to advisor on quality
                         signals, periodic check-ins, pre-commit review
@@ -30,6 +32,7 @@
             [agent.extensions.small-model.profiles        :as profiles]
             [agent.extensions.small-model.evidence        :as evidence]
             [agent.extensions.small-model.read-guard      :as read-guard]
+            [agent.extensions.small-model.stream-rules   :as stream-rules]
             [agent.extensions.small-model.thinking-budget :as thinking-budget]
             [agent.extensions.small-model.supervisor      :as supervisor]
             [agent.extensions.small-model.self-tune       :as self-tune]
@@ -82,6 +85,9 @@
       ;; ── Read guard ───────────────────────────────────────────────
       (when (shared/enabled? config :read-guard)
         (swap! cleanups conj (read-guard/activate api config)))
+
+      (when (shared/enabled? config :stream-rules)
+        (swap! cleanups conj (stream-rules/activate api config)))
 
       ;; ── Thinking budget ──────────────────────────────────────────
       (when (shared/enabled? config :thinking-budget)
