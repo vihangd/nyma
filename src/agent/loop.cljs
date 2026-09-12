@@ -190,7 +190,12 @@
     (when (:abort-controller agent)
       (reset! (:abort-controller agent) (js/AbortController.)))
 
-    (emit "agent_start" {})
+    ;; Awaited, unlike most fire-and-forget emits. This is the only hook that
+    ;; runs BEFORE `get-active-tools-filtered` reads the registry below, which
+    ;; makes it the one place an extension can finish registering tools in time
+    ;; for the first turn. mcp_client joins its background bring-up here; a
+    ;; handler that returns nothing costs nothing.
+    (js-await ((:emit-async events) "agent_start" {}))
 
     ;; Main loop — re-enters for follow-up messages
     (loop []
@@ -502,19 +507,19 @@
                                   ;; stream's field — reading it here made every
                                   ;; delta "", so stream_filter never saw text.
                                   (let [piece (or (.-text chunk-val) (.-textDelta chunk-val) "")]
-                                  (swap! accumulated str piece)
-                                  (let [filter-result
-                                        (js-await
-                                         (emit-collect "stream_filter"
-                                                       #js {:delta @accumulated
-                                                            :chunk piece
-                                                            :type  evt-type}))]
-                                    (when (get filter-result "abort")
-                                      (reset! aborted true)
-                                      (reset! (:retry-state agent)
-                                              {:reason (get filter-result "reason")
-                                               :inject (or (get filter-result "inject") [])})))
-                                  (when-not @aborted (emit evt-type chunk-val))))
+                                    (swap! accumulated str piece)
+                                    (let [filter-result
+                                          (js-await
+                                           (emit-collect "stream_filter"
+                                                         #js {:delta @accumulated
+                                                              :chunk piece
+                                                              :type  evt-type}))]
+                                      (when (get filter-result "abort")
+                                        (reset! aborted true)
+                                        (reset! (:retry-state agent)
+                                                {:reason (get filter-result "reason")
+                                                 :inject (or (get filter-result "inject") [])})))
+                                    (when-not @aborted (emit evt-type chunk-val))))
                                 (emit evt-type chunk-val)))
                             (when-not @aborted (recur))))))
 

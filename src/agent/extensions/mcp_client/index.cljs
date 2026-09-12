@@ -7,10 +7,17 @@
        shared/mcp-servers atom (already populated by mcp_discovery).
      - Create a manager (no spawning yet — defer to session_start).
      - Register the two status segments + /mcp-status command.
-     - Subscribe session_start (eager start-all + tool registration)
-       and session_shutdown (clean teardown) on the MAIN event bus
+     - Subscribe session_ready / session_start (START start-all + tool
+       registration, without waiting for it), agent_start (JOIN it) and
+       session_shutdown (clean teardown) on the MAIN event bus
        (api.on, NOT api.events.on — the bus distinction that bit
       the hook bridge).
+
+   The split between starting and joining is deliberate. Awaiting five
+   servers inside session_ready meant nyma painted nothing for 3–6 s
+   (measured: 0.13 s with no mcp.json to find). agent_start is the join
+   because it is the last hook before loop.cljs reads the tool registry
+   — anything later and MCP tools would be missing on turn one.
 
    Returns a deactivator that unregisters everything."
   (:require [agent.debug :as d]
@@ -230,6 +237,13 @@
                                  :handler (fn [_args _ctx]
                                             (notify api (format-status-table @manager-ref)))})
 
+        ;; The in-flight bring-up, so it can be started without being waited
+        ;; for. Measured: five configured servers cost 3–6 s, and awaiting them
+        ;; inside session_ready meant nyma painted nothing for that whole time
+        ;; (0.13 s with no mcp.json to find, 3–6 s with one). Spawning is
+        ;; already parallel; the wait was simply in the wrong place.
+        bring-up-promise  (atom nil)
+
         ;; Bring up: spawn every configured server, register tools.
         ;; Idempotent — if the manager already has clients, no-op.
         ;; Critical detail discovered the hard way: nyma fires
@@ -286,6 +300,30 @@
                     (d/warn "[mcp-client] start-all error:"
                             (or (.-message e) (str e)))))))))
 
+        ;; session_ready / session_start: START the bring-up, do not wait for
+        ;; it. Returning nil rather than the promise is the entire point — the
+        ;; CLI awaits session_ready before it paints, so handing it the promise
+        ;; would put the 3–6 s back exactly where it was.
+        on-session-ready
+        (fn [data]
+          (when (nil? @bring-up-promise)
+            (reset! bring-up-promise (on-bring-up data)))
+          nil)
+
+        ;; agent_start: the join. It is the last hook that runs before
+        ;; loop.cljs reads the tool registry, so tools registered by the
+        ;; bring-up are present on turn one — not turn two. A user who spent a
+        ;; couple of seconds typing waits for nothing; one who hit enter
+        ;; immediately waits only for what is left.
+        ;;
+        ;; on-bring-up already swallows its own failures, so this cannot reject
+        ;; and a dead server cannot block the turn — but the catch stays,
+        ;; because a turn must not die for MCP's sake under any refactor.
+        on-agent-start
+        (^:async fn [_data]
+          (when-let [p @bring-up-promise]
+            (try (js-await p) (catch :default _ nil))))
+
         ;; session_shutdown: tools off, then stop all.
         ;;
         ;; CRITICAL: subprocess teardown (mgr/stop-all!) MUST run even if
@@ -294,6 +332,12 @@
         ;; so a failure in tool-state restoration can't skip the kill.
         on-session-shutdown
         (^:async fn [_data]
+          ;; Step 0: let an in-flight bring-up finish first. Now that it runs
+          ;; in the background, a fast exit can reach teardown while servers
+          ;; are still spawning — and stop-all! cannot kill a child that has
+          ;; not been recorded yet, which is how stdio servers become orphans.
+          (when-let [p @bring-up-promise]
+            (try (js-await p) (catch :default _ nil)))
           ;; Step 1: best-effort restore shadowed-natives.
           (try
             (when (seq @shadowed-natives)
@@ -338,15 +382,17 @@
     ;; session_ready: vanilla CLI launch — primary entry point.
     ;; session_start: explicit /new / /fork / /clear.
     ;; session_shutdown / session_end: cleanup on exit.
-    (.on api "session_ready" on-bring-up 50)
-    (.on api "session_start" on-bring-up 50)
+    (.on api "session_ready" on-session-ready 50)
+    (.on api "session_start" on-session-ready 50)
+    (.on api "agent_start" on-agent-start 50)
     (.on api "session_shutdown" on-session-shutdown 50)
     (.on api "session_end" on-session-shutdown 50)
 
     ;; Deactivator
     (fn []
-      (try (.off api "session_ready" on-bring-up) (catch :default _ nil))
-      (try (.off api "session_start" on-bring-up) (catch :default _ nil))
+      (try (.off api "session_ready" on-session-ready) (catch :default _ nil))
+      (try (.off api "session_start" on-session-ready) (catch :default _ nil))
+      (try (.off api "agent_start" on-agent-start) (catch :default _ nil))
       (try (.off api "session_shutdown" on-session-shutdown) (catch :default _ nil))
       (try (.off api "session_end" on-session-shutdown) (catch :default _ nil))
       (try (.unregisterCommand api "mcp-status") (catch :default _ nil))

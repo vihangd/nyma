@@ -1249,3 +1249,121 @@ at 4298 pass / 18 skip / 0 fail across consecutive runs. With the file no longer
 General rule this leaves behind: a test that needs a binary, a network or a credential belongs behind an
 opt-in flag, and must skip — not fail — when what it needs is missing. Otherwise the suite teaches
 people to ignore it.
+
+## 2026-09-12 — the binary was never the problem
+
+Asked what else could be squeezed out of the compiled binary, I measured the build flags, then
+measured what actually happens when you run the thing. The flags are at their floor and were a
+rounding error next to the real cost.
+
+### The measurement that redirected the work
+
+```
+./nyma --help                                    0.04 s
+./nyma -p --model … (loads extensions)           3.0 – 6.0 s
+NYMA_NO_BUILTIN_EXT=1 ./nyma -p --model …        0.05 s
+HOME=<empty> ./nyma -p --model …                 0.13 s   ← same binary, no ~/.nyma/mcp.json
+```
+
+The last line is the attribution. Same binary, same extensions, nothing to find — 0.13 s. MCP was not
+*a* cost, it was essentially the whole cost: five configured servers (lean-ctx, context7, deepwiki,
+serena, semble) spawned inside a `session_ready` handler that the CLI awaited before painting
+anything.
+
+Fixed by moving the wait rather than shortening it. `mcp_client` now starts the bring-up and keeps the
+promise; the join is `agent_start`. **The join point is the whole correctness question** and there is
+exactly one right answer, because `loop.cljs` reads the tool registry on the first line of the turn:
+
+```
+raw-tools     (js-await (get-active-tools-filtered agent))   ← tools read here
+before-result (js-await (emit-collect "before_agent_start" …))
+:tools        …                                              ← st-config
+(emit-collect "before_provider_request" st-config)
+```
+
+`before_agent_start` and `before_provider_request` are both *too late*: a server that finishes after
+them registers tools the model never sees on turn one and does see on turn two. `agent_start` was the
+only hook upstream of tool assembly, and it was fire-and-forget; it is awaited now (one listener in the
+tree, a synchronous `write-event!` in pi_rpc, so awaiting it costs nothing).
+
+`test/loop_agent_start_join.test.cljs` pins this, and was mutation-verified: reverting the await fails
+2 of its 3 tests. Teardown grew a step 0 that awaits the in-flight bring-up — a fast exit could
+otherwise reach `stop-all!` before a spawning child was recorded, which is how stdio servers become
+orphans.
+
+`-p` still pays the full MCP cost, and should: it runs a turn immediately, and a turn needs its tools.
+What moved is the interactive prompt, which no longer waits for anything.
+
+### What the ecosystem actually offers (Bun 1.4.2)
+
+opencode is the only real peer — same toolchain, same shape. Its `script/build.ts` uses
+`{compile, minify: true, format: "esm", splitting: true, external: ["node-gyp"], sourcemap: none}`.
+
+- **No `--bytecode`.** That is the 0.25 s vs 0.04 s gap, and it confirms nyma's trade was the right one.
+- **`external: ["node-gyp"]`** — a dep on a path that never runs, kept out of the graph. The nyma
+  analogue is `@anthropic-ai/claude-agent-sdk` (1.55 MB), with the caveat that dropping it means not
+  shipping `agent_runner_claude_sdk` in the binary at all: a product decision, not an optimization.
+- **`define:`** for version constants instead of reading `package.json` — which is also why
+  `--compile-autoload-package-json` measured as "no change": it already defaults to false.
+- **`splitting: true`** — meaningless under `--compile`, which emits one file. Ruled out.
+
+Ruled out for this Bun version: `--compile-jit-policy` (does not exist in 1.4.2 — the docs describe a
+later release), `--asset-naming` (only matters with `--asset`; we embed none), `--env` (already
+defaults to `disable`), `--drop` (does not exist).
+
+### Where the 85 MB is (`size -m nyma`)
+
+| segment | size | what it is |
+|---|---|---|
+| `__TEXT` | 60.2 MB | the Bun runtime — `bun` itself is 59 MB |
+| `__BUN` | **26.9 MB** | our payload: 6.3 MB minified JS **+ ~20 MB bytecode cache** |
+| rest | 3.9 MB | `__DATA`, `__DATA_CONST`, `__LINKEDIT` |
+
+So `--bytecode` costs ~20 MB of binary and buys the 0.04 s start. Dropping it lands near 65 MB at
+roughly opencode's 0.25 s. Keeping it is right for a CLI invoked constantly — recorded here as a
+choice so nobody rediscovers it as a mystery.
+
+Distribution note: npm tarballs and release archives are compressed, so **85 MB is a disk number, not
+a download number.**
+
+### Flags, measured, so nobody retries them
+
+| flag | result |
+|---|---|
+| `--minify` (adopted) | 94.6 → 89.3 MB, startup unchanged |
+| `--production` | identical to `--minify` |
+| `--bytecode-depth=1` / `=2` | **worse**: 94.6 MB, same startup |
+| `--no-compile-autoload-{dotenv,bunfig,package-json}` | no measurable change; the last two already default off |
+| `--compile-exec-argv=--smol` | not pursued: heap 14→10 MB, RSS unchanged, trades throughput |
+
+### Bundle composition (6.3 MB minified, `--metafile`)
+
+| package | size | why |
+|---|---|---|
+| `@anthropic-ai/claude-agent-sdk` | 1.55 MB | `agent_runner_claude_sdk` |
+| `highlight.js` | 1.02 MB | pulled by `marked-terminal` |
+| `dist/agent` | 0.79 MB | nyma itself |
+| `squint-cljs` | 0.62 MB | runtime + compiler, needed for user `.cljs` extensions |
+| `@mixmark-io/domino` / `emojilib` / `parse5` | 0.24 / 0.22 / 0.20 MB | turndown, marked-terminal, linkedom |
+
+`marked-terminal` is worth 1.3 MB of bundle on top of the 47 ms and 17 MB RSS already recorded against
+it — a second independent reason to finish the swap to pi-tui's `Markdown`, which carries no
+highlighter. Still deferred: it is a `chat_renderer` + theme change, and `marked` stays for
+`markdown_blocks`' lexer.
+
+### Where nyma stands (measured locally)
+
+| agent | ships as | size | startup |
+|---|---|---|---|
+| **nyma** | Bun binary (bytecode + minify) | **85 MB** | **0.04 s** |
+| Claude Code 2.1.267 | native binary | 200 MB | 0.01 s |
+| goose 1.50 | native (Rust) | 284 MB | 0.01 s |
+| crush 0.93 | native (Go) | 94 MB | 0.04 s |
+| opencode 1.18 | Bun binary, no bytecode | 138 MB | 0.25 s |
+| qwen-code 0.23 | npm (node) | 108 MB unpacked | 0.03 s |
+| gemini-cli 0.59 | npm (node) | 98 MB unpacked | 0.68 s |
+| pi-coding-agent 0.73 | npm (node/bun) | 11.2 MB unpacked | — |
+
+nyma is the smallest self-contained binary of the compiled agents and ties crush for fastest cold
+start, beating the one peer on the same toolchain by 6×. 59 of the 85 MB are the Bun runtime — the
+price of shipping one file. pi is 11 MB precisely because it does not, and needs node or bun installed.
