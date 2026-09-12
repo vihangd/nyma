@@ -14,7 +14,8 @@
      profiles         — per-model tuning (thinking, temperature, allowedTools,
                         editStrategy)
      evidence         — EvidenceAdd/Get/List tools that survive compaction
-     read-guard       — oversized file-read trimming with search hint
+     read-guard       — oversized file-read trimming with search hint, and
+                        read-before-edit enforcement on edit/write
      thinking-budget  — cap thinking tokens; retry without thinking on overflow
      supervisor       — proactive babysitter: escalates to advisor on quality
                         signals, periodic check-ins, pre-commit review
