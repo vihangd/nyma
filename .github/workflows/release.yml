@@ -1,5 +1,16 @@
 name: Release
 
+# Builds a standalone nyma for every supported platform and attaches the
+# archives to a GitHub release.
+#
+# The build steps call the `bundle:*` scripts in package.json rather than
+# spelling out `bun build` flags here. That is deliberate: the flag pairing is
+# load-bearing and invisible when wrong — `--bytecode` without `--format=esm`
+# produces a binary that starts, prints help, and then fails to load every
+# extension that imports a bare npm specifier. test/bundle_flags.test.cljs
+# pins those flags on the package.json scripts, so a workflow that re-typed
+# them would be a copy the guard does not cover.
+
 on:
   push:
     tags:
@@ -7,22 +18,61 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build (${{ matrix.target }})
+  # Gate: a release that cannot compile, or whose generated files are stale,
+  # must not reach the build matrix. The builtin-extension registry and the
+  # event map are both generated and both fail loudly here when out of date —
+  # a stale registry is how a bundled nyma once shipped 2 of 40 extensions.
+  test:
+    name: Test
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Compile ClojureScript
+        run: bun run build
+
+      - name: Test
+        run: bun test dist
+
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.artifact }})
+    needs: test
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: bun-linux-x64
-            artifact: nyma-linux-x64
-          - target: bun-linux-arm64
-            artifact: nyma-linux-arm64
-          - target: bun-darwin-x64
-            artifact: nyma-macos-x64
-          - target: bun-darwin-arm64
-            artifact: nyma-macos-arm64
-          - target: bun-windows-x64
-            artifact: nyma-windows-x64.exe
+          # Bun cross-compiles every target from any host, so most of these run
+          # on ubuntu. The two `smoke: true` rows are the ones whose binary the
+          # runner can actually execute — those get run before we ship them.
+          - { os: ubuntu-latest, script: "bundle:linux-x64",        artifact: nyma-linux-x64,        smoke: true }
+          - { os: ubuntu-latest, script: "bundle:linux-arm64",      artifact: nyma-linux-arm64 }
+          # musl: a glibc binary does not run on Alpine, which is most of the
+          # container world.
+          - { os: ubuntu-latest, script: "bundle:linux-x64-musl",   artifact: nyma-linux-x64-musl }
+          - { os: ubuntu-latest, script: "bundle:linux-arm64-musl", artifact: nyma-linux-arm64-musl }
+          - { os: ubuntu-latest, script: "bundle:windows",          artifact: nyma-windows-x64.exe }
+          - { os: macos-latest,  script: "bundle:macos-x64",        artifact: nyma-macos-x64 }
+          # `bundle` is the local-dev script and writes plain `nyma`; it is the
+          # darwin-arm64 build, renamed below rather than duplicated as a
+          # near-identical script.
+          - { os: macos-latest,  script: "bundle",                  artifact: nyma-macos-arm64, outfile: nyma, smoke: true }
 
     steps:
       - uses: actions/checkout@v4
@@ -31,41 +81,69 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install
+      - run: bun install --frozen-lockfile
 
-      - name: Compile ClojureScript
-        run: bun run build
+      - name: Build
+        run: bun run ${{ matrix.script }}
 
-      - name: Build standalone binary
+      - name: Name the artifact
+        if: matrix.outfile
+        run: mv "${{ matrix.outfile }}" "${{ matrix.artifact }}"
+
+      - name: Smoke test
+        if: matrix.smoke
         run: |
-          bun build ./dist/agent/cli.mjs \
-            --compile \
-            --target=${{ matrix.target }} \
-            --outfile=${{ matrix.artifact }}
+          chmod +x "${{ matrix.artifact }}"
+          ./"${{ matrix.artifact }}" --help > /dev/null
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
+          if-no-files-found: error
 
   release:
-    name: Create Release
+    name: Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
+      - name: Package
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          for bin in nyma-*; do
+            # Archives unpack to a plain `nyma` / `nyma.exe`, so what lands on
+            # a user's PATH is not named after the platform it was built for.
+            case "$bin" in
+              *.exe)
+                cp "$bin" nyma.exe
+                zip -q "../dist/${bin%.exe}.zip" nyma.exe
+                rm nyma.exe
+                ;;
+              *)
+                cp "$bin" nyma
+                chmod +x nyma
+                tar -czf "../dist/${bin}.tar.gz" nyma
+                rm nyma
+                ;;
+            esac
+          done
+          cd ../dist
+          sha256sum * > SHA256SUMS
+          ls -lh
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: dist/*
           generate_release_notes: true
+          fail_on_unmatched_files: true

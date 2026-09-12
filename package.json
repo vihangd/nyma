@@ -1,7 +1,7 @@
 {
   "name": "nyma",
   "version": "0.7.0",
-  "description": "Nyma Yokai Mystic Agent \u2014 a minimal coding agent built with Squint + Bun + Vercel AI SDK + pi-tui",
+  "description": "Nyma Yokai Mystic Agent — a minimal coding agent built with Squint + Bun + Vercel AI SDK + pi-tui",
   "type": "module",
   "bin": {
     "nyma": "./dist/agent/cli.mjs",
@@ -11,7 +11,7 @@
     "dev": "concurrently \"npx squint watch\" \"bun --watch dist/agent/cli.mjs\"",
     "build": "npx squint compile",
     "bundle": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-darwin-arm64 --outfile=nyma",
-    "bundle:all": "bun run bundle && bun run bundle:linux-x64 && bun run bundle:linux-arm64 && bun run bundle:macos-x64 && bun run bundle:windows",
+    "bundle:all": "bun run bundle && bun run bundle:linux-x64 && bun run bundle:linux-arm64 && bun run bundle:linux-x64-musl && bun run bundle:linux-arm64-musl && bun run bundle:macos-x64 && bun run bundle:windows",
     "bundle:linux-x64": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-x64 --outfile=nyma-linux-x64",
     "bundle:linux-arm64": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-arm64 --outfile=nyma-linux-arm64",
     "bundle:macos-x64": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-darwin-x64 --outfile=nyma-macos-x64",
@@ -22,7 +22,9 @@
     "test": "bun test dist",
     "repl": "npx squint repl",
     "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",
-    "gen:builtins": "bun scripts/gen-builtin-extensions.mjs && npx squint compile"
+    "gen:builtins": "bun scripts/gen-builtin-extensions.mjs && npx squint compile",
+    "bundle:linux-x64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-x64-musl --outfile=nyma-linux-x64-musl",
+    "bundle:linux-arm64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-arm64-musl --outfile=nyma-linux-arm64-musl"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.52",

@@ -12,14 +12,14 @@
         "@mariozechner/pi-tui": "^0.73.1",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "ai": "7.0.97",
-        "headroom-ai": "^0.22.4",
+        "headroom-ai": "^0.37.0",
         "linkedom": "^0.18.13",
         "marked": "^17.0.6",
         "marked-terminal": "^7.3.0",
         "shell-quote": "^1.10.0",
         "squint-cljs": "0.14.208",
         "turndown": "^7.2.4",
-        "vscode-jsonrpc": "9.0.2",
+        "vscode-jsonrpc": "^9.0.2",
         "zod": "4.6.2",
       },
       "devDependencies": {
@@ -218,7 +218,7 @@
 
     "hasown": ["hasown@2.0.3", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg=="],
 
-    "headroom-ai": ["headroom-ai@0.22.4", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "@anthropic-ai/sdk": ">=0.30.0", "ai": ">=6.0.0", "openai": ">=4.0.0" }, "optionalPeers": ["@ai-sdk/provider", "@anthropic-ai/sdk", "ai", "openai"] }, "sha512-9a0rgB/jsWe8gs/ggyUwe6E8DYwKAuBvlUml2ApwlUjb5EfJ611X6X+WG0SiXw3nO6sdyV1/+Ah5uw9P7ecnjw=="],
+    "headroom-ai": ["headroom-ai@0.37.0", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "@anthropic-ai/sdk": ">=0.30.0", "ai": ">=6.0.0", "openai": ">=4.0.0" }, "optionalPeers": ["@ai-sdk/provider", "@anthropic-ai/sdk", "ai", "openai"] }, "sha512-LhhcQyEmcOtH6MNgcaoU2OnI/7QlMyF1CZPYdZwIWyumXjnTM6JXZZpbIufT2LFWD6cYWdUsrk3iXa9LOY3hvw=="],
 
     "highlight.js": ["highlight.js@10.7.3", "", {}, "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="],
 

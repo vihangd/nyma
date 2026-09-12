@@ -114,7 +114,7 @@ Compiles all `.cljs` files from `src/` and `test/` to `.mjs` (ES modules) in `di
 
 ```bash
 bun run bundle        # ./nyma for this machine
-bun run bundle:all    # all five targets (macos arm64/x64, linux x64/arm64, windows)
+bun run bundle:all    # all seven targets
 ```
 
 `bun run bundle` runs the squint compile itself, so it is the only command needed. It produces a
@@ -138,6 +138,37 @@ Extensions in the binary: the 38 builtins are compiled in via the generated regi
 (`src/agent/builtin_extensions.cljs` — regenerate with `bun run gen:builtins` after adding one), and
 user extensions are still discovered by scanning `~/.nyma/extensions` and `.nyma/extensions` at
 runtime. A bundled nyma reports the same 40 extensions and 20 providers as the dist entry point.
+
+#### Releases
+
+Pushing a `vX.Y.Z` tag builds every target on GitHub Actions and attaches the archives to a release
+(`.github/workflows/release.yml`). `workflow_dispatch` runs it without tagging.
+
+| target | script | artifact |
+|---|---|---|
+| macOS arm64 | `bundle` | `nyma-macos-arm64.tar.gz` |
+| macOS x64 | `bundle:macos-x64` | `nyma-macos-x64.tar.gz` |
+| Linux x64 (glibc) | `bundle:linux-x64` | `nyma-linux-x64.tar.gz` |
+| Linux arm64 (glibc) | `bundle:linux-arm64` | `nyma-linux-arm64.tar.gz` |
+| Linux x64 (musl) | `bundle:linux-x64-musl` | `nyma-linux-x64-musl.tar.gz` |
+| Linux arm64 (musl) | `bundle:linux-arm64-musl` | `nyma-linux-arm64-musl.tar.gz` |
+| Windows x64 | `bundle:windows` | `nyma-windows-x64.zip` |
+
+Each archive unpacks to a plain `nyma` (or `nyma.exe`), and `SHA256SUMS` covers all of them. The musl
+builds exist because a glibc binary will not run on Alpine.
+
+Two things the workflow does on purpose:
+
+- **It calls the `bundle:*` scripts rather than repeating the `bun build` flags.** The flags above are
+  guarded by `test/bundle_flags.test.cljs`, which reads `package.json` — a workflow that re-typed them
+  would be a second copy the guard does not cover, and `--format=esm` is exactly the kind of omission
+  that ships a binary which starts fine and loads no extensions.
+- **The whole suite gates the matrix,** and a tag must match `package.json`'s version. The generated
+  files (builtin registry, event map) have drift tests, so a stale registry fails the release instead
+  of shipping a nyma missing most of its extensions.
+
+Only the two builds whose runner can execute them (linux-x64, macos-arm64) are smoke-tested; the rest
+are cross-compiled and verified by the archive step alone.
 
 ### REPL
 
