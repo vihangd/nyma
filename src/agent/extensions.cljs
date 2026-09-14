@@ -79,15 +79,25 @@
    - Inter-extension events
    - UI hooks"
   [agent]
-  (let [handler-map (atom {})]
+  (let [;; event → Map(handler → wrapped). A JS Map keyed by identity: squint's
+        ;; `assoc` stringifies a function key, so two closures with the same
+        ;; source collapsed into one entry and `off` removed the wrong one.
+        ;; Nested per event so one handler on two events keeps both wrappers.
+        handler-map   (js/Map.)
+        watch-counter (atom 0)
+        ;; provider name → pricing keys it wrote, so unregister can undo them.
+        provider-rows (atom {})]
     #js {:on                (fn [event handler & [priority]]
                               (let [wrapped (fn [data]
-                                              (handler data (create-extension-context agent)))]
-                                (swap! handler-map assoc handler wrapped)
+                                              (handler data (create-extension-context agent)))
+                                    m       (or (.get handler-map event)
+                                                (let [nm (js/Map.)] (.set handler-map event nm) nm))]
+                                (.set m handler wrapped)
                                 ((:on (:events agent)) event wrapped priority)))
          :off               (fn [event handler]
-                              (let [wrapped (get @handler-map handler handler)]
-                                (swap! handler-map dissoc handler)
+                              (let [m       (.get handler-map event)
+                                    wrapped (or (and m (.get m handler)) handler)]
+                                (when m (.delete m handler))
                                 ((:off (:events agent)) event wrapped)))
 
        ;; ── Tool management ─────────────────────────────────
@@ -136,11 +146,14 @@
                                (str event-type)
                                (clj->js data)))
          :onStateChange     (fn [listener]
-                              ;; Returns an unsubscribe fn. Keyed by the
-                              ;; listener identity itself for dedup.
-                              (add-watch (:state agent) listener
-                                         (fn [_k _r _o n] (listener n)))
-                              (fn [] (remove-watch (:state agent) listener)))
+                              ;; Returns an unsubscribe fn. Keyed by a counter
+                              ;; token: squint stores watches in a plain object,
+                              ;; so a function key is stringified and two
+                              ;; listeners with identical source shared a slot.
+                              (let [k (str "ext-watch-" (swap! watch-counter inc))]
+                                (add-watch (:state agent) k
+                                           (fn [_k _r _o n] (listener n)))
+                                (fn [] (remove-watch (:state agent) k))))
          ;; Dot accessor `.-__state-atom` compiles to `.__state_atom` in
          ;; squint (hyphens become underscores), so use the underscore
          ;; spelling here too — otherwise the JS property name and the
@@ -277,9 +290,9 @@
                                                                              ;; declared them — and its cached tokens were billed at the
                                                                              ;; full input rate.
                                                                              :cache-read  (let [a (.-cacheRead (.-cost m))]
-                                                                                          (if (some? a) a (aget (.-cost m) "cache_read")))
+                                                                                            (if (some? a) a (aget (.-cost m) "cache_read")))
                                                                              :cache-write (let [a (.-cacheWrite (.-cost m))]
-                                                                                          (if (some? a) a (aget (.-cost m) "cache_write")))})})
+                                                                                            (if (some? a) a (aget (.-cost m) "cache_write")))})})
                                                        models-arr)))
                                     cfg (if models (assoc cfg :models models) cfg)
                                   ;; Remove nil create-model so build-provider-entry can auto-generate
@@ -295,7 +308,15 @@
                               ;;   - its costs must not fall back to the bare id, or
                               ;;     we display a price the user isn't charged.
                                 (let [gateway? (boolean (.-unpriced config))
-                                      qualify  (fn [id] (str name "/" id))]
+                                      qualify  (fn [id] (str name "/" id))
+                                      ;; Only rows THIS registration adds are
+                                      ;; recorded for undo — a row already
+                                      ;; present belongs to whoever wrote it.
+                                      was-unpriced? (contains? @pricing/unpriced-providers name)
+                                      price!   (fn [k rates]
+                                                 (when-not (contains? @pricing/token-costs k)
+                                                   (swap! provider-rows update-in [name :pricing] conj k))
+                                                 (swap! pricing/token-costs assoc k rates))]
                                   (if gateway?
                                     (swap! pricing/unpriced-providers conj name)
                                     (swap! pricing/unpriced-providers disj name))
@@ -312,6 +333,8 @@
                                                             (cons [(:id m) meta] q))))
                                                       models)))
                                   ;; Auto-register pricing
+                                    (swap! provider-rows assoc name {:gateway? (and gateway? (not was-unpriced?))
+                                                                     :pricing  []})
                                     (doseq [m models]
                                       (when-let [cost (:cost m)]
                                         ;; 4-element form only when a cache rate
@@ -327,11 +350,19 @@
                                                       [(or (:input cost) 0)
                                                        (or (:output cost) 0)])]
                                           (when-not gateway?
-                                            (swap! pricing/token-costs assoc (:id m) rates))
-                                          (swap! pricing/token-costs assoc
-                                                 (qualify (:id m)) rates))))))))
+                                            (price! (:id m) rates))
+                                          (price! (qualify (:id m)) rates))))))))
          :unregisterProvider (fn [name]
-                               ((:unregister (:provider-registry agent)) name))
+                               ((:unregister (:provider-registry agent)) name)
+                               ;; Undo the global pricing rows registerProvider
+                               ;; wrote, or a reload re-adds them on top.
+                               ;; Model-registry entries stay: re-registering
+                               ;; identical metadata is idempotent.
+                               (when-let [row (get @provider-rows name)]
+                                 (swap! pricing/token-costs #(apply dissoc % (:pricing row)))
+                                 (when (:gateway? row)
+                                   (swap! pricing/unpriced-providers disj name))
+                                 (swap! provider-rows dissoc name)))
 
        ;; ── Model control ───────────────────────────────────
          :setModel          (fn [model-spec]
@@ -427,6 +458,8 @@
                                        :value       (coerce-flag-value
                                                      type
                                                      (get (parse-ext-flag-argv) (ext-flag-short-name name) :absent))})))
+         :unregisterFlag   (fn [name]
+                             (swap! (:flags agent) dissoc name))
          :getFlag          (fn [name]
                              (when-let [flag (get @(:flags agent) name)]
                                (if (some? (:value flag))

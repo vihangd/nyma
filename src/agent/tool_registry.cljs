@@ -44,14 +44,23 @@
 
         register-fn   (fn [name t]
                         (normalize-tool! t)
-                        ;; If overriding an existing tool, preserve the original
-                        (when (and (contains? @tools name) (not (contains? @overridden name)))
-                          (swap! overridden assoc name (get @tools name)))
-                        ;; Attach __original so overriding tools can chain
-                        (when-let [orig (get @overridden name)]
-                          (set! (.-__original t) orig))
-                        (swap! tools assoc name t)
-                        (swap! active conj name))
+                        ;; Returns who owns the restore, so a scope sweep can
+                        ;; tell "I saved the original" from "someone else did":
+                        ;;   :new        — name did not exist; unregister removes it
+                        ;;   :owner      — saved the original; unregister restores it
+                        ;;   :reoverride — an original was already saved (the
+                        ;;                 stub→wrapper double-override pattern)
+                        (let [existed?  (contains? @tools name)
+                              had-orig? (contains? @overridden name)]
+                          ;; If overriding an existing tool, preserve the original
+                          (when (and existed? (not had-orig?))
+                            (swap! overridden assoc name (get @tools name)))
+                          ;; Attach __original so overriding tools can chain
+                          (when-let [orig (get @overridden name)]
+                            (set! (.-__original t) orig))
+                          (swap! tools assoc name t)
+                          (swap! active conj name)
+                          (cond had-orig? :reoverride existed? :owner :else :new)))
         unregister-fn (fn [name]
                         ;; Restore original if one was saved (tool override pattern)
                         (if-let [original (get @overridden name)]

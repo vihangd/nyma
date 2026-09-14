@@ -4,7 +4,7 @@
             ["node:path" :as path]
             ["node:fs/promises" :as fsp]
             ["node:fs" :as fs]
-            [agent.extension-scope :refer [create-scoped-api derive-namespace]]
+            [agent.extension-scope :refer [create-scoped-api derive-namespace dispose-scope!]]
             [agent.permissions :refer [parse-capabilities]]))
 
 (defn- cljs-extension?  [p] (or (.endsWith p ".cljs") (.endsWith p ".cljc")))
@@ -271,6 +271,7 @@
                           ;; Carried so filter-by-mode can read `modes` off it;
                           ;; it takes :manifest and got nil from every entry.
                           :manifest   manifest
+                          :scope      scoped
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
               (swap! failed conj namespace)
@@ -299,16 +300,29 @@
                     (.includes mode-strs mode-name)))))
           extensions))
 
-(defn deactivate-all
-  "Call deactivate on all loaded extensions that returned a cleanup function."
+(defn ^:async deactivate-all
+  "Call deactivate on every loaded extension, then sweep what its scope
+   recorded (`dispose-scope!`) — the extension's own cleanup first, the
+   namespace's safety net second.
+
+   ONE synchronous pass, then a single Promise.all. A per-item await would
+   suspend after the first extension, and cli.cljs' `process.on \"exit\"`
+   handler is synchronous — node never runs the continuation, so cleanup
+   would stop at the first promise-returning deactivate. This way every
+   sync deactivate and every sweep behind one has already run by the time
+   the promise is handed back."
   [extensions]
-  (doseq [{:keys [deactivate path]} extensions]
-    (when deactivate
-      (try
-        (deactivate)
-        (catch :default e
-          (d/error
-           (str "[nyma] Extension deactivate error (" path "):") e))))))
+  (js-await
+   (js/Promise.all
+    (mapv (fn [{:keys [deactivate scope path]}]
+            (let [log   (fn [e] (d/error (str "[nyma] Extension deactivate error (" path "):") e))
+                  sweep (fn [] (dispose-scope! scope) nil)
+                  r     (try (when deactivate (deactivate))
+                             (catch :default e (log e) nil))]
+              (if (and r (fn? (.-then r)))
+                (.then r (fn [_] (sweep)) (fn [e] (log e) (sweep)))
+                (sweep))))
+          extensions))))
 
 (defn ^:async reload-extension
   "Deactivate and re-load a single extension."

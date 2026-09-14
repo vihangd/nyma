@@ -254,5 +254,8 @@
              ;; Invalidate cache for this event
              (swap! sorted-cache dissoc event))
 
-     :handler-count (fn [event] (count (get @handlers event [])))}))
+     :handler-count (fn [event] (count (get @handlers event [])))
+     ;; Total across every event — the number a leak test compares before
+     ;; and after an extension's lifetime.
+     :handler-total (fn [] (reduce + 0 (map count (vals @handlers))))}))
 

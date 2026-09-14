@@ -149,7 +149,7 @@
   [agent resources extensions-atom resolve-flags-fn ctx]
   ;; 1. Deactivate loaded extensions
   (when extensions-atom
-    (deactivate-all @extensions-atom))
+    (js-await (deactivate-all @extensions-atom)))
   ;; 2. Reload settings from disk
   (when-let [settings (:settings resources)]
     (when-let [reload-fn (:reload settings)]
@@ -511,8 +511,8 @@
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
                         (compact s (:model (:config agent)) (:events agent)
-                                  {:model-registry (:model-registry agent)
-                                   :state-atom     (:state agent)})
+                                 {:model-registry (:model-registry agent)
+                                  :state-atom     (:state agent)})
                         (notify ctx "Compaction complete")))}
 
           "debug"

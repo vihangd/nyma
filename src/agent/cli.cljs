@@ -68,7 +68,7 @@
     (reset! shutdown-done? true)
     (js-await (-> (emit-async-fn agent "exit")
                   (.catch (fn [_] nil))))
-    (try (deactivate-fn @extensions-atom) (catch :default _ nil)))
+    (try (js-await (deactivate-fn @extensions-atom)) (catch :default _ nil)))
   ;; One macrotask so buffered stdout drains before the hard exit — console.log
   ;; to a pipe is not guaranteed synchronous, and truncating the answer would be
   ;; a worse bug than the one being fixed.
@@ -146,7 +146,7 @@
     {:model    (try ((:resolve provider-registry) provider model-id)
                      ;; An unknown provider throws here; the caller still needs
                      ;; to know WHAT was asked for to say so.
-                     (catch :default _ nil))
+                    (catch :default _ nil))
      :provider provider
      :model-id model-id
      ;; Reported rather than warned about: this function runs TWICE, and the
@@ -697,8 +697,8 @@ Examples:
              (reset! shutdown-done? true)
              (-> (emit-session-shutdown-async! agent "sigint")
                  (.finally (fn []
-                             (deactivate-all @extensions-atom)
-                             (js/process.exit 0))))))
+                             (-> (deactivate-all @extensions-atom)
+                                 (.finally (fn [] (js/process.exit 0)))))))))
       ;; exit: synchronous shutdown — node won't wait on promises here.
       ;; Skipped when a one-shot mode already shut down, so extension cleanup
       ;; and the session_end events don't run twice.
