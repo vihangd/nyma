@@ -1,7 +1,6 @@
 (ns agent.extensions.custom-provider-groq.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
-            ["node:fs" :as fs]
-            ["node:path" :as path]
+            [agent.utils.credentials :as credentials]
             [agent.utils.reasoning-stream :as rs]
             [agent.utils.reasoning-request :as rr]))
 
@@ -64,19 +63,9 @@
 (defn resolve-base-url []
   (or (aget js/process.env "GROQ_BASE_URL") default-base-url))
 
-(defn- read-credentials-file []
-  (let [home      (.. js/process -env -HOME)
-        cred-path (path/join home ".nyma" "credentials.json")]
-    (when (and home (fs/existsSync cred-path))
-      (try
-        (let [raw    (fs/readFileSync cred-path "utf8")
-              parsed (js/JSON.parse raw)]
-          (aget parsed provider-name))
-        (catch :default _ nil)))))
-
 (defn resolve-api-key []
   (or (aget js/process.env "GROQ_API_KEY")
-      (read-credentials-file)))
+      (credentials/read-credential provider-name)))
 
 ;; Groq publishes `reasoning_effort` for a subset of its models, and
 ;; `reasoning_format` to choose where the chain lands. Measured on

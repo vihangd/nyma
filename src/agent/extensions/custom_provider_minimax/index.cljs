@@ -1,7 +1,7 @@
 (ns agent.extensions.custom-provider-minimax.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
-            ["node:fs" :as fs]
-            ["node:path" :as path]))
+            [agent.utils.credentials :as credentials]
+))
 
 (def ^:private provider-name "minimax")
 (def ^:private default-base-url "https://api.minimax.io/v1")
@@ -27,24 +27,9 @@
 (defn resolve-base-url []
   (or (aget js/process.env "MINIMAX_BASE_URL") default-base-url))
 
-(defn- read-credentials-file
-  "Read ~/.nyma/credentials.json and return the stored key for this provider.
-   The built-in resolve-api-key in registry.cljs only checks env vars, not
-   credentials.json — this makes /login minimax actually work without touching
-   core code."
-  []
-  (let [home      (.. js/process -env -HOME)
-        cred-path (path/join home ".nyma" "credentials.json")]
-    (when (and home (fs/existsSync cred-path))
-      (try
-        (let [raw    (fs/readFileSync cred-path "utf8")
-              parsed (js/JSON.parse raw)]
-          (aget parsed provider-name))
-        (catch :default _ nil)))))
-
 (defn resolve-api-key []
   (or (aget js/process.env "MINIMAX_API_KEY")
-      (read-credentials-file)))
+      (credentials/read-credential provider-name)))
 
 ;; ── reasoning_split fetch wrapper ──────────────────────────────
 ;;

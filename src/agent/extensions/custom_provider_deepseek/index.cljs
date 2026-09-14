@@ -20,8 +20,7 @@
 
    Get a key at https://platform.deepseek.com/."
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
-            ["node:fs" :as fs]
-            ["node:path" :as path]
+            [agent.utils.credentials :as credentials]
             [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "deepseek")
@@ -58,19 +57,9 @@
 (defn resolve-base-url []
   (or (aget js/process.env "DEEPSEEK_BASE_URL") default-base-url))
 
-(defn- read-credentials-file []
-  (let [home      (.. js/process -env -HOME)
-        cred-path (path/join home ".nyma" "credentials.json")]
-    (when (and home (fs/existsSync cred-path))
-      (try
-        (let [raw    (fs/readFileSync cred-path "utf8")
-              parsed (js/JSON.parse raw)]
-          (aget parsed provider-name))
-        (catch :default _ nil)))))
-
 (defn resolve-api-key []
   (or (aget js/process.env "DEEPSEEK_API_KEY")
-      (read-credentials-file)))
+      (credentials/read-credential provider-name)))
 
 (defn- create-deepseek-model [id]
   (let [key (resolve-api-key)]
