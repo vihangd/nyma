@@ -1,6 +1,6 @@
 {
   "namespace": "custom-provider-opencode-zen",
-  "capabilities": ["providers", "model"],
+  "capabilities": ["providers"],
   "dependsOn": [],
   "dependencies": {}
 }

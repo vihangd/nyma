@@ -1,5 +1,5 @@
 {
   "namespace": "memory",
-  "capabilities": ["events", "tools", "state"],
+  "capabilities": ["events", "tools"],
   "dependsOn": []
 }

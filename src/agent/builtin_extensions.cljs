@@ -63,16 +63,16 @@
   [
    {:namespace "add-dir"
     :module    ext-add-dir
-    :manifest  #js {"namespace" "add-dir" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "add-dir" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "advisor"
     :module    ext-advisor
     :manifest  #js {"namespace" "advisor" "capabilities" #js ["tools" "commands" "model" "state"] "dependsOn" #js []}}
    {:namespace "agent-runner-claude-sdk"
     :module    ext-agent-runner-claude-sdk
-    :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events" "commands" "ui" "state"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
+    :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "session" "context" "flags" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js ["model-roles"]}}
    {:namespace "agent-state"
     :module    ext-agent-state
     :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js []}}
@@ -81,7 +81,7 @@
     :manifest  #js {"namespace" "ast-tools" "capabilities" #js ["tools" "exec"]}}
    {:namespace "bash-suite"
     :module    ext-bash-suite
-    :manifest  #js {"namespace" "bash-suite" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "exec" "flags"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"}}}
+    :manifest  #js {"namespace" "bash-suite" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"}}}
    {:namespace "budget"
     :module    ext-budget
     :manifest  #js {"namespace" "budget" "capabilities" #js ["events"] "dependsOn" #js []}}
@@ -90,13 +90,13 @@
     :manifest  #js {"namespace" "checkpoints" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
-    :manifest  #js {"namespace" "claude-hook-bridge" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "claude-hook-bridge" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
-    :manifest  #js {"namespace" "custom-provider-claude-native" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-claude-native" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-deepseek"
     :module    ext-custom-provider-deepseek
-    :manifest  #js {"namespace" "custom-provider-deepseek" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-deepseek" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-groq"
     :module    ext-custom-provider-groq
     :manifest  #js {"namespace" "custom-provider-groq" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
@@ -105,19 +105,19 @@
     :manifest  #js {"namespace" "custom-provider-kimi" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "local"
     :module    ext-custom-provider-local
-    :manifest  #js {"namespace" "local" "capabilities" #js ["providers" "tools"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "local" "capabilities" #js ["providers"] "dependsOn" #js []}}
    {:namespace "custom-provider-minimax"
     :module    ext-custom-provider-minimax
-    :manifest  #js {"namespace" "custom-provider-minimax" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-minimax" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-opencode-zen"
     :module    ext-custom-provider-opencode-zen
-    :manifest  #js {"namespace" "custom-provider-opencode-zen" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-opencode-zen" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-openrouter"
     :module    ext-custom-provider-openrouter
     :manifest  #js {"namespace" "custom-provider-openrouter" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-qwen-cli"
     :module    ext-custom-provider-qwen-cli
-    :manifest  #js {"namespace" "custom-provider-qwen-cli" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-qwen-cli" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-relay"
     :module    ext-custom-provider-relay
     :manifest  #js {"namespace" "custom-provider-relay" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
@@ -126,19 +126,19 @@
     :manifest  #js {"namespace" "desktop-notify" "capabilities" #js ["events" "flags"] "dependsOn" #js []}}
    {:namespace "handoff"
     :module    ext-handoff
-    :manifest  #js {"namespace" "handoff" "capabilities" #js ["events" "commands" "state" "model"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "handoff" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
    {:namespace "headroom"
     :module    ext-headroom
     :manifest  #js {"namespace" "headroom" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
-    :manifest  #js {"namespace" "lsp-suite" "capabilities" #js ["tools" "events" "middleware" "session"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
+    :manifest  #js {"namespace" "lsp-suite" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
    {:namespace "mcp-client"
     :module    ext-mcp-client
     :manifest  #js {"namespace" "mcp-client" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
    {:namespace "memory"
     :module    ext-memory
-    :manifest  #js {"namespace" "memory" "capabilities" #js ["events" "tools" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "memory" "capabilities" #js ["events" "tools"] "dependsOn" #js []}}
    {:namespace "model-roles"
     :module    ext-model-roles
     :manifest  #js {"namespace" "model-roles" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js []}}
@@ -153,10 +153,10 @@
     :manifest  #js {"namespace" "questionnaire" "capabilities" #js ["tools" "ui"] "dependsOn" #js []}}
    {:namespace "refine"
     :module    ext-refine
-    :manifest  #js {"namespace" "refine" "capabilities" #js ["commands" "session" "ui"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "refine" "capabilities" #js ["commands" "ui"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "small-model"
     :module    ext-small-model
-    :manifest  #js {"namespace" "small-model" "capabilities" #js ["events" "context" "model" "middleware" "tools" "tools-override" "flags" "commands" "state" "messages"] "dependsOn" #js ["advisor"]}}
+    :manifest  #js {"namespace" "small-model" "capabilities" #js ["events" "model" "middleware" "tools" "tools-override" "flags" "state" "messages"] "dependsOn" #js ["advisor"]}}
    {:namespace "spec-driven"
     :module    ext-spec-driven
     :manifest  #js {"namespace" "spec-driven" "capabilities" #js ["events" "commands" "state" "ui" "messages"] "dependsOn" #js []}}
@@ -165,7 +165,7 @@
     :manifest  #js {"namespace" "stats-dashboard" "capabilities" #js ["commands" "events" "state" "ui"] "dependsOn" #js []}}
    {:namespace "subagent"
     :module    ext-subagent
-    :manifest  #js {"namespace" "subagent" "capabilities" #js ["tools" "commands" "state" "model" "ui" "messages" "events"] "dependsOn" #js ["model-roles"]}}
+    :manifest  #js {"namespace" "subagent" "capabilities" #js ["tools" "commands" "model" "ui" "messages"] "dependsOn" #js ["model-roles"]}}
    {:namespace "thinking-renderer"
     :module    ext-thinking-renderer
     :manifest  #js {"namespace" "thinking-renderer" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
@@ -180,4 +180,4 @@
     :manifest  #js {"namespace" "verify-gate" "capabilities" #js ["events" "messages"] "dependsOn" #js []}}
    {:namespace "workspace-config"
     :module    ext-workspace-config
-    :manifest  #js {"namespace" "workspace-config" "capabilities" #js ["commands" "flags" "events" "state" "ui"] "dependsOn" #js []}}])
+    :manifest  #js {"namespace" "workspace-config" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])

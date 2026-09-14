@@ -1,6 +1,6 @@
 {
   "namespace": "refine",
-  "capabilities": ["commands", "session", "ui"],
+  "capabilities": ["commands", "ui"],
   "dependsOn": [],
   "dependencies": {}
 }

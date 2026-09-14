@@ -13,6 +13,8 @@ Defines named **roles** that map to provider/model pairs (and optionally `allowe
 | `/model-roles__escalate` | `[/escalate]` — hand the current task to the stronger model, from a pruned context. `/escalate off` reverts and disarms for the session; `/escalate status` shows tier, budget and cooldown |
 | `/model-roles__role` | `[/role <name>]` — switch the active role. With no arg, shows the current role and the list. `/role reset` reverts to `default` |
 | `/model-roles__roles` | List every available role |
+| `/model-roles__planmode` | Enter plan mode: bind the `plan` role (read-only tools, write/edit/bash denied), capture the plan, and hand off to execution on exit |
+| `/model-roles__plan` | Same as `/planmode`; registered only when no other extension (e.g. the ACP agent shell's mode switcher) already owns `/plan` |
 
 ## Hooks
 

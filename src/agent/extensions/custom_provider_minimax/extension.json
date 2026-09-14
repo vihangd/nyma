@@ -1,6 +1,6 @@
 {
   "namespace": "custom-provider-minimax",
-  "capabilities": ["providers", "model"],
+  "capabilities": ["providers"],
   "dependsOn": [],
   "dependencies": {}
 }

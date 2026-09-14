@@ -1,5 +1,5 @@
 {
   "namespace": "handoff",
-  "capabilities": ["events", "commands", "state", "model"],
+  "capabilities": ["events", "commands", "state"],
   "dependsOn": []
 }

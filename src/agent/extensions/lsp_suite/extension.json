@@ -1,6 +1,6 @@
 {
   "namespace": "lsp-suite",
-  "capabilities": ["tools", "events", "middleware", "session"],
+  "capabilities": ["tools", "events"],
   "dependsOn": [],
   "dependencies": {
     "vscode-jsonrpc": "^9.0.0"

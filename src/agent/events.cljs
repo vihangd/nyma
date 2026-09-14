@@ -28,6 +28,11 @@
    "tool_execution_start" "tool_execution_update" "tool_execution_end"
    "before_tool_call"
    "before_provider_request"
+   ;; Provider pipeline hooks (all emit-collect from loop.cljs). Emitted for
+   ;; a long time without being declared here, so they were invisible to the
+   ;; emitter lint, the event map, and rpc mode's advertised channel list.
+   "model_resolve" "before_message_send" "provider_error" "stream_filter"
+   "message_before_store"
    "before_agent_start" "input"
    "compact" "before_compact"
    "before_branch_switch"

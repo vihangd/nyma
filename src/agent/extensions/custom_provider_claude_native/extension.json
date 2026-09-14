@@ -1,6 +1,6 @@
 {
   "namespace": "custom-provider-claude-native",
-  "capabilities": ["providers", "model"],
+  "capabilities": ["providers"],
   "dependsOn": [],
   "dependencies": {}
 }

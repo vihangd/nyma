@@ -6,5 +6,5 @@
     "messages",
     "ui"
   ],
-  "dependsOn": []
+  "dependsOn": ["agent-shell", "token-suite"]
 }

@@ -80,6 +80,23 @@
                     (-> (expect (str/join ", " (unemitted events/core-event-types emitted)))
                         (.toBe "")))))
 
+            (it "every event loop.cljs emits is declared"
+                (fn []
+                  ;; The inverse: five names (`before_message_send`,
+                  ;; `model_resolve`, `provider_error`, `stream_filter`,
+                  ;; `message_before_store`) were emitted for months without
+                  ;; appearing in `core-event-types` — outside this lint,
+                  ;; outside the docs, not advertised to rpc mode.
+                  (let [declared (set (map str (vec events/all-event-types)))
+                        from-loop (->> (:emitters (event-map/scan))
+                                       (keep (fn [[ev files]]
+                                               (when (some #(.endsWith (str %) "loop.cljs") files)
+                                                 (str ev))))
+                                       (remove declared)
+                                       sort
+                                       vec)]
+                    (-> (expect (str/join ", " from-loop)) (.toBe "")))))
+
             (it "the pi-compat names stay out of the core list"
                 (fn []
                   ;; They are inert BY DESIGN — declared so a pi extension can

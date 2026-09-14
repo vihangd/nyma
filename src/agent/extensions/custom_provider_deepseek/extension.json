@@ -1,6 +1,6 @@
 {
   "namespace": "custom-provider-deepseek",
-  "capabilities": ["providers", "model"],
+  "capabilities": ["providers"],
   "dependsOn": [],
   "dependencies": {}
 }

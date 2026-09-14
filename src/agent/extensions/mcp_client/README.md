@@ -3,6 +3,12 @@
 Connects nyma to [Model Context Protocol](https://modelcontextprotocol.io) servers. Each server's
 tools are registered as `mcp__<server>__<tool>` and appear to the model like any native tool.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/mcp-client__mcp-status` | Show MCP server connection state and tool counts |
+
 ## Configuring servers
 
 Add a `.mcp.json` to your project root (standard MCP format):

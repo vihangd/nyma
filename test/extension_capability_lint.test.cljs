@@ -97,6 +97,52 @@
                  (.includes (:source ext) "(.-ui api")))
     {:method "api.ui" :capability ui-property-capability}))
 
+(def capability-methods
+  "capability → the api members that need it. The inverse of `gated-methods`,
+   plus the surfaces that are not plain method calls: `api.ui` is a property,
+   `api.events`/`api.state` are sub-objects, `on`/`off` are the whole point of
+   `events`, `__state_atom` is reached by aget."
+  {"tools"          ["registerTool" "unregisterTool" "getActiveTools" "getAllTools" "getTool" "setActiveTools"]
+   "tools-override" ["overrideTool" "unoverrideTool"]
+   "commands"       ["registerCommand" "unregisterCommand" "getCommands"]
+   "shortcuts"      ["registerShortcut" "unregisterShortcut"]
+   "events"         ["on" "off" "emitGlobal" "events"]
+   "messages"       ["sendMessage" "sendUserMessage"]
+   "state"          ["getState" "dispatch" "onStateChange" "state" "__state_atom"]
+   "ui"             ["ui" "registerStatusSegment" "unregisterStatusSegment"]
+   "middleware"     ["addMiddleware" "removeMiddleware"]
+   "exec"           ["exec"]
+   "spawn"          ["spawn"]
+   "providers"      ["registerProvider" "unregisterProvider"]
+   "model"          ["setModel" "getActiveModelSpec" "getThinkingLevel" "setThinkingLevel" "resolveModel"]
+   "session"        ["appendEntry" "setSessionName" "getSessionName" "setLabel"]
+   "flags"          ["registerFlag" "getFlag" "unregisterFlag"]
+   "context"        ["getTokenBudget"]})
+
+(defn uses-member?
+  "Any of the three shapes the api is reached through: `(.m api`, `(.-m api`
+   and `(aget api \"m\")`. Receiver-agnostic for the first two — a sub-module
+   may hold the api under another name, and a false \"unused\" is the
+   expensive direction here."
+  [source m]
+  (or (.includes source (str "(." m " "))
+      (.includes source (str "(.-" m " "))
+      (.includes source (str "(.-" m ")"))
+      (.includes source (str "\"" m "\")"))))
+
+(defn unused-capabilities
+  "Declared capabilities with no evidence of use in the source. A declared
+   grant nobody exercises is either copy-paste (five providers declared
+   `model`) or a feature that silently never got wired (`agent_shell`'s
+   `renderers`, `context`, `session`)."
+  [ext]
+  (->> (:capabilities ext)
+       (remove #(= % "all"))
+       (remove (fn [cap]
+                 (some #(uses-member? (:source ext) %) (get capability-methods cap []))))
+       sort
+       vec))
+
 (defn missing-capabilities
   "Capabilities `ext` calls into but does not declare.
 
@@ -134,6 +180,26 @@
                                                                                    vec)]
           ;; Named in the message: a bare count tells you nothing at 4am.
                                                                       (-> (expect (str/join "; " bad)) (.toBe "")))))
+
+                                                              (it "declares no capability it never uses"
+                                                                  (fn []
+                                                                    (let [bad (->> (extensions)
+                                                                                   (keep (fn [e]
+                                                                                           (when-let [u (seq (unused-capabilities e))]
+                                                                                             (str (:name e) " declares but never uses " (str/join ", " u)))))
+                                                                                   vec)]
+                                                                      (-> (expect (str/join "; " bad)) (.toBe "")))))
+
+                                                              (it "detects an unused capability when there is one"
+                                                                  (fn []
+                                                                    (-> (expect (unused-capabilities
+                                                                                 {:capabilities #{"tools" "exec"}
+                                                                                  :source "(.registerTool api \"x\" td)"}))
+                                                                        (.toEqual #js ["exec"]))
+                                                                    (-> (expect (unused-capabilities
+                                                                                 {:capabilities #{"ui"}
+                                                                                  :source "(when (.-ui api) 1)"}))
+                                                                        (.toEqual #js []))))
 
                                                               (it "spec_driven declares messages, because the phase loop is follow-ups"
                                                                   (fn []
