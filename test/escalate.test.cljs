@@ -238,7 +238,7 @@
   (let [c   (collector)
         st  (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
         api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "No, and don't ask again this session"
-                                                      (:notes c))))]
+                                                                                    (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalate-disarmed @st)) (.toBe true))))
 
@@ -268,7 +268,7 @@
         bare {:roles {:advisor {:provider "yun" :model "opus-5"}}}
         st  (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
         api (fake-api st (assoc c :settings (no-retry bare)
-                                  :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+                                :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
     (js-await (esc/escalate! api "stalled" false))
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))
     (reset! (:set-calls c) [])
@@ -287,20 +287,20 @@
     (-> (expect (:permission-mode @st)) (.toBe "accept-edits"))))
 
 (describe "escalate:consent"
-  (fn []
-    (it "ask mode with no prompt available does NOT escalate"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:model "zen/cheap-1" :no-op-turns 3
-                           :escalate-task-in-flight true
-                           :messages [{:role "user" :content "fix X"}]})
-                api (fake-api st c)]
-            (esc/on-turn-finalize api nil)
-            (-> (expect (:escalated-to @st)) (.toBeFalsy))
-            (-> (expect (count @(:sent c))) (.toBe 0)))))
-    (it "answering no leaves the context untouched" t-no-keeps-context)
-    (it "yes prunes, swaps and re-delivers the request exactly once" t-yes-prunes-swaps-redelivers)
-    (it "'don't ask again' disarms the session" t-never-disarms)))
+          (fn []
+            (it "ask mode with no prompt available does NOT escalate"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1" :no-op-turns 3
+                                   :escalate-task-in-flight true
+                                   :messages [{:role "user" :content "fix X"}]})
+                        api (fake-api st c)]
+                    (esc/on-turn-finalize api nil)
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy))
+                    (-> (expect (count @(:sent c))) (.toBe 0)))))
+            (it "answering no leaves the context untouched" t-no-keeps-context)
+            (it "yes prunes, swaps and re-delivers the request exactly once" t-yes-prunes-swaps-redelivers)
+            (it "'don't ask again' disarms the session" t-never-disarms)))
 
 (defn ^:async t-latched-stall-escalates []
   (let [c    (collector)
@@ -313,99 +313,99 @@
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))))
 
 (describe "escalate:guards"
-  (fn []
+          (fn []
     ;; The stall gate used to scan state :messages for a "tool_call" role that
     ;; nothing writes, so it could never fire in production.
-    (it "latches task-in-flight from the turn_finalize tool count"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:model "zen/cheap-1" :no-op-turns 0})
-                api (fake-api st c)]
-            (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 2})
-            (-> (expect (:escalate-task-in-flight @st)) (.toBe true))
+            (it "latches task-in-flight from the turn_finalize tool count"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1" :no-op-turns 0})
+                        api (fake-api st c)]
+                    (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 2})
+                    (-> (expect (:escalate-task-in-flight @st)) (.toBe true))
             ;; and the episode boundary clears it
-            (esc/on-user-message api nil)
-            (-> (expect (:escalate-task-in-flight @st)) (.toBeFalsy)))))
+                    (esc/on-user-message api nil)
+                    (-> (expect (:escalate-task-in-flight @st)) (.toBeFalsy)))))
 
-    (it "a tool-less turn never latches, so a plain chat cannot stall-escalate"
-        (fn []
-          (let [c    (collector)
-                auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
-                st   (atom {:model "zen/cheap-1" :no-op-turns 0})
-                api  (fake-api st (assoc c :settings auto))]
-            (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 0})
-            (esc/on-turn-finalize api #js {:noOpTurns 3 :toolCalls 0})
-            (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+            (it "a tool-less turn never latches, so a plain chat cannot stall-escalate"
+                (fn []
+                  (let [c    (collector)
+                        auto (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})
+                        st   (atom {:model "zen/cheap-1" :no-op-turns 0})
+                        api  (fake-api st (assoc c :settings auto))]
+                    (esc/on-turn-finalize api #js {:noOpTurns 0 :toolCalls 0})
+                    (esc/on-turn-finalize api #js {:noOpTurns 3 :toolCalls 0})
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
 
-    (it "latched work plus 3 no-op turns escalates end to end" t-latched-stall-escalates)
+            (it "latched work plus 3 no-op turns escalates end to end" t-latched-stall-escalates)
 
-    (it "refuses when the target is the model already running" t-refuses-same-model)
-    (it "respects max-per-session" t-respects-cap)
-    (it "never touches :active-role, allowed-tools or the permission mode" t-permissions-untouched)
+            (it "refuses when the target is the model already running" t-refuses-same-model)
+            (it "respects max-per-session" t-respects-cap)
+            (it "never touches :active-role, allowed-tools or the permission mode" t-permissions-untouched)
 
-    (it "stands down in plan mode — opusplan already owns the model"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:model "zen/cheap-1" :plan-mode true :no-op-turns 9
-                           :escalate-task-in-flight true
-                           :messages [{:role "user" :content "fix X"}]})
-                api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
-            (esc/on-turn-finalize api nil)
-            (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+            (it "stands down in plan mode — opusplan already owns the model"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1" :plan-mode true :no-op-turns 9
+                                   :escalate-task-in-flight true
+                                   :messages [{:role "user" :content "fix X"}]})
+                        api (fake-api st (assoc c :settings (no-retry settings) :ui (ui-with-select "Yes — escalate and retry" (:notes c))))]
+                    (esc/on-turn-finalize api nil)
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
 
-    (it "revert puts the ORIGINAL model back, not just the flag"
-        t-revert-restores-the-cheap-model)
+            (it "revert puts the ORIGINAL model back, not just the flag"
+                t-revert-restores-the-cheap-model)
 
-    (it "an unresolvable chain entry is skipped, not counted as a fallback"
+            (it "an unresolvable chain entry is skipped, not counted as a fallback"
         ;; setModel would fire and the retry would re-run on the same model
         ;; while the toast claimed a swap.
-        (fn []
-          (let [c   (collector)
-                bad {:roles {:default {:provider "zen" :model "cheap-1"}}
-                     :escalate {:fallback {:default ["typo-role"]}}}
-                st  (atom {:model "zen/cheap-1"})
-                r   (esc/on-provider-error (fake-api st (assoc c :settings bad))
-                                           #js {:message "429" :config #js {}})]
-            (-> (expect r) (.toBeFalsy))
-            (-> (expect (count @(:set-calls c))) (.toBe 0)))))
+                (fn []
+                  (let [c   (collector)
+                        bad {:roles {:default {:provider "zen" :model "cheap-1"}}
+                             :escalate {:fallback {:default ["typo-role"]}}}
+                        st  (atom {:model "zen/cheap-1"})
+                        r   (esc/on-provider-error (fake-api st (assoc c :settings bad))
+                                                   #js {:message "429" :config #js {}})]
+                    (-> (expect r) (.toBeFalsy))
+                    (-> (expect (count @(:set-calls c))) (.toBe 0)))))
 
-    (it "reverts on the next user request (the task is the episode)"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:model "zen/cheap-1" :escalated-to "yun/opus-5" :active-role "default"})
-                api (fake-api st c)]
-            (esc/on-user-message api nil)
-            (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
+            (it "reverts on the next user request (the task is the episode)"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1" :escalated-to "yun/opus-5" :active-role "default"})
+                        api (fake-api st c)]
+                    (esc/on-user-message api nil)
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy)))))
 
-    (it "a quiet session never resolves or swaps anything"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:model "zen/cheap-1" :no-op-turns 0 :messages []})
-                api (fake-api st c)]
-            (esc/on-turn-finalize api nil)
-            (esc/on-resolve api nil)
-            (-> (expect (count @(:set-calls c))) (.toBe 0)))))
+            (it "a quiet session never resolves or swaps anything"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:model "zen/cheap-1" :no-op-turns 0 :messages []})
+                        api (fake-api st c)]
+                    (esc/on-turn-finalize api nil)
+                    (esc/on-resolve api nil)
+                    (-> (expect (count @(:set-calls c))) (.toBe 0)))))
 
-    (it "while escalated, model_resolve keeps applying the target"
-        (fn []
-          (let [c   (collector)
-                st  (atom {:escalated-to "yun/opus-5"})
-                api (fake-api st c)]
-            (esc/on-resolve api nil)
-            (-> (expect (vec @(:set-calls c))) (.toEqual ["yun/opus-5"])))))))
+            (it "while escalated, model_resolve keeps applying the target"
+                (fn []
+                  (let [c   (collector)
+                        st  (atom {:escalated-to "yun/opus-5"})
+                        api (fake-api st c)]
+                    (esc/on-resolve api nil)
+                    (-> (expect (vec @(:set-calls c))) (.toEqual ["yun/opus-5"])))))))
 
 ;; ── the status marker ─────────────────────────────────────────────────────
 (describe "escalate:status-segment"
-  (fn []
-    (it "shows the model, not a role — escalation never changes the role"
-        (fn []
-          (let [s (seg/render-escalated "yun/opus-5")]
-            (-> (expect (:visible? s)) (.toBe true))
-            (-> (expect (:content s)) (.toContain "opus-5")))))
-    (it "is hidden when nothing is escalated"
-        (fn []
-          (-> (expect (:visible? (seg/render-escalated nil))) (.toBeFalsy))
-          (-> (expect (:visible? (seg/render-escalated ""))) (.toBeFalsy))))))
+          (fn []
+            (it "shows the model, not a role — escalation never changes the role"
+                (fn []
+                  (let [s (seg/render-escalated "yun/opus-5")]
+                    (-> (expect (:visible? s)) (.toBe true))
+                    (-> (expect (:content s)) (.toContain "opus-5")))))
+            (it "is hidden when nothing is escalated"
+                (fn []
+                  (-> (expect (:visible? (seg/render-escalated nil))) (.toBeFalsy))
+                  (-> (expect (:visible? (seg/render-escalated ""))) (.toBeFalsy))))))
 
 ;; ── retry before escalation (sequential refinement) ──────────────────────
 ;; Measured: qwen3.5-9b failed `transpose` under three scaffold configurations
@@ -439,16 +439,16 @@
     (-> (expect (:escalated-to @st)) (.toBe "yun/opus-5"))))
 
 (describe "escalate:retry-first"
-  (fn []
-    (it "retries the same model before escalating" t-retry-before-escalating)
-    (it "escalates once the retry budget is spent" t-escalates-once-retries-are-spent)
-    (it "a new user request refills the retry budget"
-        (fn []
-          (let [c  (collector)
-                st (atom {:model "zen/cheap-1" :escalate-retries 1})
-                api (fake-api st c)]
-            (esc/on-user-message api nil)
-            (-> (expect (:escalate-retries @st)) (.toBeFalsy)))))))
+          (fn []
+            (it "retries the same model before escalating" t-retry-before-escalating)
+            (it "escalates once the retry budget is spent" t-escalates-once-retries-are-spent)
+            (it "a new user request refills the retry budget"
+                (fn []
+                  (let [c  (collector)
+                        st (atom {:model "zen/cheap-1" :escalate-retries 1})
+                        api (fake-api st c)]
+                    (esc/on-user-message api nil)
+                    (-> (expect (:escalate-retries @st)) (.toBeFalsy)))))))
 
 ;; ── does the trigger actually reach the retry? ───────────────────────────
 ;; The retry has unit tests, but in a real benchmark run arm A scored exactly
@@ -477,8 +477,8 @@
     (-> (expect (count @(:sent c))) (.toBe 1))))
 
 (describe "escalate:trigger-wiring"
-  (fn []
-    (it "a spent verify gate reaches the retry" t-verify-exhausted-triggers-retry)))
+          (fn []
+            (it "a spent verify gate reaches the retry" t-verify-exhausted-triggers-retry)))
 
 ;;; ─── chain-for is what /escalate status now reports ────────────────────────
 
@@ -532,25 +532,25 @@
 
 (describe "escalate/try-set-model!" (fn []
 
-  (it "reports success when setModel returns"
-      (fn []
-        (let [{:keys [api calls]} (api-that (fn [_] nil))]
-          (-> (expect (esc/try-set-model! api "p/m")) (.toBe true))
-          (-> (expect (vec @calls)) (.toEqual #js ["p/m"])))))
+                                      (it "reports success when setModel returns"
+                                          (fn []
+                                            (let [{:keys [api calls]} (api-that (fn [_] nil))]
+                                              (-> (expect (esc/try-set-model! api "p/m")) (.toBe true))
+                                              (-> (expect (vec @calls)) (.toEqual #js ["p/m"])))))
 
-  (it "reports failure instead of swallowing"
-      (fn []
+                                      (it "reports failure instead of swallowing"
+                                          (fn []
         ;; The credential case: provider has no key, create-model throws.
-        (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "No credentials for provider 'x'"))))]
-          (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))
+                                            (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "No credentials for provider 'x'"))))]
+                                              (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))
 
-  (it "does not throw out of the handler it runs in"
-      (fn []
+                                      (it "does not throw out of the handler it runs in"
+                                          (fn []
         ;; on-resolve calls this mid-turn; a throw there would take the turn
         ;; down. It must convert the failure into a return value.
-        (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "boom"))))]
-          (-> (expect (fn? (fn [] (esc/try-set-model! api "x/m")))) (.toBe true))
-          (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))))
+                                            (let [{:keys [api]} (api-that (fn [_] (throw (js/Error. "boom"))))]
+                                              (-> (expect (fn? (fn [] (esc/try-set-model! api "x/m")))) (.toBe true))
+                                              (-> (expect (esc/try-set-model! api "x/m")) (.toBe false)))))))
 
 ;;; ─── A self-hosted box being switched off must escalate ────────────────────
 ;;
@@ -570,35 +570,83 @@
 
 (describe "escalate: unreachable self-hosted provider" (fn []
 
-  (it "classifies Bun's connect failure as a network error"
-      (fn []
+                                                         (it "classifies Bun's connect failure as a network error"
+                                                             (fn []
         ;; squint compiles keywords to bare strings — the same fact behind the
         ;; roles.default guard, so no leading colon here.
-        (-> (expect (str (esc/error-kind bun-connect-failure))) (.toBe "network"))
-        (-> (expect (esc/retryable? bun-connect-failure)) (.toBe true))))
+                                                               (-> (expect (str (esc/error-kind bun-connect-failure))) (.toBe "network"))
+                                                               (-> (expect (esc/retryable? bun-connect-failure)) (.toBe true))))
 
-  (it "classifies the Node wording too"
-      (fn []
-        (-> (expect (esc/retryable? "connect ECONNREFUSED 192.168.14.15:8000")) (.toBe true))
-        (-> (expect (esc/retryable? "TypeError: fetch failed")) (.toBe true))))
+                                                         (it "classifies the Node wording too"
+                                                             (fn []
+                                                               (-> (expect (esc/retryable? "connect ECONNREFUSED 192.168.14.15:8000")) (.toBe true))
+                                                               (-> (expect (esc/retryable? "TypeError: fetch failed")) (.toBe true))))
 
-  (it "still ignores an error no other model would survive"
-      (fn []
+                                                         (it "still ignores an error no other model would survive"
+                                                             (fn []
         ;; retryable? must stay narrow — escalating on a genuine 400 would just
         ;; burn the chain on a request that is wrong everywhere.
-        (-> (expect (esc/retryable? "400 invalid request: bad tool schema")) (.toBe false))
-        (-> (expect (esc/retryable? "")) (.toBe false))))
+                                                               (-> (expect (esc/retryable? "400 invalid request: bad tool schema")) (.toBe false))
+                                                               (-> (expect (esc/retryable? "")) (.toBe false))))
 
-  (it "picks the configured chain for the failing role"
-      (fn []
+                                                         (it "picks the configured chain for the failing role"
+                                                             (fn []
         ;; roles.local -> escalate.fallback.local = ["build"], so a dead box
         ;; moves to minimax rather than retrying the box.
-        (let [cfg {:fallback {"local" ["build"] :default ["fast"]}}]
-          (-> (expect (vec (esc/chain-for cfg "local"))) (.toEqual #js ["build"]))
+                                                               (let [cfg {:fallback {"local" ["build"] :default ["fast"]}}]
+                                                                 (-> (expect (vec (esc/chain-for cfg "local"))) (.toEqual #js ["build"]))
           ;; …and an unlisted role still gets the default chain.
-          (-> (expect (vec (esc/chain-for cfg "other"))) (.toEqual #js ["fast"])))))
+                                                                 (-> (expect (vec (esc/chain-for cfg "other"))) (.toEqual #js ["fast"])))))
 
-  (it "does not re-try a target already burned"
-      (fn []
-        (-> (expect (esc/next-fallback ["build" "fast"] ["build"])) (.toBe "fast"))
-        (-> (expect (esc/next-fallback ["build"] ["build"])) (.toBeNil))))))
+                                                         (it "does not re-try a target already burned"
+                                                             (fn []
+                                                               (-> (expect (esc/next-fallback ["build" "fast"] ["build"])) (.toBe "fast"))
+                                                               (-> (expect (esc/next-fallback ["build"] ["build"])) (.toBeNil))))))
+
+;; ── /escalate bare reports; /escalate now acts ────────────────────────────
+;;
+;; Bare `/escalate` escalated immediately: a command whose whole job is to
+;; spend more money on a bigger model, triggered by a word that reads like a
+;; topic, with no confirmation and a per-session budget it silently consumed.
+
+(defn- cmd-collector [notes]
+  {:set-calls (atom []) :sent (atom [])
+   :ui #js {:available true :notify (fn [m _l] (swap! notes conj (str m)))}})
+
+(describe "escalate:command"
+          (fn []
+            (it "bare /escalate reports status and usage instead of escalating"
+                (fn []
+                  (let [notes (atom [])
+                        c     (cmd-collector notes)
+                        st    (atom {:model "zen/cheap-1" :messages []})
+                        api   (fake-api st c)]
+                    (esc/command-handler api #js [] nil)
+                    (let [all (apply str @notes)]
+                      (-> (expect (.includes all "Escalation:")) (.toBe true))
+                      (-> (expect (.includes all "/escalate now")) (.toBe true)))
+            ;; nothing was escalated and no request was re-sent
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy))
+                    (-> (expect (count @(:set-calls c))) (.toBe 0))
+                    (-> (expect (count @(:sent c))) (.toBe 0)))))
+
+            (it "/escalate now is the one that escalates"
+                (fn []
+                  (let [notes (atom [])
+                        c     (cmd-collector notes)
+                        st    (atom {:model "zen/cheap-1"
+                                     :messages [{:role "user" :content "fix X"}]})
+                        api   (fake-api st (assoc c :settings (no-retry settings)))]
+                    (-> (js/Promise.resolve (esc/command-handler api #js ["now"] nil))
+                        (.then (fn [_]
+                                 (-> (expect (str (:escalated-to @st))) (.toBe "yun/opus-5"))))))))
+
+            (it "/escalate status is the same report"
+                (fn []
+                  (let [notes (atom [])
+                        c     (cmd-collector notes)
+                        st    (atom {:model "zen/cheap-1" :messages []})
+                        api   (fake-api st c)]
+                    (esc/command-handler api #js ["status"] nil)
+                    (-> (expect (.includes (apply str @notes) "Escalation:")) (.toBe true))
+                    (-> (expect (:escalated-to @st)) (.toBeFalsy)))))))
