@@ -160,8 +160,11 @@
                     :getCommands      (gate capabilities :commands (.-getCommands base-api))
                     ;; Shortcuts (keys are not namespaced — pre-existing)
                     :registerShortcut (gate capabilities :shortcuts
-                                            (fn [key handler]
-                                              (.registerShortcut base-api key handler)
+                                            (fn [key handler opts]
+                                              ;; `opts` forwarded, not swallowed: an
+                                              ;; extension's `{description: …}` is what
+                                              ;; /hotkeys prints next to the key.
+                                              (.registerShortcut base-api key handler opts)
                                               (track! (fn [] (.unregisterShortcut base-api key)))
                                               nil))
                     :unregisterShortcut (gate capabilities :shortcuts

@@ -207,15 +207,21 @@
                                     (-> (expect (:content last-asst)) (.toBe "second reply")))))))
 
 (describe "/hotkeys command" (fn []
-                               (it "lists built-in shortcuts"
+                               (it "lists the keys that are really bound"
                                    (fn []
                                      (let [agent (make-agent-with-builtins)
                                            {:keys [ctx overlays]} (make-ctx)
                                            handler (get-handler agent "hotkeys")]
                                        (handler nil ctx)
                                        (let [text (first @overlays)]
-                                         (-> (expect text) (.toContain "Escape"))
-                                         (-> (expect text) (.toContain "Ctrl+L"))))))
+                                         ;; Abort and exit — the two keys a user
+                                         ;; needs before any other.
+                                         (-> (expect text) (.toContain "esc"))
+                                         (-> (expect text) (.toContain "^C"))
+                                         ;; …and not the two that were advertised
+                                         ;; while bound to nothing.
+                                         (-> (expect text) (.not.toContain "Ctrl+L"))
+                                         (-> (expect text) (.not.toContain "Reserved"))))))
 
                                (it "includes extension shortcuts when registered"
                                    (fn []
@@ -225,8 +231,8 @@
                                            handler (get-handler agent "hotkeys")]
                                        (handler nil ctx)
                                        (let [text (first @overlays)]
-                                         (-> (expect text) (.toContain "ctrl+k"))
-                                         (-> (expect text) (.toContain "Extensions:"))))))))
+                                         (-> (expect text) (.toContain "^K"))
+                                         (-> (expect text) (.toContain "Extensions")))))))) 
 
 (describe "/export command" (fn []
                               (it "generates html by default"

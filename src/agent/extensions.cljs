@@ -135,8 +135,19 @@
          :getCommands       (fn [] @(:commands agent))
 
        ;; ── Shortcut registration ───────────────────────────
-         :registerShortcut  (fn [key handler]
-                              (swap! (:shortcuts agent) assoc key handler))
+         ;; 2-arg form stores the BARE FN, exactly as before — the shape
+         ;; keybindings/shortcut-handler and every existing caller expect.
+         ;; An opts map (`{description: "Search prompt history"}`) is what
+         ;; /hotkeys prints, so a shortcut can say what it does instead of
+         ;; being listed as a key with no explanation.
+         :registerShortcut  (fn [key handler opts]
+                              (let [desc (when opts
+                                           (or (aget opts "description")
+                                               (aget opts "desc")))]
+                                (swap! (:shortcuts agent) assoc key
+                                       (if (seq (str (or desc "")))
+                                         {:handler handler :description (str desc)}
+                                         handler))))
          :unregisterShortcut (fn [key]
                                (swap! (:shortcuts agent) dissoc key))
 

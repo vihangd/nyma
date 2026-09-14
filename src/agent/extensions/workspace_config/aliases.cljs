@@ -57,6 +57,23 @@
       (notify api (str "Alias /" name " removed")))
     (notify api (str "No alias named \"" name "\"") "error")))
 
+(defn ctx-positional
+  "The flag-free tokens interactive mode's shared splitter put on `ctx`,
+   or nil when the caller did not come through it."
+  [ctx]
+  (when ctx
+    (when-let [p (try (aget ctx "positional") (catch :default _ nil))]
+      (vec p))))
+
+(defn ctx-flags
+  "`--flag` / `--flag=value` / `--no-flag` from the shared splitter, as a
+   map of raw key → true | false | string. Empty when absent."
+  [ctx]
+  (or (when ctx
+        (when-let [f (try (aget ctx "flags") (catch :default _ nil))]
+          (into {} (map (fn [k] [k (aget f k)]) (js/Object.keys f)))))
+      {}))
+
 (defn- list-aliases [api aliases-atom]
   (let [m @aliases-atom]
     (if (empty? m)
@@ -94,14 +111,31 @@
   ;; Register the /alias management command
   (.registerCommand api "alias"
     #js {:description "Manage command aliases. Usage: /alias [<name> <target>] [--remove <name>]"
-         :handler (fn [args _ctx]
-                    (let [argv (vec args)]
+         :handler (fn [args ctx]
+                    ;; Migrated to interactive mode's shared argument splitter:
+                    ;; `--remove` is read from ctx.flags rather than matched as
+                    ;; a positional token, and a quoted target
+                    ;; (`/alias fix "spec analyze --run"`) survives as ONE
+                    ;; argument instead of being re-split on spaces.
+                    ;;
+                    ;; `args` is still every token, so a caller that is not
+                    ;; interactive mode (a keybinding, a test) keeps the old
+                    ;; behaviour via the fallbacks below.
+                    (let [flags  (ctx-flags ctx)
+                          argv   (or (ctx-positional ctx) (vec args))
+                          remove-name (let [f (get flags "remove")]
+                                        (cond
+                                          (string? f) f
+                                          (true? f)   (first argv)
+                                          ;; Pre-splitter form: ["--remove" "x"]
+                                          (= (first (vec args)) "--remove") (second (vec args))
+                                          :else nil))]
                       (cond
+                        (some? remove-name)
+                        (unregister-alias! api aliases-atom remove-name)
+
                         (empty? argv)
                         (list-aliases api aliases-atom)
-
-                        (and (= (first argv) "--remove") (second argv))
-                        (unregister-alias! api aliases-atom (second argv))
 
                         (and (first argv) (second argv))
                         (register-alias! api aliases-atom (first argv)

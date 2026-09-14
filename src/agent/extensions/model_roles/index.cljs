@@ -384,7 +384,8 @@
                  next-r  (when (seq names)
                            (nth names (mod (inc idx) (count names))))]
              (when next-r
-               (activate-role! next-r ui-notify)))))))
+               (activate-role! next-r ui-notify))))
+                       #js {:description "Cycle to the next role (and its model)"})))
 
     ;; /roles command — list all
     (.registerCommand api "roles"

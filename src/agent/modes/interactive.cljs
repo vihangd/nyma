@@ -6,6 +6,7 @@
                                               matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command]]
+            [agent.commands.parser :as parser]
             [agent.ui.themes :refer [default-dark]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.chat-pane :refer [create-chat-pane]]
@@ -18,6 +19,7 @@
             [agent.ui.crash-recovery :as crash-recovery]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.keybindings :as keybindings]
+            [agent.keybinding-registry :as kbr]
             [clojure.string :as str]))
 
 ;;; ---------------------------------------------------------------------------
@@ -162,6 +164,29 @@
           (vec (session->seed-messages (build)))))
       []))
 
+(defn resumed-banner
+  "The line a resumed session opens with, or nil for a fresh one.
+
+   Starting nyma with -c / -r / --session repainted the previous
+   conversation with nothing to say which session it was, how much of it
+   there is, or what it has cost so far — the three things you check before
+   typing into a session you left yesterday.
+
+   `name` falls back to the file's basename, then to \"previous session\".
+   Cost is printed only when the state carries one. Pure: takes values, not
+   the agent."
+  [{:keys [message-count name file-path total-cost]}]
+  (when (pos? (or message-count 0))
+    (let [label (or (when (seq (str (or name ""))) (str name))
+                    (when (seq (str (or file-path "")))
+                      (last (.split (str file-path) "/")))
+                    "previous session")
+          cost  (when (and (number? total-cost) (pos? total-cost))
+                  (str " — $" (.toFixed total-cost 2) " so far"))]
+      (str "Resumed " label " — " message-count
+           (if (= 1 message-count) " message" " messages")
+           (or cost "")))))
+
 (defn session-start-clears?
   "Should a `session_start` blank the transcript instead of re-seeding it?
 
@@ -264,35 +289,83 @@
                            :scrollInfo     (fn [s] (str (fg muted) DIM s RESET))
                            :noMatch        (fn [s] (str (fg error-c) s RESET))}}))
 
+(defn slash-command-items
+  "The entries the editor's slash picker shows, from a commands map.
+
+   One vocabulary with `/help`: both go through `parser/visible-commands`
+   (hidden and disabled commands are not offered) and
+   `parser/compute-display-names` (so the picker says `/role`, not
+   `/model-roles__role`). Only a command whose short name is ambiguous
+   keeps its full `ns__name` key — the short form would be inert there,
+   because `resolve-command` refuses an ambiguous suffix match.
+
+   Display names are right-padded by `compute-display-names` for
+   alignment inside a collision group; trimmed here, because this string
+   is inserted into the editor and a trailing space breaks the next
+   prefix match.
+
+   Pure — takes the map, not the agent — so it is testable without a TUI."
+  [commands]
+  (let [visible  (parser/visible-commands commands)
+        displays (parser/compute-display-names (vec (keys visible)))]
+    (->> visible
+         (map (fn [[name cmd]]
+                {:name        (.trim (str (get displays name name)))
+                 :description (or (:description cmd) "")}))
+         (sort-by :name)
+         vec)))
+
 (defn- build-slash-commands [agent]
   (clj->js
-   (map (fn [[name cmd]]
-          #js {:name        (str name)
-               :description (or (:description cmd) "")})
-        @(:commands agent))))
+   (map (fn [m] #js {:name (:name m) :description (:description m)})
+        (slash-command-items @(:commands agent)))))
+
+(defn unknown-command-text
+  "The message an unrecognised `/cmd` gets. Suggestions come from
+   `parser/command-suggestions+fuzzy` — prefix matches first, and an
+   edit-distance ≤ 2 fallback so `/sepc` offers `/spec` — and are printed
+   as DISPLAY names, the same names `/help` and the picker show.
+
+   The hand-rolled prefix filter this replaces listed raw `ns__name`
+   keys, offered hidden and disabled commands, and could not see a
+   transposition at all."
+  [cmd commands]
+  (let [near (->> (parser/command-suggestions+fuzzy (str "/" cmd) commands)
+                  (map (fn [m] (.trim (str (:display-name m)))))
+                  distinct
+                  (take 5))]
+    (str "Unknown command: /" cmd
+         (when (seq near)
+           (str "\nDid you mean: " (str/join ", " (map #(str "/" %) near))))
+         "\nRun /help to list commands.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Command execution (mirrors app.cljs handle-command)
 ;;; ---------------------------------------------------------------------------
 
 (defn- run-command! [agent text update-messages!]
-  ;; Split on RUNS of whitespace, and drop empties. Splitting on a single " "
-  ;; turned `/spec analyze  foo` (double space) into
-  ;; ["spec" "analyze" "" "foo"], so the handler saw "" as its first argument
-  ;; and reported its usage string — for every command, not just this one.
-  ;; Tabs and a trailing space were broken the same way.
-  (let [parts    (->> (.split (.trim (.slice text 1)) #"\s+")
-                      (remove (fn [p] (= "" p)))
-                      vec)
-        cmd      (first parts)
-        args     (rest parts)
-        commands @(:commands agent)]
+  ;; ONE argument splitter for every slash command: `parse-command-args`
+  ;; understands double quotes and `--flag` / `--flag=value` / `--no-flag`.
+  ;;
+  ;; `args` is still every token, in order, exactly as the old whitespace
+  ;; split produced it — the commands that hand-parse their own flags keep
+  ;; working untouched. What is new is `ctx.flags` (also readable as
+  ;; `(:flags ctx)`) and `ctx.positional`, which a migrated command reads
+  ;; instead of pattern-matching on `--`.
+  (let [after-cmd (.trim (.slice text 1))
+        cmd       (first (.split after-cmd #"\s+"))
+        rest-text (.slice after-cmd (count (str cmd)))
+        parsed    (parser/parse-command-args rest-text)
+        args      (:args parsed)
+        commands  @(:commands agent)]
     (if-let [entry (resolve-command commands cmd)]
       (let [h (:handler entry)]
         (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
                      ;; Aborted by Escape while the command runs.
                      :signal         (when-let [c (:abort-controller agent)] (.-signal @c))
                      :agent          agent
+                     :flags          (clj->js (:flags parsed))
+                     :positional     (clj->js (:positional parsed))
                      :set-messages   update-messages!
                      :append-message (fn [msg]
                                        (update-messages!
@@ -300,25 +373,13 @@
                                           (conj (vec prev) (assoc msg :id (new-id))))))}))
       ;; Was a bare `when-let`: an unrecognised command did nothing at all,
       ;; which is indistinguishable from one that ran and had nothing to say.
-      ;; Suggest near misses by prefix — the usual cause is a half-remembered
-      ;; name, not an invented one.
-      (let [near (->> (keys commands)
-                      (map str)
-                      (filter (fn [n] (or (.startsWith n (str cmd))
-                                          (.startsWith (str cmd) n))))
-                      sort
-                      (take 5))]
-        (update-messages!
-         (fn [prev]
-           (conj (vec prev)
-                 {:role       "error"
-                  :id         (new-id)
-                  :local-only true
-                  :content    (str "Unknown command: /" cmd
-                                   (when (seq near)
-                                     (str "\nDid you mean: "
-                                          (str/join ", " (map #(str "/" %) near))))
-                                   "\nRun /help to list commands.")})))))))
+      (update-messages!
+       (fn [prev]
+         (conj (vec prev)
+               {:role       "error"
+                :id         (new-id)
+                :local-only true
+                :content    (unknown-command-text cmd commands)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entry point
@@ -918,6 +979,30 @@
                            nil))
 
       (.start tui)
+
+      ;; Two lines a session opens with, AFTER .start for the same reason the
+      ;; seed prompt is submitted here: the first frame has painted, so they
+      ;; land in the transcript instead of being overwritten by it.
+      ;;
+      ;; The banner only appears for a session that was resumed (-c / -r /
+      ;; --session seeded the pane above); the hint only when it was not, so a
+      ;; resumed session is not told how to abort a turn it is not running.
+      (let [note (fn [text]
+                   (update-messages!
+                    (fn [msgs]
+                      (conj (vec msgs) {:role "info" :content text :id (new-id)})))
+                   (.requestRender tui))
+            st   @(:state agent)
+            sess @(:session agent)]
+        (if-let [banner (resumed-banner
+                         {:message-count (count @messages)
+                          :name          (when sess (try ((:get-session-name sess))
+                                                         (catch :default _ nil)))
+                          :file-path     (when sess (try ((:get-file-path sess))
+                                                         (catch :default _ nil)))
+                          :total-cost    (:total-cost st)})]
+          (note banner)
+          (note kbr/first-launch-hint)))
 
       ;; The prompt cli handed us (`nyma "do the thing"` with no -p). Submitted
       ;; AFTER .start so the first frame has painted and the turn's output has
