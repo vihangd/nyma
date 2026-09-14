@@ -23,21 +23,62 @@
 
 ;;; ─── Config reading ────────────────────────────────────────────
 
+(defn malformed-config-message
+  "The error shown for an .mcp.json that will not parse. Names the exact
+   path — a present-but-broken config silently yielding 0 servers is
+   indistinguishable from having no config at all."
+  [file-path err-msg]
+  (str "Malformed MCP config: " file-path " — " err-msg
+       ". Its servers will NOT load."))
+
 (defn- read-mcp-json
   "Read and parse an .mcp.json file. Returns the mcpServers object or nil.
-   Parse failures WARN with the exact path — a present-but-broken config
-   silently yielding 0 servers is indistinguishable from success otherwise."
-  [file-path]
+   On a parse failure `on-error` is called with a message naming the exact
+   path (and the debug log still gets it). This used to only warn to
+   debug.log, where nobody running nyma normally would ever see it."
+  [file-path & [on-error]]
   (try
     (when (fs/existsSync file-path)
       (let [raw    (fs/readFileSync file-path "utf8")
             parsed (js/JSON.parse raw)]
         (.-mcpServers parsed)))
     (catch :default e
-      (d/warn "[mcp-discovery]"
-              (str "failed to parse " file-path ": " (.-message e)
-                   " — its servers will NOT load"))
+      (let [m (malformed-config-message file-path (.-message e))]
+        (d/warn "[mcp-discovery]" m)
+        (when on-error (on-error m)))
       nil)))
+
+;;; ─── Candidate config files ───────────────────────────────────
+
+(defn candidate-paths
+  "The four files consulted, lowest → highest precedence. One list, so the
+   scan and the report it prints cannot drift apart."
+  ([project-root] (candidate-paths project-root (os/homedir)))
+  ([project-root home]
+   [(path/join home ".nyma" "mcp.json")
+    (path/join project-root ".nyma" "mcp.json")
+    (path/join project-root ".cursor" "mcp.json")
+    (path/join project-root ".mcp.json")]))
+
+(defn format-candidates
+  "Render `[{:file \"…\" :exists? bool}]` as the consulted-files report.
+   Pure, so both /mcp list and /mcp-status can print it without a filesystem
+   in the test."
+  [entries]
+  (str "Config files consulted (lowest → highest precedence):\n"
+       (str/join "\n"
+                 (map (fn [e]
+                        (str "  " (if (:exists? e) "✓" "·") " " (:file e)
+                             (if (:exists? e) "" " (not found)")))
+                      entries))))
+
+(defn candidate-report
+  "The consulted-files report for a real filesystem."
+  ([project-root] (candidate-report project-root (os/homedir)))
+  ([project-root home]
+   (format-candidates
+    (mapv (fn [p] {:file p :exists? (boolean (fs/existsSync p))})
+          (candidate-paths project-root home)))))
 
 (defn- expand-env
   "Expand ${ENV_VAR} placeholders in a string using process.env."
@@ -119,12 +160,14 @@
      2. <cwd>/.nyma/mcp.json
      3. <cwd>/.cursor/mcp.json
      4. <cwd>/.mcp.json"
-  ([project-root] (scan-mcp-servers project-root (os/homedir)))
-  ([project-root home]
-   (let [user-global   (read-mcp-json (path/join home ".nyma" "mcp.json"))
-         nyma-project  (read-mcp-json (path/join project-root ".nyma" "mcp.json"))
-         cursor-servers (read-mcp-json (path/join project-root ".cursor" "mcp.json"))
-         project-servers (read-mcp-json (path/join project-root ".mcp.json"))
+  ([project-root] (scan-mcp-servers project-root (os/homedir) nil))
+  ([project-root home] (scan-mcp-servers project-root home nil))
+  ([project-root home on-error]
+   (let [[p-user p-nyma p-cursor p-project] (candidate-paths project-root home)
+         user-global     (read-mcp-json p-user on-error)
+         nyma-project    (read-mcp-json p-nyma on-error)
+         cursor-servers  (read-mcp-json p-cursor on-error)
+         project-servers (read-mcp-json p-project on-error)
          merged #js {}
          copy-into! (fn [src]
                       (when src
@@ -139,8 +182,8 @@
 
 (defn- scan-and-store!
   "Scan for MCP servers and update the shared atom."
-  [project-root]
-  (let [servers (scan-mcp-servers project-root)]
+  [project-root & [on-error]]
+  (let [servers (scan-mcp-servers project-root (os/homedir) on-error)]
     (reset! shared/mcp-servers servers)
     servers))
 
@@ -162,8 +205,10 @@
 (defn activate
   "Scan for MCP servers and register /mcp command."
   [api]
-  ;; Initial scan
-  (let [servers (scan-and-store! (js/process.cwd))]
+  ;; Initial scan. A broken config is an ERROR in the transcript naming the
+  ;; file, not a line in debug.log nobody reads.
+  (let [report-error! (fn [m] (notify api m "error"))
+        servers (scan-and-store! (js/process.cwd) report-error!)]
     (when (pos? (count servers))
       (notify api (str "Discovered " (count servers) " MCP server"
                        (when (> (count servers) 1) "s")
@@ -176,14 +221,17 @@
                                     (let [subcmd (first args)]
                                       (cond
                                         (or (nil? subcmd) (= subcmd "list"))
-                                        (let [servers @shared/mcp-servers]
+                                        (let [servers @shared/mcp-servers
+                                              report  (candidate-report (js/process.cwd))]
                                           (if (empty? servers)
-                                            (notify api "No MCP servers discovered. Add a .mcp.json to your project root.")
-                                            (notify api (format-server-list servers))))
+                                            (notify api (str "No MCP servers discovered. Add a .mcp.json to your project root.\n\n" report))
+                                            (notify api (str (format-server-list servers) "\n\n" report))))
 
                                         (= subcmd "refresh")
-                                        (let [servers (scan-and-store! (js/process.cwd))]
-                                          (notify api (str "Refreshed: " (count servers) " MCP server(s) found")))
+                                        (let [servers (scan-and-store! (js/process.cwd)
+                                                                       (fn [m] (notify api m "error")))]
+                                          (notify api (str "Refreshed: " (count servers) " MCP server(s) found\n\n"
+                                                           (candidate-report (js/process.cwd)))))
 
                                         :else
                                         (notify api "Usage: /agent-shell__mcp [list|refresh]" "error"))))})
