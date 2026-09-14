@@ -8,6 +8,7 @@
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
             [agent.commands.resolver :refer [resolve-command]]
+            [agent.keybinding-registry :as kbr]
             [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures]]
             [agent.extension-scope :refer [handler-errors]]
             [agent.resources.loader :refer [discover]]
@@ -862,19 +863,16 @@
                                                         " exited " code ")") "error"))))))))}
 
           "hotkeys"
-          {:description "Show keyboard shortcuts"
+          {:description "Show the keyboard shortcuts that are actually bound"
+           :aliases     ["keys"]
            :handler (fn [_args ctx]
-                      (let [ext-shortcuts @(:shortcuts agent)
-                            builtins [["Escape"  "Abort current generation"]
-                                      ["Ctrl+L"  "Show current model"]
-                                      ["Ctrl+P"  "Reserved"]]
-                            lines (concat
-                                   ["Built-in:"]
-                                   (map (fn [[k d]] (str "  " k " - " d)) builtins)
-                                   (when (seq ext-shortcuts)
-                                     (concat ["" "Extensions:"]
-                                             (map (fn [[k _]] (str "  " k)) ext-shortcuts))))]
-                        (show-info ctx (str/join "\n" lines))))}
+                      ;; Generated, not hardcoded. The list this replaced
+                      ;; advertised Ctrl+L as "Show current model" and Ctrl+P as
+                      ;; "Reserved" — neither was bound to anything — and said
+                      ;; nothing about Ctrl-C, Enter or extension shortcuts.
+                      (show-info ctx (kbr/hotkeys-text
+                                      @(:keybinding-registry agent)
+                                      @(:shortcuts agent))))}
 
           "export"
           {:group       :session

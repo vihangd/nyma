@@ -7,11 +7,22 @@
    3. create-registry combines both and detects conflicts
 
    A 'combo' is a canonical lowercase string: 'ctrl+r', 'alt+f', 'escape', 'return',
-   'tab', 'up', 'down', 'left', 'right', 'backspace', 'delete', 'space', '?', 'a'...")
+   'tab', 'up', 'down', 'left', 'right', 'backspace', 'delete', 'space', '?', 'a'..."
+  (:require [clojure.string :as str]))
 
 (def default-actions
-  "Built-in action registry. Each entry: {:description :default-keys :category}.
-   category is a keyword used to group actions in the help overlay."
+  "Built-in action registry. Each entry:
+     {:description :default-keys :category :bound-by :fixed?}
+
+   `:bound-by` names the code that ACTUALLY dispatches the action, and is
+   absent when nothing does. `/hotkeys` prints only the bound ones — the
+   whole point of generating that list from here is that it stops being a
+   list of keys somebody once intended to wire up.
+
+   `:fixed?` means the combo is not rebindable: interactive.cljs adds its
+   input listener before the keybindings dispatcher and the editor owns its
+   own keys, so a keybindings.json entry for one of these never fires (see
+   keybindings.cljs/shortcut-handler)."
   {;; ── Navigation ──
    "app.help"           {:description  "Show keyboard help"
                          :default-keys ["?"]
@@ -20,31 +31,43 @@
                          :default-keys ["ctrl+r"]
                          :category     :navigation}
    ;; ── Agent ──
-   "app.interrupt"      {:description  "Interrupt agent / close overlay"
+   "app.interrupt"      {:description  "Abort the turn in flight — only while one is running, and only with no overlay open"
                          :default-keys ["escape"]
-                         :category     :agent}
+                         :category     :agent
+                         :bound-by     "interactive mode"
+                         :fixed?       true}
    "app.model.show"     {:description  "Show current model info"
                          :default-keys ["ctrl+l"]
                          :category     :agent}
-   "app.steer"          {:description  "Queue follow-up while streaming"
+   "app.steer"          {:description  "Queue a follow-up while a turn is streaming"
                          :default-keys ["return"]
-                         :category     :agent}
+                         :category     :agent
+                         :bound-by     "interactive mode"
+                         :fixed?       true}
    ;; ── Editor ──
-   "app.submit"         {:description  "Submit message"
+   "app.submit"         {:description  "Submit the message"
                          :default-keys ["return"]
-                         :category     :editor}
+                         :category     :editor
+                         :bound-by     "the editor"
+                         :fixed?       true}
    "app.paste.expand"   {:description  "Expand collapsed paste marker"
                          :default-keys ["ctrl+e"]
                          :category     :editor}
-   "app.tab.complete"   {:description  "Autocomplete (slash, @file, path)"
+   "app.tab.complete"   {:description  "Autocomplete: slash command, @file, path"
                          :default-keys ["tab"]
-                         :category     :editor}
-   "app.bash.mode"      {:description  "Prefix ! for bash, !! for hidden"
+                         :category     :editor
+                         :bound-by     "the editor"
+                         :fixed?       true}
+   "app.bash.mode"      {:description  "Prefix ! runs bash, !! runs it without showing the output"
                          :default-keys ["!"]
-                         :category     :editor}
-   "app.eval.mode"      {:description  "Prefix $ for babashka eval"
+                         :category     :editor
+                         :bound-by     "the editor"
+                         :fixed?       true}
+   "app.eval.mode"      {:description  "Prefix $ evaluates a babashka expression"
                          :default-keys ["$"]
-                         :category     :editor}
+                         :category     :editor
+                         :bound-by     "the editor"
+                         :fixed?       true}
    ;; ── Tools ──
    "app.tools.expand"   {:description  "Expand tool execution view"
                          :default-keys ["ctrl+o"]
@@ -256,3 +279,94 @@
     (and combo
          (contains? (get-bindings registry action-id)
                     (normalize-combo combo)))))
+
+
+;;; ─── /hotkeys ───────────────────────────────────────────
+
+(def fixed-input-keys
+  "Keys nyma or pi-tui own outright, with no action id behind them.
+
+   Ctrl-C is an `addInputListener` in interactive.cljs, added before the
+   keybindings dispatcher, so it is not in the action table and cannot be
+   rebound. The editor rows come from pi-tui's own keybinding table
+   (dist/keybindings.js: tui.input.newLine, tui.input.tab)."
+  [{:combo "ctrl+c"      :category :agent
+    :description "Interrupt: stop the turn, shut the session down and exit"}
+   {:combo "shift+enter" :category :editor
+    :description "Insert a newline instead of submitting (ctrl+j does the same)"}])
+
+(defn shortcut-description
+  "What a `(:shortcuts agent)` entry says about itself.
+
+   Three shapes live in that atom: a bare fn (2-arg `registerShortcut`),
+   `{:handler :description}` (3-arg `registerShortcut` with opts) and
+   `{:action :source :handler}` (keybindings.json). A bare fn can say
+   nothing, so it is named by what it is rather than described as
+   something it isn't."
+  [entry]
+  (cond
+    (fn? entry) "(extension shortcut)"
+    (map? entry)
+    (or (:description entry)
+        (get entry "description")
+        (when-let [a (or (:action entry) (get entry "action"))]
+          (if (.startsWith (str a) "command:")
+            (str "Run /" (.slice (str a) 8))
+            (str a)))
+        "(extension shortcut)")
+    :else "(extension shortcut)"))
+
+(defn- category-rows
+  [registry category]
+  (->> (:actions registry)
+       (filter (fn [[_ a]] (and (= category (:category a)) (some? (:bound-by a)))))
+       (map (fn [[id a]]
+              {:combo (if (:fixed? a)
+                        (normalize-combo (first (:default-keys a)))
+                        (or (get-binding registry id)
+                            (normalize-combo (first (:default-keys a)))))
+               :description (:description a)}))
+       (concat (filter (fn [r] (= category (:category r))) fixed-input-keys))
+       (sort-by :description)
+       vec))
+
+(defn hotkeys-text
+  "The `/hotkeys` list, generated from the action registry (so a user
+   override in keybindings.json shows the combo that is really in effect)
+   plus every registered shortcut with its description.
+
+   This replaced a hardcoded three-line list that claimed Ctrl+L showed the
+   model and Ctrl+P was 'Reserved' — neither was bound to anything — while
+   saying nothing about Ctrl-C, Enter, Tab, or the extension shortcuts that
+   are the only keys most sessions actually use.
+
+   Pure: takes the registry value and the shortcuts map, returns a string."
+  [registry shortcuts]
+  (let [section (fn [title rows]
+                  (when (seq rows)
+                    (str title "\n"
+                         (str/join "\n"
+                                   (map (fn [r]
+                                          (str "  " (format-key-combo (:combo r))
+                                               (.repeat " " (max 1 (- 8 (count (format-key-combo (:combo r))))))
+                                               (:description r)))
+                                        rows)))))
+        ext-rows (->> (or shortcuts {})
+                      (map (fn [[combo entry]]
+                             {:combo combo :description (shortcut-description entry)}))
+                      (sort-by :combo)
+                      vec)
+        blocks (keep identity
+                     [(section "Agent"      (category-rows registry :agent))
+                      (section "Editor"     (category-rows registry :editor))
+                      (section "Navigation" (category-rows registry :navigation))
+                      (section "Extensions and custom bindings" ext-rows)])]
+    (if (seq blocks)
+      (str/join "\n\n" blocks)
+      "No keyboard shortcuts are bound.")))
+
+(def first-launch-hint
+  "One line printed under the editor on the first launch of a session. The
+   three things a new user needs before anything else: how to stop a turn,
+   how to leave, and where the rest is written down."
+  "Esc aborts · Ctrl-C interrupts · /help")

@@ -19,6 +19,7 @@
             [agent.ui.crash-recovery :as crash-recovery]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.keybindings :as keybindings]
+            [agent.keybinding-registry :as kbr]
             [clojure.string :as str]))
 
 ;;; ---------------------------------------------------------------------------
@@ -162,6 +163,29 @@
         (when-let [build (:build-context session)]
           (vec (session->seed-messages (build)))))
       []))
+
+(defn resumed-banner
+  "The line a resumed session opens with, or nil for a fresh one.
+
+   Starting nyma with -c / -r / --session repainted the previous
+   conversation with nothing to say which session it was, how much of it
+   there is, or what it has cost so far — the three things you check before
+   typing into a session you left yesterday.
+
+   `name` falls back to the file's basename, then to \"previous session\".
+   Cost is printed only when the state carries one. Pure: takes values, not
+   the agent."
+  [{:keys [message-count name file-path total-cost]}]
+  (when (pos? (or message-count 0))
+    (let [label (or (when (seq (str (or name ""))) (str name))
+                    (when (seq (str (or file-path "")))
+                      (last (.split (str file-path) "/")))
+                    "previous session")
+          cost  (when (and (number? total-cost) (pos? total-cost))
+                  (str " — $" (.toFixed total-cost 2) " so far"))]
+      (str "Resumed " label " — " message-count
+           (if (= 1 message-count) " message" " messages")
+           (or cost "")))))
 
 (defn session-start-clears?
   "Should a `session_start` blank the transcript instead of re-seeding it?
@@ -955,6 +979,30 @@
                            nil))
 
       (.start tui)
+
+      ;; Two lines a session opens with, AFTER .start for the same reason the
+      ;; seed prompt is submitted here: the first frame has painted, so they
+      ;; land in the transcript instead of being overwritten by it.
+      ;;
+      ;; The banner only appears for a session that was resumed (-c / -r /
+      ;; --session seeded the pane above); the hint only when it was not, so a
+      ;; resumed session is not told how to abort a turn it is not running.
+      (let [note (fn [text]
+                   (update-messages!
+                    (fn [msgs]
+                      (conj (vec msgs) {:role "info" :content text :id (new-id)})))
+                   (.requestRender tui))
+            st   @(:state agent)
+            sess @(:session agent)]
+        (if-let [banner (resumed-banner
+                         {:message-count (count @messages)
+                          :name          (when sess (try ((:get-session-name sess))
+                                                         (catch :default _ nil)))
+                          :file-path     (when sess (try ((:get-file-path sess))
+                                                         (catch :default _ nil)))
+                          :total-cost    (:total-cost st)})]
+          (note banner)
+          (note kbr/first-launch-hint)))
 
       ;; The prompt cli handed us (`nyma "do the thing"` with no -p). Submitted
       ;; AFTER .start so the first frame has painted and the turn's output has

@@ -85,7 +85,8 @@
                                                                     (when (and (.-ui api) (.-setEditorValue (.-ui api)))
                                                                       (.setEditorValue (.-ui api) selected)))))]
                              (when (.-ui api)
-                               (.custom (.-ui api) picker))))))
+                               (.custom (.-ui api) picker)))))
+                       #js {:description "Search prompt history"})
 
     ;; /history command — search prompts
     (.registerCommand api "history"
