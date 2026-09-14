@@ -3,7 +3,7 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            [agent.settings.manager :refer [create-settings-manager defaults
+            [agent.settings.manager :refer [create-settings-manager defaults manifest-defaults
                                             camel->kebab normalize-keys]]))
 
 (describe "settings-manager" (fn []
@@ -194,3 +194,30 @@
                     (-> (expect (:scrollback-mode ((:get mgr)))) (.toBe false))
                     (try (fs/unlinkSync tmp-path) (catch :default _))
                     (try (fs/rmdirSync tmp-dir) (catch :default _)))))))
+
+(describe "manifest-declared settings defaults" (fn []
+  (it "manifest-defaults kebab-cases sections and keys, ignores non-objects"
+      (fn []
+        (-> (expect (clj->js (manifest-defaults #js {"budget" #js {"turnTokens" 5 "wall-seconds" nil}
+                                                     "bogus" 3})))
+            (.toEqual #js {"budget" #js {"turn-tokens" 5 "wall-seconds" nil}}))
+        (-> (expect (clj->js (manifest-defaults nil))) (.toEqual #js {}))))
+
+  (it "registered defaults fill a section under the user's keys, per key"
+      (fn []
+        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
+          ((:register-defaults! mgr) {"budget" {"turn-tokens" 5 "session-tokens" 100}})
+          ((:set-override mgr) "budget" {"turn-tokens" 9})
+          (let [b (get ((:get mgr)) "budget")]
+            ;; user key wins, declared key survives — this is NOT the :roles replace
+            (-> (expect (get b "turn-tokens")) (.toBe 9))
+            (-> (expect (get b "session-tokens")) (.toBe 100))))))
+
+  (it "a second registration merges into the section instead of replacing it"
+      (fn []
+        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
+          ((:register-defaults! mgr) {"x" {"a" 1}})
+          ((:register-defaults! mgr) {"x" {"b" 2}})
+          (-> (expect (clj->js (get ((:get mgr)) "x"))) (.toEqual #js {"a" 1 "b" 2})))))))

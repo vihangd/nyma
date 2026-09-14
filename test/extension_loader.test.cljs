@@ -6,7 +6,8 @@
             [agent.debug :as d]
             [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort last-load-failures]]
             [agent.core :refer [create-agent]]
-            [agent.extensions :refer [create-extension-api]]))
+            [agent.extensions :refer [create-extension-api]]
+            [agent.settings.manager :refer [create-settings-manager]]))
 
 ;; Helper: create a minimal base API for testing discover-and-load
 (defn make-test-api []
@@ -214,6 +215,27 @@
     (-> (expect (get @last-load-failures "half-ext")) (.toContain "mid-activate"))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
+(defn ^:async test-manifest-settings-become-defaults []
+  ;; extension.json `settings` → the manager, before activation, so the
+  ;; extension's own activate sees its defaults through api.settings.
+  (let [tmp-dir (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-dir (path/join tmp-dir "declares")
+        _       (.mkdirSync fs ext-dir #js {:recursive true})
+        _       (.writeFileSync fs (path/join ext-dir "index.mjs")
+                                "export default function(api) { globalThis.__seen = api.settings('declares'); }")
+        _       (.writeFileSync fs (path/join ext-dir "extension.json")
+                                (js/JSON.stringify #js {:namespace "declares"
+                                                        :capabilities #js ["events"]
+                                                        :settings #js {:declares #js {:limit 7}}}))
+        mgr     (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                          :project-path "/tmp/nyma-test-nonexistent-project.json"})
+        agent   (create-agent {:model "mock" :system-prompt "test" :settings mgr})
+        api     (create-extension-api agent)
+        _       (js-await (discover-and-load [tmp-dir] api))]
+    (-> (expect (get-in ((:get mgr)) ["declares" "limit"])) (.toBe 7))
+    (-> (expect (get (aget js/globalThis "__seen") "limit")) (.toBe 7))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
 (defn ^:async test-loads-manifest []
   ;; When extension.json exists in the dir, only index.* is loaded as entry point
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
@@ -239,7 +261,8 @@
             (it "skips non-extension files" test-skips-non-extension-files)
             (it "handles extension that throws during load" test-handles-throwing-extension)
             (it "sweeps what a throwing activation registered" test-throwing-activation-leaves-nothing-registered)
-            (it "loads extension.json manifest for namespace" test-loads-manifest)))
+            (it "loads extension.json manifest for namespace" test-loads-manifest)
+            (it "manifest settings become manager defaults before activation" test-manifest-settings-become-defaults)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────
 

@@ -5,7 +5,8 @@
             ["node:fs/promises" :as fsp]
             ["node:fs" :as fs]
             [agent.extension-scope :refer [create-scoped-api derive-namespace dispose-scope!]]
-            [agent.permissions :refer [parse-capabilities]]))
+            [agent.permissions :refer [parse-capabilities]]
+            [agent.settings.manager :refer [manifest-defaults]]))
 
 (defn- cljs-extension?  [p] (or (.endsWith p ".cljs") (.endsWith p ".cljc")))
 (defn- ts-js-extension? [p] (or (.endsWith p ".ts") (.endsWith p ".js")
@@ -244,6 +245,14 @@
     (let [sorted     (topo-sort @scan-results)
           extensions (atom [])
           failed     (atom #{})]
+      ;; Pass 2b: manifest `settings` blocks become defaults BEFORE any
+      ;; activation runs — an extension reading api.settings at activate time
+      ;; sees its own defaults, and so does /settings even for one that
+      ;; later fails to load.
+      (when-let [reg (.-registerSettingsDefaults api)]
+        (doseq [{:keys [manifest]} sorted]
+          (when-let [s (and manifest (.-settings manifest))]
+            (reg (manifest-defaults s)))))
       ;; Pass 3: Load in sorted order; skip anything whose dependency failed
       ;; (loading against a half-initialized dependency is worse than not
       ;; loading at all).

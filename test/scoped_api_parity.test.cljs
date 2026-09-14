@@ -22,6 +22,12 @@
                        :exec :spawn :session :renderers :ui :providers
                        :model :events :context :flags :state}))
 
+(def ^:private loader-only
+  "Base-API members the loader calls on an extension's behalf and that the
+   scope deliberately does not forward: an extension declares its settings in
+   extension.json, it does not register them at runtime."
+  #{"registerSettingsDefaults"})
+
 (defn- api-fn-keys [api]
   (->> (js/Object.keys api)
        (filter (fn [k] (fn? (aget api k))))
@@ -36,7 +42,7 @@
                                             scoped (make-scoped-api base)
                                             base-fns   (api-fn-keys base)
                                             scoped-fns (api-fn-keys scoped)
-                                            missing    (clj->js (sort (remove scoped-fns base-fns)))]
+                                            missing    (clj->js (sort (remove (into scoped-fns loader-only) base-fns)))]
         ;; Report which methods are absent so failures are self-documenting.
                                         (-> (expect (.-length missing))
                                             (.toBe 0)))))

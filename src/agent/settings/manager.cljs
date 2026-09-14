@@ -364,6 +364,22 @@
               (map (fn [k] (str "  " k " — " (get inert-keys k))))
               (str/join "\n")))))
 
+(defn manifest-defaults
+  "extension.json `settings` (a JS object: section → {key → default}) as
+   {section {key default}} with kebab-case keys, the form `:get` merges.
+   Pure. A section whose value is not an object is ignored."
+  [js-settings]
+  (if (object? js-settings)
+    (reduce (fn [m section]
+              (let [v (aget js-settings section)]
+                (if (object? v)
+                  (assoc m (camel->kebab section)
+                         (reduce (fn [sm k] (assoc sm (camel->kebab k) (aget v k)))
+                                 {} (js/Object.keys v)))
+                  m)))
+            {} (js/Object.keys js-settings))
+    {}))
+
 (defn create-settings-manager
   "Two-scope settings: global + project. Project overrides global.
    Supports :reload to re-read files from disk without restarting.
@@ -376,13 +392,26 @@
          project-path  (or project-path ".nyma/settings.json")
          global-settings  (atom (load-json global-path))
          project-settings (atom (load-json project-path))
-         overrides        (atom {})]
+         overrides        (atom {})
+         ;; Defaults declared by extension manifests, registered by the loader
+         ;; before activation. Merged PER SECTION under the user's values, so
+         ;; a user who sets one key of a section keeps the rest — unlike the
+         ;; top-level shallow merge, which `:roles` relies on being a REPLACE.
+         ext-defaults     (atom {})]
 
      {:get (fn []
-             (merge defaults
-                    (or @global-settings {})
-                    (or @project-settings {})
-                    @overrides))
+             (let [merged (merge defaults
+                                 (or @global-settings {})
+                                 (or @project-settings {})
+                                 @overrides)]
+               (reduce (fn [m k] (assoc m k (merge (get @ext-defaults k) (get m k))))
+                       merged
+                       (keys @ext-defaults))))
+
+      ;; {section {key default}} from an extension manifest. Late registration
+      ;; is fine: `:get` reads the atom on every call.
+      :register-defaults! (fn [m] (swap! ext-defaults #(merge-with merge % m)))
+      :ext-defaults       (fn [] @ext-defaults)
 
       ;; Only what the USER actually wrote. `:get` merges `defaults` in, so it
       ;; always contains every key and cannot answer "did they set this?".

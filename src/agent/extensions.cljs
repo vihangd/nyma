@@ -589,6 +589,12 @@
          ;; The form every reader wants: the merged map, or one section of
          ;; it, never nil. Replaces the try/when/or ladders around
          ;; getSettings — which already never threw.
+         ;; Loader-only: registers a manifest's `settings` block as defaults.
+         ;; Not on the scoped api — an extension declares, it does not call.
+         :registerSettingsDefaults (fn [m]
+                                     (let [sm (:settings agent)]
+                                       (when (and sm (fn? (:register-defaults! sm)))
+                                         ((:register-defaults! sm) m))))
          :settings          (fn [& [section]]
                               (let [sm  (:settings agent)
                                     all (or (when (and sm (fn? (:get sm))) ((:get sm))) {})]
