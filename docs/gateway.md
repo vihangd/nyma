@@ -49,7 +49,9 @@ bun dist/gateway/entry.mjs --help
 
 After `bun link` (or global install) the same commands work as `nyma-gateway`
 directly. The daemon blocks until `SIGINT` or `SIGTERM`, at which point it
-drains in-flight work and calls `stop!` on every channel.
+clears the maintenance timer, calls `stop!` on every channel, and tears down
+the ACP worker pool. It does **not** wait for in-flight turns to finish —
+a message being handled at shutdown is dropped.
 
 ## Config file
 
@@ -82,10 +84,14 @@ value are interpolated from `process.env` at load time.
 }
 ```
 
-All config keys use **kebab-case** (`system-prompt`, `idle-evict-ms`) — the
-gateway reads them with plain Clojure keyword lookups and does not rewrite
-camelCase. Channel-level keys inside `channels[].config` follow the same
-convention per adapter (see each channel section below).
+A `${VAR}` with no value in the environment is left **literally in place**,
+not blanked — a missing `TELEGRAM_BOT_TOKEN` reaches the adapter as the string
+`${TELEGRAM_BOT_TOKEN}`.
+
+Gateway-level config keys use **kebab-case** (`system-prompt`, `idle-evict-ms`)
+and are read with plain keyword lookups. Channel adapters are looser: slack,
+email and telegram each accept a camelCase spelling of their own keys as a
+fallback (`appToken`, `botToken`, …).
 
 ### `agent.*` — agent creation
 
@@ -99,25 +105,34 @@ convention per adapter (see each channel section below).
 
 ### `gateway.streaming` — how partial replies reach the platform
 
-Policies wrap the agent's text-delta stream before it hits the channel's
-`stream!` function. All policies end up calling `send!`/`stream!` with
-**complete text payloads**, never raw deltas — the channel adapter decides
-whether to post a new message or edit an existing one.
+One policy, configured globally in `gateway.streaming`, wraps the agent's
+text-delta stream before it reaches the channel's `stream!` function. It is
+**not** per-channel: every adapter gets the same policy.
 
-| Policy | Latency | Call volume | Best for |
+| Policy | Latency | Call volume | Payload |
 |---|---|---|---|
-| `immediate` | Lowest | Highest | Fast-editing platforms (Slack, Telegram) — each chunk edits the same message in place |
-| `debounce` *(default)* | ~`delayMs` ms | Medium | Good balance; flushes after N ms of silence |
-| `throttle` | ~`intervalMs` ms | Bounded | Strict rate limits; leading-edge emit then cap at most one call per interval |
-| `batch-on-end` | Final only | 1 per turn | Email, SMS, or any platform that cannot edit — emit once when the response is complete |
+| `immediate` | Lowest | Highest | the raw delta |
+| `debounce` *(default, 400 ms)* | ~`delay-ms` | Medium | the deltas buffered since the last flush |
+| `throttle` | ~`interval-ms` (500 ms) | Bounded | the deltas buffered since the last emit |
+| `batch-on-end` | Final only | 1 per turn | the whole response |
 
-Either form works:
+> **Known bug.** Only `batch-on-end` emits cumulative text. The other three
+> emit *fragments*, while every adapter treats the payload as the complete
+> message and overwrites what it sent before. So under the default `debounce`
+> policy, Telegram and Slack edit the reply down to the latest fragment and
+> `POST /message` returns only the last one. Until that is fixed,
+> `batch-on-end` is the only policy that produces a correct reply.
+
+Configuration is a map:
 
 ```jsonc
-"streaming": "debounce"
 "streaming": { "policy": "debounce", "delay-ms": 250 }
 "streaming": { "policy": "throttle", "interval-ms": 750 }
 ```
+
+The bare-string form `"streaming": "debounce"` is **not** read — the loader
+looks for a `policy` key on a map, so a string silently falls through to a
+300 ms debounce.
 
 ### `gateway.session` — conversation retention
 
@@ -126,7 +141,7 @@ Either form works:
 | `persistent` *(default)* | Never auto-evict. The SDK session (agent + history) stays in memory until the daemon exits. |
 | `idle-evict` | Evict the whole session when `Date.now() - lastActive > idle-evict-ms`. Next message creates a fresh session. |
 | `ephemeral` | After every successful run, clear the session's `:data` (agent session + history). Each inbound message sees a stateless agent. |
-| `capped` | Like `persistent` but the per-session data atom is subject to trimming (future work). |
+| `capped` | Nothing reads this value — it behaves exactly as `persistent`. Trimming is future work. |
 
 `idle-evict-ms` defaults to 1 hour. Eviction runs on a 10-minute maintenance
 timer alongside dedup-cache pruning.
@@ -134,16 +149,19 @@ timer alongside dedup-cache pruning.
 ### `gateway.dedup` — idempotency cache
 
 Webhook deliveries (Slack events, Telegram retries) may redeliver the same
-message. Adapters feed an `event-id` into `mark-seen!`/`seen-event?` to
-suppress duplicates. TTL is 5 minutes by default, configurable via
-`dedup.cache-ttl-ms`.
+message. Adapters attach an `:event-id` to each inbound message and
+`gateway.loop` checks it against the cache. TTL is 5 minutes by default,
+configurable via `dedup.cache-ttl-ms`.
 
 ### `gateway.auth` — allow-list check
 
 When either `allowed-user-ids` or `allowed-channels` is non-empty, an auth check
-is automatically registered at startup. Requests with a user-id or
-channel-name not on the corresponding list are denied with a
-`"User X not on allow-list"` style reason.
+is automatically registered at startup. Requests whose user-id is not on
+`allowed-user-ids` are denied with a `"User X not on allow-list"` reason.
+
+> **`allowed-channels` does not work.** The check needs a `:channel-name` on
+> the inbound request and no adapter sets one, so the channel list never
+> denies anything. Use `allowed-user-ids`, or a custom check.
 
 Custom auth checks can be added at runtime:
 
@@ -151,7 +169,7 @@ Custom auth checks can be added at runtime:
 ((:add! (:auth-pipeline gw))
  (fn [req]
    (js/Promise.resolve
-    (if (rate-limit-ok? (.-userId req))
+    (if (rate-limit-ok? (:user-id req))
       #js {:allow? true}
       #js {:allow? false :reason "rate limited"}))))
 ```
@@ -187,6 +205,9 @@ the worker's output back through the conversation's response context.
   `(project, agent)` combination not on the list, regardless of `default-agent`.
 - **`default-agent`** fills in when `run_in_project` is called without an
   explicit `agent` argument. Defaults to `"claude"`.
+- `run_in_project` declares the `execution` capability, so the sample
+  `"exclude-capabilities": ["execution"]` above would drop this tool and with
+  it the whole projects feature.
 
 Sessions are pooled by `(agent, cwd)` — follow-up messages targeting the same
 project reuse the same ACP subprocess and its in-process session, so the
@@ -202,23 +223,25 @@ follow-up work.
 ### `channels[]` — platform adapters
 
 Each entry is `{type, name, config}`. `name` must be unique. `type` is a
-keyword that must have been registered via `register-channel-type!` before
-the config is loaded — the four built-in adapters self-register from
-`gateway.entry`.
+keyword registered via `register-channel-type!` — the four built-in adapters
+self-register when `gateway.entry` loads, which is before any config is read.
+An unknown type is warned about and skipped; startup fails only if *no*
+channel instantiates.
 
 ## Built-in channel adapters
 
-| Type | Capabilities | Streaming strategy | Key config |
-|---|---|---|---|
-| `telegram` | text, typing, attachments | Leading-edge immediate (edits the reply-in-place) | `token` — bot token from @BotFather |
-| `slack` | text, typing, threads | Leading-edge immediate (edits the message) | `app-token`, `bot-token` — xapp-/xoxb- tokens; uses Socket Mode (no public URL needed) |
-| `http` | text | Batched — final reply in HTTP response body | `port` (default `3000`), `host` (default `"0.0.0.0"`), `secret?` (Bearer token) |
-| `email` | text | Batch-on-end (one reply per inbound message) | `imap-host`, `smtp-host`, `user`, `password` (+ optional ports/TLS flags) |
+| Type | Capabilities | Key config |
+|---|---|---|
+| `telegram` | text, typing, attachments | `token` — bot token from @BotFather. Also `parse-mode` (default `"Markdown"`) and `timeout` (long-poll seconds, default 30) |
+| `slack` | text, typing, threads | `app-token`, `bot-token` — xapp-/xoxb- tokens; uses Socket Mode (no public URL needed) |
+| `http` | text | `port` (default `3000`), `host` (default `"0.0.0.0"`), `secret` (Bearer token), `timeout-ms` (default 120000) |
+| `email` | text | `imap-host`, `smtp-host`, `user`, `password` (+ optional ports, `tls?`) |
 
-All four accept `${VAR}` interpolation in their config values, and all lazy-load
-their underlying SDKs (`node-telegram-bot-api`, `@slack/socket-mode`,
-`Bun.serve`, `imap-simple`+`nodemailer`) — if the dependency is missing the
-gateway prints a `bun add <pkg>` hint on startup.
+All four accept `${VAR}` interpolation in their config values. Slack
+(`@slack/socket-mode` + `@slack/web-api`) and email (`imap-simple`,
+`nodemailer`, `mailparser`) lazy-load their SDKs and throw a `bun add <pkg>`
+hint on first use if one is missing. Telegram needs no SDK — it calls the Bot
+API with `fetch`. HTTP uses `Bun.serve` directly.
 
 ### Telegram
 
@@ -231,8 +254,10 @@ gateway prints a `bun add <pkg>` hint on startup.
 ```
 
 Long-polling via the Bot API. Conversation ID is `telegram:<chat_id>`, so
-each chat becomes its own session lane. The adapter sets typing indicators
-on every inbound message until the response is fully streamed.
+each chat becomes its own session lane. The adapter fires one `sendChatAction`
+per turn and one per tool call; Telegram expires the indicator after about
+five seconds, and nothing refreshes it. Photos and documents are downloaded
+into the OS temp directory and never cleaned up.
 
 ### Slack
 
@@ -251,8 +276,11 @@ Uses Socket Mode — no inbound webhook URL needed. Threads become part of the
 conversation key when the incoming event carries a `thread_ts`, so a single
 channel can host multiple parallel agent sessions.
 
-Run `nyma-gateway setup` to verify both tokens are valid before starting the
-daemon.
+On `:typing-start` the adapter posts a `_Thinking..._` placeholder message and
+edits it as the reply streams.
+
+`nyma-gateway setup` runs an `auth.test` against the **bot** token. The app
+token is not validated.
 
 ### HTTP
 
@@ -294,10 +322,15 @@ Request body for `/message` and `/message/async`:
 - `user_id` (optional; snake_case only)
 - `event_id` (optional dedup key; snake_case only)
 
-Missing required fields return `400`.
+Missing required fields return `400`. `/message/async` answers `202`; a sync
+request that outlives `timeout-ms` answers `504`. `GET /result/<job>` answers
+`404 {status:"not_found"}` for an unknown or expired job — the async job store
+keeps results for 5 minutes.
 
-When `secret` is set, every request must include
-`Authorization: Bearer <secret>` or the server returns `401`.
+When `secret` is set, `POST /message` and `POST /message/async` must carry
+`Authorization: Bearer <secret>` or the server returns `401`. `GET /health`
+and `GET /result/<job>` are **not** authenticated, so anyone who can reach the
+port and guess a job id can read that job's output.
 
 ### Email
 
@@ -327,8 +360,9 @@ same as `user`, `mailbox` `"INBOX"`, `poll-ms` 30000.
 Polls an IMAP inbox for unread mail, marks processed messages as seen, and
 sends replies via SMTP. Threading is preserved through `Message-ID` and
 `In-Reply-To` headers; the conversation key is the thread ID, so follow-ups
-land in the same agent session. Streaming policy is `batch-on-end` — each
-email gets exactly one reply, never partial updates.
+land in the same agent session. The adapter buffers its own output and sends on
+`:done`, so each email gets exactly one reply whatever the configured streaming
+policy is.
 
 ---
 
@@ -342,10 +376,11 @@ talk *through* the channel instead of to the local filesystem:
 | `send_message` | Emit an additional message into the current conversation (besides the main reply) |
 | `typing_indicator` | Show/hide a typing indicator while a long operation runs |
 | `conversation_info` | Read the conversation's metadata — channel name, user id, capabilities |
-| `handoff_to_human` | Escalate: tag the conversation for human review and stop agent responses |
-| `request_approval` | Ask the human operator to confirm a destructive action before executing it |
+| `handoff_to_human` | **Inert.** Emits a `:handoff` meta op that no adapter implements; nothing is tagged and nothing stops, but the tool reports success. |
+| `request_approval` | **Inert.** Emits an `:approval-request` that no adapter implements, so the result is always nil and the tool always answers "Denied — do not proceed". No human is ever asked. |
+| `run_in_project` | Present only when `gateway.projects` is configured (see above). Declares the `execution` capability, so `"exclude-capabilities": ["execution"]` removes the entire projects feature. |
 
-All five declare `:modes #{:gateway}` in their tool metadata, so they pass the
+All six declare `:modes #{:gateway}` in their tool metadata, so they pass the
 default `{"modes": ["gateway"]}` filter and **do not load** in the interactive
 CLI. They are registered by `gateway.tools/register-tool-metadata!` at daemon
 startup.
@@ -367,9 +402,12 @@ keys. The gateway validator accepts either form.
 | Key | Signature | Purpose |
 |---|---|---|
 | `name` | string | Unique channel identifier |
-| `capabilities` | Set/Array of keywords or strings | Platform features: any of `:text`, `:typing`, `:threads`, `:attachments` |
 | `start!` | `(on-message-fn) → Promise<void>` | Begin accepting messages. Call `on-message-fn(inbound, response-ctx)` for each one |
 | `stop!` | `() → Promise<void>` | Gracefully shut down |
+
+Those three are what the validator checks. `capabilities` (a set or array of
+`:text`, `:typing`, `:threads`, `:attachments`) is conventional but neither
+required nor validated.
 
 ### Optional keys
 
@@ -386,9 +424,12 @@ The `inbound` argument passed to `on-message-fn` is a map:
  :conversation-id "channel:chat-id"       ;; lane key — picks the session
  :user-id         "sender-id"             ;; for auth allow-lists
  :text            "the message body"
- :attachments     [{:url "..." :mime-type "..." :local-path "..."}]
+ :attachments     [{:local "/tmp/downloaded-file" :mime-type "image/jpeg"}]
  :raw             <original-platform-event>}
 ```
+
+Telegram is the only adapter that produces attachments; it downloads the file
+and reports the local path as `:local`.
 
 ### Response context shape
 
@@ -399,29 +440,28 @@ The `response-ctx` argument is an `IResponseContext`:
  :channel-name    "my-channel"
  :capabilities    #{:text :typing}
  :send!       (fn [content-map] ...)    ;; content-map: {:text, :markdown, :image-url, :file-path}
- :stream!     (fn [chunk-string] ...)    ;; deliver a streaming text delta
- :meta!       (fn [op args] ...)         ;; ops: :typing-start :typing-stop :tool-start :tool-end :done
- :interrupt!  (fn [reason] ...)          ;; user interrupted → abort the run
+ :stream!     (fn [content-map] ...)    ;; SAME shape as send! — {:text "..."}, not a bare string
+ :meta!       (fn [op args] ...)        ;; ops: :typing-start :typing-stop :tool-start :tool-end
+                                        ;;      :done, plus :handoff and :approval-request from
+                                        ;;      the gateway tools (no built-in adapter handles those)
+ :interrupt!  (fn [reason] ...)         ;; declared and defaulted, but nothing in the gateway calls it
 }
 ```
 
-You rarely build this by hand — use `gateway.protocols/make-response-context`
-or compose with `gateway.streaming/create-streaming-policy`:
+Build it with `gateway.protocols/make-response-context`. Do **not** wrap
+`:stream!` in your own `create-streaming-policy`: `gateway.loop` already
+applies the configured policy to whatever `:stream!` you supply, and a second
+policy inside the adapter double-buffers it. None of the four built-in
+adapters does this.
 
 ```clojure
-(require '[gateway.streaming :as streaming])
-
-(let [{:keys [on-chunk on-end]}
-      (streaming/create-streaming-policy
-        (fn [content-map] (platform-send chat-id content-map))
-        :debounce)]
-  (make-response-context
-    {:conversation-id (str "my-chan:" chat-id)
-     :channel-name    "my-chan"
-     :capabilities    #{:text}
-     :send!           (fn [c] (platform-send chat-id c))
-     :stream!         on-chunk
-     :meta!           (fn [op _] (when (= op :done) (on-end nil)))}))
+(make-response-context
+  {:conversation-id (str "my-chan:" chat-id)
+   :channel-name    "my-chan"
+   :capabilities    #{:text}
+   :send!           (fn [content] (platform-send chat-id content))
+   :stream!         (fn [content] (platform-edit chat-id (:text content)))
+   :meta!           (fn [op _] (when (= op :done) (platform-finish chat-id)))})
 ```
 
 ### Registering the factory
@@ -446,8 +486,7 @@ channels[] entry. Register it from your own entry point (or a custom
 
 ```clojure
 (ns my.channels.discord
-  (:require [gateway.protocols :as proto]
-            [gateway.streaming :as streaming]))
+  (:require [gateway.protocols :as proto]))
 
 (defn create-discord-channel [channel-name cfg]
   (let [token  (:token cfg)
@@ -457,7 +496,9 @@ channels[] entry. Register it from your own entry point (or a custom
      :capabilities #{:text :typing}
 
      :start!
-     (fn [on-message-fn]
+     ;; ^:async — js-await below compiles to a bare `await`, which the JS
+     ;; engine rejects at parse time in a plain fn.
+     (^:async fn [on-message-fn]
        (reset! running? true)
        ;; ... create a Discord client ...
        (let [c (discord-create-client token)]
@@ -465,18 +506,15 @@ channels[] entry. Register it from your own entry point (or a custom
          (.on c "messageCreate"
               (fn [msg]
                 (let [chat-id (.-channelId msg)
-                      {:keys [on-chunk on-end]}
-                      (streaming/create-streaming-policy
-                       (fn [content] (.send c chat-id (:text content)))
-                       :debounce)
                       ctx (proto/make-response-context
                             {:conversation-id (str "discord:" chat-id)
                              :channel-name    channel-name
                              :capabilities    #{:text}
-                             :send!           (fn [c] (.send c chat-id (:text c)))
-                             :stream!         on-chunk
-                             :meta!           (fn [op _]
-                                                (when (= op :done) (on-end nil)))})]
+                             :send!    (fn [content] (.send c chat-id (:text content)))
+                             ;; Same shape as send! — the gateway's streaming
+                             ;; policy is applied outside the adapter.
+                             :stream!  (fn [content] (.send c chat-id (:text content)))
+                             :meta!    (fn [_op _args] nil)})]
                   (on-message-fn
                    {:event-id        (.-id msg)
                     :conversation-id (str "discord:" chat-id)
@@ -517,9 +555,32 @@ Gateway logic has unit coverage under `test/`:
 - `gateway_pipelines.test.cljs` — first-deny short-circuit, async checks, sync-throw handling
 - `gateway_streaming.test.cljs` — all four policies' chunk/end state machines
 - `gateway_core.test.cljs` — channel registry, allow-list auth check, `create-gateway` validation
+- `gateway_projects.test.cljs` — project/agent resolution for `run_in_project`
 
-Run just the gateway slice:
+Run just the gateway slice (after `npx squint compile`; `bun run test`
+compiles first):
 
 ```bash
 bun test dist/gateway_*.test.mjs
 ```
+
+---
+
+## Known gaps
+
+Things the code does not do, listed so nobody has to rediscover them:
+
+- **Fragment streaming.** Every policy but `batch-on-end` sends fragments to
+  adapters that treat them as the whole message. See the streaming section.
+- **`allowed-channels` is dead config** — no adapter supplies the field it
+  matches on.
+- **`handoff_to_human` and `request_approval` are inert** — no adapter
+  implements the meta ops they emit.
+- **`/health` and `GET /result/<job>` are unauthenticated** on the HTTP channel.
+- **The approval pipeline is unwired.** `create-gateway` builds and exposes
+  `:approval-pipeline`, and nothing ever consults it.
+- **Shutdown does not drain** in-flight turns.
+- **Session transcripts leak.** Every gateway conversation is written to
+  `/tmp/nyma-sdk-session-<ts>.jsonl` and never removed. So are Telegram
+  attachment downloads.
+- **No idle eviction for ACP workers** (see `gateway.projects`).
