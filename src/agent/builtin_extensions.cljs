@@ -90,7 +90,7 @@
     :manifest  #js {"namespace" "checkpoints" "description" "Snapshots a file's pre-turn state; `/rewind` restores it" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
-    :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
+    :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["commands" "events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
     :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}

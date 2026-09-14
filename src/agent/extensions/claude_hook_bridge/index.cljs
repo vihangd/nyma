@@ -43,12 +43,33 @@
             "sdk"))
         (catch :default _e "sdk"))))
 
+(defn notify-parse-errors!
+  "Surface every parse failure from a load result through `notify`.
+   A malformed hooks file used to fail into total silence — not even
+   debug.log. Pure over the injected callback, so the test needs no UI."
+  [errors notify]
+  (doseq [{:keys [path message]} errors]
+    (let [m (config/malformed-config-message path message)]
+      (d/warn "[hook-bridge]" m)
+      (when notify (notify m "error")))))
+
 (defn ^:export default [api]
   (let [cwd        (js/process.cwd)
         compat     (config/load-compat-flags cwd)
         loaded     (config/load-merged-hooks cwd compat)
+        ;; The WHOLE load result lives in an atom, not just the hooks map:
+        ;; /hooks prints the source list and the parse errors, and after a
+        ;; hot reload a report built from the activation-time value would
+        ;; still be showing the typo the user just fixed.
+        loaded-atom (atom loaded)
         hooks-atom (atom (:hooks loaded))
+        notify     (fn [msg level]
+                     (let [ui (.-ui api)]
+                       (when (and ui (.-available ui) (.-notify ui))
+                         (.notify ui msg (or level "info")))))
         cleanups   (atom [])]
+
+    (notify-parse-errors! (:errors loaded) notify)
 
     ;; Expose mode + a query for the loaded hooks for diagnostic UIs.
     (try
@@ -79,6 +100,17 @@
       (swap! cleanups conj (stop/register! shared))
       (swap! cleanups conj (compact/register! shared))
       (swap! cleanups conj (perm/register! shared)))
+
+    ;; /hooks — what got resolved, out of which files, and what broke.
+    (.registerCommand api "hooks"
+                      #js {:description "Show resolved hooks, the source files read, and any that failed to parse"
+                           :handler
+                           (fn [_args ctx]
+                             (let [text (config/format-report @loaded-atom)]
+                               (when (and ctx (.-ui ctx) (.-notify (.-ui ctx)))
+                                 (.notify (.-ui ctx) text "info"))
+                               text))})
+    (swap! cleanups conj (fn [] (.unregisterCommand api "hooks")))
 
     ;; Visible startup line — only when NYMA_DEBUG=1, otherwise silent.
     (when (and (.-NYMA_DEBUG js/process.env)
@@ -111,7 +143,9 @@
                         (try
                           (let [fresh (config/load-merged-hooks
                                        cwd (config/load-compat-flags cwd))]
+                            (reset! loaded-atom fresh)
                             (reset! hooks-atom (:hooks fresh))
+                            (notify-parse-errors! (:errors fresh) notify)
                             (audit/reset-seen!)  ;; re-audit edited scripts
                             (diag/reset!)        ;; old unseen matchers are no longer config
                             (when (seq (:sources-loaded fresh))

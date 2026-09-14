@@ -23,6 +23,10 @@
                      (swap! listeners update evt
                             (fn [hs] (filterv #(not= % h) (or hs []))))
                      nil)
+         ;; /hooks is registered during default() — an api missing these
+         ;; throws before a single handler gets subscribed.
+         :registerCommand   (fn [_ _] nil)
+         :unregisterCommand (fn [_] nil)
          :events   #js {:on  (fn [_ _ _] nil)
                         :off (fn [_ _] nil)}
          :ui       #js {:available false}
@@ -30,8 +34,8 @@
 
 (defn ^:async test-handlers-subscribed-even-with-empty-hooks []
   (let [mod (js-await (js/import (path/join (js* "import.meta.dir")
-                                     "agent" "extensions"
-                                     "claude_hook_bridge" "index.mjs")))
+                                            "agent" "extensions"
+                                            "claude_hook_bridge" "index.mjs")))
         api (mock-api)]
     ;; Important: this test runs in a tmpdir-like environment where
     ;; the user's real settings.json IS present. We can't fully
