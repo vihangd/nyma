@@ -36,13 +36,12 @@ the user will approve the plan before execution begins.")
 (defn- state-atom [api] (.-__state-atom api))
 (defn- cur-state [api] (.getState api))
 
-(defn- settings [api]
-  (when-let [g (.-getSettings api)] (g)))
+(defn- settings [api] (.settings api))
 
 (defn- auto-approve? [api]
   ;; Tolerate keyword (CLJS defaults) and string (user JSON) keys.
   (let [s  (settings api)
-        pm (or (:plan-mode s) (get s "plan-mode"))]
+        pm (:plan-mode s)]
     (boolean (or (:auto-approve pm) (and pm (get pm "auto-approve"))))))
 
 (defn role-model-spec
@@ -51,10 +50,10 @@ the user will approve the plan before execution begins.")
   [settings role]
   ;; Squint: keywords ARE strings, so :default == "default" — one lookup
   ;; covers both keyword (CLJS defaults) and string (user JSON) roles.
-  (let [roles (or (:roles settings) (get settings "roles"))
+  (let [roles (:roles settings)
         cfg   (or (get roles role) (get roles (str role)))
-        provider (or (:provider cfg) (get cfg "provider"))
-        model-id (or (:model cfg) (get cfg "model"))]
+        provider (:provider cfg)
+        model-id (:model cfg)]
     (when (and provider model-id) (str provider "/" model-id))))
 
 (defn default-model-spec
@@ -92,7 +91,7 @@ the user will approve the plan before execution begins.")
    false/nil (→ no switch, plan uses the :plan role's own model). Exposed
    for tests."
   [settings]
-  (let [pm   (or (:plan-mode settings) (get settings "plan-mode"))
+  (let [pm   (:plan-mode settings)
         ;; key absent (nil) → default :advisor; explicit false → disable.
         raw  (if (some? (:planner-role pm)) (:planner-role pm) (get pm "planner-role"))
         role (if (nil? raw) :advisor raw)]
@@ -117,7 +116,7 @@ the user will approve the plan before execution begins.")
 
 (defn- last-assistant-text [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))]
-    (when a (content->text (or (:content a) (get a "content"))))))
+    (when a (content->text (:content a)))))
 
 (defn extract-todos
   "Parse numbered steps ('1. text', '2) text') into todo maps."
@@ -383,8 +382,7 @@ the user will approve the plan before execution begins.")
 (defn activate
   "Register plan-mode handlers + commands. Returns a deactivate fn."
   [api]
-  (let [handlers (atom [])
-        on-bas   (fn [data] (on-before-agent-start api data))
+  (let [on-bas   (fn [data] (on-before-agent-start api data))
         on-final (fn [data] (on-turn-finalize api data))
         on-tend  (fn [data] (on-turn-end api data))
         on-mres  (fn [data] (on-plan-resolve api data))
@@ -412,12 +410,6 @@ the user will approve the plan before execution begins.")
     (.on api "model_resolve" on-mres -10)
     (.on api "provider_error" on-perr)
     (.on api "session_end" on-send)
-    (swap! handlers into [["before_agent_start" on-bas]
-                          ["turn_finalize" on-final]
-                          ["turn_end" on-tend]
-                          ["model_resolve" on-mres]
-                          ["provider_error" on-perr]
-                          ["session_end" on-send]])
 
     ;; /planmode always works.
     (.registerCommand api "planmode"
@@ -442,7 +434,5 @@ the user will approve the plan before execution begins.")
                                :handler plan-handler})))
 
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.unregisterCommand api "planmode")
       (.unregisterCommand api "plan"))))

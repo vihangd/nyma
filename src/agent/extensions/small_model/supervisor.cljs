@@ -98,7 +98,6 @@
         every-n         (or (:every-n-turns sv-cfg) 8)
         max-iv          (or (:max-interventions sv-cfg) 3)
         pre-commit?     (not= false (:pre-commit sv-cfg))
-        handlers        (atom [])
 
         ;; Budget guard
         can-intervene?  (fn [] (< (:interventions @state) max-iv))
@@ -145,16 +144,11 @@
           nil)]
 
     (.on api "after_provider_request" on-turn)
-    (swap! handlers conj ["after_provider_request" on-turn])
 
     ;; Inter-extension event (quality_monitor escalation)
     (.on api "small-model/quality-signal" on-quality-signal)
-    (swap! handlers conj ["small-model/quality-signal" on-quality-signal])
 
     (.on api "permission_request" on-permission)
-    (swap! handlers conj ["permission_request" on-permission])
 
     ;; Cleanup
-    (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler)))))
+    (fn [] nil)))

@@ -102,7 +102,6 @@
    Returns a cleanup fn."
   [api config state]
   (let [tools    (make-tools api config state)
-        handlers (atom [])
 
         ;; Inject evidence into system prompt via before_agent_start
         on-before-start
@@ -116,11 +115,8 @@
 
     ;; Hook
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
     ;; Cleanup
     (fn []
       (doseq [[name _] tools]
-        (.unregisterTool api name))
-      (doseq [[event handler] @handlers]
-        (.off api event handler)))))
+        (.unregisterTool api name)))))

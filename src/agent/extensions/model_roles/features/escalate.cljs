@@ -49,7 +49,7 @@
   "Pure: settings → the escalate config, user keys merged over defaults.
    Nested :on and :fallback merge field-wise so setting one key keeps the rest."
   [settings]
-  (let [raw (or (:escalate settings) (get settings "escalate") {})]
+  (let [raw (or (:escalate settings) {})]
     (-> (merge default-config raw)
         (assoc :on       (merge (:on default-config)       (:on raw)))
         (assoc :fallback (merge (:fallback default-config) (:fallback raw))))))
@@ -178,7 +178,7 @@
 
 (defn- state-atom [api] (.-__state-atom api))
 (defn- cur-state [api] (.getState api))
-(defn- settings [api] (when-let [g (.-getSettings api)] (g)))
+(defn- settings [api] (.settings api))
 (defn- ui [api] (.-ui api))
 
 (defn- notify [api msg level]
@@ -295,8 +295,8 @@
            :escalate-retries (inc (or (:escalate-retries @st) 0)))
     (notify api (str "↻ retrying from a clean context — " reason) "info")
     (d/info "escalate" (str "retry " (:escalate-retries @st)) #js {:reason reason})
-        (when (and request (.-sendUserMessage api))
-          (.sendUserMessage api request #js {:deliverAs "followUp"}))
+    (when (and request (.-sendUserMessage api))
+      (.sendUserMessage api request #js {:deliverAs "followUp"}))
     true))
 
 (defn apply-escalation!
@@ -486,9 +486,9 @@
       ;; the loop. Dropping the promise races the prune against the next turn.
       (when-let [reason (when-not (= (str (and data (.-finishReason data))) "length")
                           (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
-                                                       (:no-op-turns s))
-                                       :task-in-flight (:escalate-task-in-flight s)
-                                       :verify-exhausted (:escalate-verify-exhausted s)}
+                                                          (:no-op-turns s))
+                                         :task-in-flight (:escalate-task-in-flight s)
+                                         :verify-exhausted (:escalate-verify-exhausted s)}
                                         cfg))]
         (escalate! api reason false)))))
 
@@ -549,8 +549,7 @@
 (defn activate
   "Wire the feature. Returns a cleanup thunk."
   [api]
-  (let [handlers (atom [])
-        on-mres  (fn [data] (on-resolve api data))
+  (let [on-mres  (fn [data] (on-resolve api data))
         on-perr  (fn [data] (on-provider-error api data))
         on-final (fn [data] (on-turn-finalize api data))
         on-user  (fn [data] (on-user-message api data))
@@ -562,16 +561,10 @@
     (.on api "turn_finalize" on-final)
     (.on api "input_submit" on-user)
     (.on api "small-model/verify-exhausted" on-vexh)
-    (swap! handlers into [["model_resolve" on-mres]
-                          ["provider_error" on-perr]
-                          ["turn_finalize" on-final]
-                          ["input_submit" on-user]
-                          ["small-model/verify-exhausted" on-vexh]])
 
     (.registerCommand api "escalate"
                       #js {:description "Hand this task to the stronger model. Usage: /escalate [off|status]"
                            :handler (fn [args ctx] (command-handler api args ctx))})
 
     (fn []
-      (doseq [[event handler] @handlers] (.off api event handler))
       (.unregisterCommand api "escalate"))))

@@ -11,7 +11,7 @@
             [agent.extensions.budget.shared :as shared]))
 
 (defn ^:export activate [api]
-  (let [cfg    (shared/config (try (.getSettings api) (catch :default _ nil)))
+  (let [cfg    (shared/config (.settings api))
         totals (atom {:turn 0 :session 0})
         ;; Wall clock is a TIMER, not a turn_end check: a hung provider call
         ;; finishes no step, so a check that rides turn_end never runs in the

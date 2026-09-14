@@ -58,8 +58,7 @@
            :dispose (fn [] nil)})))
 
 (defn ^:export default [api]
-  (let [handlers     (atom [])
-        last-prompt  (atom nil) ;; dedup consecutive identical prompts
+  (let [last-prompt  (atom nil) ;; dedup consecutive identical prompts
 
         ;; Capture submitted prompts
         on-submit
@@ -73,7 +72,6 @@
                 ((:insert-prompt store) text nil)))))]
 
     (.on api "input_submit" on-submit)
-    (swap! handlers conj ["input_submit" on-submit])
 
     ;; Ctrl+R shortcut — open history search
     (.registerShortcut api "ctrl+r"
@@ -113,7 +111,5 @@
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.unregisterShortcut api "ctrl+r")
       (.unregisterCommand api "history"))))

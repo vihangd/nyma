@@ -57,7 +57,8 @@
   (let [handlers (atom {})
         segments (atom {})
         tools    (atom {})]
-    {:api #js {:getState              (fn [] state)
+    {:api #js {:settings              (fn [sec] (if sec {} {}))
+               :getState              (fn [] state)
                :on                    (fn [evt f & _] (swap! handlers update evt (fnil conj []) f))
                :off                   (fn [_ _] nil)
                :registerTool          (fn [n cfg] (swap! tools assoc n cfg))
@@ -88,8 +89,7 @@
                 (fn []
                   (let [m (stub-api {:plan-executing true
                                      :plan-todos [{:step 1 :text "one" :completed false}]})
-                        _ ((.-default todos) (:api m))
-                        ]
+                        _ ((.-default todos) (:api m))]
                     ;; Model wrote a ledger too — it must not reach the prompt,
                     ;; because plan mode is already injecting its own list.
                     ((.-execute (get @(:tools m) "todo_write"))
@@ -203,8 +203,10 @@
             (it "is disabled by a zero threshold"
                 (fn []
                   (let [m (stub-api {:plan-executing false})
-                        _ (aset (:api m) "getSettings"
-                                (fn [] {:todos {:reminder-every-n-turns 0}}))
+                        _ (aset (:api m) "settings"
+                                (fn [sec]
+                                  (let [all {:todos {:reminder-every-n-turns 0}}]
+                                    (if sec (or (get all sec) {}) all))))
                         _ ((.-default todos) (:api m))]
                     (write-list! m ["one"])
                     (-> (expect (reminder-text (turns! m 30))) (.toBeFalsy)))))))

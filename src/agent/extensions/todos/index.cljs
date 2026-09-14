@@ -11,7 +11,6 @@
 
 (defn ^:export default [api]
   (let [ledger   (atom [])            ; session-scoped [{:content :status}]
-        handlers (atom [])
         wrote?   (atom false)         ; set by todo_write, consumed by the reminder
         stop-reminder (atom nil)
 
@@ -38,7 +37,6 @@
               #js {:system-prompt-additions #js [block]})))]
 
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
     ;; ── Nag reminder ──────────────────────────────────────────────────────
     ;; Models write a list and then abandon it: across 26 real sessions only 4
@@ -56,15 +54,8 @@
     ;;     calls at models where a single invalid call costs ~30pp accuracy.
     ;;     Nagging to maintain is defensible; nagging to create is not.
     ;;   - silent while a plan executes; plan mode owns progress then.
-    ;; getSettings delegates into the settings manager, which throws when the
-    ;; host handed the agent a plain object instead of one. An exception here
-    ;; aborts activation of the WHOLE extension — todo_write/todo_read never get
-    ;; registered — over an optional reminder cadence. Not worth it.
-    (let [cfg     (let [s (try (when (.-getSettings api) (.getSettings api))
-                               (catch :default _e nil))]
-                    (or (:todos s) (get s "todos")))
-          every-n (let [v (or (:reminder-every-n-turns cfg)
-                              (get cfg "reminder-every-n-turns"))]
+    (let [cfg     (.settings api "todos")
+          every-n (let [v (:reminder-every-n-turns cfg)]
                     (if (number? v) v 5))]
       (when (pos? every-n)
         (let [stop ((reminder/make-reminder
@@ -138,5 +129,4 @@
       (.unregisterTool api "todo_write")
       (.unregisterTool api "todo_read")
       (when-let [unreg (.-unregisterStatusSegment api)]
-        (try (unreg "todos.progress") (catch :default _ nil)))
-      (doseq [[e h] @handlers] (.off api e h)))))
+        (try (unreg "todos.progress") (catch :default _ nil))))))

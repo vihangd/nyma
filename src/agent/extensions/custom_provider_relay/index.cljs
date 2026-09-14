@@ -247,7 +247,7 @@
                       (->vec (entry-get e "models" "models")))})
 
 (defn load-settings-entries [settings]
-  (let [raw (when settings (or (get settings "providers") (get settings :providers)))]
+  (let [raw (when settings (get settings "providers"))]
     (mapv normalize-entry (->vec raw))))
 
 (defn merge-entries
@@ -519,8 +519,7 @@
   (reset! level-fn-atom (when (.-getThinkingLevel api)
                           (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (reset! active-tools-atom (rescue/active-tools-fn api))
-  (let [settings   (try (when (.-getSettings api) (.getSettings api))
-                        (catch :default _ nil))
+  (let [settings   (.settings api)
         user       (try (load-settings-entries settings)
                         (catch :default e
                           (d/warn "relay-provider" (str "bad `providers` setting: " (.-message e)))

@@ -48,14 +48,18 @@
                 (fn []
                   (let [api #js {:getState    (fn [] {:base-model-spec "openai/gpt-5"})
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}})}]
+                                                                        :model "claude-sonnet-4-20250514"}}})
+                                 :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
+                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "openai/gpt-5")))))
 
             (it "falls back to the :default role's model when no base-spec (non-cli paths)"
                 (fn []
                   (let [api #js {:getState    (fn [] {})
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}})}]
+                                                                        :model "claude-sonnet-4-20250514"}}})
+                                 :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
+                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "anthropic/claude-sonnet-4-20250514")))))
 
             ;; B6: effective-model-spec is the single resolver — "default" → base
@@ -64,7 +68,9 @@
                 (fn []
                   (let [api #js {:getState    (fn [] {:base-model-spec "openai/gpt-5"})
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
-                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}})}]
+                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}})
+                                 :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/effective-model-spec api "default")) (.toBe "openai/gpt-5"))
                     (-> (expect (pm/effective-model-spec api :deep)) (.toBe "anthropic/claude-opus-4-20250514")))))))
 
@@ -82,6 +88,8 @@
                                  :getState        (fn [] @st)
                                  :getSettings     (fn [] {:roles {:default {:provider "anthropic"
                                                                             :model "claude-sonnet-4-20250514"}}})
+                                 :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
+                                                                            :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
                                  :setModel        (fn [m] (swap! set-calls conj m))
                                  :sendUserMessage (fn [_t _o] nil)
                                  :ui              #js {:available false :notify (fn [_ _] nil)}}]
@@ -155,6 +163,7 @@
     #js {:__state_atom    st
          :getState        (fn [] @st)
          :getSettings     (fn [] settings)
+         :settings (fn [sec] (let [all settings] (if sec (or (get all sec) {}) (or all {}))))
          :setModel        (fn [_m] nil)
          :sendUserMessage (fn [t _o] (swap! sent conj t))
          :ui              #js {:available false}}))
@@ -238,6 +247,7 @@
   #js {:__state_atom st
        :getState     (fn [] @st)
        :getSettings  (fn [] settings)
+       :settings (fn [sec] (let [all settings] (if sec (or (get all sec) {}) (or all {}))))
        :setModel     (fn [m] (swap! set-calls conj m))
        :ui           #js {:available false}})
 
@@ -301,6 +311,7 @@
                         api #js {:__state_atom st
                                  :getState    (fn [] @st)
                                  :getSettings (fn [] oc-settings)
+                                 :settings (fn [sec] (let [all oc-settings] (if sec (or (get all sec) {}) (or all {}))))
                                  :setModel    (fn [_m] nil)
                                  :resolveModel (fn [p m] #js {:id (str p "/" m)})
                                  :ui #js {:available false}}
@@ -330,6 +341,7 @@
     #js {:__state_atom    st
          :getState        (fn [] @st)
          :getSettings     (fn [] settings)
+         :settings (fn [sec] (let [all settings] (if sec (or (get all sec) {}) (or all {}))))
          :setModel        (fn [_m] nil)
          :sendUserMessage (fn [t _o] (swap! sent conj t))
          :ui              #js {:available false
@@ -374,6 +386,7 @@
     #js {:__state_atom      st
          :getState          (fn [] @st)
          :getSettings       (fn [] settings)
+         :settings (fn [sec] (let [all settings] (if sec (or (get all sec) {}) (or all {}))))
          :setModel          (fn [_m] nil)
          :sendUserMessage   (fn [t _o] (swap! sent conj t))
          :ui                #js {:available false :notify (fn [m _l] (swap! notes conj m))}

@@ -23,8 +23,7 @@
             [agent.extensions.openwiki.events :as events]))
 
 (defn ^:export default [api]
-  (let [settings  (try (when (.-getSettings api) (.getSettings api)) (catch :default _ nil))
-        base      (shared/config settings)
+  (let [base      (shared/config (.settings api))
         cleanups  (atom [])]
 
     ;; Register BEFORE reading. Extensions load before cli's resolve-ext-flags

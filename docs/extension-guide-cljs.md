@@ -12,9 +12,14 @@ This guide covers nyma-only superpowers not available in pi-mono.
 (ns my-extension)
 
 (defn ^:export default [api]
-  (.on api "agent_start" (fn [event ctx] (js/console.log "Agent started!")))
-  ;; Return deactivate function
-  (fn [] (js/console.log "Extension deactivated")))
+  ;; Settings: (.settings api) is the whole merged map, (.settings api "k")
+  ;; one section. Both are always a map — never nil, so no guard needed.
+  (let [cfg (.settings api "my-extension")]
+    (.on api "agent_start" (fn [event ctx] (js/console.log "Started!" (:greeting cfg)))))
+  ;; Optional deactivate fn. You do NOT need to unsubscribe handlers or
+  ;; unregister tools/commands here — see Extension Lifecycle. Return nil
+  ;; when there is nothing else to undo.
+  nil)
 ```
 
 The loader looks for the ES module `default` export. Use `(defn ^:export default [api] ...)` — Squint compiles this to `export default default$`.
@@ -156,34 +161,26 @@ Tool and command names are auto-prefixed:
 ;; Registered as "my-ext__search" — no collisions with other extensions
 ```
 
-### 5. Data-Driven Schemas
+### 5. Tool Schemas
 
-No need to import Zod. Use Clojure maps:
-
-```clojure
-(require '[agent.schema :refer [compile-schema]])
-
-(def my-schema
-  (compile-schema
-    {:query   {:type :string :description "Search query"}
-     :limit   {:type :number :description "Max results" :optional true :default 10}
-     :filters {:type [:array :string] :description "Filter tags"}}))
-```
-
-### 6. Protocols
-
-Implement custom session stores, tool providers, or context builders:
+No Zod, and no schema compiler either — a tool's `:parameters` is a JSON
+Schema literal, written as a `#js` map:
 
 ```clojure
-(require '[agent.protocols :refer [ISessionStore_session_load ...]])
-
-;; Custom session store backed by SQLite
-(defn create-sqlite-session [db-path]
-  (let [store {...}]
-    (aset store ISessionStore_session_load (fn [_] ...))
-    (aset store ISessionStore_session_append (fn [_ entry] ...))
-    store))
+#js {:type "object"
+     :required #js ["query"]
+     :properties #js {:query #js {:type "string" :description "Search query"}
+                      :limit #js {:type "number" :description "Max results"}}}
 ```
+
+(`agent.schema.typebox-adapter` still exists, for porting pi-mono
+extensions that declare TypeBox schemas.)
+
+### 6. Subsystems Are Plain Maps
+
+A custom session store, tool provider or context builder is a map of
+closures — no protocol, no `aset` on a marker key. Build the map with the
+keys the consumer reads and hand it over.
 
 ### 7. Extension CLI Flags
 
@@ -397,6 +394,19 @@ safely without a null check.
 6. Default export called with scoped API
 7. May return deactivate function for cleanup
 8. On `/reload` or process exit, deactivate is called
+9. **Then every registration made through the scoped api is swept** —
+   handlers, tools, commands, status segments, flags, providers,
+   middleware. The scope recorded them when you registered them, so a
+   handlers atom and a matching `.off` loop on deactivate is dead code.
+
+So a deactivate fn is only for cleanup the api does not know about:
+stopping a spawned process, closing a socket, resetting a module-level
+atom, calling an unregister thunk some helper handed you. If there is
+none, return `nil`. Unsubscribing mid-life (an extension that switches
+itself off while running) still uses `.off` as before.
+
+Extension state (`api.state`) is deliberately NOT swept — it is your
+on-disk data, keyed by namespace, and must survive a `/reload`.
 
 ## System Events
 

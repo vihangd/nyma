@@ -2,7 +2,8 @@
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [agent.utils.js-interop :as ji]))
 
 ;; ── Stats tracking ───────────────────────────────────────────
 (def suite-stats
@@ -96,9 +97,7 @@
               parsed (js/JSON.parse raw)
               suite  (aget parsed "bash-suite")]
           (if suite
-            ;; js->clj doesn't exist in Squint; parse via JSON round-trip
-            (let [suite-clj (js/JSON.parse (js/JSON.stringify suite))]
-              (merge-with merge default-config suite-clj))
+            (merge-with merge default-config (ji/js->clj* suite))
             default-config))
         (catch :default _e default-config))
       default-config)))

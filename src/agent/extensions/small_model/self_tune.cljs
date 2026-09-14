@@ -159,7 +159,6 @@
         reflect-on  (set (map str (or (:reflect-on st-cfg)
                                       ["quality-signal" "verify-fail"])))
         dir         "memory"
-        handlers    (atom [])
         failures    (atom 0)
         reflections (atom 0)
 
@@ -198,16 +197,11 @@
                              (str/join "\n" (map #(str "- " %) lessons)))]})))]
 
     (when (contains? reflect-on "quality-signal")
-      (.on api "small-model/quality-signal" on-failure)
-      (swap! handlers conj ["small-model/quality-signal" on-failure]))
+      (.on api "small-model/quality-signal" on-failure))
 
     (when (contains? reflect-on "verify-fail")
-      (.on api "small-model/verify-fail" on-failure)
-      (swap! handlers conj ["small-model/verify-fail" on-failure]))
+      (.on api "small-model/verify-fail" on-failure))
 
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
-    (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler)))))
+    (fn [] nil)))

@@ -22,6 +22,7 @@
                 (let [handlers (atom {})
                       aborted  (atom false)
                       api      #js {:getSettings (fn [] #js {:budget #js {:turn-tokens 100}})
+                                    :settings (fn [sec] (let [all #js {:budget #js {:turn-tokens 100}}] (if sec (or (get all sec) {}) (or all {}))))
                                     :on  (fn [evt h] (swap! handlers assoc evt h))
                                     :off (fn [evt _] (swap! handlers dissoc evt))}
                       _        (b/activate api)
@@ -39,6 +40,7 @@
                 (let [handlers (atom {})
                       aborted  (atom 0)
                       api      #js {:getSettings (fn [] #js {:budget #js {:turn-tokens 100 :session-tokens 250}})
+                                    :settings (fn [sec] (let [all #js {:budget #js {:turn-tokens 100 :session-tokens 250}}] (if sec (or (get all sec) {}) (or all {}))))
                                     :on  (fn [evt h] (swap! handlers assoc evt h))
                                     :off (fn [evt _] (swap! handlers dissoc evt))}
                       _        (b/activate api)
@@ -58,6 +60,7 @@
               (fn []
                 (let [handlers (atom {})
                       api      #js {:getSettings (fn [] #js {})
+                                    :settings (fn [sec] (let [all #js {}] (if sec (or (get all sec) {}) (or all {}))))
                                     :on  (fn [evt h] (swap! handlers assoc evt h))
                                     :off (fn [evt _] (swap! handlers dissoc evt))}]
                   (b/activate api)
@@ -71,6 +74,7 @@
   (let [handlers (atom {})
         aborted  (atom false)
         api      #js {:getSettings (fn [] #js {:budget #js {:wall-seconds 0.05}})
+                      :settings (fn [sec] (let [all #js {:budget #js {:wall-seconds 0.05}}] (if sec (or (get all sec) {}) (or all {}))))
                       :on  (fn [evt h] (swap! handlers assoc evt h))
                       :off (fn [evt _] (swap! handlers dissoc evt))}
         _        (b/activate api)
@@ -84,6 +88,7 @@
   (let [handlers (atom {})
         aborted  (atom false)
         api      #js {:getSettings (fn [] #js {:budget #js {:wall-seconds 0.05}})
+                      :settings (fn [sec] (let [all #js {:budget #js {:wall-seconds 0.05}}] (if sec (or (get all sec) {}) (or all {}))))
                       :on  (fn [evt h] (swap! handlers assoc evt h))
                       :off (fn [evt _] (swap! handlers dissoc evt))}
         _        (b/activate api)
@@ -114,6 +119,7 @@
               (fn []
                 (let [handlers (atom {})
                       api      #js {:getSettings (fn [] #js {:budget #js {:turn-tokens 100}})
+                                    :settings (fn [sec] (let [all #js {:budget #js {:turn-tokens 100}}] (if sec (or (get all sec) {}) (or all {}))))
                                     :on  (fn [evt h] (swap! handlers assoc evt h))
                                     :off (fn [evt _] (swap! handlers dissoc evt))}
                       _        (b/activate api)

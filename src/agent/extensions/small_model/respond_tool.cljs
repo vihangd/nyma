@@ -51,8 +51,7 @@
   "Inject synthetic respond tool and wire the block-on-respond hooks.
    Returns a cleanup fn."
   [api _config]
-  (let [handlers   (atom [])
-        pending    (atom nil)  ; saved respond message waiting to be promoted
+  (let [pending    (atom nil)  ; saved respond message waiting to be promoted
 
         ;; ── before_provider_request: inject + check pending ──────
         on-before-request
@@ -101,15 +100,11 @@
                   #js {:content filtered})))))]
 
     (.on api "before_provider_request" on-before-request)
-    (swap! handlers conj ["before_provider_request" on-before-request])
 
     (.addMiddleware api respond-interceptor)
 
     (.on api "message_before_store" on-before-store)
-    (swap! handlers conj ["message_before_store" on-before-store])
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.removeMiddleware api "small-model/respond-tool"))))

@@ -946,7 +946,9 @@
   (or (get phase-prompt (str phase)) continue-prompt))
 
 (defn ^:export default [api]
-  (let [handlers (atom [])
+  (let [;; The status segment's own unregister thunk — a registration the
+        ;; scope sweep does not own, so deactivate still calls it.
+        status-seg-cleanup (atom nil)
         ;; Filled in when the loop registers below; the command handler is
         ;; built before that point and closes over the atom, not the map.
         loop-controls (atom nil)
@@ -954,7 +956,7 @@
         ;; uses :active-role.
         get-active (fn []
                      (let [s (.getState api)]
-                       (or (:active-spec s) (get s "active-spec"))))
+                       (:active-spec s)))
         ;; Persistent store (.nyma/ext-state/spec-driven.json). The state
         ;; ATOM is per-process, so before this an /spec start did not survive
         ;; a restart — you resumed a session with the spec docs silently no
@@ -973,19 +975,17 @@
         ;; Merged live settings (defaults < global < project < overrides).
         ;; read-spec-settings deliberately reads the PROJECT file only, for the
         ;; shape dials; phase config has to see global settings too.
-        safe-settings (fn []
-                        (try (when (.-getSettings api) (.getSettings api))
-                             (catch :default _ nil)))
+        safe-settings (fn [] (.settings api))
 
         ;; ── Phase state ────────────────────────────────────────
         ;; Phase and profile live beside :active-spec — in the state atom for
         ;; the running session, mirrored to the persistent store so a restart
         ;; resumes mid-feature instead of phase-less.
         get-phase   (fn [] (let [s (.getState api)]
-                             (or (:spec-phase s) (get s "spec-phase"))))
+                             (:spec-phase s)))
         get-profile (fn []
                       (let [s (.getState api)]
-                        (or (:spec-profile s) (get s "spec-profile")
+                        (or (:spec-profile s)
                             (:profile (:loop (phases/config (safe-settings)))))))
         known-roles (fn []
                       ;; Union of the user's declared roles and the names that
@@ -1569,35 +1569,35 @@
                                  (str "spec: analyzing " target
                                       " — checking the plan against the spec"))
                         (-> (generateText
-                           #js {:model    model
-                                :messages #js [#js {:role    "user"
-                                                    :content prompt}]
-                                :maxTokens 4096})
-                          (.then
-                           (fn [result]
-                             (let [report (.-text result)
-                                   parsed (analyze/parse-analyze-output report)
-                                   hash   (analyze/compute-content-hash
-                                           {:spec-content         spec-c
-                                            :plan-content         plan-c
-                                            :tasks-content        tasks-c
-                                            :constitution-content const-c})]
+                             #js {:model    model
+                                  :messages #js [#js {:role    "user"
+                                                      :content prompt}]
+                                  :maxTokens 4096})
+                            (.then
+                             (fn [result]
+                               (let [report (.-text result)
+                                     parsed (analyze/parse-analyze-output report)
+                                     hash   (analyze/compute-content-hash
+                                             {:spec-content         spec-c
+                                              :plan-content         plan-c
+                                              :tasks-content        tasks-c
+                                              :constitution-content const-c})]
                                ;; Persist the run for soft-block on start.
-                               (analyze/write-analyze-result!
-                                cwd target
-                                {:content-hash   hash
-                                 :critical-count (:critical-count parsed)
-                                 :finding-count  (count (:findings parsed))})
+                                 (analyze/write-analyze-result!
+                                  cwd target
+                                  {:content-hash   hash
+                                   :critical-count (:critical-count parsed)
+                                   :finding-count  (count (:findings parsed))})
                                ;; Render the full Markdown report.
+                                 (set-analyzing! false)
+                                 (.notify (.-ui ctx) (or report "")))))
+                            (.catch
+                             (fn [e]
                                (set-analyzing! false)
-                               (.notify (.-ui ctx) (or report "")))))
-                          (.catch
-                           (fn [e]
-                             (set-analyzing! false)
-                             (.notify (.-ui ctx)
-                                      (str "Analyze failed: "
-                                           (or (.-message e) (str e)))
-                                      "error")))))))))
+                               (.notify (.-ui ctx)
+                                        (str "Analyze failed: "
+                                             (or (.-message e) (str e)))
+                                        "error")))))))))
 
               "install-skill"
               (let [opts   (vec rest-)
@@ -1827,15 +1827,12 @@
 
     (.on api "context_assembly" on-context-assembly)
     (.on api "before_tool_call" on-before-tool)
-    (swap! handlers conj ["before_tool_call" on-before-tool])
-    (swap! handlers conj ["context_assembly" on-context-assembly])
 
     ;; Status segment. Without it a spec run is invisible: after
     ;; `/spec import --run` the decomposition is queued as a follow-up, so it
     ;; does not start until the next turn ends, and nothing on screen said a
     ;; spec was active or that work was pending.
-    (swap! handlers conj
-           [:status-segment
+    (reset! status-seg-cleanup
             (status-segment/register!
              api
              (fn []
@@ -1846,16 +1843,13 @@
                      prog   (when spec (phases/progress (parse-tasks raw) raw))]
                  {:spec     active
                   :phase    (get-phase)
-                  :role     (or (:active-role st) (get st "active-role"))
+                  :role     (:active-role st)
                   :progress prog
                   ;; the previously-invisible state: spec exists, tasks are
                   ;; still the scaffold, decomposition has not landed
-                  :analyzing? (boolean (or (:spec-analyzing st)
-                                           (get st "spec-analyzing")))
-                  :pending? (boolean (or (:spec-loop-pending st)
-                                         (get st "spec-loop-pending")))
-                  :armed?   (boolean (or (:spec-loop-armed st)
-                                         (get st "spec-loop-armed")))})))])
+                  :analyzing? (boolean (:spec-analyzing st))
+                  :pending? (boolean (:spec-loop-pending st))
+                  :armed?   (boolean (:spec-loop-armed st))}))))
 
     ;; Rehydrate the active spec from the persistent store, but only if it
     ;; still exists on disk — a spec deleted between sessions must not
@@ -1955,9 +1949,7 @@
                     (emit "spec_task_complete"
                           #js {:spec spec :task t :source "agent"}))))))]
       (.on api "tool_execution_start" on-write-start)
-      (.on api "tool_execution_end" on-write-end)
-      (swap! handlers conj ["tool_execution_start" on-write-start])
-      (swap! handlers conj ["tool_execution_end" on-write-end]))
+      (.on api "tool_execution_end" on-write-end))
 
     ;; ── The phase loop ────────────────────────────────────────
     ;;
@@ -1983,7 +1975,6 @@
           armed?         (fn []
                            (let [st (.getState api)]
                              (boolean (or (:spec-loop-armed st)
-                                          (get st "spec-loop-armed")
                                           ;; settings#spec.loop.mode "on" was
                                           ;; parsed and never read, so opting in
                                           ;; permanently did nothing at all.
@@ -1992,7 +1983,7 @@
           disarm!        (fn [] (swap! (.-__state-atom api) dissoc :spec-loop-armed))
           fresh?         (fn [cfg]
                            (let [st (.getState api)
-                                 ov (or (:spec-loop-fresh st) (get st "spec-loop-fresh"))]
+                                 ov (:spec-loop-fresh st)]
                              (if (some? ov) (boolean ov)
                                  (boolean (:fresh-context (:loop cfg))))))
           ;; Ralph's reset, through the store's `messages-cleared` reducer
@@ -2013,7 +2004,7 @@
           promote-pending!
           (fn [progress]
             (let [st (.getState api)]
-              (when (and (or (:spec-loop-pending st) (get st "spec-loop-pending"))
+              (when (and (:spec-loop-pending st)
                          (= :in-progress (:status progress))
                          (not (phases/template-tasks? progress)))
                 (set-pending! false)
@@ -2098,7 +2089,7 @@
                   (do (swap! loop-iteration inc)
                       (when (fresh? cfg) (reset-context!))
                       ((.-sendUserMessage api) (prompt-for-phase phase)
-                       #js {:deliverAs "followUp"}))
+                                               #js {:deliverAs "followUp"}))
 
                   "advance"
                   (let [nxt (:next-phase d)
@@ -2109,7 +2100,7 @@
                     ;; The prompt of the phase we are entering, not the one we
                     ;; just left.
                     ((.-sendUserMessage api) (prompt-for-phase nxt)
-                     #js {:deliverAs "followUp"}))
+                                             #js {:deliverAs "followUp"}))
 
                   "hold"
                   ;; Verify holds silently: verify_gate's fix follow-up is the
@@ -2130,14 +2121,12 @@
                       (say (str "spec loop stopped: " (:reason d))))))))]
 
       (.on api "agent_end" on-agent-end)
-      (swap! handlers conj ["agent_end" on-agent-end])
       ;; verify_gate publishes these on the main bus via emitGlobal; every
       ;; subscriber picks them up with plain api.on (cf. self_tune.cljs:205).
       (doseq [[ev h] [["small-model/verify-fail" on-verify-fail]
                       ["small-model/verify-exhausted" on-verify-fail]
                       ["small-model/verify-pass" on-verify-ok]]]
-        (.on api ev h)
-        (swap! handlers conj [ev h]))
+        (.on api ev h))
       (reset! loop-controls {:set-fresh! (fn [v] (swap! (.-__state-atom api)
                                                         assoc :spec-loop-fresh (boolean v)))
                              :fresh?     (fn [] (fresh? (phases/config (safe-settings))))
@@ -2154,10 +2143,7 @@
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (if (= :status-segment event)
-          (when (fn? handler) (handler))
-          (.off api event handler)))
+      (when-let [f @status-seg-cleanup] (f))
       (.unregisterCommand api "spec")
       ;; Clear active-spec from extension state so a hot-reload doesn't
       ;; silently re-attach with stale spec docs in every turn.

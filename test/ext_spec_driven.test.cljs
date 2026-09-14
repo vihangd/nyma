@@ -1026,6 +1026,8 @@
                  :__state_atom st
                  :getSettings  (fn [] #js {:roles #js {:fast #js {} :deep #js {}
                                                         :advisor #js {} :commit #js {}}})
+                 :settings (fn [sec] (let [all #js {:roles #js {:fast #js {} :deep #js {}
+                                                        :advisor #js {} :commit #js {}}}] (if sec (or (get all sec) {}) (or all {}))))
                  ;; Stand-ins for model_roles (owns :active-role) and the store.
                  :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
                                              (swap! st assoc :active-role (str (.-role d)))))
@@ -1129,6 +1131,9 @@
                  :getSettings  (fn [] (or settings
                                           #js {:roles #js {:fast #js {} :deep #js {}
                                                            :advisor #js {} :commit #js {}}}))
+                 :settings (fn [sec] (let [all (or settings
+                                          #js {:roles #js {:fast #js {} :deep #js {}
+                                                           :advisor #js {} :commit #js {}}})] (if sec (or (get all sec) {}) (or all {}))))
                  ;; Stand-ins for model_roles (owns :active-role) and the store.
                  :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
                                              (swap! st assoc :active-role (str (.-role d)))))

@@ -86,7 +86,7 @@ plain text; the executor will read it on its next turn.")
    An unrecognised value falls back to the default rather than being sent."
   [settings]
   (let [adv   (:advisor (:roles settings))
-        raw   (or (:thinking adv) (get adv "thinking"))
+        raw   (:thinking adv)
         level (str (or raw default-advisor-thinking))]
     (if (thinking/valid-level? level) level default-advisor-thinking)))
 
@@ -223,9 +223,7 @@ plain text; the executor will read it on its next turn.")
                       :execute    (fn [args]
                                     (consult-advisor
                                      api
-                                     (or (and (.-getSettings api)
-                                              (.getSettings api))
-                                         {})
+                                     (.settings api)
                                      {:focus (.-focus args)}))})
 
   ;; Slash command: user-driven forced consultation.
@@ -234,9 +232,7 @@ plain text; the executor will read it on its next turn.")
                          :handler
                          (fn [args ctx]
                            (let [focus (when (seq args) (.join (clj->js args) " "))
-                                 settings (or (and (.-getSettings api)
-                                                   (.getSettings api))
-                                              {})]
+                                 settings (.settings api)]
                              (-> (consult-advisor api settings {:focus focus})
                                  (.then (fn [text]
                                           (.notify (.-ui ctx)

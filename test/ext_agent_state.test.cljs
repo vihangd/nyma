@@ -107,6 +107,7 @@
     {:api #js {:on          (fn [e h] (swap! handlers update e (fnil conj []) h) nil)
                :off         (fn [e h] (swap! handlers update e (fn [hs] (vec (remove #(= % h) hs)))) nil)
                :getSettings (fn [] (clj->js settings))
+               :settings (fn [sec] (let [all (clj->js settings)] (if sec (or (get all sec) {}) (or all {}))))
                :spawn       (fn [cmd args _] (swap! spawned conj (into [cmd] (vec args))) nil)}
      :handlers handlers
      :spawned  spawned
@@ -186,6 +187,7 @@
                             api #js {:on  (fn [e h] (swap! handlers update e (fnil conj []) h) nil)
                                      :off (fn [_ _] nil)
                                      :getSettings (fn [] (clj->js {"agent-state" {"command" ["boom"]}}))
+                                     :settings (fn [sec] (let [all (clj->js {"agent-state" {"command" ["boom"]}})] (if sec (or (get all sec) {}) (or all {}))))
                                      :spawn (fn [& _] (throw (js/Error. "ENOENT")))}
                             stop (ast/activate api)]
                         (-> (expect (fn [] ((first (get @handlers "agent_start")) #js {})))

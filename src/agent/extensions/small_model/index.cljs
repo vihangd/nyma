@@ -42,9 +42,7 @@
             [agent.extensions.small-model.finalize-warn    :as finalize-warn]))
 
 (defn ^:export default [api]
-  (let [settings (try (when (.-getSettings api) (.getSettings api))
-                      (catch :default _ nil))
-        config   (shared/load-config (or settings {}))
+  (let [config   (shared/load-config (.settings api))
         state    (shared/make-state)
         cleanups (atom [])]
 
@@ -68,54 +66,54 @@
                      (false? flag-val) (assoc config :enabled false)
                      :else             config)]
 
-    (when (:enabled config)
+      (when (:enabled config)
 
       ;; ── Quality monitor ──────────────────────────────────────────
-      (when (shared/enabled? config :quality-monitor)
-        (swap! cleanups conj (qm/activate api config state)))
+        (when (shared/enabled? config :quality-monitor)
+          (swap! cleanups conj (qm/activate api config state)))
 
       ;; ── Per-model profiles ───────────────────────────────────────
-      (when (shared/enabled? config :profiles)
-        (swap! cleanups conj (profiles/activate api config)))
+        (when (shared/enabled? config :profiles)
+          (swap! cleanups conj (profiles/activate api config)))
 
       ;; ── Evidence store ───────────────────────────────────────────
-      (when (shared/enabled? config :evidence)
-        (swap! cleanups conj (evidence/activate api config state)))
+        (when (shared/enabled? config :evidence)
+          (swap! cleanups conj (evidence/activate api config state)))
 
       ;; ── Read guard ───────────────────────────────────────────────
-      (when (shared/enabled? config :read-guard)
-        (swap! cleanups conj (read-guard/activate api config)))
+        (when (shared/enabled? config :read-guard)
+          (swap! cleanups conj (read-guard/activate api config)))
 
-      (when (shared/enabled? config :stream-rules)
-        (swap! cleanups conj (stream-rules/activate api config)))
+        (when (shared/enabled? config :stream-rules)
+          (swap! cleanups conj (stream-rules/activate api config)))
 
       ;; ── Thinking budget ──────────────────────────────────────────
-      (when (shared/enabled? config :thinking-budget)
-        (swap! cleanups conj (thinking-budget/activate api config)))
+        (when (shared/enabled? config :thinking-budget)
+          (swap! cleanups conj (thinking-budget/activate api config)))
 
       ;; ── Supervisor ───────────────────────────────────────────────
-      (when (shared/enabled? config :supervisor)
-        (swap! cleanups conj (supervisor/activate api config state)))
+        (when (shared/enabled? config :supervisor)
+          (swap! cleanups conj (supervisor/activate api config state)))
 
       ;; ── Self-tune (ACE-style learned playbook) ───────────────────
-      (when (shared/enabled? config :self-tune)
-        (swap! cleanups conj (self-tune/activate api config)))
+        (when (shared/enabled? config :self-tune)
+          (swap! cleanups conj (self-tune/activate api config)))
 
       ;; ── Respond tool ─────────────────────────────────────────────
-      (when (shared/enabled? config :respond-tool)
-        (swap! cleanups conj (respond-tool/activate api config)))
+        (when (shared/enabled? config :respond-tool)
+          (swap! cleanups conj (respond-tool/activate api config)))
 
       ;; ── Knowledge injection ──────────────────────────────────────
-      (when (shared/enabled? config :knowledge-inject)
-        (swap! cleanups conj (knowledge-inject/activate api config state)))
+        (when (shared/enabled? config :knowledge-inject)
+          (swap! cleanups conj (knowledge-inject/activate api config state)))
 
       ;; ── Finalize warn (premature-completion guard) ───────────────
-      (when (shared/enabled? config :finalize-warn)
-        (swap! cleanups conj (finalize-warn/activate api config state)))
+        (when (shared/enabled? config :finalize-warn)
+          (swap! cleanups conj (finalize-warn/activate api config state)))
 
       ;; ── Context relief ───────────────────────────────────────────
       ;; Always active when the extension is enabled — no sub-toggle needed.
-      (swap! cleanups conj (context-relief/activate api config))))
+        (swap! cleanups conj (context-relief/activate api config))))
 
     ;; Return deactivate fn
     (fn []

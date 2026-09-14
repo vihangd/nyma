@@ -44,6 +44,8 @@
                  :getSettings  (fn []
                                  #js {:roles #js {:fast #js {} :deep #js {}
                                                   :advisor #js {} :commit #js {}}})
+                 :settings (fn [sec] (let [all #js {:roles #js {:fast #js {} :deep #js {}
+                                                  :advisor #js {} :commit #js {}}}] (if sec (or (get all sec) {}) (or all {}))))
                  :state        #js {:get    (fn [k] (get @shared k))
                                     :set    (fn [k v] (swap! shared assoc k v))
                                     :delete (fn [k] (swap! shared dissoc k))

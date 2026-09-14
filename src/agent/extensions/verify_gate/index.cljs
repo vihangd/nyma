@@ -16,7 +16,7 @@
     {:exit-code code :output (str stdout (when (seq stderr) (str "\n" stderr)))}))
 
 (defn ^:export activate [api]
-  (let [cfg      (shared/config (try (.getSettings api) (catch :default _ nil)))
+  (let [cfg      (shared/config (.settings api))
         edited?  (atom false)
         ;; Two ledgers, two tones: paths edited DURING the fix loop (after a
         ;; failure) warrant the strong tamper warning; paths edited BEFORE the

@@ -61,17 +61,13 @@
    disabled (empty string) without a code change; ctrl+r is deliberately not
    the default because prompt_history registers it."
   [api]
-  (let [settings (try (when (.-getSettings api) (.getSettings api))
-                      (catch :default _ nil))
+  (let [settings (.settings api)
         ;; Top-level, same as `roles` (index/get-roles) and as documented in
         ;; the README's settings table. A nested "model-roles" map is also
         ;; accepted so either spelling works.
-        mr       (when settings
-                   (or (get settings "model-roles") (get settings :model-roles)))
-        k        (or (when settings
-                       (or (get settings "cycle-key") (get settings :cycle-key)))
-                     (when mr
-                       (or (get mr "cycle-key") (get mr :cycle-key))))]
+        mr       (get settings "model-roles")
+        k        (or (get settings "cycle-key")
+                     (when mr (get mr "cycle-key")))]
     (if (some? k) (str k) "ctrl+g")))
 
 (defn cyclable-role-names
@@ -87,7 +83,7 @@
    A role without a model is not a model switch, so it is not cyclable."
   [roles]
   (vec (keep (fn [[k cfg]]
-               (when (or (:model cfg) (get cfg "model")) k))
+               (when (:model cfg) k))
              roles)))
 
 (defn- get-roles
@@ -97,11 +93,10 @@
    a non-default provider inherits the default model, so no cross-provider leak).
    Accepts both CLJS maps and plain JS objects (from JSON.parse)."
   [api]
-  (let [settings   (when-let [get-fn (.-getSettings api)] (get-fn))
-        raw-roles  (or (when settings (get settings "roles"))
-                       (when settings (get settings :roles)))
-        def-prov   (when settings (or (:provider settings) (get settings "provider")))
-        def-model  (when settings (or (:model settings) (get settings "model")))
+  (let [settings   (.settings api)
+        raw-roles  (get settings "roles")
+        def-prov   (:provider settings)
+        def-model  (:model settings)
         user-roles (cond
                      (map? raw-roles)    raw-roles
                      (some? raw-roles)   (js-obj->map raw-roles)
@@ -115,8 +110,8 @@
 (defn- resolve-role-model
   "Given a role config {:provider :model}, resolve the model object via provider registry."
   [api role-config]
-  (let [provider (or (:provider role-config) (get role-config "provider"))
-        model-id (or (:model role-config) (get role-config "model"))]
+  (let [provider (:provider role-config)
+        model-id (:model role-config)]
     (when (and provider model-id)
       ;; Use setModel which handles resolution through the provider registry
       (.setModel api (str provider "/" model-id)))))
@@ -132,14 +127,14 @@
                          model-piece
                          (cond
                            (and (= rname "default") default-spec) (str default-spec)
-                           (or (:model rconf) (get rconf "model"))
-                           (str (or (:provider rconf) (get rconf "provider") "?")
-                                "/" (or (:model rconf) (get rconf "model")))
+                           (:model rconf)
+                           (str (or (:provider rconf) "?")
+                                "/" (:model rconf))
                            ;; model-less role (a permission mode) — no model pin.
                            :else "(inherits model)")
                  ;; rname (map key) and active-role (state) are both strings.
                          marker   (if (= rname active-role) " ◀" "")]
-                     (let [allowed (or (:allowed-tools rconf) (get rconf "allowed-tools"))
+                     (let [allowed (:allowed-tools rconf)
                            tools-hint (when (seq allowed) (str " [" (count allowed) " tools]"))]
                        (str "  " rname " → " model-piece
                             (or tools-hint "") marker))))
@@ -185,8 +180,7 @@
         (.notify ui (str "Mode: " mode) "info")))))
 
 (defn ^:export default [api]
-  (let [handlers (atom [])
-        plan-deactivate (atom nil)
+  (let [plan-deactivate (atom nil)
         esc-deactivate  (atom nil)
         seg-deactivate  (atom nil)
 
@@ -216,8 +210,8 @@
 
               (get roles name)
               (let [role-cfg (get roles name)
-                    model-id (or (:model role-cfg) (get role-cfg "model"))
-                    provider (or (:provider role-cfg) (get role-cfg "provider"))]
+                    model-id (:model role-cfg)
+                    provider (:provider role-cfg)]
                 (swap! (.-__state-atom api) assoc :active-role name :escalated-to nil)
                 (when (and provider model-id)
                   (.setModel api (str provider "/" model-id)))
@@ -252,8 +246,8 @@
                 roles    (get-roles api)
                 role-cfg (get roles role)]
             (when (and role-cfg (not= role "default"))
-              (let [provider (or (:provider role-cfg) (get role-cfg "provider"))
-                    model-id (or (:model role-cfg) (get role-cfg "model"))]
+              (let [provider (:provider role-cfg)
+                    model-id (:model role-cfg)]
                 (when (and provider model-id)
                   ;; Re-apply setModel each turn so the correct provider model is
                   ;; always in config even if something else reset it.
@@ -271,8 +265,8 @@
                 roles    (get-roles api)
                 mode-cfg (get roles (or (:permission-mode state) "default"))
                 role-cfg (get roles (or (:active-role state) :default))
-                ma       (or (:allowed-tools mode-cfg) (get mode-cfg "allowed-tools"))
-                ra       (or (:allowed-tools role-cfg) (get role-cfg "allowed-tools"))
+                ma       (:allowed-tools mode-cfg)
+                ra       (:allowed-tools role-cfg)
                 ;; nil → no restriction; a vector (possibly EMPTY) → restrict to
                 ;; it. An empty intersection MUST be returned ({:allowed []} =
                 ;; zero tools), not dropped — else it resolves to "all tools".
@@ -301,15 +295,11 @@
               #js {:decision (str decision)})))]
 
     (.on api "model_resolve" on-resolve)
-    (swap! handlers conj ["model_resolve" on-resolve])
 
     (.on api "tool_access_check" on-tool-access)
-    (swap! handlers conj ["tool_access_check" on-tool-access])
 
     (.on api "permission_request" on-permission)
-    (swap! handlers conj ["permission_request" on-permission])
     (.on api "role_change" on-role-change)
-    (swap! handlers conj ["role_change" on-role-change])
 
     ;; /role command
     (.registerCommand api "role"
@@ -407,8 +397,6 @@
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.unregisterCommand api "role")
       (.unregisterCommand api "roles")
       (.unregisterCommand api "mode")

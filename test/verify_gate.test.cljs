@@ -10,6 +10,7 @@
         ;; would silently change what those assertions mean.
         emits    (atom [])]
     {:api #js {:getSettings     (fn [] (if cmd #js {:verify #js {:cmd cmd :max-attempts 2}} #js {}))
+               :settings (fn [sec] (let [all (if cmd #js {:verify #js {:cmd cmd :max-attempts 2}} #js {})] (if sec (or (get all sec) {}) (or all {}))))
                :on              (fn [evt h] (swap! handlers assoc evt h))
                :off             (fn [evt _] (swap! handlers dissoc evt))
                :sendMessage     (fn [_ _])

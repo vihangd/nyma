@@ -1,7 +1,8 @@
 (ns agent.extensions.agent-shell.shared
   (:require ["node:path" :as path]
             ["node:fs" :as fs]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [agent.utils.js-interop :as ji]))
 
 ;;; ─── Shared state ──────────────────────────────────────────
 
@@ -76,15 +77,11 @@
    :auto-connect  false
    :agents        {}})
 
-;;; ─── JS interop (Squint has clj->js but NOT js->clj) ──────
+;;; ─── JS interop ────────────────────────────────────────────
+;;; The JSON round-trip lives in agent.utils.js-interop; this alias keeps
+;;; the `shared/js->clj*` call sites in acp/* reading the same as before.
 
-(defn js->clj*
-  "Convert a JS object to a Clojure-ish map via JSON round-trip.
-   Squint does not provide js->clj, so we use JSON.parse(JSON.stringify(x))
-   which gives us plain JS objects that Squint's get/assoc work with."
-  [x]
-  (when x
-    (js/JSON.parse (js/JSON.stringify x))))
+(def js->clj* ji/js->clj*)
 
 (defn load-config
   "Load agent-shell config from .nyma/settings.json."
@@ -357,7 +354,6 @@
                     (conj (str "| in:" (format-k (:input-tokens (:turn-usage state)))
                                " out:" (format-k (:output-tokens (:turn-usage state))))))]
         (.join (clj->js parts) " ")))))
-
 
 ;; A `header-factory` + `setup-ui!` pair lived here, installing a rich
 ;; "nyma × claude | model | mode" header through `api.ui.setHeader`. No TUI ever

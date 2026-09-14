@@ -13,7 +13,6 @@
 
 (defn ^:export default [api]
   (let [roots    (atom [])             ; session-scoped absolute paths
-        handlers (atom [])
 
         add-agents-md
         (fn [root]
@@ -30,7 +29,6 @@
                            (str/join "\n" (map (fn [r] (str "- " r (or (add-agents-md r) ""))) @roots)))]}))]
 
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
     (.registerCommand api "add-dir"
                       #js {:description "Add an extra project directory to the session (agent reads/greps it too). Usage: /add-dir <path> | /add-dir (list) | /add-dir remove <path>"
@@ -61,5 +59,4 @@
                                                (notify (str "Added root: " abs " (fires on your next message)") "info")))))))})
 
     (fn []
-      (.unregisterCommand api "add-dir")
-      (doseq [[e h] @handlers] (.off api e h)))))
+      (.unregisterCommand api "add-dir"))))

@@ -97,7 +97,6 @@
   [api config state]
   (let [qm-cfg    (:quality-monitor config)
         max-turns (or (:max-turns qm-cfg) 40)
-        handlers  (atom [])
         ;; Escalation counters (keyed by violation type)
         counters  (atom {:empty 0 :hallucinated 0 :repeat 0})
 
@@ -216,19 +215,13 @@
                                 #js {:deliverAs "followUp"}))))]
 
     (.on api "stream_filter" on-stream-filter)
-    (swap! handlers conj ["stream_filter" on-stream-filter])
     (.on api "turn_start" on-turn-start)
-    (swap! handlers conj ["turn_start" on-turn-start])
     (.on api "turn_finalize" on-empty-turn-finalize)
-    (swap! handlers conj ["turn_finalize" on-empty-turn-finalize])
 
     (.addMiddleware api tool-checker)
 
     (.on api "after_provider_request" on-turn)
-    (swap! handlers conj ["after_provider_request" on-turn])
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.removeMiddleware api "small-model/quality-monitor"))))

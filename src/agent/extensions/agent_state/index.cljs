@@ -80,7 +80,7 @@
   "The argv templates to use: explicit settings first, then auto-detection,
    else nil — and nil means this extension does nothing at all."
   [config agent-name]
-  (let [cmd (or (:command config) (get config "command"))]
+  (let [cmd (:command config)]
     (cond
       (and (sequential? cmd) (seq cmd)) {:report (vec cmd) :release nil}
       (false? (:enabled config))        nil
@@ -89,11 +89,8 @@
 ;;; ─── Activation ────────────────────────────────────────────
 
 (defn ^:export activate [api]
-  (let [;; Guarded the way advisor does: getSettings is not on every api shape
-        ;; an extension can be handed (tests build minimal ones).
-        settings   (or (and (.-getSettings api) (.getSettings api)) #js {})
-        config     (or (aget settings "agent-state") {})
-        agent-name (or (:agent config) (get config "agent") "nyma")
+  (let [config     (.settings api "agent-state")
+        agent-name (or (:agent config) "nyma")
         templates  (resolve-command config agent-name)]
     (if-not templates
       ;; Nothing to report to. No handlers, no cost, no spawned processes.

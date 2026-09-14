@@ -123,15 +123,14 @@
   ;; Opt-in, settings-driven — the same shape `local` and `relay` already use,
   ;; so this is one more provider honouring an existing switch rather than a
   ;; new mechanism:  {"opencode-zen": {"rescue-parsing": true}}
-  (let [settings (try (when (.-getSettings api) (.getSettings api))
-                      (catch :default _ nil))
-        zen      (or (aget (or settings #js {}) "opencode-zen") #js {})
-        override (boolean (or (aget zen "rescue-parsing") (aget zen "rescueParsing")))]
+  (let [settings (.settings api)
+        zen      (.settings api "opencode-zen")
+        override (boolean (or (get zen "rescue-parsing") (get zen "rescueParsing")))]
     ;; One shared policy rather than a fourth bespoke shape — see
     ;; agent.utils.toolcall-rescue/enabled-for?. The per-entry flag above stays
     ;; as an explicit override so nothing configured today stops working.
     (reset! rescue-enabled?
-            (rescue/enabled-for? (or settings #js {}) provider-name "*" override))
+            (rescue/enabled-for? settings provider-name "*" override))
     (reset! active-tools-atom (rescue/active-tools-fn api)))
   (.registerProvider api provider-name
                      #js {:createModel create-oc-zen-model
