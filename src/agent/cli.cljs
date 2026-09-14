@@ -778,7 +778,11 @@ Examples:
         (catch :default e
           (d/warn "sqlite" (str "store unavailable: " (.-message e))))))
 
-    ;; Load all extensions (both .cljs and .ts/.js)
+    ;; Load all extensions (both .cljs and .ts/.js). Up to a few seconds with
+    ;; 40 builtins, during which the terminal was blank; one line on stderr,
+    ;; cleared once the TUI paints over it.
+    (when (and (not (contains? #{"print" "json"} mode)) (.-isTTY js/process.stderr))
+      (.write js/process.stderr (str "nyma " version ": loading extensions…\r")))
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
                                                          (:builtin-extensions resources)))
           extensions-atom   (atom loaded-extensions)
@@ -907,7 +911,20 @@ Examples:
                (try
                  (emit-session-shutdown! agent "exit")
                  (catch :default _ nil))
-               (deactivate-all @extensions-atom))))
+               (deactivate-all @extensions-atom))
+             ;; The last thing an interactive session prints: where it went and
+             ;; what it cost. Nothing did, so resuming meant guessing the path.
+             (when-not (contains? #{"print" "json"} mode)
+               (try
+                 (let [st   @(:state agent)
+                       sess @(:session agent)
+                       file (when (and sess (fn? (:session-file sess))) ((:session-file sess)))]
+                   (.write js/process.stderr
+                           (str "nyma: " (or (:turn-count st) 0) " turns · $"
+                                (.toFixed (or (:total-cost st) 0) 4)
+                                (when (seq (str file)) (str " · " file " — resume with nyma -c"))
+                                "\n")))
+                 (catch :default _ nil)))))
 
       ;; Dispatch to mode. Print/json resolve stdin here (not in the mode
       ;; module) so unit tests can call mode/start directly with nil and

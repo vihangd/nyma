@@ -1,5 +1,7 @@
 (ns agent.commands.builtins
-  (:require [agent.sessions.compaction :refer [compact]]
+  (:require [agent.model-info :as model-info]
+            [agent.token-estimation :as te]
+            [agent.sessions.compaction :refer [compact]]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
@@ -605,13 +607,25 @@
                                             (when (> (count tree) 20) "\n  ... more entries")))))))}
 
           "compact"
-          {:description "Compact conversation context"
+          {:description "Compact conversation context now, and say by how much"
            :handler (fn [_args ctx]
+                      ;; Returned, so the dispatcher's busy state and .catch
+                      ;; cover it: this used to fire "Compaction complete"
+                      ;; before compaction ran, and without :force? a manual
+                      ;; /compact below the auto threshold did nothing at all.
                       (when-let [s @(:session agent)]
-                        (compact s (:model (:config agent)) (:events agent)
-                                 {:model-registry (:model-registry agent)
-                                  :state-atom     (:state agent)})
-                        (notify ctx "Compaction complete")))}
+                        (let [st     (:state agent)
+                              before (te/estimate-messages-tokens (:messages @st))]
+                          (-> (compact s (:model (:config agent)) (:events agent)
+                                       {:model-registry (:model-registry agent)
+                                        :state-atom     st
+                                        :force?         true
+                                        :model-key      (model-info/config-model-key (:config agent))})
+                              (.then (fn [_]
+                                       (let [after (te/estimate-messages-tokens (:messages @st))]
+                                         (notify ctx (if (< after before)
+                                                       (str "Compacted ~" before " → ~" after " tokens")
+                                                       "Nothing to compact")))))))))}
 
           "debug"
           {:description "Show debug information"
@@ -640,8 +654,26 @@
                       (let [loaded (or (when extensions-atom @extensions-atom) [])
                             errs   @handler-errors
                             failed @last-load-failures
-                            row    (fn [{:keys [namespace type]}]
+                            merged (when-let [sm (:settings resources)]
+                                     (when (fn? (:get sm)) ((:get sm))))
+                            ;; An extension that loaded but whose feature is
+                            ;; switched off: its manifest declares
+                            ;; `<section>.enabled` and the merged settings say
+                            ;; false. Five shipped off-by-default with no way to
+                            ;; learn they existed or how to turn them on.
+                            off-hint (fn [{:keys [namespace manifest]}]
+                                       (when-let [decl (and manifest (.-settings manifest))]
+                                         (some (fn [section]
+                                                 (let [keys (aget decl section)]
+                                                   (when (and keys (some? (aget keys "enabled")))
+                                                     (let [v (get-in merged [section "enabled"])]
+                                                       (when-not v
+                                                         (str " — off: set " section ".enabled: true"
+                                                              " in settings, or --ext-" namespace))))))
+                                               (js/Object.keys decl))))
+                            row    (fn [{:keys [namespace type] :as ext}]
                                      (str "  " namespace " (" (str type) ")"
+                                          (off-hint ext)
                                           (when-let [n (get errs namespace)]
                                             (str " — " n " handler error" (when (> n 1) "s")))))]
                         (show-info ctx

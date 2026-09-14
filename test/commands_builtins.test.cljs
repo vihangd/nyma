@@ -338,6 +338,19 @@
                                    (let [agent (make-agent-with-builtins)]
                                      (-> (expect (get @(:commands agent) "login")) (.toBeDefined)))))))
 
+(describe "/compact command" (fn []
+  (it "returns its promise so the dispatcher can show busy and catch failures"
+      (fn []
+        (let [agent (make-agent-with-builtins)
+              {:keys [ctx]} (make-ctx)
+              handler (get-handler agent "compact")
+              r (handler nil ctx)]
+          ;; No session → nil; with one it is a thenable that rejects here
+          ;; (the harness has no real model) — swallow that, the shape is the
+          ;; contract under test.
+          (when (and r (fn? (.-then r))) (.catch r (fn [_] nil)))
+          (-> (expect (or (nil? r) (fn? (.-then r)))) (.toBe true)))))))
+
 (describe "/extensions command" (fn []
                                   (it "lists loaded extensions and load failures"
                                       (fn []
