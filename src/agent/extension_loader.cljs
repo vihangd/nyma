@@ -268,8 +268,6 @@
                           :type       (cond module :builtin
                                             (cljs-extension? entry) :squint
                                             :else :ts)
-                          ;; Carried so filter-by-mode can read `modes` off it;
-                          ;; it takes :manifest and got nil from every entry.
                           :manifest   manifest
                           :scope      scoped
                           :deactivate (when (fn? result) result)}))))
@@ -278,27 +276,6 @@
               (d/error
                (str "[nyma] Failed to load extension (" path "):") e)))))
       @extensions)))
-
-(defn filter-by-mode
-  "Return only those loaded-extension entries whose manifest allows `current-mode`.
-
-   Manifest format (extension.json): {\"modes\": [\"tui\", \"gateway\"]}
-   If a manifest has no `modes` field (or the extension has no manifest),
-   the extension is allowed in every mode — this preserves backward compatibility
-   with all existing extensions written before mode declarations were introduced.
-
-   `current-mode` is a keyword such as :tui or :gateway.
-
-   Example:
-     (filter-by-mode loaded-extensions :gateway)"
-  [extensions current-mode]
-  (filter (fn [{:keys [manifest]}]
-            (let [modes (when manifest (.-modes manifest))]
-              (or (nil? modes)
-                  (let [mode-strs (js/Array.from modes)
-                        mode-name (name current-mode)]
-                    (.includes mode-strs mode-name)))))
-          extensions))
 
 (defn ^:async deactivate-all
   "Call deactivate on every loaded extension, then sweep what its scope
@@ -324,35 +301,3 @@
                 (sweep))))
           extensions))))
 
-(defn ^:async reload-extension
-  "Deactivate and re-load a single extension."
-  [ext-info api]
-  (when (:deactivate ext-info)
-    (try ((:deactivate ext-info))
-         (catch :default e
-           (d/error (str "[nyma] Extension deactivate error during reload:") e))))
-  (try
-    (let [manifest (js-await (load-manifest (:path ext-info)))
-          _        (when manifest (js-await (resolve-dependencies manifest)))
-          ext-fn   (js-await (load-extension (:path ext-info)))
-          ns-str   (or (and manifest (.-namespace manifest))
-                       (:namespace ext-info))
-          caps     (parse-capabilities
-                    (when manifest (.-capabilities manifest))
-                    ns-str)
-          scoped   (create-scoped-api api ns-str caps)]
-      (when ext-fn
-        (let [result (js-await (ext-fn scoped))]
-          (assoc ext-info :deactivate (when (fn? result) result)))))
-    (catch :default e
-      (d/error (str "[nyma] Extension reload error (" (:path ext-info) "):") e)
-      ext-info)))
-
-(defn ^:async reload-all
-  "Reload all extensions. Returns updated extension info vector."
-  [extensions api]
-  (let [results (atom [])]
-    (doseq [ext extensions]
-      (let [reloaded (js-await (reload-extension ext api))]
-        (swap! results conj reloaded)))
-    @results))

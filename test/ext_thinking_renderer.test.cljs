@@ -1,7 +1,7 @@
 (ns ext-thinking-renderer.test
   "Tests for the thinking-renderer extension."
   (:require ["bun:test" :refer [describe it expect beforeEach]]
-            [extensions.thinking-renderer.index :as ext]))
+            [agent.extensions.thinking-renderer.index :as ext]))
 
 ;;; ─── Mock API ─────────────────────────────────────────────────
 

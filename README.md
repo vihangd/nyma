@@ -725,7 +725,7 @@ Control which API methods the extension can access via a capabilities list in `e
 }
 ```
 
-Available capabilities: `tools`, `commands`, `shortcuts`, `events`, `messages`, `state`, `ui`, `middleware`, `exec`, `spawn`, `providers`, `model`, `session`, `flags`, `renderers`, `context`. Use `all` to grant everything. When no manifest is present, extensions get everything except `exec`, `spawn`, `tools-override` and `middleware` — declare those explicitly.
+Available capabilities: `tools`, `commands`, `shortcuts`, `events`, `messages`, `state`, `ui`, `middleware`, `exec`, `spawn`, `providers`, `model`, `session`, `flags`, `context`. Use `all` to grant everything. When no manifest is present, extensions get everything except `exec`, `spawn`, `tools-override` and `middleware` — declare those explicitly.
 
 ### ClojureScript Extension
 

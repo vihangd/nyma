@@ -1,4 +1,4 @@
-(ns extensions.thinking-renderer.index
+(ns agent.extensions.thinking-renderer.index
   "Enhanced collapsible thinking/reasoning display with token counting.
    Listens to acp_thought (ACP agents) and reasoning_delta (native provider)
    events and renders thinking in a widget with auto-collapse on turn completion.")

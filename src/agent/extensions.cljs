@@ -348,8 +348,12 @@
                                                             (cons [(:id m) meta] q))))
                                                       models)))
                                   ;; Auto-register pricing
-                                    (swap! provider-rows assoc name {:gateway? (and gateway? (not was-unpriced?))
-                                                                     :pricing  []})
+                                    ;; Re-registering the same name (relay does:
+                                    ;; seed list, then discovered list) must KEEP
+                                    ;; the rows the first call recorded.
+                                    (swap! provider-rows update name
+                                           #(or % {:gateway? (and gateway? (not was-unpriced?))
+                                                   :pricing  []}))
                                     (doseq [m models]
                                       (when-let [cost (:cost m)]
                                         ;; 4-element form only when a cache rate

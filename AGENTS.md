@@ -76,7 +76,6 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode |
 | `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode |
 | `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode |
-| `src/macros/tool_dsl.cljs` | `macros.tool-dsl` | Compile-time macros: `deftool`, `defcommand`, `definterceptor`, `defmiddleware`, `defreducer`, `defextension` |
 
 ## Development Workflow
 
@@ -142,48 +141,21 @@ Squint only generates `async function` for top-level `defn`. The `^:async` metad
 
 This applies everywhere: tool execute functions, event handlers, test callbacks. If you need an async callback, extract it to a named `defn ^:async`.
 
-### `name`, `keyword?`, and `keyword` are not available at runtime
+### `name`, `keyword`, and callable sets DO work (squint 0.14.208)
 
-These Clojure core functions compile to bare identifiers (`name(k)`, `keyword_QMARK_(x)`, `keyword(s)`) that are `ReferenceError`s at runtime. In Squint, keywords **are** strings — no conversion is needed.
+Earlier notes here said `name`/`keyword` were `ReferenceError`s and sets were
+not callable. Both are false on the pinned squint: `squint_core.name` and
+`squint_core.keyword` exist, and `(#{"a" "b"} x)` compiles to
+`squint_core.get(new Set([...]), x)`. Keywords are still plain strings, so
+`(name :k)` returns `"k"` and `(keyword "k")` returns `"k"`. Prefer
+`contains?` for sets anyway — it reads as intent — but do not "fix" existing
+callable-set sites; an audit that flags them is chasing a ghost.
 
-```clojure
-;; BROKEN — ReferenceError: name is not defined
-(name :my-key)  ; => wants "my-key"
+### Function keys are stringified
 
-;; CORRECT — just use str, or use the keyword directly (it's already a string)
-(str :my-key)   ; => ":my-key"  (includes the colon)
-;; For keyword→string, just use the string literal directly
-
-;; BROKEN — ReferenceError: keyword_QMARK_ is not defined
-(keyword? x)
-
-;; CORRECT — check for string type instead
-(string? x)
-
-;; BROKEN — ReferenceError: keyword is not defined
-(keyword "foo")
-
-;; CORRECT — just use the string
-"foo"
-```
-
-### Sets are not callable
-
-In Clojure, sets work as functions: `(#{:a :b} :a) ;=> :a`. In Squint, sets compile to JS `Set` objects which are **not callable**. This also applies when the set is held in an atom — `@atom` returns the JS Set, and calling it still fails.
-
-```clojure
-;; BROKEN — TypeError: ac is not a function
-(filter (fn [[k _]] (my-set k)) items)
-
-;; BROKEN — same error even with atom deref
-(let [seen (atom #{})]
-  (when (@seen id) ...))            ;; TypeError: squint_core.deref(seen) is not a function
-
-;; CORRECT
-(filter (fn [[k _]] (contains? my-set k)) items)
-(let [seen (atom #{})]
-  (when (contains? @seen id) ...))  ;; use contains? on the dereferenced set
-```
+`assoc`, `get`, `add-watch` on a plain map/atom stringify a function key, so
+two closures with identical source collapse into one entry. Key by identity
+with a `js/Map` / `js/WeakMap`, or by a counter token.
 
 ### Maps/objects are not callable — use `get`
 
@@ -385,16 +357,6 @@ The interceptor chain (`src/agent/interceptors.cljs`) is the execution engine un
 (def combined (into-chain chain-a chain-b extra-int))
 ```
 
-### Using the `definterceptor` Macro
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [definterceptor]])
-
-(definterceptor audit-log
-  {:enter (fn [ctx] (println "entering" (:tool-name ctx)) ctx)
-   :leave (fn [ctx] (println "leaving" (:tool-name ctx)) ctx)})
-```
-
 ## Middleware Pipeline
 
 The middleware pipeline (`src/agent/middleware.cljs`) wraps tool execution as an interceptor chain. Each tool call flows through all registered interceptors before and after execution.
@@ -433,18 +395,6 @@ api.addMiddleware({
 });
 
 api.removeMiddleware("rate-limiter");
-```
-
-### Using the `defmiddleware` Macro
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [defmiddleware]])
-
-(defmiddleware rate-limiter
-  {:enter (fn [ctx]
-            (if (too-many-calls?)
-              (assoc ctx :cancelled true)
-              ctx))})
 ```
 
 ## Protocols
@@ -519,21 +469,6 @@ Supported type specs:
 (def schema (compile-schema {:query {:type :string :description "Search query"}}))
 ```
 
-### `deftool` with Data Schema
-
-The `deftool` macro now accepts data schemas instead of inline Zod:
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [deftool]])
-
-(deftool web-search
-  "Search the web"
-  {:query {:type :string :description "The search query"}
-   :limit {:type :number :description "Max results" :optional true}}
-  [{:keys [query limit]}]
-  (js-await (js/fetch (str "https://api.example.com?q=" query))))
-```
-
 ## Event-Sourced State Store
 
 `src/agent/state.cljs` replaces the bare atom with an event-sourced store. All state mutations go through `dispatch!` with registered reducers. Full history is maintained.
@@ -581,15 +516,6 @@ The store exposes a bare-atom interface so existing code continues to work:
 ((:swap store) update :messages conj msg)
 ((:reset store) new-state)
 ((:deref store))
-```
-
-### `defreducer` Macro
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [defreducer]])
-
-(defreducer handle-tool-approved :tool-approved [state data]
-  (update state :approved-tools conj (:tool-name data)))
 ```
 
 ### Extension API
@@ -654,25 +580,6 @@ Place an `extension.json` file alongside the extension:
 
 Without a manifest, the namespace is derived from the filename (`git_tools.cljs` → `"git-tools"`).
 
-### `defextension` Macro
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [defextension]])
-
-(defextension git-tools
-  {:capabilities #{:tools :events}}
-  [api]
-  (.registerTool api "status"
-    #js {:description "Git status"
-         :execute     (fn [_] (js-await (run-bash "git status")))})
-  (fn [] (.unregisterTool api "status")))
-```
-
-This macro:
-1. Defines `git-tools-metadata` with namespace and capabilities
-2. Defines `git-tools-activate` as the main async function
-3. Sets `module.default` to the activate function
-
 ## Event System
 
 All agent lifecycle events flow through the event bus. Handlers are error-isolated — a throwing handler is logged and the next handler continues.
@@ -688,7 +595,7 @@ context / before_agent_start / input
 compact / before_compact
 ```
 
-**Note:** `tool_execution_start` and `tool_execution_end` are defined in `all-event-types` but are never emitted by the current loop implementation.
+**Note:** `tool_execution_start` and `tool_execution_end` are emitted by the middleware tracking interceptor (`middleware.cljs`), not by `loop.cljs`.
 
 ### Async Event Emission
 
@@ -735,33 +642,6 @@ Settings are resolved in priority order:
 | json | `--mode json` | Run once, output JSON messages |
 | rpc | `--mode rpc` | JSONL protocol over stdio |
 | sdk | (import) | Programmatic embedding |
-
-## Tool DSL (Macros)
-
-Use `deftool` and `defcommand` macros for concise tool definitions:
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [deftool defcommand]])
-
-(deftool web-search
-  "Search the web"
-  {:query {:type :string :description "The search query"}
-   :limit {:type :number :description "Max results" :optional true}}
-  [{:keys [query limit]}]
-  (let [res (js-await (js/fetch (str "https://api.example.com?q=" query)))]
-    (js-await (.json res))))
-```
-
-All available macros in `macros.tool-dsl`:
-
-| Macro | Purpose |
-|-------|---------|
-| `deftool` | Define an LLM-callable tool with data schema |
-| `defcommand` | Define a `/slash` command |
-| `definterceptor` | Define a named interceptor `{:name :enter :leave :error}` |
-| `defmiddleware` | Shorthand for interceptors used as middleware |
-| `defreducer` | Define a state reducer for a specific event type |
-| `defextension` | Define an extension with metadata, activate fn, and module.default |
 
 ## Quick Reference: DOs and DON'Ts
 

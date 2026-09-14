@@ -50,6 +50,7 @@
             [agent.extensions.spec-driven.index :as ext-spec-driven]
             [agent.extensions.stats-dashboard.index :as ext-stats-dashboard]
             [agent.extensions.subagent.index :as ext-subagent]
+            [agent.extensions.thinking-renderer.index :as ext-thinking-renderer]
             [agent.extensions.todos.index :as ext-todos]
             [agent.extensions.token-suite.index :as ext-token-suite]
             [agent.extensions.verify-gate.index :as ext-verify-gate]
@@ -71,7 +72,7 @@
     :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events" "commands" "ui" "state"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "session" "renderers" "context" "flags" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "session" "context" "flags" "state"] "dependsOn" #js []}}
    {:namespace "agent-state"
     :module    ext-agent-state
     :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js []}}
@@ -165,6 +166,9 @@
    {:namespace "subagent"
     :module    ext-subagent
     :manifest  #js {"namespace" "subagent" "capabilities" #js ["tools" "commands" "state" "model" "ui" "messages" "events"] "dependsOn" #js ["model-roles"]}}
+   {:namespace "thinking-renderer"
+    :module    ext-thinking-renderer
+    :manifest  #js {"namespace" "thinking-renderer" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
    {:namespace "todos"
     :module    ext-todos
     :manifest  #js {"namespace" "todos" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js []}}

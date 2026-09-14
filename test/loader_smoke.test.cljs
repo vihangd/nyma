@@ -64,7 +64,8 @@
     "verify-gate"
     "checkpoints"
     "handoff"
-    "budget"})
+    "budget"
+    "thinking-renderer"})
 
 (defn ^:async test-all-builtins-load-with-correct-namespaces []
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})

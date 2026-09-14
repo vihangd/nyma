@@ -34,8 +34,8 @@
 
 (def ^:private lint-roots
   "Scanned for hyphenated property reads. `src/agent` alone left src/gateway
-   (1,700+ LOC) and src/macros unscanned — the trap applies equally there."
-  ["src/agent" "src/gateway" "src/macros"])
+   (1,700+ LOC) unscanned — the trap applies equally there."
+  ["src/agent" "src/gateway"])
 
 (describe "squint hyphenated .- access lint" (fn []
 

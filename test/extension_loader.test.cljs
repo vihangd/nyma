@@ -4,8 +4,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.debug :as d]
-            [agent.extension-loader :refer [deactivate-all discover-and-load
-                                            reload-extension reload-all topo-sort]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort]]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]))
 
@@ -221,45 +220,6 @@
             (it "skips non-extension files" test-skips-non-extension-files)
             (it "handles extension that throws during load" test-handles-throwing-extension)
             (it "loads extension.json manifest for namespace" test-loads-manifest)))
-
-;; ── Extension reload ─────────────────────────────────────────
-
-(defn ^:async test-reload-extension-calls-deactivate []
-  (let [deactivated (atom false)
-        ext-info {:path "/tmp/fake.mjs"
-                  :namespace "fake"
-                  :type :ts
-                  :deactivate (fn [] (reset! deactivated true))}]
-    ;; reload-extension will call deactivate, then try to re-load the file
-    ;; Since /tmp/fake.mjs doesn't exist, it will catch the error
-    (js-await (reload-extension ext-info (make-test-api)))
-    ;; Deactivate should have been called
-    (-> (expect @deactivated) (.toBe true))))
-
-(defn ^:async test-reload-extension-handles-no-deactivate []
-  (let [ext-info {:path "/tmp/fake.mjs"
-                  :namespace "fake"
-                  :type :ts
-                  :deactivate nil}]
-    ;; Should not throw even without deactivate function
-    (let [result (js-await (reload-extension ext-info (make-test-api)))]
-      ;; Returns ext-info on error (file doesn't exist)
-      (-> (expect (:namespace result)) (.toBe "fake")))))
-
-(defn ^:async test-reload-all-processes-all []
-  (let [count-atom (atom 0)
-        ext1 {:path "/tmp/f1.mjs" :namespace "a" :type :ts
-              :deactivate (fn [] (swap! count-atom inc))}
-        ext2 {:path "/tmp/f2.mjs" :namespace "b" :type :ts
-              :deactivate (fn [] (swap! count-atom inc))}]
-    (js-await (reload-all [ext1 ext2] (make-test-api)))
-    ;; Both should have had deactivate called
-    (-> (expect @count-atom) (.toBe 2))))
-
-(describe "agent.extension-loader - reload" (fn []
-                                              (it "reload-extension calls deactivate" test-reload-extension-calls-deactivate)
-                                              (it "reload-extension handles missing deactivate" test-reload-extension-handles-no-deactivate)
-                                              (it "reload-all processes all extensions" test-reload-all-processes-all)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────
 

@@ -4,7 +4,7 @@
 (def all-capabilities
   "All available extension capabilities (must match extension_scope gating)."
   #{:tools :tools-override :commands :shortcuts :events :messages :state :ui
-    :middleware :exec :providers :model :session :flags :renderers :spawn
+    :middleware :exec :providers :model :session :flags :spawn
     :context})
 
 (def default-capabilities
