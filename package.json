@@ -25,7 +25,8 @@
     "gen:builtins": "bun scripts/gen-builtin-extensions.mjs && npx squint compile",
     "bundle:linux-x64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-x64-musl --outfile=nyma-linux-x64-musl",
     "bundle:linux-arm64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-arm64-musl --outfile=nyma-linux-arm64-musl",
-    "gen:version": "bun scripts/gen-version.mjs"
+    "gen:version": "bun scripts/gen-version.mjs",
+    "hooks:install": "git config core.hooksPath scripts/githooks"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.52",

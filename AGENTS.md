@@ -99,8 +99,11 @@ bun run gen:builtins      # after ADDING an extension: regenerates the compiled-
 # `bun run build` also regenerates src/agent/version.cljs from package.json —
 # a compiled binary has no package.json to read, so --version is baked in.
 
-# Run tests
-bun test
+# Run tests (compiles first; a bare `bun test dist` runs stale output — test/dist_freshness catches it)
+bun run test
+
+# One-time: pre-commit hook (incremental compile + the lint tests, ~5 s)
+bun run hooks:install
 
 # REPL
 npx squint repl

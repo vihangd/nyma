@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fast gate: compile (incremental) and run the lint tests + freshness check.
+# ~5 s. The full suite still runs in CI. Install once: bun run hooks:install
+set -e
+cd "$(git rev-parse --show-toplevel)"
+npx squint compile >/dev/null 2>&1 || { echo "pre-commit: squint compile failed"; exit 1; }
+bun test dist/*_lint.test.mjs dist/squint_interop_regression.test.mjs dist/builtin_extensions.test.mjs dist/dist_freshness.test.mjs 2>&1 | grep -E "^\(fail\)|^ [0-9]+ (pass|fail)" || true
+bun test dist/*_lint.test.mjs dist/squint_interop_regression.test.mjs dist/builtin_extensions.test.mjs dist/dist_freshness.test.mjs >/dev/null 2>&1
