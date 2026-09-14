@@ -1,6 +1,6 @@
 {
   "name": "nyma",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Nyma Yokai Mystic Agent — a minimal coding agent built with Squint + Bun + Vercel AI SDK + pi-tui",
   "type": "module",
   "bin": {

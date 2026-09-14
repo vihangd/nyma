@@ -292,13 +292,15 @@
 ;; ── New commands ──────────────────────────────────────────
 
 (describe "/changelog command" (fn []
-                                 (it "shows error when no CHANGELOG.md exists"
+                                 (it "shows CHANGELOG.md in an overlay"
                                      (fn []
+                                       ;; The file did not exist for the first 0.7.x releases,
+                                       ;; so the command advertised something absent.
                                        (let [agent (make-agent-with-builtins)
-                                             {:keys [ctx notifications]} (make-ctx)
+                                             {:keys [ctx overlays]} (make-ctx)
                                              handler (get-handler agent "changelog")]
                                          (handler nil ctx)
-                                         (-> (expect (:msg (first @notifications))) (.toContain "No CHANGELOG.md")))))))
+                                         (-> (expect (first @overlays)) (.toContain "# Changelog")))))))
 
 (describe "/logout command" (fn []
                               (it "shows error when no credentials file"
