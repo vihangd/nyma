@@ -242,15 +242,24 @@ When multiple independent tool calls are needed, make them in parallel.
         project-nyma (or (from-dir (resolve cwd ".nyma/skills") "project:.nyma/skills") {})]
     (merge global-cv global-nyma project-cv project-nyma)))
 
-(defn- discover-prompts [dir]
+(defn discover-prompts
+  "`<dir>/<name>.md` → {name {:template :description :argument-hint :path}}.
+   Optional frontmatter (`description`, `argument-hint`) describes the
+   `/<name>` command; the body is the template."
+  [dir]
   (when (fs/existsSync dir)
     (let [entries (fs/readdirSync dir)]
       (->> entries
            (filter #(.endsWith % ".md"))
            (map (fn [file]
                   (let [name (subs file 0 (- (count file) 3))
-                        content (fs/readFileSync (path/join dir file) "utf8")]
-                    [name {:template content :path (path/join dir file)}])))
+                        content (fs/readFileSync (path/join dir file) "utf8")
+                        {:keys [frontmatter body]} (skills/parse-frontmatter content)
+                        fm (fn [k] (when frontmatter (aget frontmatter k)))]
+                    [name {:template      body
+                           :description   (fm "description")
+                           :argument-hint (fm "argument-hint")
+                           :path          (path/join dir file)}])))
            (into {})))))
 
 (defn ^:async discover

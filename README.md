@@ -916,7 +916,17 @@ Active skills are tracked in agent state (`:active-skills`) to prevent duplicate
 
 ### Prompts
 
-Place `.md` files in `~/.nyma/prompts/` or `.nyma/prompts/`. They are loaded as templates for reuse, supporting `{{variable}}` placeholder expansion.
+Place `.md` files in `~/.nyma/prompts/` or `.nyma/prompts/`. Each one becomes a slash command named after the file: `review.md` is `/review`. Arguments fill `$ARGUMENTS` (all of them), `$1`…`$9` and `${N:-default}`, and the result is sent as your message. Optional frontmatter describes the command in `/help` and the autocomplete picker:
+
+```markdown
+---
+description: Review a file for bugs
+argument-hint: <path>
+---
+Review $1 for correctness bugs. Focus on ${2:-error handling}.
+```
+
+A template never shadows an existing command — a name collision is skipped with a warning. `/reload` picks up new or changed templates.
 
 ### Themes
 

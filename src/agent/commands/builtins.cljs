@@ -17,6 +17,9 @@
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
             [agent.resources.skills :as skills]
+            [agent.utils.template-args :as template-args]
+            [agent.loop :refer [follow-up]]
+            [agent.debug :as d]
             [agent.ui.skill-picker :as skill-picker]
             [agent.providers.catalog :as catalog]
             [agent.thinking :as thinking]
@@ -177,6 +180,7 @@
    [:modes      "Modes & roles"]
    [:extensions "Extensions"]
    [:agent      "Agent commands (forwarded via //)"]
+   [:prompts    "Prompt templates"]
    [:other      "Other"]])
 
 (def ^:private modes-and-roles
@@ -313,7 +317,10 @@
         (reset! extensions-atom loaded)))
     ;; 6. Re-resolve CLI flags
     (when resolve-flags-fn
-      (resolve-flags-fn agent)))
+      (resolve-flags-fn agent))
+    ;; Prompt templates: after extensions, so a collision is detected against
+    ;; the reloaded command set.
+    (register-prompt-commands! agent (:prompts new-resources)))
   ;; 7. session_ready again. Extensions set up their world on it — status
   ;;    segments, ACP auto-connect, MCP servers — and it used to fire once at
   ;;    startup only, so /reload deactivated all of that and brought none of
@@ -325,6 +332,40 @@
                                                 :reason     "reload"}))
   ((:emit (:events agent)) "reload" {})
   (notify ctx "Extensions reloaded"))
+
+(defonce ^:private prompt-command-names
+  ;; What register-prompt-commands! last registered, so a reload can drop a
+  ;; prompt whose file went away instead of leaving a stale `/name`.
+  (atom #{}))
+
+(defn register-prompt-commands!
+  "Each discovered prompt template becomes `/<name>`: arguments fill
+   `$ARGUMENTS`/`$N` and the text is submitted as a user message. A name
+   already taken by a builtin or an extension is skipped with a warning —
+   a template must never shadow a command."
+  [agent prompts]
+  (swap! (:commands agent) (fn [cs] (apply dissoc cs @prompt-command-names)))
+  (reset! prompt-command-names #{})
+  (doseq [[pname {:keys [template description argument-hint]}] prompts]
+    (if-let [taken (resolve-command @(:commands agent) pname)]
+      (d/warn "prompts" (str "prompt template /" pname " skipped: the name belongs to "
+                             (or (:description taken) "an existing command")))
+      (do
+        (swap! prompt-command-names conj pname)
+        (swap! (:commands agent) assoc pname
+               {:group       :prompts
+                :description (str (or description (str "Prompt template " pname))
+                                  (when (seq argument-hint) (str " — " argument-hint)))
+                :handler
+                (fn [args _ctx]
+                  (let [text   (template-args/substitute template (vec args))
+                        events (:events agent)]
+                    ;; turn_request STARTS a turn (interactive mode owns the
+                    ;; submit path); where nothing listens, queue it for the
+                    ;; next turn like any extension-sent message.
+                    (if (pos? ((:handler-count events) "turn_request"))
+                      ((:emit events) "turn_request" #js {:text text :echo true})
+                      (follow-up agent {:role "user" :content text}))))})))))
 
 (def global-settings-path
   "Where `/settings` writes. Mirrors create-settings-manager's default."
@@ -1217,4 +1258,7 @@
                                              (when (seq desc) (str " — " desc)))))
                                  (str/join "\n"))]
                    (notify ctx (str "Skills:\n" body
-                                    "\n\nUse /skill <name> to activate."))))))}}))
+                                    "\n\nUse /skill <name> to activate."))))))}})
+  ;; Templates last: extensions are already loaded when cli.cljs calls this,
+  ;; so every name a template could collide with is in the map.
+  (register-prompt-commands! agent (:prompts resources)))

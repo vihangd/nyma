@@ -76,7 +76,7 @@ elsewhere (or is empty) — read the emit site.
 | `tool_result` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - | - |
 | `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs | error, finishReason, no-op-turns, noOpTurns, state, toolCalls |
-| `turn_request` | src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | text |
+| `turn_request` | src/agent/commands/builtins.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | echo, text |
 | `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `user_bash` | src/agent/ui/editor_bash.cljs | - | blocked, command, exit-code, reason, stderr, stdout |
 | `user_eval` | src/agent/ui/editor_eval.cljs | - | blocked, exit-code, expr, reason, stderr, stdout, unavailable |
