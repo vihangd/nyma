@@ -89,7 +89,7 @@
                                  :getSettings     (fn [] {:roles {:default {:provider "anthropic"
                                                                             :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                            :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
+                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
                                  :setModel        (fn [m] (swap! set-calls conj m))
                                  :sendUserMessage (fn [_t _o] nil)
                                  :ui              #js {:available false :notify (fn [_ _] nil)}}]
@@ -376,7 +376,44 @@
                                  ;; gate could not prompt → stays in plan mode, notified (not silent)
                                  (-> (expect (:plan-mode @st)) (.toBe true))
                                  (-> (expect (count @sent)) (.toBe 0))
-                                 (-> (expect (some #(.includes % "no UI") @notes)) (.toBeTruthy))))))))))
+                                 (-> (expect (some #(.includes % "no UI") @notes)) (.toBeTruthy))))))))
+
+            ;; The escape hatches must name a command that exists. /plan may be
+            ;; the ACP agent shell's, and is no longer registered by this
+            ;; extension at all — the native one is /planmode.
+            (it "every escape hatch it prints names /planmode, never /plan"
+                (fn []
+                  (let [notes (atom [])
+                        run   (fn [state data]
+                                (pm/on-turn-finalize (notify-api (atom state) (atom []) notes) data))]
+                    (-> (js/Promise.all
+                         #js [(run {:plan-mode true :active-role :plan
+                                    :messages [{:role "assistant" :content "Plan:\n1. step"}]}
+                                   #js {:error true})
+                              (run {:plan-mode true :active-role :plan
+                                    :messages [{:role "assistant" :content "Plan:\n1. do x"}]}
+                                   #js {:error false})])
+                        (.then (fn [_]
+                                 (let [all (apply str @notes)]
+                                   (-> (expect (.includes all "/planmode cancel")) (.toBe true))
+                                   (-> (expect (.includes all "/planmode execute")) (.toBe true))
+                                   (-> (expect (.includes all "/plan cancel")) (.toBe false))
+                                   (-> (expect (.includes all "/plan execute")) (.toBe false)))))))))
+
+            ;; The plan file was written and never mentioned: the one durable
+            ;; artifact of a planning session was findable only by guessing.
+            (it "says where the plan file was written"
+                (fn []
+                  (let [st    (atom {:plan-mode true :active-role :plan
+                                     :messages [{:role "assistant" :content "Plan:\n1. do x"}]})
+                        notes (atom [])
+                        api   (notify-api st (atom []) notes)]
+                    (-> (pm/on-turn-finalize api #js {:error false})
+                        (.then (fn [_]
+                                 (let [line (first (filter #(.includes % "Plan written to") @notes))]
+                                   (-> (expect (some? line)) (.toBe true))
+                                   (-> (expect (.includes (str line) ".nyma/plans/")) (.toBe true))
+                                   (-> (expect (.endsWith (str line) ".md")) (.toBe true)))))))))))
 
 ;; ── Phase 1: manual /plan execute|cancel escape hatch ──
 (defn- cmd-api [st sent notes cmds]
