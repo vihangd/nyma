@@ -593,6 +593,7 @@ before relying on a value here.
   "compaction": { "enabled": true, "threshold": 0.85 },
   "retry": { "enabled": true, "max-retries": 5 },
   "max-steps": 100,
+  "extensions": {},
   "steering-mode": "one-at-a-time",
   "follow-up-mode": "one-at-a-time",
   "transport": "auto",
@@ -732,6 +733,23 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 
 - **Global:** `~/.nyma/extensions/`
 - **Project:** `.nyma/extensions/`
+
+### Disabling an Extension
+
+Any extension, builtin or user, can be switched off by namespace in settings:
+
+```json
+{ "extensions": { "openwiki": false } }
+```
+
+Global (`~/.nyma/settings.json`) and project (`.nyma/settings.json`) entries are merged per
+namespace, project winning. A disabled extension is never activated — not even its manifest
+defaults — and anything that `dependsOn` it is skipped with the reason `depends on disabled
+<ns>`. `/extensions` lists what is loaded, disabled and failed;
+`/extensions disable <ns>` and `/extensions enable <ns>` edit the global file
+(`--project` for the project file) and take effect on `/reload`. This is distinct from the
+per-feature `<section>.enabled` switches some extensions declare: those load the extension and
+turn its behaviour off.
 
 ### Namespacing and Capabilities
 

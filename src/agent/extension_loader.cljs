@@ -184,6 +184,22 @@
    logged failures and then forgot them; /extensions reads this."
   (atom {}))
 
+(def last-disabled
+  "Namespaces the `extensions` setting switched off in the most recent
+   discover-and-load — never activated, so they are not in the loaded
+   vector either; /extensions reads this to say why."
+  (atom #{}))
+
+(defn- disabled-namespaces
+  "Namespaces set to false under the merged `extensions` setting. The api's
+   `settings` fn is the loader's only route to the manager — a test harness
+   without one gets an empty set."
+  [api]
+  (let [s (.-settings api)
+        m (when (fn? s) (s "extensions"))]
+    (set (keep (fn [k] (when (false? (get m k)) k))
+               (when (object? m) (js/Object.keys m))))))
+
 (defn ^:async discover-and-load
   "Scan directories for extension files, load them, and wire them up.
    Extensions may return a deactivate function for cleanup.
@@ -191,6 +207,7 @@
    Extensions are loaded in dependency order (topological sort)."
   [dirs api & [builtins]]
   (reset! last-load-failures {})
+  (reset! last-disabled #{})
   ;; Pass 1: collect metadata — the statically compiled builtins first, then
   ;; whatever the user directories hold.
   ;;
@@ -250,10 +267,18 @@
         (when (and (:module e) (contains? user-ns (:namespace e)))
           (d/info (str "user extension overrides the builtin " (:namespace e)))))
       (swap! scan-results (fn [rs] (vec (remove #(and (:module %) (contains? user-ns (:namespace %))) rs)))))
+    ;; `extensions: {"<ns>": false}` in settings drops the candidate here,
+    ;; before the sort, so nothing of it runs — not even its manifest
+    ;; defaults. Its dependents fall through the failed-dependency path
+    ;; below and are listed by /extensions with the real reason.
+    (let [off (disabled-namespaces api)]
+      (when (seq off)
+        (reset! last-disabled (set (filter off (map :namespace @scan-results))))
+        (swap! scan-results (fn [rs] (vec (remove #(contains? off (:namespace %)) rs))))))
     ;; Pass 2: Topological sort
     (let [sorted     (topo-sort @scan-results)
           extensions (atom [])
-          failed     (atom #{})]
+          failed     (atom @last-disabled)]
       ;; Pass 2b: manifest `settings` blocks become defaults BEFORE any
       ;; activation runs — an extension reading api.settings at activate time
       ;; sees its own defaults, and so does /settings even for one that
@@ -267,11 +292,12 @@
       ;; loading at all).
       (doseq [{:keys [path entry namespace manifest deps module]} sorted]
         (if-let [bad (first (filter @failed (or deps [])))]
-          (do (swap! failed conj namespace)
-              (swap! last-load-failures assoc namespace (str "dependency " bad " failed to load"))
-              (d/error
-               (str "Skipping extension " namespace
-                    " — its dependency " bad " failed to load")))
+          (let [reason (if (contains? @last-disabled bad)
+                         (str "depends on disabled " bad)
+                         (str "dependency " bad " failed to load"))]
+            (swap! failed conj namespace)
+            (swap! last-load-failures assoc namespace reason)
+            (d/error (str "Skipping extension " namespace " — " reason)))
           ;; Held outside the try so a throw mid-activation can sweep what the
           ;; extension registered before it died. Without this a half-activated
           ;; extension left its handlers and commands live under a namespace

@@ -233,6 +233,8 @@ Declare load-order dependencies in `extension.json`:
 
 Extensions are loaded in dependency order (topological sort). If a cycle is detected, the loader falls back to filesystem scan order and logs a warning.
 
+A namespace set to `false` under the `extensions` key of `~/.nyma/settings.json` or `.nyma/settings.json` is dropped before the sort and never activated; anything depending on it is skipped with the reason `depends on disabled <ns>`. `/extensions disable <ns>` writes that key, `/extensions enable <ns>` removes it, `/reload` applies it.
+
 ### 11. NPM Package Dependencies
 
 Declare required npm packages in the `dependencies` field of `extension.json`:

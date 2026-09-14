@@ -6,7 +6,12 @@
                                              handle-settings settings-row nested-setting?
                                              coerce-setting-value]]
             [agent.commands.share :refer [messages->html messages->markdown]]
-            [agent.commands.resolver :refer [resolve-command]]))
+            [agent.commands.resolver :refer [resolve-command]]
+            [agent.extension-loader :refer [last-disabled]]
+            [agent.settings.manager :refer [create-settings-manager]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]))
 
 ;;; ─── Helpers ────────────────────────────────────────────────
 
@@ -359,6 +364,19 @@
           (when (and r (fn? (.-then r))) (.catch r (fn [_] nil)))
           (-> (expect (or (nil? r) (fn? (.-then r)))) (.toBe true)))))))
 
+(defn- make-agent-with-settings
+  "Builtins registered against a settings manager whose global file is a
+   fresh temp path already holding `content`, plus one loaded extension."
+  [content]
+  (let [dir   (.mkdtempSync fs (path/join (os/tmpdir) "nyma-cmd-test-"))
+        gpath (path/join dir "settings.json")
+        _     (fs/writeFileSync gpath (js/JSON.stringify (clj->js content)))
+        mgr   (create-settings-manager {:global-path gpath
+                                        :project-path (path/join dir "project.json")})
+        agent (create-agent {:model "test-model" :system-prompt "test" :settings mgr})]
+    (register-builtins agent nil {:settings mgr} (atom [{:namespace "openwiki" :type :builtin}]))
+    {:agent agent :path gpath :dir dir}))
+
 (describe "/extensions command" (fn []
                                   (it "lists loaded extensions and load failures"
                                       (fn []
@@ -366,7 +384,54 @@
                                               {:keys [ctx overlays]} (make-ctx)
                                               handler (get-handler agent "extensions")]
                                           (handler nil ctx)
-                                          (-> (expect (first @overlays)) (.toContain "Extensions (0 loaded")))))))
+                                          (-> (expect (first @overlays)) (.toContain "Extensions (0 loaded")))))
+
+                                  (it "disable writes extensions.<ns>=false without clobbering the section or other keys"
+                                      (fn []
+                                        (let [{:keys [agent path dir]} (make-agent-with-settings
+                                                                        {:model "m" :extensions {:other false}})
+                                              {:keys [ctx notifications]} (make-ctx)
+                                              handler (get-handler agent "extensions")]
+                                          (try
+                                            (handler ["disable" "openwiki"] ctx)
+                                            (let [on-disk (js/JSON.parse (fs/readFileSync path "utf8"))]
+                                              (-> (expect (aget (aget on-disk "extensions") "openwiki")) (.toBe false))
+                                              (-> (expect (aget (aget on-disk "extensions") "other")) (.toBe false))
+                                              (-> (expect (aget on-disk "model")) (.toBe "m")))
+                                            (-> (expect (:msg (first @notifications)))
+                                                (.toBe "Disabled openwiki (global). /reload to apply."))
+                                            ;; enable removes the key again; the other entry survives
+                                            (handler ["enable" "openwiki"] ctx)
+                                            (let [on-disk (js/JSON.parse (fs/readFileSync path "utf8"))]
+                                              (-> (expect (js/Object.keys (aget on-disk "extensions"))) (.toEqual #js ["other"])))
+                                            (finally
+                                              (fs/rmSync dir #js {:recursive true :force true}))))))
+
+                                  (it "disable of an unknown namespace lists the known ones"
+                                      (fn []
+                                        (let [{:keys [agent dir]} (make-agent-with-settings {})
+                                              {:keys [ctx notifications]} (make-ctx)
+                                              handler (get-handler agent "extensions")]
+                                          (try
+                                            (handler ["disable" "nope"] ctx)
+                                            (-> (expect (:level (first @notifications))) (.toBe "error"))
+                                            (-> (expect (:msg (first @notifications))) (.toContain "openwiki"))
+                                            (finally
+                                              (fs/rmSync dir #js {:recursive true :force true}))))))
+
+                                  (it "lists a namespace disabled in settings with the way back on"
+                                      (fn []
+                                        (let [agent (make-agent-with-builtins)
+                                              {:keys [ctx overlays]} (make-ctx)
+                                              handler (get-handler agent "extensions")]
+                                          (reset! last-disabled #{"openwiki"})
+                                          (try
+                                            (handler nil ctx)
+                                            (-> (expect (first @overlays)) (.toContain "1 disabled"))
+                                            (-> (expect (first @overlays))
+                                                (.toContain "openwiki — disabled in settings (/extensions enable openwiki)"))
+                                            (finally
+                                              (reset! last-disabled #{}))))))))
 
 (describe "/reload command" (fn []
                               (it "registered as a command"

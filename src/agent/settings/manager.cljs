@@ -139,7 +139,11 @@
    ;;                   selected one). Default :advisor (the strong-model knob,
    ;;                   shared with the advisor tool). Set to :plan to use the
    ;;                   :plan role's own model, or false to disable the switch.
-   :plan-mode      {:auto-approve false :planner-role :advisor}})
+   :plan-mode      {:auto-approve false :planner-role :advisor}
+   ;; Extensions switched off by namespace: {"openwiki" false}. Builtin or
+   ;; user, either scope; `/extensions disable <ns>` writes it. Merged PER KEY
+   ;; across global and project (see `:get`), unlike the top-level replace.
+   :extensions     {}})
 
 (defn detect-duplicate-keys
   "Scan a JSON source string for duplicate keys inside the same
@@ -403,7 +407,14 @@
              (let [merged (merge defaults
                                  (or @global-settings {})
                                  (or @project-settings {})
-                                 @overrides)]
+                                 @overrides
+                                 ;; Per key: a project that disables one
+                                 ;; extension must not silently re-enable
+                                 ;; everything the global file switched off.
+                                 {:extensions (merge {}
+                                                     (:extensions @global-settings)
+                                                     (:extensions @project-settings)
+                                                     (:extensions @overrides))})]
                (reduce (fn [m k] (assoc m k (merge (get @ext-defaults k) (get m k))))
                        merged
                        (keys @ext-defaults))))
@@ -415,8 +426,13 @@
 
       ;; Only what the USER actually wrote. `:get` merges `defaults` in, so it
       ;; always contains every key and cannot answer "did they set this?".
-      :user-settings (fn []
-                       (merge (or @global-settings {}) (or @project-settings {})))
+      ;; With a scope (:global / :project), that file's contents alone — for
+      ;; a read-modify-write of one nested section before `:save-*`.
+      :user-settings (fn [& [scope]]
+                       (case scope
+                         :global  (or @global-settings {})
+                         :project (or @project-settings {})
+                         (merge (or @global-settings {}) (or @project-settings {}))))
 
       :set-override (fn [k v]
                       (swap! overrides assoc k v))
@@ -428,13 +444,17 @@
                 (reset! global-settings (load-json global-path))
                 (reset! project-settings (load-json project-path)))
 
+      ;; The in-memory map follows the file, so `:get` answers with what was
+      ;; just written instead of waiting for a restart or `:reload`.
       :save-global (fn [settings]
-                     (save-json global-path
-                                (merge @global-settings settings)))
+                     (let [m (merge @global-settings settings)]
+                       (reset! global-settings m)
+                       (save-json global-path m)))
 
       :save-project (fn [settings]
-                      (save-json project-path
-                                 (merge @project-settings settings)))
+                      (let [m (merge @project-settings settings)]
+                        (reset! project-settings m)
+                        (save-json project-path m)))
 
       :tool-allowed? (fn [tool-name]
                       ;; Union of project + global allow-lists.

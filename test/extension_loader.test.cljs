@@ -4,7 +4,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.debug :as d]
-            [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort last-load-failures]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort last-load-failures last-disabled]]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]
             [agent.settings.manager :refer [create-settings-manager]]))
@@ -236,6 +236,36 @@
     (-> (expect (get (aget js/globalThis "__seen") "limit")) (.toBe 7))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
+
+(defn ^:async test-disabled-in-settings []
+  ;; `extensions: {"base": false}` — base never activates, and `child`
+  ;; (dependsOn base) is skipped with a reason /extensions can show. The
+  ;; second load goes through `:reload`, which is what /reload calls, so the
+  ;; setting written mid-session is honoured without a restart.
+  (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        proj     (path/join tmp-dir "settings.json")
+        mgr      (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                           :project-path proj})
+        agent    (create-agent {:model "mock" :system-prompt "test" :settings mgr})
+        api      (create-extension-api agent)
+        ran      (atom [])
+        builtin  (fn [ns deps]
+                   {:namespace ns
+                    :manifest #js {:namespace ns :capabilities #js [] :dependsOn (clj->js deps)}
+                    :module #js {:default (fn [_] (swap! ran conj ns) nil)}})
+        builtins [(builtin "child" ["base"]) (builtin "base" []) (builtin "solo" [])]
+        before   (js-await (discover-and-load [] api builtins))
+        _        (.writeFileSync fs proj (js/JSON.stringify #js {:extensions #js {:base false}}))
+        _        ((:reload mgr))
+        _        (reset! ran [])
+        after    (js-await (discover-and-load [] api builtins))]
+    (-> (expect (count before)) (.toBe 3))
+    (-> (expect (mapv :namespace after)) (.toEqual ["solo"]))
+    (-> (expect @ran) (.toEqual ["solo"]))
+    (-> (expect @last-disabled) (.toEqual #{"base"}))
+    (-> (expect (get @last-load-failures "child")) (.toBe "depends on disabled base"))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
 (defn ^:async test-user-copy-overrides-builtin []
   ;; A user kept ~/.nyma/extensions/thinking-renderer from before it became a
   ;; builtin; the loader warned "only one will load" and picked one by sort
@@ -282,7 +312,8 @@
             (it "sweeps what a throwing activation registered" test-throwing-activation-leaves-nothing-registered)
             (it "loads extension.json manifest for namespace" test-loads-manifest)
             (it "a user extension with a builtin's namespace replaces the builtin" test-user-copy-overrides-builtin)
-            (it "manifest settings become manager defaults before activation" test-manifest-settings-become-defaults)))
+            (it "manifest settings become manager defaults before activation" test-manifest-settings-become-defaults)
+            (it "a namespace disabled in settings is not activated and a dependent is skipped with a reason" test-disabled-in-settings)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────
 

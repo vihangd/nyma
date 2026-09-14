@@ -9,7 +9,7 @@
             [agent.commands.parser :as cmd-parser]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.keybinding-registry :as kbr]
-            [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures last-disabled]]
             [agent.extension-scope :refer [handler-errors]]
             [agent.resources.loader :refer [discover]]
             [agent.providers.oauth :as oauth]
@@ -493,6 +493,80 @@
 
 ;;; ─── Registration ───────────────────────────────────────────
 
+(defn extensions-report
+  "The `/extensions` listing: loaded, disabled in settings, failed."
+  [resources extensions-atom]
+  (let [loaded   (or (when extensions-atom @extensions-atom) [])
+        errs     @handler-errors
+        failed   @last-load-failures
+        disabled @last-disabled
+        merged   (when-let [sm (:settings resources)]
+                   (when (fn? (:get sm)) ((:get sm))))
+        ;; An extension that loaded but whose feature is switched off: its
+        ;; manifest declares `<section>.enabled` and the merged settings say
+        ;; false. Five shipped off-by-default with no way to learn they
+        ;; existed or how to turn them on.
+        off-hint (fn [{:keys [namespace manifest]}]
+                   (when-let [decl (and manifest (.-settings manifest))]
+                     (some (fn [section]
+                             (let [keys (aget decl section)]
+                               (when (and keys (some? (aget keys "enabled")))
+                                 (let [v (get-in merged [section "enabled"])]
+                                   (when-not v
+                                     (str " — off: set " section ".enabled: true"
+                                          " in settings, or --ext-" namespace))))))
+                           (js/Object.keys decl))))
+        row      (fn [{:keys [namespace type] :as ext}]
+                   (str "  " namespace " (" (str type) ")"
+                        (off-hint ext)
+                        (when-let [n (get errs namespace)]
+                          (str " — " n " handler error" (when (> n 1) "s")))))]
+    (str "Extensions (" (count loaded) " loaded"
+         (when (seq disabled) (str ", " (count disabled) " disabled"))
+         (when (seq failed) (str ", " (count failed) " failed")) ")\n"
+         (str/join "\n" (map row (sort-by :namespace loaded)))
+         (when (seq disabled)
+           (str "\n\nDisabled:\n"
+                (str/join "\n" (map (fn [ns] (str "  " ns " — disabled in settings (/extensions enable " ns ")"))
+                                    (sort disabled)))))
+         (when (seq failed)
+           (str "\n\nFailed to load:\n"
+                (str/join "\n" (map (fn [[ns r]] (str "  " ns " — " r))
+                                    (sort-by first failed)))))
+         "\n\nErrors are also in ~/.nyma/debug.log (NYMA_DEBUG=1 or --debug for more).")))
+
+(defn toggle-extension!
+  "`/extensions disable|enable <ns> [--project]`: read-modify-write the
+   `extensions` section of the chosen settings file. The saves are shallow
+   at the top level, so the section is rebuilt from that file alone — the
+   other scope's entries stay where they are. Takes effect on /reload."
+  [resources extensions-atom sub ns project? ctx]
+  (let [sm     (:settings resources)
+        known  (set (concat (map :namespace (or (when extensions-atom @extensions-atom) []))
+                            (keys @last-load-failures)
+                            @last-disabled))]
+    (cond
+      (not (and sm (fn? (:save-global sm))))
+      (notify ctx "Settings are not available here" "error")
+
+      (or (nil? ns) (not (contains? known ns)))
+      (notify ctx (str (if ns (str "Unknown extension " ns ". ") "Which extension? ")
+                       "Known: " (str/join ", " (sort known)))
+              "error")
+
+      :else
+      (let [scope   (if project? :project :global)
+            section (or (get ((:user-settings sm) scope) "extensions") {})
+            ;; `enable` removes the key rather than writing true, so the
+            ;; other scope's verdict (and the default) applies again.
+            section (if (= sub "disable")
+                      (assoc section ns false)
+                      (dissoc section ns))
+            save    (if project? (:save-project sm) (:save-global sm))]
+        (save {"extensions" section})
+        (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
+                         " (" (name scope) "). /reload to apply."))))))
+
 (defn register-builtins
   "Register all built-in slash commands on the agent.
    Pi-mono-compatible: help, model, clear, exit, new, fork, tree,
@@ -761,42 +835,18 @@
                       (handle-reload agent resources extensions-atom resolve-flags-fn ctx))}
 
           "extensions"
-          {:description "List loaded extensions, load failures, and handler error counts"
-           :handler (fn [_args ctx]
-                      (let [loaded (or (when extensions-atom @extensions-atom) [])
-                            errs   @handler-errors
-                            failed @last-load-failures
-                            merged (when-let [sm (:settings resources)]
-                                     (when (fn? (:get sm)) ((:get sm))))
-                            ;; An extension that loaded but whose feature is
-                            ;; switched off: its manifest declares
-                            ;; `<section>.enabled` and the merged settings say
-                            ;; false. Five shipped off-by-default with no way to
-                            ;; learn they existed or how to turn them on.
-                            off-hint (fn [{:keys [namespace manifest]}]
-                                       (when-let [decl (and manifest (.-settings manifest))]
-                                         (some (fn [section]
-                                                 (let [keys (aget decl section)]
-                                                   (when (and keys (some? (aget keys "enabled")))
-                                                     (let [v (get-in merged [section "enabled"])]
-                                                       (when-not v
-                                                         (str " — off: set " section ".enabled: true"
-                                                              " in settings, or --ext-" namespace))))))
-                                               (js/Object.keys decl))))
-                            row    (fn [{:keys [namespace type] :as ext}]
-                                     (str "  " namespace " (" (str type) ")"
-                                          (off-hint ext)
-                                          (when-let [n (get errs namespace)]
-                                            (str " — " n " handler error" (when (> n 1) "s")))))]
-                        (show-info ctx
-                                   (str "Extensions (" (count loaded) " loaded"
-                                        (when (seq failed) (str ", " (count failed) " failed")) ")\n"
-                                        (str/join "\n" (map row (sort-by :namespace loaded)))
-                                        (when (seq failed)
-                                          (str "\n\nFailed to load:\n"
-                                               (str/join "\n" (map (fn [[ns r]] (str "  " ns " — " r))
-                                                                   (sort-by first failed)))))
-                                        "\n\nErrors are also in ~/.nyma/debug.log (NYMA_DEBUG=1 or --debug for more)."))))}
+          {:description "List extensions; /extensions disable|enable <ns> [--project] switches one off or on in settings"
+           :handler (fn [args ctx]
+                      (let [argv     (let [p (positional-args ctx)] (if (some? p) p (vec args)))
+                            ;; A keybinding or alias hands the raw vector with
+                            ;; the flag still in it.
+                            project? (boolean (or (get (command-flags ctx) "project")
+                                                  (some #{"--project"} argv)))
+                            argv     (vec (remove #{"--project"} argv))
+                            sub      (first argv)]
+                        (if (contains? #{"disable" "enable"} sub)
+                          (toggle-extension! resources extensions-atom sub (second argv) project? ctx)
+                          (show-info ctx (extensions-report resources extensions-atom)))))}
 
      ;; ── New pi-mono-compatible commands ─────────────────────
 
