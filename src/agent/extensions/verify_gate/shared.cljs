@@ -23,6 +23,35 @@
                (aget v "max-attempts") (assoc :max-attempts (aget v "max-attempts"))
                (aget v "timeout-ms")   (assoc :timeout-ms (aget v "timeout-ms")))))))
 
+;; ── "you tried to configure this and it did not take" ────────────────────
+;; The gate cannot warn merely because `verify.cmd` is unset: extension.json
+;; declares the whole section, the loader registers it as defaults, so
+;; `(.settings api "verify")` is non-empty for EVERY user and an
+;; existence check would nag everyone who never wanted the gate.
+;;
+;; An unrecognised key in the section is the signal that someone did try —
+;; `"comand"`, `"command"`, `"maxAttempts"` — and got silence for it.
+
+(def known-keys ["cmd" "max-attempts" "timeout-ms"])
+
+(defn unknown-keys
+  "Keys in the `verify` settings section that no reader looks at. Pure."
+  [section]
+  (if-not section
+    []
+    (vec (sort (filterv (fn [k] (not (.includes (clj->js known-keys) k)))
+                        (vec (js/Object.keys section)))))))
+
+(defn off-hint
+  "The one-time notice for a `verify` section that was written but does
+   nothing. Names the key that works and the ones that do not. Pure."
+  [unknown]
+  (str "verify_gate loaded but off — set verify.cmd (e.g. \"bun test\"). "
+       "Unrecognised key"
+       (when (> (count unknown) 1) "s")
+       " in the `verify` settings section: "
+       (.join (clj->js unknown) ", ")))
+
 (defn edit-tool? [tool-name]
   (tool-metadata/file-editing? tool-name))
 

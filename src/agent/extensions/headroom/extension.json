@@ -3,7 +3,9 @@
   "description": "ML context compression via the Headroom proxy (off by default)",
   "capabilities": [
     "events",
-    "commands"
+    "commands",
+    "flags",
+    "ui"
   ],
   "dependsOn": [],
   "dependencies": {

@@ -73,6 +73,30 @@ Opt-in compat sources via the `hooks-compat` flag:
 `disableAllHooks: true` in any source short-circuits every source
 below it (matches CC's behavior).
 
+A source that exists but does not parse is **reported, not skipped
+quietly**: the bridge shows an error naming the file and the JSON
+error at load (and again after a hot reload), and the sources below
+it still load normally. `/hooks` lists the same failure with its
+path. Before this, a trailing comma produced zero hooks and total
+silence — not even a line in debug.log.
+
+---
+
+## `/hooks`
+
+Run `/hooks` to see what the bridge actually resolved:
+
+- every hook, as `<Event> [<matcher>] → <handler>`, with the source
+  file each one came from;
+- all eight candidate source files, marked `(read)`,
+  `(not found)`, `(failed to parse)`, or `(not consulted; enable
+  via hooks-compat)`;
+- the source that set `disableAllHooks`, if any;
+- every parse failure, with its path and error.
+
+It reflects the *current* config — after a hot reload it shows the
+reloaded state, not what was on disk at startup.
+
 ---
 
 ## Schema
@@ -135,8 +159,9 @@ e.g. `mcp__memory__write_graph` or `mcp__.*__read.*`.
 
 ### Unseen-matcher diagnostics
 
-At session end the bridge logs a warning for every configured
-matcher that never fired during the session. Catches typos like
+At session end, **when `NYMA_DEBUG` is set**, the bridge logs a
+warning for every configured matcher that never fired during the
+session. Catches typos like
 `matcher: "Edot"` or `matcher: "BashCommands"` that case tolerance
 can't fix. Sample output:
 
@@ -192,6 +217,9 @@ Fires before a tool runs. Discriminated by tool name (CC TitleCase).
   `permissionDecisionReason` to the model.
 - `updatedInput` → full replacement of the tool's args.
 - Multiple matching hooks: precedence is **deny > defer > ask > allow**.
+- `defer` wins over `ask` in that ordering, but nyma has no
+  deferred-decision SDK yet, so a winning `defer` is applied as
+  `ask`.
 
 ### `PostToolUse` / `PostToolUseFailure`
 
@@ -450,8 +478,8 @@ restarting nyma. The audit log's "first-run seen" cache is
 cleared too, so an edited script gets re-audited on its next
 fire.
 
-There's no UI for hot reload — it just happens. To inspect the
-currently-loaded config from inside an extension, call
+There's no UI for hot reload — it just happens. Run `/hooks` to see
+the post-reload state; from inside an extension, call
 `api.getHookConfig()`.
 
 ---

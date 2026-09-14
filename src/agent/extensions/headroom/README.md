@@ -84,7 +84,11 @@ headroom install persistent --supervisor systemd    # Linux
 }
 ```
 
+…or, for one session only, start nyma with `--ext-headroom` (`--ext-headroom=false` forces it off even when settings say otherwise).
+
 If the proxy is not running when Nyma starts, the extension logs one warning and skips compression silently — no errors, no broken sessions.
+
+If that settings file will not parse, headroom now says so — naming the section and the file — instead of quietly falling back to the defaults and looking switched off.
 
 ## Configuration
 
@@ -129,7 +133,7 @@ All keys under `"headroom"` in `.nyma/settings.json` or `~/.nyma/settings.json`:
 
 | Command | What it does |
 |---|---|
-| `/headroom-stats` | Show per-session stats: compressed turns, tokens saved, ratio, errors |
+| `/headroom-stats` | Show per-session stats: compressed turns, tokens saved, ratio, errors. With headroom off it answers with how to turn it on instead of not existing. |
 
 ## Provider compatibility
 

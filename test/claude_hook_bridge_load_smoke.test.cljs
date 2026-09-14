@@ -82,6 +82,10 @@
                      nil)
          :events   #js {:on  (fn [_ _ _] nil)
                         :off (fn [_ _] nil)}
+         ;; The bridge registers /hooks during default(); an api without
+         ;; these two threw right past the "no exception" assertion.
+         :registerCommand   (fn [_ _] nil)
+         :unregisterCommand (fn [_] nil)
          :ui       #js {:available false}
          :__listeners listeners}))
 

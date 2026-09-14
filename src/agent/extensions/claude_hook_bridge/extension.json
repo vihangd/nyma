@@ -2,6 +2,7 @@
   "namespace": "claude-hook-bridge",
   "description": "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt",
   "capabilities": [
+    "commands",
     "events",
     "state",
     "messages",

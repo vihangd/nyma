@@ -90,7 +90,7 @@
     :manifest  #js {"namespace" "checkpoints" "description" "Snapshots a file's pre-turn state; `/rewind` restores it" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
-    :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
+    :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["commands" "events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
     :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
@@ -129,7 +129,7 @@
     :manifest  #js {"namespace" "handoff" "description" "`/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md`" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
    {:namespace "headroom"
     :module    ext-headroom
-    :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
+    :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands" "flags" "ui"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
     :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
@@ -177,7 +177,7 @@
     :manifest  #js {"namespace" "token-suite" "description" "Token optimizations, smart compaction, live cost preview (`/token-preview`)" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil}}}}
    {:namespace "verify-gate"
     :module    ext-verify-gate
-    :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)" "capabilities" #js ["events" "messages"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
+    :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)" "capabilities" #js ["events" "messages" "ui"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
    {:namespace "workspace-config"
     :module    ext-workspace-config
     :manifest  #js {"namespace" "workspace-config" "description" "Per-project aliases and flags from `.nyma/settings.json`" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])

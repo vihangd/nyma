@@ -10,6 +10,12 @@ canonical schema. Hook scripts and HTTP endpoints from the entire
 Claude Code ecosystem (rtk, claude-mem, validators, audit tools, …)
 work in nyma without per-tool integration.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/hooks` | Lists every resolved hook (event → matcher → handler, and the file it came from), all eight candidate source files with which ones were read, and any file that failed to parse — with its path and the parse error. |
+
 ## Quick start
 
 Add a `hooks` block to `.nyma/settings.json`:

@@ -26,6 +26,15 @@
                (aget ow "dir")             (assoc :dir (aget ow "dir"))
                (aget ow "sections")        (assoc :sections (vec (aget ow "sections"))))))))
 
+(defn disabled-hint
+  "What `/openwiki` answers when the extension is off. A command that simply
+   does not exist reads as a broken install; this names the setting and the
+   flag that turn it on. Pure."
+  [dir]
+  (str "openwiki is off — set openwiki.enabled: true in .nyma/settings.json "
+       "(docs land in " (or dir (:dir default-config)) "/) "
+       "or start with --ext-openwiki"))
+
 (defn metadata-file [dir] (str dir "/.last-update.json"))
 (defn instructions-file [dir] (str dir "/INSTRUCTIONS.md"))
 

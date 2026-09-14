@@ -42,6 +42,20 @@
                      (false? flag-val) (assoc base :enabled false)
                      :else             base)]
 
+      ;; Registered AFTER the flag has been resolved, in the else arm: doing
+      ;; it earlier would put the stub and the real handler under the same
+      ;; name whenever --ext-openwiki turned the extension on.
+      (when-not (:enabled config)
+        (.registerCommand api "openwiki"
+                          #js {:description "OpenWiki is off — how to turn it on"
+                               :handler
+                               (fn [_args ctx]
+                                 (let [text (shared/disabled-hint (:dir config))]
+                                   (when (and ctx (.-ui ctx) (.-notify (.-ui ctx)))
+                                     (.notify (.-ui ctx) text "info"))
+                                   text))})
+        (swap! cleanups conj (fn [] (.unregisterCommand api "openwiki"))))
+
       (when (:enabled config)
         (let [tool-list (tools/make-tools config)]
           (.registerCommand api "openwiki"
