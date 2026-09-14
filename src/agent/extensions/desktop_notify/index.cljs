@@ -31,13 +31,31 @@
 
 ;;; ─── OSC 777 notification ──────────────────────────────────
 
+(defn notifications-possible?
+  "False whenever writing an escape sequence would corrupt something.
+
+   Two ways it could: stdout is not a terminal (piped or redirected, so the
+   bytes land in whatever is reading — `nyma -p --output-format json | jq`
+   died on them), or this is a one-shot run, where nobody is watching a
+   terminal and the process exits before a notification means anything.
+   Pure and exported so the gate is testable without a TTY."
+  []
+  (and (boolean (.-isTTY (.-stdout js/process)))
+       (not (.. js/process -env -NYMA_ONE_SHOT))))
+
 (defn- send-notification!
-  "Send OSC 777 terminal notification. Silent on unsupported terminals."
+  "Send OSC 777 terminal notification. Silent on unsupported terminals.
+
+   Written to STDERR. On stdout the escape sequence is part of the program's
+   output: a terminal swallows it, but a pipe does not, so `nyma -p
+   --output-format json | jq` got an OSC 777 glued to the front of the JSON
+   and failed to parse. stderr is where out-of-band chatter belongs."
   [title body]
-  (try
-    (.write (.-stdout js/process)
-            (str "\u001b]777;notify;" title ";" body "\u0007"))
-    (catch :default _ nil)))
+  (when (notifications-possible?)
+    (try
+      (.write (.-stderr js/process)
+              (str "\u001b]777;notify;" title ";" body "\u0007"))
+      (catch :default _ nil))))
 
 ;;; ─── Extension activation ──────────────────────────────────
 
@@ -50,29 +68,29 @@
         (fn [_data _ctx]
           (reset! turn-start (js/Date.now)))
 
+        ;; One gate for all four handlers. It used to be written out inline in
+        ;; turn_end and left off session_end_summary entirely, so the summary
+        ;; fired on every exit — including a piped one-shot run, where it was
+        ;; the last thing written to whatever was reading the output.
+        check-enabled
+        (fn []
+          (and (notifications-possible?)
+               (if (.-getFlag api)
+                 (let [flag-val (.getFlag api "enabled")]
+                   (if (some? flag-val) flag-val true))
+                 true)))
+
         on-turn-end
         (fn [_data _ctx]
           (when-let [start @turn-start]
             (let [elapsed (- (js/Date.now) start)]
-              (when (> elapsed threshold-ms)
-                (let [enabled (if (and (.-getFlag api))
-                                (let [flag-val (.getFlag api "enabled")]
-                                  (if (some? flag-val) flag-val true))
-                                true)]
-                  (when enabled
-                    (send-notification! "nyma" "Response ready")
-                    (when (.-emitGlobal api)
-                      (.emitGlobal api "notification"
-                                   {:title  "nyma"
-                                    :body   "Response ready"
-                                    :source "desktop-notify"}))))))))
-
-        check-enabled
-        (fn []
-          (if (.-getFlag api)
-            (let [flag-val (.getFlag api "enabled")]
-              (if (some? flag-val) flag-val true))
-            true))
+              (when (and (> elapsed threshold-ms) (check-enabled))
+                (send-notification! "nyma" "Response ready")
+                (when (.-emitGlobal api)
+                  (.emitGlobal api "notification"
+                               {:title  "nyma"
+                                :body   "Response ready"
+                                :source "desktop-notify"}))))))
 
         ;; Notify on long-running tool completions (>10s)
         on-tool-complete
