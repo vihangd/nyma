@@ -1,5 +1,9 @@
 {
   "namespace": "add-dir",
-  "capabilities": ["events", "commands"],
+  "description": "Multi-root context — `/add-dir <path>` registers extra project roots",
+  "capabilities": [
+    "events",
+    "commands"
+  ],
   "dependsOn": []
 }

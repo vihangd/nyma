@@ -1,5 +1,11 @@
 {
   "namespace": "advisor",
-  "capabilities": ["tools", "commands", "model", "state"],
+  "description": "Model-as-critic — `/advisor` sends the full transcript to a stronger model for review, no tools",
+  "capabilities": [
+    "tools",
+    "commands",
+    "model",
+    "state"
+  ],
   "dependsOn": []
 }

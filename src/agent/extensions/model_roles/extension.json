@@ -1,5 +1,6 @@
 {
   "namespace": "model-roles",
+  "description": "Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain",
   "capabilities": [
     "events",
     "commands",

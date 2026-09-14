@@ -1,5 +1,14 @@
 {
   "namespace": "mcp-client",
-  "capabilities": ["events", "tools", "tools-override", "commands", "ui"],
-  "dependsOn": ["agent-shell"]
+  "description": "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`",
+  "capabilities": [
+    "events",
+    "tools",
+    "tools-override",
+    "commands",
+    "ui"
+  ],
+  "dependsOn": [
+    "agent-shell"
+  ]
 }

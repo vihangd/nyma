@@ -1,6 +1,10 @@
 {
   "namespace": "lsp-suite",
-  "capabilities": ["tools", "events"],
+  "description": "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics",
+  "capabilities": [
+    "tools",
+    "events"
+  ],
   "dependsOn": [],
   "dependencies": {
     "vscode-jsonrpc": "^9.0.0"

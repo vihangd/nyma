@@ -63,121 +63,121 @@
   [
    {:namespace "add-dir"
     :module    ext-add-dir
-    :manifest  #js {"namespace" "add-dir" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "add-dir" "description" "Multi-root context — `/add-dir <path>` registers extra project roots" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "advisor"
     :module    ext-advisor
-    :manifest  #js {"namespace" "advisor" "capabilities" #js ["tools" "commands" "model" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "advisor" "description" "Model-as-critic — `/advisor` sends the full transcript to a stronger model for review, no tools" "capabilities" #js ["tools" "commands" "model" "state"] "dependsOn" #js []}}
    {:namespace "agent-runner-claude-sdk"
     :module    ext-agent-runner-claude-sdk
-    :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
+    :manifest  #js {"namespace" "agent-runner-claude-sdk" "description" "In-process Claude Agent SDK runner" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js [] "settings" #js {"agent-shell" #js {"default-agent" nil "auto-approve" false "auto-connect" false "agents" #js {}}}}}
+    :manifest  #js {"namespace" "agent-shell" "description" "Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.)" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js [] "settings" #js {"agent-shell" #js {"default-agent" nil "auto-approve" false "auto-connect" false "agents" #js {}}}}}
    {:namespace "agent-state"
     :module    ext-agent-state
-    :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js [] "settings" #js {"agent-state" #js {"enabled" nil "agent" "nyma" "command" nil}}}}
+    :manifest  #js {"namespace" "agent-state" "description" "Reports what nyma is doing (idle, streaming, tool, waiting) to a supervisor process via a command hook" "capabilities" #js ["events" "spawn"] "dependsOn" #js [] "settings" #js {"agent-state" #js {"enabled" nil "agent" "nyma" "command" nil}}}}
    {:namespace "ast-tools"
     :module    ext-ast-tools
-    :manifest  #js {"namespace" "ast-tools" "capabilities" #js ["tools" "exec"]}}
+    :manifest  #js {"namespace" "ast-tools" "description" "Tree-sitter–backed code search and editing tools" "capabilities" #js ["tools" "exec"]}}
    {:namespace "bash-suite"
     :module    ext-bash-suite
-    :manifest  #js {"namespace" "bash-suite" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
+    :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
    {:namespace "budget"
     :module    ext-budget
-    :manifest  #js {"namespace" "budget" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
+    :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
    {:namespace "checkpoints"
     :module    ext-checkpoints
-    :manifest  #js {"namespace" "checkpoints" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "checkpoints" "description" "Snapshots a file's pre-turn state; `/rewind` restores it" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
-    :manifest  #js {"namespace" "claude-hook-bridge" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
+    :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["events" "state" "messages" "ui"] "dependsOn" #js ["agent-shell" "token-suite"]}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
-    :manifest  #js {"namespace" "custom-provider-claude-native" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-deepseek"
     :module    ext-custom-provider-deepseek
-    :manifest  #js {"namespace" "custom-provider-deepseek" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-deepseek" "description" "DeepSeek models via `api.deepseek.com/v1`" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-groq"
     :module    ext-custom-provider-groq
-    :manifest  #js {"namespace" "custom-provider-groq" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-groq" "description" "Groq models via OpenAI-compatible API" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-kimi"
     :module    ext-custom-provider-kimi
-    :manifest  #js {"namespace" "custom-provider-kimi" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-kimi" "description" "Moonshot/Kimi models with thinking-model passthrough" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "local"
     :module    ext-custom-provider-local
-    :manifest  #js {"namespace" "local" "capabilities" #js ["providers"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "local" "description" "Any OpenAI-compatible local endpoint, registered from the `local-models` setting" "capabilities" #js ["providers"] "dependsOn" #js []}}
    {:namespace "custom-provider-minimax"
     :module    ext-custom-provider-minimax
-    :manifest  #js {"namespace" "custom-provider-minimax" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-minimax" "description" "MiniMax M2.x models via OpenAI-compatible API" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-opencode-zen"
     :module    ext-custom-provider-opencode-zen
-    :manifest  #js {"namespace" "custom-provider-opencode-zen" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"opencode-zen" #js {"rescue-parsing" false}}}}
+    :manifest  #js {"namespace" "custom-provider-opencode-zen" "description" "opencode-zen models via OpenAI-compatible API" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"opencode-zen" #js {"rescue-parsing" false}}}}
    {:namespace "custom-provider-openrouter"
     :module    ext-custom-provider-openrouter
-    :manifest  #js {"namespace" "custom-provider-openrouter" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"openrouter" #js {"provider" nil}}}}
+    :manifest  #js {"namespace" "custom-provider-openrouter" "description" "OpenRouter models via OpenAI-compatible API" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"openrouter" #js {"provider" nil}}}}
    {:namespace "custom-provider-qwen-cli"
     :module    ext-custom-provider-qwen-cli
-    :manifest  #js {"namespace" "custom-provider-qwen-cli" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-qwen-cli" "description" "Qwen models via local CLI provider" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-relay"
     :module    ext-custom-provider-relay
-    :manifest  #js {"namespace" "custom-provider-relay" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-relay" "description" "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona)" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "desktop-notify"
     :module    ext-desktop-notify
-    :manifest  #js {"namespace" "desktop-notify" "capabilities" #js ["events" "flags"] "dependsOn" #js [] "settings" #js {"desktop-notify" #js {"enabled" true "threshold-ms" 3000}}}}
+    :manifest  #js {"namespace" "desktop-notify" "description" "System desktop notifications on turn completion" "capabilities" #js ["events" "flags"] "dependsOn" #js [] "settings" #js {"desktop-notify" #js {"enabled" true "threshold-ms" 3000}}}}
    {:namespace "handoff"
     :module    ext-handoff
-    :manifest  #js {"namespace" "handoff" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "handoff" "description" "`/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md`" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
    {:namespace "headroom"
     :module    ext-headroom
-    :manifest  #js {"namespace" "headroom" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
+    :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
-    :manifest  #js {"namespace" "lsp-suite" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
+    :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
    {:namespace "mcp-client"
     :module    ext-mcp-client
-    :manifest  #js {"namespace" "mcp-client" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
+    :manifest  #js {"namespace" "mcp-client" "description" "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
    {:namespace "memory"
     :module    ext-memory
-    :manifest  #js {"namespace" "memory" "capabilities" #js ["events" "tools"] "dependsOn" #js [] "settings" #js {"memory" #js {"dir" "memory" "max-lines" 200}}}}
+    :manifest  #js {"namespace" "memory" "description" "Agent-maintained `MEMORY.md`, injected each run" "capabilities" #js ["events" "tools"] "dependsOn" #js [] "settings" #js {"memory" #js {"dir" "memory" "max-lines" 200}}}}
    {:namespace "model-roles"
     :module    ext-model-roles
-    :manifest  #js {"namespace" "model-roles" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
+    :manifest  #js {"namespace" "model-roles" "description" "Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
    {:namespace "openwiki"
     :module    ext-openwiki
-    :manifest  #js {"namespace" "openwiki" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js [] "settings" #js {"openwiki" #js {"enabled" false "dir" "openwiki" "sections" #js ["architecture" "workflows" "domain" "operations" "testing"]}}}}
+    :manifest  #js {"namespace" "openwiki" "description" "AI-maintained, git-aware living documentation for the repo (off by default)" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js [] "settings" #js {"openwiki" #js {"enabled" false "dir" "openwiki" "sections" #js ["architecture" "workflows" "domain" "operations" "testing"]}}}}
    {:namespace "prompt-history"
     :module    ext-prompt-history
-    :manifest  #js {"namespace" "prompt-history" "capabilities" #js ["commands" "events" "shortcuts" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "prompt-history" "description" "SQLite-backed prompt history with picker UI" "capabilities" #js ["commands" "events" "shortcuts" "ui"] "dependsOn" #js []}}
    {:namespace "questionnaire"
     :module    ext-questionnaire
-    :manifest  #js {"namespace" "questionnaire" "capabilities" #js ["tools" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "questionnaire" "description" "Structured user input flows for extensions" "capabilities" #js ["tools" "ui"] "dependsOn" #js []}}
    {:namespace "refine"
     :module    ext-refine
-    :manifest  #js {"namespace" "refine" "capabilities" #js ["commands" "ui"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "refine" "description" "`/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools)" "capabilities" #js ["commands" "ui"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "small-model"
     :module    ext-small-model
-    :manifest  #js {"namespace" "small-model" "capabilities" #js ["events" "model" "middleware" "tools" "tools-override" "flags" "state" "messages"] "dependsOn" #js ["advisor"] "settings" #js {"small-model" #js {"enabled" false "quality-monitor" #js {"enabled" true "max-turns" 40 "no-progress-streak" 3 "adaptive-temperature" true} "profiles" #js {"enabled" true} "evidence" #js {"enabled" true "max-snippets" 20 "max-snippet-chars" 1024} "read-guard" #js {"enabled" false "max-lines" 60} "thinking-budget" #js {"enabled" false "max-tokens" 8000 "retry-without-thinking" true} "supervisor" #js {"enabled" false "every-n-turns" 8 "max-interventions" 3 "pre-commit" true} "respond-tool" #js {"enabled" false} "self-tune" #js {"enabled" false "max-lessons" 20 "min-failures" 2 "max-reflections" 3 "reflect-on" #js ["quality-signal" "verify-fail"]} "knowledge-inject" #js {"enabled" false "dir" "knowledge" "top-k" 1 "threshold" 2 "token-budget" 800} "finalize-warn" #js {"enabled" false "max-nudges" 2}}}}}
+    :manifest  #js {"namespace" "small-model" "description" "Adaptation layer for small/local models: quality monitor, per-model profiles, evidence store, self-tuning playbook (off unless enabled or `--ext-small-model`)" "capabilities" #js ["events" "model" "middleware" "tools" "tools-override" "flags" "state" "messages"] "dependsOn" #js ["advisor"] "settings" #js {"small-model" #js {"enabled" false "quality-monitor" #js {"enabled" true "max-turns" 40 "no-progress-streak" 3 "adaptive-temperature" true} "profiles" #js {"enabled" true} "evidence" #js {"enabled" true "max-snippets" 20 "max-snippet-chars" 1024} "read-guard" #js {"enabled" false "max-lines" 60} "thinking-budget" #js {"enabled" false "max-tokens" 8000 "retry-without-thinking" true} "supervisor" #js {"enabled" false "every-n-turns" 8 "max-interventions" 3 "pre-commit" true} "respond-tool" #js {"enabled" false} "self-tune" #js {"enabled" false "max-lessons" 20 "min-failures" 2 "max-reflections" 3 "reflect-on" #js ["quality-signal" "verify-fail"]} "knowledge-inject" #js {"enabled" false "dir" "knowledge" "top-k" 1 "threshold" 2 "token-budget" 800} "finalize-warn" #js {"enabled" false "max-nudges" 2}}}}}
    {:namespace "spec-driven"
     :module    ext-spec-driven
-    :manifest  #js {"namespace" "spec-driven" "capabilities" #js ["events" "commands" "state" "ui" "messages"] "dependsOn" #js [] "settings" #js {"spec" #js {"profiles" nil "loop" nil "default-shape" "spec-kit" "shape-precedence" nil}}}}
+    :manifest  #js {"namespace" "spec-driven" "description" "Spec-driven development: durable plans surfaced from markdown specs" "capabilities" #js ["events" "commands" "state" "ui" "messages"] "dependsOn" #js [] "settings" #js {"spec" #js {"profiles" nil "loop" nil "default-shape" "spec-kit" "shape-precedence" nil}}}}
    {:namespace "stats-dashboard"
     :module    ext-stats-dashboard
-    :manifest  #js {"namespace" "stats-dashboard" "capabilities" #js ["commands" "events" "state" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "stats-dashboard" "description" "Usage stats and cost aggregation dashboard" "capabilities" #js ["commands" "events" "state" "ui"] "dependsOn" #js []}}
    {:namespace "subagent"
     :module    ext-subagent
-    :manifest  #js {"namespace" "subagent" "capabilities" #js ["tools" "commands" "model" "ui" "messages"] "dependsOn" #js ["model-roles"]}}
+    :manifest  #js {"namespace" "subagent" "description" "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs" "capabilities" #js ["tools" "commands" "model" "ui" "messages"] "dependsOn" #js ["model-roles"]}}
    {:namespace "thinking-renderer"
     :module    ext-thinking-renderer
-    :manifest  #js {"namespace" "thinking-renderer" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "thinking-renderer" "description" "Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
    {:namespace "todos"
     :module    ext-todos
-    :manifest  #js {"namespace" "todos" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js [] "settings" #js {"todos" #js {"reminder-every-n-turns" 5}}}}
+    :manifest  #js {"namespace" "todos" "description" "Persistent todo ledger for session-scoped task tracking" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js [] "settings" #js {"todos" #js {"reminder-every-n-turns" 5}}}}
    {:namespace "token-suite"
     :module    ext-token-suite
-    :manifest  #js {"namespace" "token-suite" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil}}}}
+    :manifest  #js {"namespace" "token-suite" "description" "Token optimizations, smart compaction, live cost preview (`/token-preview`)" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil}}}}
    {:namespace "verify-gate"
     :module    ext-verify-gate
-    :manifest  #js {"namespace" "verify-gate" "capabilities" #js ["events" "messages"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
+    :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)" "capabilities" #js ["events" "messages"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
    {:namespace "workspace-config"
     :module    ext-workspace-config
-    :manifest  #js {"namespace" "workspace-config" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])
+    :manifest  #js {"namespace" "workspace-config" "description" "Per-project aliases and flags from `.nyma/settings.json`" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])

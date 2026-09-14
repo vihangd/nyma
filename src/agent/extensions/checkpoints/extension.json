@@ -1,5 +1,9 @@
 {
   "namespace": "checkpoints",
-  "capabilities": ["events", "commands"],
+  "description": "Snapshots a file's pre-turn state; `/rewind` restores it",
+  "capabilities": [
+    "events",
+    "commands"
+  ],
   "dependsOn": []
 }

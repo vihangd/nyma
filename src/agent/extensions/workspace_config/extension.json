@@ -1,5 +1,6 @@
 {
   "namespace": "workspace-config",
+  "description": "Per-project aliases and flags from `.nyma/settings.json`",
   "capabilities": [
     "commands",
     "ui"

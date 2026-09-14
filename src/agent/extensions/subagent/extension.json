@@ -1,5 +1,14 @@
 {
   "namespace": "subagent",
-  "capabilities": ["tools", "commands", "model", "ui", "messages"],
-  "dependsOn": ["model-roles"]
+  "description": "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs",
+  "capabilities": [
+    "tools",
+    "commands",
+    "model",
+    "ui",
+    "messages"
+  ],
+  "dependsOn": [
+    "model-roles"
+  ]
 }

@@ -1,5 +1,6 @@
 {
   "namespace": "budget",
+  "description": "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)",
   "capabilities": [
     "events"
   ],

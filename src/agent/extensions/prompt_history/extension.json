@@ -1,5 +1,11 @@
 {
   "namespace": "prompt-history",
-  "capabilities": ["commands", "events", "shortcuts", "ui"],
+  "description": "SQLite-backed prompt history with picker UI",
+  "capabilities": [
+    "commands",
+    "events",
+    "shortcuts",
+    "ui"
+  ],
   "dependsOn": []
 }

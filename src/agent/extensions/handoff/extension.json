@@ -1,5 +1,10 @@
 {
   "namespace": "handoff",
-  "capabilities": ["events", "commands", "state"],
+  "description": "`/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md`",
+  "capabilities": [
+    "events",
+    "commands",
+    "state"
+  ],
   "dependsOn": []
 }

@@ -1,5 +1,6 @@
 {
   "namespace": "verify-gate",
+  "description": "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)",
   "capabilities": [
     "events",
     "messages"

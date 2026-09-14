@@ -1,5 +1,6 @@
 {
   "namespace": "custom-provider-openrouter",
+  "description": "OpenRouter models via OpenAI-compatible API",
   "capabilities": [
     "providers",
     "model"

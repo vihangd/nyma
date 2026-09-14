@@ -654,47 +654,50 @@ Extensions add tools, commands, keyboard shortcuts, middleware, and UI hooks. Th
 
 Nyma ships with several extension suites in `src/agent/extensions/`:
 
+<!-- generated: builtin-extensions (bun run gen:builtins) -->
 | Extension | Namespace | Purpose |
 |-----------|-----------|---------|
-| `agent_shell` | `agent-shell` | Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.) |
-| `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
-| `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
-| `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
-| `lsp_suite` | `lsp-suite` | Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics |
-| `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain |
-| `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
-| `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
-| `questionnaire` | `questionnaire` | Structured user input flows for extensions |
-| `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
-| `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
-| `mention_files` | `mention-files` | `@filename` file insertion in the editor |
+| `add_dir` | `add-dir` | Multi-root context — `/add-dir <path>` registers extra project roots |
 | `advisor` | `advisor` | Model-as-critic — `/advisor` sends the full transcript to a stronger model for review, no tools |
-| `subagent` | `subagent` | Context-isolated delegation built on roles: parallel fan-out, chains, background jobs |
-| `verify_gate` | `verify-gate` | Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set) |
-| `small_model` | `small-model` | Adaptation layer for small/local models: quality monitor, per-model profiles, evidence store, self-tuning playbook (off unless enabled or `--ext-small-model`) |
+| `agent_runner_claude_sdk` | `agent-runner-claude-sdk` | In-process Claude Agent SDK runner |
+| `agent_shell` | `agent-shell` | Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.) |
+| `agent_state` | `agent-state` | Reports what nyma is doing (idle, streaming, tool, waiting) to a supervisor process via a command hook |
+| `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
+| `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
+| `budget` | `budget` | Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set) |
 | `checkpoints` | `checkpoints` | Snapshots a file's pre-turn state; `/rewind` restores it |
 | `claude_hook_bridge` | `claude-hook-bridge` | Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt |
-| `spec_driven` | `spec-driven` | Spec-driven development: durable plans surfaced from markdown specs |
-| `memory` | `memory` | Agent-maintained `MEMORY.md`, injected each run |
-| `todos` | `todos` | Persistent todo ledger for session-scoped task tracking |
-| `handoff` | `handoff` | `/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md` |
-| `refine` | `refine` | `/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools) |
-| `budget` | `budget` | Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set) |
-| `headroom` | `headroom` | ML context compression via the Headroom proxy (off by default) |
-| `openwiki` | `openwiki` | AI-maintained, git-aware living documentation for the repo (off by default) |
-| `mcp_client` | `mcp-client` | MCP server integration — third-party tools from `.mcp.json` / `settings.mcp` |
-| `add_dir` | `add-dir` | Multi-root context — `/add-dir <path>` registers extra project roots |
-| `agent_runner_claude_sdk` | `agent-runner-claude-sdk` | In-process Claude Agent SDK runner |
 | `custom_provider_claude_native` | `custom-provider-claude-native` | Native Anthropic SDK provider (direct API, no OpenAI shim) |
-| `custom_provider_minimax` | `custom-provider-minimax` | MiniMax M2.x models via OpenAI-compatible API |
-| `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Qwen models via local CLI provider |
-| `custom_provider_local` | `local` | Any OpenAI-compatible local endpoint, registered from the `local-models` setting |
-| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona) |
 | `custom_provider_deepseek` | `custom-provider-deepseek` | DeepSeek models via `api.deepseek.com/v1` |
 | `custom_provider_groq` | `custom-provider-groq` | Groq models via OpenAI-compatible API |
 | `custom_provider_kimi` | `custom-provider-kimi` | Moonshot/Kimi models with thinking-model passthrough |
+| `custom_provider_local` | `local` | Any OpenAI-compatible local endpoint, registered from the `local-models` setting |
+| `custom_provider_minimax` | `custom-provider-minimax` | MiniMax M2.x models via OpenAI-compatible API |
 | `custom_provider_opencode_zen` | `custom-provider-opencode-zen` | opencode-zen models via OpenAI-compatible API |
 | `custom_provider_openrouter` | `custom-provider-openrouter` | OpenRouter models via OpenAI-compatible API |
+| `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Qwen models via local CLI provider |
+| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona) |
+| `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
+| `handoff` | `handoff` | `/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md` |
+| `headroom` | `headroom` | ML context compression via the Headroom proxy (off by default) |
+| `lsp_suite` | `lsp-suite` | Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics |
+| `mcp_client` | `mcp-client` | MCP server integration — third-party tools from `.mcp.json` / `settings.mcp` |
+| `memory` | `memory` | Agent-maintained `MEMORY.md`, injected each run |
+| `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain |
+| `openwiki` | `openwiki` | AI-maintained, git-aware living documentation for the repo (off by default) |
+| `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
+| `questionnaire` | `questionnaire` | Structured user input flows for extensions |
+| `refine` | `refine` | `/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools) |
+| `small_model` | `small-model` | Adaptation layer for small/local models: quality monitor, per-model profiles, evidence store, self-tuning playbook (off unless enabled or `--ext-small-model`) |
+| `spec_driven` | `spec-driven` | Spec-driven development: durable plans surfaced from markdown specs |
+| `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
+| `subagent` | `subagent` | Context-isolated delegation built on roles: parallel fan-out, chains, background jobs |
+| `thinking_renderer` | `thinking-renderer` | Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams |
+| `todos` | `todos` | Persistent todo ledger for session-scoped task tracking |
+| `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
+| `verify_gate` | `verify-gate` | Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set) |
+| `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
+<!-- /generated: builtin-extensions -->
 
 ### Extension Locations
 

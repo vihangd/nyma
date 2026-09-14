@@ -1,6 +1,10 @@
 {
   "namespace": "custom-provider-relay",
-  "capabilities": ["providers", "model"],
+  "description": "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona)",
+  "capabilities": [
+    "providers",
+    "model"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

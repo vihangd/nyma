@@ -1,6 +1,10 @@
 {
   "namespace": "custom-provider-kimi",
-  "capabilities": ["providers", "model"],
+  "description": "Moonshot/Kimi models with thinking-model passthrough",
+  "capabilities": [
+    "providers",
+    "model"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

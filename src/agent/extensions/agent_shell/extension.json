@@ -1,5 +1,6 @@
 {
   "namespace": "agent-shell",
+  "description": "Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.)",
   "capabilities": [
     "spawn",
     "commands",

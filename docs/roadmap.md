@@ -1512,3 +1512,45 @@ not rediscovered:
 - **`advisor/index.cljs:88`** reads `(:advisor (:roles settings))` with no default — the
   documented `:roles`-replaces trap, hit in practice: any user `:roles` map disables the advisor
   role.
+
+## 2026-09-14 — maintainability sweep (Lisp leverage, pluggability, tooling)
+
+Three read-only sweeps, one feasibility pass, then ten phases landed in fourteen commits. The
+finding that shaped all of it: five abstractions had been built and never wired to a call site
+(`js-interop`, `agent.schema`, `parse-command-line`, both `protocols.cljs`). Wired or deleted;
+a dead-namespace lint now fails on the next one.
+
+**Landed**
+- `^:async (fn …)` works — the meta was on the args vector in the folklore. AGENTS.md corrected;
+  five comments rewritten. No macro layer: SCI macros compile fine (+35 ms) but the runtime loader's
+  web `compileString` ignores `:require-macros`, so core-only macros would fork the language.
+- `(:k s)` ≡ `(get s "k")` under squint; 98 dual reads collapsed. `api.settings` replaces the
+  three-spelling `getSettings` ladder (26 sites, three private copies). Hand handler bookkeeping
+  deleted from 14 extensions — `dispose-scope!` owns it.
+- Deleted with zero callers: `agent.protocols`, `gateway` protocols, `agent.schema`,
+  `parse-command-line`, `agent.packages.manager`, `agent.resources.prompts`,
+  `agent.schema.typebox-adapter`, `docs/schema-reference.md`.
+- **SQLite store wired.** `prompt_history` (Ctrl+R) and `/stats` read `api.__sqlite-store`, which
+  nothing had ever set; the `usage` table had readers and no writer. The CLI opens `~/.nyma/nyma.db`
+  and records a usage row per run (store subscribers now receive the dispatch payload).
+- `/reload` re-fires `session_ready`; `session_ready`, `session_end_summary`, `tool_access_check`
+  declared; the event map carries a payload-keys column. `/extensions`, `--debug`.
+- `extension.json` `settings` blocks (16 extensions, 18 sections) registered as manager defaults
+  per section; `/settings` lists them; `settings_reader_lint` runs both directions;
+  `builtin_extensions.test` catches a stale `gen:builtins` and generates the README table.
+- `categorize-tool` reads `tool_metadata` for built-ins too; reasoning dialects are a `defmulti`
+  each provider extends from its own extension; spec_driven's shape `case` ×12 is one table.
+- Tests: HOME scratch dir, module-global registries restored per file, `dist_freshness` fails on
+  stale or orphaned output, `mk-api-mock` covers the whole scoped api, pre-commit hook
+  (`bun run hooks:install`).
+
+**Deferred, named**
+- `lsp_suite` (`lsp`), `mcp_client` (`mcp`), `claude_hook_bridge` (`hooks`), `workspace_config`
+  read settings sections without `api.settings` and declare nothing; `bash_suite`, `token_suite`,
+  `agent_shell`, `headroom` still read `.nyma/settings.json` directly. Their declarations are
+  documentation only until they consult the manager.
+- 382 public `defn`s are used only inside their own file (none dead). Privatising is churn;
+  do it as files are touched.
+- Payload shape is a column of key names, not a contract; `agent_end` still emits three shapes.
+- Twelve of twenty test files still hand-roll an api mock; migrate as touched.
+- `docs/gateway.md` and `docs/hooks.md` are untested and months stale.

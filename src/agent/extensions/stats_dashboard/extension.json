@@ -1,5 +1,11 @@
 {
   "namespace": "stats-dashboard",
-  "capabilities": ["commands", "events", "state", "ui"],
+  "description": "Usage stats and cost aggregation dashboard",
+  "capabilities": [
+    "commands",
+    "events",
+    "state",
+    "ui"
+  ],
   "dependsOn": []
 }

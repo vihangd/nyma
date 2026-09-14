@@ -1,6 +1,9 @@
 {
   "namespace": "custom-provider-minimax",
-  "capabilities": ["providers"],
+  "description": "MiniMax M2.x models via OpenAI-compatible API",
+  "capabilities": [
+    "providers"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

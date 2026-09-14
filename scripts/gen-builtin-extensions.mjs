@@ -101,8 +101,35 @@ ${rows}])
 `;
 }
 
+/** The README's "Built-in Extensions" table, from each manifest's
+ *  `description`. The hand-kept table listed an extension that did not
+ *  exist and missed two that did. */
+export function renderReadmeTable(root = SRC) {
+  const rows = builtinDirs(root).map((dir) => {
+    const p = join(root, dir, "extension.json");
+    const m = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
+    const desc = m.description ?? "";
+    return `| \`${dir}\` | \`${m.namespace ?? kebab(dir)}\` | ${desc} |`;
+  });
+  return ["| Extension | Namespace | Purpose |", "|-----------|-----------|---------|", ...rows].join("\n");
+}
+
+export const README_START = "<!-- generated: builtin-extensions (bun run gen:builtins) -->";
+export const README_END = "<!-- /generated: builtin-extensions -->";
+
+/** README with the generated block replaced. Returns null when the markers are absent. */
+export function spliceReadme(readme, table) {
+  const i = readme.indexOf(README_START), j = readme.indexOf(README_END);
+  if (i < 0 || j < 0) return null;
+  return readme.slice(0, i + README_START.length) + "\n" + table + "\n" + readme.slice(j);
+}
+
 if (import.meta.main) {
   const out = render();
   writeFileSync(OUT, out);
   console.log(`${OUT} — ${builtinDirs().length} builtin extensions`);
+  const readme = readFileSync("README.md", "utf8");
+  const spliced = spliceReadme(readme, renderReadmeTable());
+  if (spliced === null) console.log("README.md — no generated-table markers, left alone");
+  else if (spliced !== readme) { writeFileSync("README.md", spliced); console.log("README.md — builtin table regenerated"); }
 }

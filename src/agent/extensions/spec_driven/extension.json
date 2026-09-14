@@ -1,5 +1,6 @@
 {
   "namespace": "spec-driven",
+  "description": "Spec-driven development: durable plans surfaced from markdown specs",
   "capabilities": [
     "events",
     "commands",

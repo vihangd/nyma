@@ -1,5 +1,6 @@
 {
   "namespace": "desktop-notify",
+  "description": "System desktop notifications on turn completion",
   "capabilities": [
     "events",
     "flags"

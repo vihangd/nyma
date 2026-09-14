@@ -1,4 +1,8 @@
 {
   "namespace": "ast-tools",
-  "capabilities": ["tools", "exec"]
+  "description": "Tree-sitter–backed code search and editing tools",
+  "capabilities": [
+    "tools",
+    "exec"
+  ]
 }

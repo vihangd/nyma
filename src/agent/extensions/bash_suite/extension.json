@@ -1,5 +1,6 @@
 {
   "namespace": "bash-suite",
+  "description": "Shell execution helpers, security analysis, output handling",
   "capabilities": [
     "events",
     "tools",

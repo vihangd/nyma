@@ -1,6 +1,10 @@
 {
   "namespace": "custom-provider-groq",
-  "capabilities": ["providers", "model"],
+  "description": "Groq models via OpenAI-compatible API",
+  "capabilities": [
+    "providers",
+    "model"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

@@ -1,5 +1,10 @@
 {
   "namespace": "thinking-renderer",
-  "capabilities": ["events", "ui", "flags"],
+  "description": "Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams",
+  "capabilities": [
+    "events",
+    "ui",
+    "flags"
+  ],
   "dependsOn": []
 }

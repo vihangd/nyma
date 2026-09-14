@@ -1,6 +1,10 @@
 {
   "namespace": "refine",
-  "capabilities": ["commands", "ui"],
+  "description": "`/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools)",
+  "capabilities": [
+    "commands",
+    "ui"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

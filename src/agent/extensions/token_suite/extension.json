@@ -1,5 +1,6 @@
 {
   "namespace": "token-suite",
+  "description": "Token optimizations, smart compaction, live cost preview (`/token-preview`)",
   "capabilities": [
     "events",
     "context",

@@ -1,5 +1,6 @@
 {
   "namespace": "todos",
+  "description": "Persistent todo ledger for session-scoped task tracking",
   "capabilities": [
     "events",
     "tools",

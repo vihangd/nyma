@@ -1,6 +1,9 @@
 {
   "namespace": "custom-provider-qwen-cli",
-  "capabilities": ["providers"],
+  "description": "Qwen models via local CLI provider",
+  "capabilities": [
+    "providers"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

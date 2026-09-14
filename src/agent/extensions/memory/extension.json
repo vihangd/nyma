@@ -1,5 +1,6 @@
 {
   "namespace": "memory",
+  "description": "Agent-maintained `MEMORY.md`, injected each run",
   "capabilities": [
     "events",
     "tools"

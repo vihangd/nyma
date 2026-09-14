@@ -1,5 +1,6 @@
 {
   "namespace": "agent-state",
+  "description": "Reports what nyma is doing (idle, streaming, tool, waiting) to a supervisor process via a command hook",
   "capabilities": [
     "events",
     "spawn"

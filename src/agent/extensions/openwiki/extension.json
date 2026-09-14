@@ -1,5 +1,6 @@
 {
   "namespace": "openwiki",
+  "description": "AI-maintained, git-aware living documentation for the repo (off by default)",
   "capabilities": [
     "events",
     "commands",

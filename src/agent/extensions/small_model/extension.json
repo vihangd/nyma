@@ -1,5 +1,6 @@
 {
   "namespace": "small-model",
+  "description": "Adaptation layer for small/local models: quality monitor, per-model profiles, evidence store, self-tuning playbook (off unless enabled or `--ext-small-model`)",
   "capabilities": [
     "events",
     "model",

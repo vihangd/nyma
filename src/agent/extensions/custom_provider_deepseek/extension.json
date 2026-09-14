@@ -1,6 +1,9 @@
 {
   "namespace": "custom-provider-deepseek",
-  "capabilities": ["providers"],
+  "description": "DeepSeek models via `api.deepseek.com/v1`",
+  "capabilities": [
+    "providers"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }

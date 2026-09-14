@@ -6,6 +6,7 @@
    `bun run bundle` shipped a nyma with 2 of 40 extensions and 3 of 20 providers
    for as long as it did."
   (:require ["bun:test" :refer [describe it expect]]
+            ["../scripts/gen-builtin-extensions.mjs" :as gen]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
@@ -51,6 +52,24 @@
 
 (describe "builtin registry"
           (fn []
+            (it "README's built-in table is the generated one"
+                (fn []
+                  ;; Hand-kept, the table listed an extension that did not
+                  ;; exist and missed two that did. `bun run gen:builtins`
+                  ;; rewrites it from each manifest's `description`.
+                  (let [readme (fs/readFileSync (path/join (js/process.cwd) "README.md") "utf8")]
+                    (-> (expect (.includes readme (gen/renderReadmeTable))) (.toBe true)))))
+
+            (it "every manifest has a description (the README row)"
+                (fn []
+                  (let [missing (->> (source-dirs)
+                                     (remove (fn [dir]
+                                               (let [p (path/join src-root dir "extension.json")]
+                                                 (and (fs/existsSync p)
+                                                      (seq (str (.-description (js/JSON.parse (fs/readFileSync p "utf8")))))))))
+                                     vec)]
+                    (-> (expect (str/join ", " missing)) (.toBe "")))))
+
             (it "covers every extension in the source tree"
                 (fn []
                   (let [in-registry (set (map :namespace registry))

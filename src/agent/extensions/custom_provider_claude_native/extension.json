@@ -1,6 +1,9 @@
 {
   "namespace": "custom-provider-claude-native",
-  "capabilities": ["providers"],
+  "description": "Native Anthropic SDK provider (direct API, no OpenAI shim)",
+  "capabilities": [
+    "providers"
+  ],
   "dependsOn": [],
   "dependencies": {}
 }
