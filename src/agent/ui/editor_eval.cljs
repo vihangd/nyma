@@ -6,20 +6,20 @@
      $expr   → eval, show, include in LLM context for future turns
      $$expr  → eval, show, HIDE from LLM context (:local-only message)
 
-   Unlike editor-bash, this path does NOT route through the
-   bash_suite middleware chain. Rationale:
+   Like editor-bash, this path DOES route through the
+   `before_tool_call` emit-collect chain before spawning bb, so
+   bash_suite's security analysis, the Claude-hook bridge's
+   PreToolUse and the permission gates all see a typed `$expr`
+   before it runs. A `{block: true}` / `{cancel: true}` result
+   cancels the eval and the reason is shown in the transcript.
 
-     - Babashka is a language runtime, not a shell. env_filter,
-       cwd_manager, and shell-grammar classification don't apply.
-     - A bb form can still shell out via clojure.java.shell/sh —
-       that path will eventually hit bash_suite when we wire the
-       user_bash event. Today it does not.
-
-   SECURITY GAP (documented so a future phase can catch it):
-     $(clojure.java.io/delete-file \"/\") runs ungated. If you add
-     an eval-mode security extension, emit before_tool_call with
-     name \"bb\" in run-eval! and honor {:block true ...} the
-     same way editor-bash does. A ~10 line change.
+   The payload names the tool `\"bash\"`, not `\"bb\"`, and that is
+   deliberate: bash_suite gates every one of its handlers on
+   `is-bash-tool?` (shared.cljs — a literal `= \"bash\"`), so a
+   `\"bb\"` payload would travel the whole chain and be classified
+   by nobody. Only the BLOCK verdict is honoured; argument
+   rewrites (env_filter's `unset …` preamble) are ignored, since
+   bb is a language runtime and the preamble is shell syntax.
 
    Separated from app.cljs so the pure pieces (parse, format, and
    the bb-availability probe) are unit-testable without mounting
@@ -147,11 +147,26 @@
    when bb is missing. Never throws — any internal failure surfaces
    in :stderr so the caller can render it like any other eval error.
 
-   Optional `events` — when provided, emits `user_eval` with the
-   result payload after execution (or after the unavailable check)."
+   Optional `events` — when provided, the expression is first put
+   through the `before_tool_call` emit-collect chain (a blocking
+   verdict short-circuits into {:blocked? true :reason ...}), and
+   `user_eval` is emitted with the result payload afterwards."
   [expr & [events]]
-  (let [result
-        (if-not (js-await (bb-available?))
+  (let [verdict (when (and events (:emit-collect events))
+                  (js-await ((:emit-collect events) "before_tool_call"
+                             #js {:name "bash" :args #js {:command expr}})))
+        blocked (when (and verdict (or (get verdict "block") (get verdict "cancel")))
+                  (or (get verdict "reason") "Expression blocked by bash_suite"))
+        result
+        (if blocked
+          {:blocked?     true
+           :reason       blocked
+           :unavailable? false
+           :expr         expr
+           :stdout       ""
+           :stderr       ""
+           :exit-code    -1}
+          (if-not (js-await (bb-available?))
           {:unavailable? true
            :expr         expr
            :install-hint install-hint
@@ -176,13 +191,15 @@
                :expr         expr
                :stdout       ""
                :stderr       (str "bb spawn failed: " (.-message e))
-               :exit-code    -1})))]
-    (when events
+               :exit-code    -1}))))]
+    (when (and events (:emit events))
       ((:emit events) "user_eval"
                       {:expr         (:expr result)
                        :stdout       (:stdout result)
                        :stderr       (:stderr result)
                        :exit-code    (:exit-code result)
+                       :blocked?     (boolean (:blocked? result))
+                       :reason       (:reason result)
                        :unavailable? (:unavailable? result)}))
     result))
 
@@ -194,8 +211,11 @@
    accent, and an exit footer over this; plain text here is the
    fallback for :role assistant rendering and for the LLM context
    on $expr (non-hidden) turns."
-  [{:keys [expr unavailable? install-hint stdout stderr exit-code]}]
+  [{:keys [expr blocked? reason unavailable? install-hint stdout stderr exit-code]}]
   (cond
+    blocked?
+    (str "blocked: " (or reason "expression blocked"))
+
     unavailable?
     (str "λ " expr "\n" (or install-hint "bb not available"))
 

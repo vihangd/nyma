@@ -35,7 +35,7 @@ elsewhere (or is empty) — read the emit site.
 | `before_compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/smart_compaction.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `before_message_send` | src/agent/loop.cljs | - | messages, model, system |
 | `before_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/profiles.cljs, src/agent/extensions/small_model/respond_tool.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs | - |
-| `before_tool_call` | src/agent/loop.cljs, src/agent/middleware.cljs, src/agent/ui/editor_bash.cljs | src/agent/extensions/bash_suite/env_filter.cljs, src/agent/extensions/bash_suite/security_analysis.cljs, src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/pre_tool_use.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/file_access.cljs | - |
+| `before_tool_call` | src/agent/loop.cljs, src/agent/middleware.cljs, src/agent/ui/editor_bash.cljs, src/agent/ui/editor_eval.cljs | src/agent/extensions/bash_suite/env_filter.cljs, src/agent/extensions/bash_suite/security_analysis.cljs, src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/pre_tool_use.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/file_access.cljs | args, command, name |
 | `compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/kv_cache.cljs, src/agent/modes/pi_rpc.cljs | after, before, summary |
 | `context_assembly` | src/agent/loop.cljs | src/agent/extensions/headroom/compress.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/token_suite/priority_assembly.cljs | contextWindow, inputBudget, messages, model, overheadTokens, systemPrompt, tokenBudget, tokensUsed |
 | `editor_change` | src/agent/modes/interactive.cljs | src/agent/extensions/token_suite/token_preview.cljs | text |
@@ -78,7 +78,7 @@ elsewhere (or is empty) — read the emit site.
 | `turn_request` | src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | text |
 | `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `user_bash` | src/agent/ui/editor_bash.cljs | - | blocked, command, exit-code, reason, stderr, stdout |
-| `user_eval` | src/agent/ui/editor_eval.cljs | - | exit-code, expr, stderr, stdout, unavailable |
+| `user_eval` | src/agent/ui/editor_eval.cljs | - | blocked, exit-code, expr, reason, stderr, stdout, unavailable |
 
 ## pi-compat events
 
