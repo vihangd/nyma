@@ -1554,3 +1554,42 @@ a dead-namespace lint now fails on the next one.
 - Payload shape is a column of key names, not a contract; `agent_end` still emits three shapes.
 - Twelve of twenty test files still hand-roll an api mock; migrate as touched.
 - `docs/gateway.md` and `docs/hooks.md` are untested and months stale.
+
+## 2026-09-14 — UX/UI review
+
+Three sweeps (first-run + CLI, the TUI, commands + workflows) judged as a daily Claude Code /
+aider user would; 38 findings, every S1 verified by direct read. The shape matched the code
+sweep: the machinery mostly existed and was unwired — thirteen status-line segments, the good
+autocomplete in `parser.cljs`, `watch-theme`, the theme icon maps, the paste reducer.
+
+**Landed**
+- Bugs a first-time user hit: OSC bytes on stdout broke `-p --output-format json | jq`; `-p`
+  printed the last message of any role; exit code 0 on JSON errors; startup failures dumped
+  compiled source + stack; the positional prompt was dropped in interactive mode; a
+  half-written session threw on `-c`; credentials written 0644; `/login <typo>` saved a key;
+  `/handoff` was unreachable (two owners); a failed tool rendered `✓`; `notify` dropped its
+  level; plan-mode messages named a command that might belong to another extension; `/mode`
+  discarded an unapproved plan silently; bare `/escalate` escalated; Ctrl-C quit instead of
+  interrupting; `/settings` edits were never saved; `$expr` bypassed the security gate;
+  malformed MCP config was silent.
+- Awareness: cost, context fill and an elapsed clock on the status line (numbers per turn, the
+  clock per tick); failed-tool marker; tool progress text; slash commands show busy with the
+  clock, Escape aborts (`ctx.signal`), failures are named; extension handler errors reach the
+  transcript once per extension; provider errors classified (auth / rate-limit / context →
+  `/compact`); startup and exit lines; `/compact` forces, awaits and reports the delta.
+- Permission prompt shows the command / path / first changed line and the policy reason;
+  "Allow for this session" added; "Allow always" says what it means.
+- Colour: one `fg` honouring NO_COLOR and TERM depth; icons from the theme with an ASCII set;
+  picker keys unified; input picker has a cursor; editor border colours by prefix.
+- Vocabulary: `/plan` deleted (`/planmode` native, `/agent mode plan` ACP); `/roles` and
+  `/mode` no longer share entries; `default` shown; `/extensions` names disabled extensions
+  and how to enable them.
+
+**Deferred, named**
+- `/theme` still needs a restart: the pane, bar and editor close over the theme at construction.
+  Live reload means they read from an atom; `watch-theme` is waiting for that.
+- Tool output is still one line and not expandable; `verbosity`/`max-lines` in interactive.cljs
+  are unread. Needs a per-message expand key and a renderer that reads them.
+- `turn-count` resets per process; no resumed-session marker on compaction summaries.
+- Session lock (D26) and onboarding nudge (C9) as before; `nyma login` / `nyma resume`
+  subcommands; streaming in `-p`.
