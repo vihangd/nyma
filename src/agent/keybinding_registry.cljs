@@ -69,9 +69,10 @@
                          :bound-by     "the editor"
                          :fixed?       true}
    ;; ── Tools ──
-   "app.tools.expand"   {:description  "Expand tool execution view"
+   "app.tools.expand"   {:description  "Expand or collapse the last tool's output"
                          :default-keys ["ctrl+o"]
-                         :category     :tools}
+                         :category     :tools
+                         :bound-by     "interactive mode"}
    ;; ── Pager (in-app chat history scroll, active only in pager mode) ──
    "app.scroll.up"      {:description  "Scroll chat up one message"
                          :default-keys ["ctrl+up"]
@@ -280,7 +281,6 @@
          (contains? (get-bindings registry action-id)
                     (normalize-combo combo)))))
 
-
 ;;; ─── /hotkeys ───────────────────────────────────────────
 
 (def fixed-input-keys
@@ -351,7 +351,15 @@
                                                (.repeat " " (max 1 (- 8 (count (format-key-combo (:combo r))))))
                                                (:description r)))
                                         rows)))))
+        ;; An `app.*` action in the shortcuts atom (interactive mode's own
+        ;; handler, or a keybindings.json override of one) is already printed
+        ;; from the registry above, under its effective combo.
+        app-action? (fn [entry]
+                      (when (map? entry)
+                        (let [a (str (or (:action entry) (get entry "action") ""))]
+                          (.startsWith a "app."))))
         ext-rows (->> (or shortcuts {})
+                      (remove (fn [[_ entry]] (app-action? entry)))
                       (map (fn [[combo entry]]
                              {:combo combo :description (shortcut-description entry)}))
                       (sort-by :combo)
@@ -359,6 +367,7 @@
         blocks (keep identity
                      [(section "Agent"      (category-rows registry :agent))
                       (section "Editor"     (category-rows registry :editor))
+                      (section "Tools"      (category-rows registry :tools))
                       (section "Navigation" (category-rows registry :navigation))
                       (section "Extensions and custom bindings" ext-rows)])]
     (if (seq blocks)

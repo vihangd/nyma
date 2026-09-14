@@ -518,8 +518,12 @@
                       :id      (new-id)})))))
 
         ;; ── Tool events ────────────────────────────────────────────────────
-        verbosity "collapsed"
-        max-lines 500
+        ;; From settings — both keys were defaults nothing read.
+        ui-settings (when-let [s (:settings agent)]
+                      (when (fn? (:get s)) ((:get s))))
+        verbosity (str (or (:tool-display ui-settings) "collapsed"))
+        max-lines (let [n (:tool-display-max-lines ui-settings)]
+                    (if (and (number? n) (pos? n)) n 40))
         events    (:events agent)
 
         on-tool-start
@@ -952,6 +956,17 @@
                              (when-let [ctrl-atom (:abort-controller agent)]
                                (.abort @ctrl-atom "user-interrupt")))
                            nil))
+
+      ;; ctrl+o: expand/collapse the last tool's output. The registry
+      ;; documented this action for a long time with no handler; it lives in
+      ;; `(:shortcuts agent)` like every other dispatched key, under whatever
+      ;; combo keybindings.json mapped to `app.tools.expand`.
+      (let [combo (or (kbr/get-binding @(:keybinding-registry agent) "app.tools.expand")
+                      "ctrl+o")]
+        (swap! (:shortcuts agent) assoc combo
+               {:action      "app.tools.expand"
+                :description (get-in kbr/default-actions ["app.tools.expand" :description])
+                :handler     (fn [] (update-messages! reducers/tool-toggle-expanded))}))
 
       ;; Registered shortcuts — extensions' `registerShortcut` and every
       ;; keybindings.json binding. Both landed in `(:shortcuts agent)` and

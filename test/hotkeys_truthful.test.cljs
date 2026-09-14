@@ -39,11 +39,22 @@
 
    (it "omits an action nothing dispatches"
        (fn []
-         ;; app.tools.expand / app.scroll.* are in the action table but no
-         ;; code dispatches them; printing them is the bug this fixes.
+         ;; app.scroll.* are in the action table but no code dispatches
+         ;; them; printing them is the bug this fixes.
          (let [text (kbr/hotkeys-text registry {})]
-           (-> (expect (.includes text "Expand tool execution view")) (.toBe false))
            (-> (expect (.includes text "Scroll chat up one page")) (.toBe false)))))
+
+   (it "lists ctrl+o once it has a handler, and not a second time from the shortcuts atom"
+       (fn []
+         ;; interactive mode registers the handler in `(:shortcuts agent)`
+         ;; under the action id; the registry row is the one that prints.
+         (let [text (kbr/hotkeys-text
+                     registry
+                     {"ctrl+o" {:action "app.tools.expand" :handler (fn [])
+                                :description "Expand or collapse the last tool's output"}})]
+           (-> (expect (.includes text "^O")) (.toBe true))
+           (-> (expect (.includes text "Expand or collapse the last tool's output")) (.toBe true))
+           (-> (expect (count (.split text "Expand or collapse"))) (.toBe 2)))))
 
    (it "prints an extension shortcut with its description"
        (fn []

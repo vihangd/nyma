@@ -364,6 +364,9 @@ bun run start
 ```
 
 Launches the full terminal UI with message display, text input, and keyboard shortcuts.
+`/hotkeys` lists the keys that are bound. `ctrl+o` expands or collapses the last
+tool call's output (rebind it in `~/.nyma/keybindings.json` as
+`{"ctrl+t": "app.tools.expand"}`).
 
 In the editor, `@path` mentions a file or directory: on submit each one is appended to your message as a `<file path="…">` block (a directory becomes a one-level `<dir>` listing; files over 200 KB are marked skipped). Typing `@` opens fuzzy path completion (Tab accepts) — gitignore-aware via `fd` when it is on your PATH, otherwise from `git ls-files` or a directory walk. Emails and `@scope/pkg` names that resolve to nothing are left alone.
 
@@ -601,7 +604,7 @@ before relying on a value here.
   "follow-up-mode": "one-at-a-time",
   "transport": "auto",
   "tool-display": "collapsed",
-  "tool-display-max-lines": 500,
+  "tool-display-max-lines": 40,
   "scrollback-mode": true,
   "status-line": { "preset": "default" },
   "ui": {
@@ -624,6 +627,13 @@ defaults in the extension that owns it
 (`extensions/model_roles/features/escalate.cljs`), so there is one place to
 change rather than two to keep in sync. See
 [`model_roles`](src/agent/extensions/model_roles/README.md#escalation).
+
+`tool-display` is `"collapsed"` (one line per tool call; `ctrl+o` expands the
+last one) or `"expanded"` (every finished call shows its output).
+`tool-display-max-lines` caps the expanded body; the rest is summarised as
+`… N more lines`. An `edit` call expands to a `-`/`+` line diff of
+`old_string` against `new_string`, a `write` to the content it wrote, and a
+failed call previews the first lines of its error even when collapsed.
 
 Keys are accepted in either kebab-case or camelCase — `load-json` normalizes
 camelCase to kebab before merging, so `maxHeight` and `max-height` are the same

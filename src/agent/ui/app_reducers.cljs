@@ -42,7 +42,8 @@
                      :exec-id   (get data :execId)
                      :id        (new-id)
                      :verbosity (or (get data :customVerbosity) verbosity)
-                     :max-lines max-lines}
+                     :max-lines max-lines
+                     :expanded  (= "expanded" (or (get data :customVerbosity) verbosity))}
               (get data :customOneLineArgs)  (assoc :custom-one-line-args (get data :customOneLineArgs))
               (get data :customStatusText)    (assoc :custom-status-text (get data :customStatusText))
               (get data :customIcon)           (assoc :custom-icon (get data :customIcon)))]
@@ -77,8 +78,11 @@
                             :result    (get data :result)
                             :exec-id   exec-id
                             :verbosity (or (get data :customVerbosity) verbosity)
-                            :max-lines max-lines}
-                     start-id                           (assoc :id start-id)
+                            :max-lines max-lines
+                            ;; The renderer reads this; the setting decides the
+                            ;; default and ctrl+o flips it afterwards.
+                            :expanded  (= "expanded" (or (get data :customVerbosity) verbosity))}
+                     start-id                          (assoc :id start-id)
                      start-args                         (assoc :args start-args)
                      ;; The end payload has no customOneLineArgs — only the
                      ;; start event carries it — so without this the finished
@@ -106,6 +110,22 @@
     (if (some? idx)
       (assoc-in prev-v [idx :custom-status-text] (str (get data :data)))
       prev-v)))
+
+(defn tool-toggle-expanded
+  "Flip `:expanded` on the LAST tool message (ctrl+o). Returns prev unchanged
+   when there is no tool message.
+
+   The message map is REPLACED, not mutated: chat-pane's line cache is a
+   WeakMap keyed on the message object, so a fresh object is what makes the
+   next frame re-render that entry."
+  [prev]
+  (let [v   (vec prev)
+        idx (last (keep-indexed (fn [i m]
+                                  (when (contains? #{"tool-start" "tool-end"} (:role m)) i))
+                                v))]
+    (if (some? idx)
+      (update v idx (fn [m] (assoc m :expanded (not (:expanded m)))))
+      v)))
 
 (defn make-submit-guard
   "Wrap submit-fn so that:

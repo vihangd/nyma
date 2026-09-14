@@ -4,6 +4,7 @@
             ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [agent.utils.ansi :as ansi :refer [fg]]
             [agent.utils.markdown-blocks :as mb]
+            [agent.ui.diff-lines :refer [diff-lines]]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]))
 
 (defn clamp-line
@@ -32,7 +33,6 @@
 (def ^:private RESET (str ESC "[0m"))
 (def ^:private BOLD  (str ESC "[1m"))
 (def ^:private DIM   (str ESC "[2m"))
-
 
 (defn- wrap+split
   "Wrap plain-text ANSI string to width, return string[]."
@@ -125,6 +125,52 @@
         (let [lines (.split (str result) "\n") n (count lines) max-w (max 20 (- (or (.-columns js/process.stdout) 80) 30))]
           (if (= n 1) (truncate-to (first lines) max-w) (str n " lines")))))))
 
+;;; ─── Expanded tool body ───────────────────────────────────────────────────
+
+(def error-preview-lines
+  "A failed call auto-expands this many lines of its result, collapsed or not:
+   the one-line summary shows the first line of the error and the cause is
+   usually a few lines further down."
+  10)
+
+(defn- plain-rows [prefix s]
+  (mapv (fn [l] [prefix l]) (split-lines (str (or s "")))))
+
+(defn- tool-body-rows
+  "`[style-prefix text]` rows for a finished tool's expanded view.
+   `edit` shows a line diff of old_string → new_string (the tool's own result
+   is only \"Edit applied\"), `write` the content it wrote, everything else its
+   result. A failure shows the result whatever the tool: the error is the
+   information, not the diff that never applied."
+  [tname msg is-error {:keys [ec gc mc]}]
+  (let [dim-mc (str mc DIM)]
+    (cond
+      is-error         (plain-rows dim-mc (:result msg))
+      (= tname "edit") (mapv (fn [[op s]]
+                               (case op
+                                 :- [ec (str "-" s)]
+                                 :+ [gc (str "+" s)]
+                                 [dim-mc (str " " s)]))
+                             (diff-lines (get-in msg [:args :old_string])
+                                         (get-in msg [:args :new_string])))
+      (= tname "write") (plain-rows dim-mc (get-in msg [:args :content]))
+      :else            (plain-rows dim-mc (:result msg)))))
+
+(defn- expanded-lines
+  "Indented, styled, width-clamped body lines plus a `… N more lines` tail
+   when `limit` cut it."
+  [rows limit w mc]
+  (let [shown  (vec (take limit rows))
+        hidden (- (count rows) (count shown))
+        maxw   (max 10 (dec w))]
+    (cond-> (mapv (fn [[prefix s]]
+                    (truncate-line-to-width
+                     (str "  " prefix (ansi/expand-tabs s) RESET) maxw))
+                  shown)
+      (pos? hidden)
+      (conj (truncate-line-to-width
+             (str "  " mc DIM "… " hidden " more lines" RESET) maxw)))))
+
 ;;; ─── Message renderer ─────────────────────────────────────────────────────
 
 (defn- render-message*
@@ -153,7 +199,10 @@
         mc      (fg (get-in theme [:colors :muted]     "#565f89"))
         wc      (fg (get-in theme [:colors :warning]   "#e0af68"))
         gc      (fg (get-in theme [:colors :success]   "#9ece6a"))
-        cy      (fg "#7dcfff")]
+        ;; Theme tokens, not literals: /theme applies live and a hardcoded
+        ;; cyan would be the one colour that never followed it.
+        cy      (fg (get-in theme [:colors :info]      "#7dcfff"))
+        plc     (fg (get-in theme [:colors :plan]      "#7dcfff"))]
     (case role
       "user"
       (wrap+split (str pc BOLD (icon theme :user) " " RESET content) w)
@@ -243,12 +292,24 @@
                             (str " " DIM "· " res-str RESET))
                           (when (and is-end dur)
                             (str " " DIM (.toFixed (/ dur 1000) 1) "s" RESET))
-                          RESET)]
+                          RESET)
+            ;; Body under the one-liner. `:expanded` is stamped by app_reducers
+            ;; from the tool-display setting and flipped by ctrl+o; a failure
+            ;; shows a short preview even when collapsed.
+            limit    (cond
+                       (not is-end)    0
+                       (:expanded msg) (let [n (:max-lines msg)] (if (number? n) n 40))
+                       is-error        error-preview-lines
+                       :else           0)
+            body     (when (pos? limit)
+                       (expanded-lines
+                        (tool-body-rows tname msg is-error {:ec ec :gc gc :mc mc})
+                        limit w mc))]
         ;; Final width-safety guard: pi-tui crashes if any line exceeds
         ;; the terminal width. Long MCP arg lists (e.g. multi_read
         ;; with several full paths) can blow past format-one-line-args'
         ;; per-arg budget — truncate to (w - 1) here as a last resort.
-        [(truncate-line-to-width line (max 10 (dec w)))])
+        (into [(truncate-line-to-width line (max 10 (dec w)))] body))
 
       "shell"
       (if (seq content)
@@ -262,7 +323,7 @@
       (wrap+split (str mc DIM "│ " RESET content) w)
 
       "plan"
-      (wrap+split (str (fg "#7dcfff") (icon theme :widget) " " RESET content) w)
+      (wrap+split (str plc (icon theme :widget) " " RESET content) w)
 
       ;; One line per ACP tool call, rewritten in place as its status changes.
       ;; Dim like "shell": this is activity, not output, and a turn can carry

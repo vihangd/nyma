@@ -48,8 +48,11 @@
    :steering-mode  "one-at-a-time"
    :follow-up-mode "one-at-a-time"
    :transport              "auto"
+   ;; "collapsed" (one line per tool call, ctrl+o expands the last one) or
+   ;; "expanded" (every finished call shows its output). The line cap applies
+   ;; to the expanded body; the rest is summarised as "… N more lines".
    :tool-display           "collapsed"
-   :tool-display-max-lines 500
+   :tool-display-max-lines 40
    ;; Layout mode for the chat view. Accepts:
    ;;   true    — default, natural-flow + writeToStdout commits
    ;;   false   — fixed-height + Ink <Static> emissions to scrollback
@@ -342,14 +345,14 @@
    and were deleted with the Ink UI, leaving the key, the README entry and — for
    scrollback — a doc comment pointing at two files that no longer exist. A user
    who sets one gets exactly the silence they would get from a typo.
+   `tool-display` and `tool-display-max-lines` have since been revived by the
+   expandable tool view (interactive.cljs reads them), so four remain.
 
    This is the production copy, and `test/settings_reader_lint.test.cljs` READS
    it rather than keeping its own — the lints that mirror the thing they guard
    are the ones that go stale."
   {"steering-mode"          "never implemented; steers are injected all-at-once"
    "follow-up-mode"         "never implemented; the follow-up queue is already one-at-a-time"
-   "tool-display"           "removed with the Ink UI; tool calls render on one line"
-   "tool-display-max-lines" "removed with the Ink UI; only applied to the expanded view"
    "scrollback-mode"        "removed with the Ink UI; there is no pager"
    "status-line"            "removed with the Ink UI; segments are auto-appended in id order"})
 

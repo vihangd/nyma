@@ -52,9 +52,9 @@
                                    (fn []
                                      (-> (expect (:tool-display defaults)) (.toBe "collapsed"))))
 
-                               (it "defaults include tool-display-max-lines as 500"
+                               (it "defaults include tool-display-max-lines as 40"
                                    (fn []
-                                     (-> (expect (:tool-display-max-lines defaults)) (.toBe 500))))
+                                     (-> (expect (:tool-display-max-lines defaults)) (.toBe 40))))
 
                                (it "reload re-reads settings from disk"
                                    (fn []
