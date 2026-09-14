@@ -864,7 +864,6 @@
 
           "hotkeys"
           {:description "Show the keyboard shortcuts that are actually bound"
-           :aliases     ["keys"]
            :handler (fn [_args ctx]
                       ;; Generated, not hardcoded. The list this replaced
                       ;; advertised Ctrl+L as "Show current model" and Ctrl+P as

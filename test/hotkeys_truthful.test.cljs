@@ -4,6 +4,9 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.keybinding-registry :as kbr]
             [agent.modes.interactive :refer [resumed-banner]]
+            [agent.core :refer [create-agent]]
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extension-scope :refer [create-scoped-api]]
             ["node:fs" :as fs]))
 
 (def ^:private registry (kbr/create-registry))
@@ -115,3 +118,37 @@
        (fn []
          (-> (expect (.includes (resumed-banner {:message-count 1 :name "x"}) "1 message"))
              (.toBe true))))))
+
+;;; ─── The description must survive the real, gated api ────────────────────
+;;
+;; Every test above hands `hotkeys-text` a hand-built shortcuts map. In
+;; production the description travels registerShortcut → extension_scope's
+;; capability gate → extensions.cljs, and an arity mismatch anywhere on that
+;; path drops it silently: the key would still be listed, with no description,
+;; which is the exact failure /hotkeys was rewritten to end.
+
+(describe
+ "an extension's shortcut description reaches /hotkeys through the gated api"
+ (fn []
+   (it "keeps the description a scoped extension passes"
+       (fn []
+         (let [agent  (create-agent #js {:model #js {:modelId "test-model"}
+                                         :system-prompt "test"})
+               scoped (create-scoped-api (create-extension-api agent)
+                                         "demo" #{"shortcuts"})]
+           (.registerShortcut scoped "ctrl+t" (fn []) #js {:description "Do the thing"})
+           (-> (expect (kbr/shortcut-description (get @(:shortcuts agent) "ctrl+t")))
+               (.toBe "Do the thing"))
+           (-> (expect (.includes (kbr/hotkeys-text @(:keybinding-registry agent)
+                                                    @(:shortcuts agent))
+                                  "Do the thing"))
+               (.toBe true)))))
+
+   (it "still stores a bare fn for the two-argument form"
+       (fn []
+         (let [agent  (create-agent #js {:model #js {:modelId "test-model"}
+                                         :system-prompt "test"})
+               scoped (create-scoped-api (create-extension-api agent)
+                                         "demo" #{"shortcuts"})]
+           (.registerShortcut scoped "ctrl+t" (fn []))
+           (-> (expect (fn? (get @(:shortcuts agent) "ctrl+t"))) (.toBe true)))))))
