@@ -236,6 +236,25 @@
     (-> (expect (get (aget js/globalThis "__seen") "limit")) (.toBe 7))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
+(defn ^:async test-user-copy-overrides-builtin []
+  ;; A user kept ~/.nyma/extensions/thinking-renderer from before it became a
+  ;; builtin; the loader warned "only one will load" and picked one by sort
+  ;; order. The user's copy is the deliberate one.
+  (let [tmp-dir (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-dir (path/join tmp-dir "shadow")
+        _       (.mkdirSync fs ext-dir #js {:recursive true})
+        _       (.writeFileSync fs (path/join ext-dir "index.mjs")
+                                "export default function(api) { globalThis.__which = 'user'; }")
+        _       (.writeFileSync fs (path/join ext-dir "extension.json")
+                                (js/JSON.stringify #js {:namespace "shadow" :capabilities #js []}))
+        builtin {:namespace "shadow" :manifest #js {:namespace "shadow" :capabilities #js []}
+                 :module #js {:default (fn [_] (aset js/globalThis "__which" "builtin") nil)}}
+        loaded  (js-await (discover-and-load [tmp-dir] (make-test-api) [builtin]))]
+    (-> (expect (count loaded)) (.toBe 1))
+    (-> (expect (:type (first loaded))) (.not.toBe :builtin))
+    (-> (expect (aget js/globalThis "__which")) (.toBe "user"))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
 (defn ^:async test-loads-manifest []
   ;; When extension.json exists in the dir, only index.* is loaded as entry point
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
@@ -262,6 +281,7 @@
             (it "handles extension that throws during load" test-handles-throwing-extension)
             (it "sweeps what a throwing activation registered" test-throwing-activation-leaves-nothing-registered)
             (it "loads extension.json manifest for namespace" test-loads-manifest)
+            (it "a user extension with a builtin's namespace replaces the builtin" test-user-copy-overrides-builtin)
             (it "manifest settings become manager defaults before activation" test-manifest-settings-become-defaults)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────

@@ -37,7 +37,7 @@
           missing   (vec (filter #(not (dep-resolvable? %)) pkg-names))]
       (when (seq missing)
         (d/info
-         (str "[nyma] Installing missing extension deps: "
+         (str "Installing missing extension deps: "
               (.join (clj->js missing) ", ")))
         (if (fs/existsSync (path/join (js/process.cwd) "package.json"))
           (let [proc (js/Bun.spawn
@@ -47,7 +47,7 @@
                 exit-code (js-await (.-exited proc))]
             (when (not= exit-code 0)
               (d/error
-               (str "[nyma] Failed to install: "
+               (str "Failed to install: "
                     (.join (clj->js missing) ", ")))))
           (d/warn
            "[nyma] No package.json in CWD — cannot auto-install extension deps. "
@@ -147,9 +147,9 @@
   (let [ns-set  (set (map :namespace entries))
         _       (doseq [[ns-str es] (group-by :namespace entries)]
                   (when (> (count es) 1)
-                    (d/warn (str "[nyma] Duplicate extension namespace \"" ns-str "\" — "
+                    (d/warn (str "Duplicate extension namespace \"" ns-str "\" — "
                                  (.join (clj->js (mapv :path es)) " vs ")
-                                 " (only one will load)"))))
+                                 "; the last one listed loads"))))
         by-ns   (into {} (map (fn [e] [(:namespace e) e]) entries))
         ;; Filter deps to only known namespaces
         deps-of (fn [e] (filterv #(contains? ns-set %) (or (:deps e) [])))
@@ -240,7 +240,16 @@
                                 :manifest manifest :deps deps}))
                       (catch :default e
                         (d/error
-                         (str "[nyma] Failed to scan extension (" full-path "):") e)))))))))))
+                         (str "Failed to scan extension (" full-path "):") e)))))))))))
+    ;; A user extension with a builtin's namespace REPLACES the builtin: the
+    ;; copy in ~/.nyma/extensions is deliberate (it predates the builtin, or
+    ;; patches it). Say so at info level; the duplicate warning is for two
+    ;; user copies.
+    (let [user-ns (set (keep (fn [e] (when-not (:module e) (:namespace e))) @scan-results))]
+      (doseq [e @scan-results]
+        (when (and (:module e) (contains? user-ns (:namespace e)))
+          (d/info (str "user extension overrides the builtin " (:namespace e)))))
+      (swap! scan-results (fn [rs] (vec (remove #(and (:module %) (contains? user-ns (:namespace %))) rs)))))
     ;; Pass 2: Topological sort
     (let [sorted     (topo-sort @scan-results)
           extensions (atom [])
@@ -261,7 +270,7 @@
           (do (swap! failed conj namespace)
               (swap! last-load-failures assoc namespace (str "dependency " bad " failed to load"))
               (d/error
-               (str "[nyma] Skipping extension " namespace
+               (str "Skipping extension " namespace
                     " — its dependency " bad " failed to load")))
           ;; Held outside the try so a throw mid-activation can sweep what the
           ;; extension registered before it died. Without this a half-activated
@@ -298,7 +307,7 @@
               (swap! last-load-failures assoc namespace (str (.-message e)))
               (dispose-scope! @scoped-box)
               (d/error
-               (str "[nyma] Failed to load extension (" path "):") e))))))
+               (str "Failed to load extension (" path "):") e))))))
       @extensions)))
 
 (defn ^:async deactivate-all
@@ -316,7 +325,7 @@
   (js-await
    (js/Promise.all
     (mapv (fn [{:keys [deactivate scope path]}]
-            (let [log   (fn [e] (d/error (str "[nyma] Extension deactivate error (" path "):") e))
+            (let [log   (fn [e] (d/error (str "Extension deactivate error (" path "):") e))
                   sweep (fn [] (dispose-scope! scope) nil)
                   r     (try (when deactivate (deactivate))
                              (catch :default e (log e) nil))]
