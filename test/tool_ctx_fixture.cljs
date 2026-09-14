@@ -131,58 +131,123 @@
 ;;; ─── Extension API mock ───────────────────────────────
 
 (defn mk-api-mock
-  "Build a mock extension API — the object passed to an extension's
-   default/activate fn. Mirrors the shape nyma's effort_switcher /
-   model_switcher / clear_session tests build inline.
+  "A mock of the scoped extension API — the object an extension's activate
+   fn receives. Every field an extension can call is present with a capturing
+   default, so a test names only what it cares about. Twenty test files used
+   to hand-roll this in five shapes.
 
-   Provides a notify-capturing :ui, registerCommand/unregisterCommand
-   backed by an atom the test can inspect via :_commands, plus
-   matching :_notifications and :_events atoms for on/off/emit
-   capture.
+   Captures (atoms the test can inspect):
+     :_commands       {name opts}          :_notifications [{:message :level}]
+     :_notes          [msg …] (strings)     :_event-handlers {event [h …]}
+     :_global-events  [[event data] …]     :_tools          {name def}
+     :_segments       {id cfg}             :_flags          {name cfg}
+     :_messages       [msg …] (sendMessage) :_sent          [[text opts] …]
+     :_dispatches     [[type data] …]      :_state          (atom state-map)
+     :_model          (atom spec)
+
+   Helpers:
+     (.fire api \"event\" data)   — call every handler registered for event
 
    Options (all optional):
-     :ui-overrides  map of extra :ui fields (merged onto defaults)
+     :ui-overrides  map merged onto the default :ui
+     :settings      map returned by (.settings api) / section lookups
+     :state         initial agent-state map for getState / __state_atom
      :extras        map of extra top-level api fields"
-  [& [{:keys [ui-overrides extras]}]]
-  (let [commands      (atom {})
-        notifications (atom [])
+  [& [{:keys [ui-overrides settings state extras]}]]
+  (let [commands       (atom {})
+        notifications  (atom [])
+        notes          (atom [])
         event-handlers (atom {})
-        ui-base       {:available true
-                       :notify    (fn [msg & [level]]
-                                    (swap! notifications conj
-                                           {:message msg :level (or level "info")}))
-                       :showOverlay noop1
-                       :setTitle    noop1}
-        ui-map        (merge ui-base (or ui-overrides {}))
-        ui-js         (clj->js ui-map)
-        base          #js {:ui ui-js
+        global-events  (atom [])
+        tools          (atom {})
+        segments       (atom {})
+        flags          (atom {})
+        messages       (atom [])
+        sent           (atom [])
+        dispatches     (atom [])
+        state-atom     (atom (or state {}))
+        model          (atom nil)
+        settings-map   (or settings {})
+        ui-base        {:available true
+                        :notify    (fn [msg & [level]]
+                                     (swap! notes conj msg)
+                                     (swap! notifications conj
+                                            {:message msg :level (or level "info")}))
+                        :showOverlay noop1
+                        :setTitle    noop1
+                        :setWidget   noop1
+                        :clearWidget noop1}
+        ui-map         (merge ui-base (or ui-overrides {}))
+        base           #js {:ui (clj->js ui-map)
+                            :namespace "test"
 
-                           :registerCommand
-                           (fn [name opts]
-                             (swap! commands assoc name opts))
+                            :registerCommand   (fn [name opts] (swap! commands assoc name opts))
+                            :unregisterCommand (fn [name] (swap! commands dissoc name))
+                            :getCommands       (fn [] @commands)
 
-                           :unregisterCommand
-                           (fn [name]
-                             (swap! commands dissoc name))
+                            :on   (fn [event handler & _]
+                                    (swap! event-handlers update event (fnil conj []) handler))
+                            :off  (fn [event handler]
+                                    (swap! event-handlers update event
+                                           (fn [hs] (filterv #(not= % handler) hs))))
+                            :emit (fn [event data]
+                                    (doseq [h (get @event-handlers event [])] (h data)))
+                            :fire (fn [event data]
+                                    (doseq [h (get @event-handlers event [])] (h data)))
+                            :emitGlobal (fn [event data] (swap! global-events conj [event data]))
+                            :events #js {:on   (fn [event handler & _]
+                                                 (swap! event-handlers update event (fnil conj []) handler))
+                                         :off  (fn [_ _] nil)
+                                         :emit (fn [event data] (swap! global-events conj [event data]))}
 
-                           :on
-                           (fn [event handler & _]
-                             (swap! event-handlers update event (fnil conj []) handler))
+                            :registerTool   (fn [name td] (swap! tools assoc name td))
+                            :unregisterTool (fn [name] (swap! tools dissoc name))
+                            :getTool        (fn [name] (get @tools name))
 
-                           :off
-                           (fn [event handler]
-                             (swap! event-handlers update event
-                                    (fn [hs] (filterv #(not= % handler) hs))))
+                            :registerStatusSegment   (fn [id cfg] (swap! segments assoc id cfg))
+                            :unregisterStatusSegment (fn [id] (swap! segments dissoc id))
 
-                           :emit
-                           (fn [event data]
-                             (doseq [h (get @event-handlers event [])]
-                               (h data)))
+                            :registerFlag  (fn [name cfg] (swap! flags assoc name cfg))
+                            :getFlag       (fn [name] (let [f (get @flags name)]
+                                                        (when f (or (:value f) (.-default f)))))
+                            :getGlobalFlag (fn [_] nil)
 
-                           ;; Escape hatches the test can peek at
-                           :_commands       commands
-                           :_notifications  notifications
-                           :_event-handlers event-handlers}]
+                            :settings    (fn [& [section]]
+                                           (if section (or (get settings-map section) {}) settings-map))
+                            :getSettings (fn [] settings-map)
+
+                            :getState      (fn [] @state-atom)
+                            :__state_atom  state-atom
+                            :dispatch      (fn [t d] (swap! dispatches conj [t d]))
+                            :dispatchState (fn [t d]
+                                             (swap! dispatches conj [t d])
+                                             (when (= "messages-cleared" (str t))
+                                               (swap! state-atom assoc :messages [])))
+                            :onStateChange (fn [_] (fn [] nil))
+
+                            :sendMessage     (fn [m] (swap! messages conj m))
+                            :sendUserMessage (fn [t & [o]] (swap! sent conj [t o]))
+                            :setModel        (fn [spec] (reset! model spec))
+                            :getActiveModelSpec (fn [] @model)
+                            :getThinkingLevel   (fn [] "off")
+                            :estimateTokens     (fn [text] (js/Math.ceil (/ (count (str text)) 4)))
+                            :exec  (fn [& _] (js/Promise.resolve #js {:stdout "" :stderr ""}))
+                            :spawn (fn [& _] nil)
+
+                            ;; Escape hatches the test can peek at
+                            :_commands       commands
+                            :_notifications  notifications
+                            :_notes          notes
+                            :_event-handlers event-handlers
+                            :_global-events  global-events
+                            :_tools          tools
+                            :_segments       segments
+                            :_flags          flags
+                            :_messages       messages
+                            :_sent           sent
+                            :_dispatches     dispatches
+                            :_state          state-atom
+                            :_model          model}]
     (when (seq extras)
       (js/Object.assign base (clj->js extras)))
     base))

@@ -1,6 +1,7 @@
 (ns workspace-config.test
   "Tests for the workspace config extension (F1: loading, F3: aliases)."
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
+            [tool-ctx-fixture :refer [mk-api-mock]]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
@@ -9,18 +10,7 @@
 
 ;;; ─── Mock API ─────────────────────────────────────────────────
 
-(defn- make-mock-api []
-  (let [registered-commands (atom {})
-        notifications       (atom [])]
-    #js {:ui                #js {:available true
-                                 :notify    (fn [msg _level] (swap! notifications conj msg))}
-         :registerCommand   (fn [name opts]
-                              (swap! registered-commands assoc name opts))
-         :unregisterCommand (fn [name]
-                              (swap! registered-commands dissoc name))
-         :getCommands       (fn [] (clj->js @registered-commands))
-         :_commands         registered-commands
-         :_notifications    notifications}))
+(defn- make-mock-api [] (mk-api-mock))
 
 ;;; ─── State reset ──────────────────────────────────────────────
 
@@ -125,11 +115,11 @@
         ;; Register two aliases first
         (handler #js ["foo" "/help"] nil)
         (handler #js ["bar" "/clear"] nil)
-        (reset! (.-_notifications api) [])
+        (reset! (.-_notes api) [])
         ;; Now call reload
         (let [reload-h (.-handler (get @(.-_commands api) "reload"))]
           (reload-h #js [] #js {:ui (.-ui api)})
-          (let [notif (str/join " " @(.-_notifications api))]
+          (let [notif (str/join " " @(.-_notes api))]
             (-> (expect (str/includes? notif "reloaded")) (.toBe true))))
         (deact))))))
 
@@ -155,9 +145,9 @@
             handler (.-handler (get @(.-_commands api) "alias"))]
         ;; Register one first, then list
         (handler #js ["mykey" "/help"] nil)
-        (reset! (.-_notifications api) [])
+        (reset! (.-_notes api) [])
         (handler #js [] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (or (str/includes? notif "mykey")
                           (str/includes? notif "Alias"))) (.toBe true)))
         (deact))))
@@ -169,7 +159,7 @@
             deact   (aliases/activate api a-atom)
             handler (.-handler (get @(.-_commands api) "alias"))]
         (handler #js [] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (str/includes? notif "No aliases")) (.toBe true)))
         (deact))))
 
@@ -192,7 +182,7 @@
             deact   (aliases/activate api a-atom)
             handler (.-handler (get @(.-_commands api) "alias"))]
         (handler #js ["--remove" "doesnotexist"] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (str/includes? notif "No alias")) (.toBe true)))
         (deact))))))
 
@@ -209,7 +199,7 @@
         (.registerCommand api "help" #js {:description "help" :handler (fn [] nil)})
         ;; Attempt to alias "help"
         (handler #js ["help" "/clear"] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (str/includes? notif "Cannot alias")) (.toBe true)))
         (-> (expect (.-description (get @(.-_commands api) "help"))) (.toBe "help"))
         (deact))))))

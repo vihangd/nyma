@@ -24,49 +24,11 @@
             [agent.commands.resolver :refer [resolve-command]]
             [agent.builtin-extensions :refer [registry]]))
 
-;; The full set of built-in extension namespaces shipped under
-;; src/agent/extensions/. If you ADD a new built-in, add it here.
+;; Derived from the generated registry, which test/builtin_extensions.test
+;; already holds equal to the source tree. A hand-kept copy here was a third
+;; list to forget when adding an extension.
 (def expected-builtin-namespaces
-  #{"advisor"
-    "agent-runner-claude-sdk"
-    "agent-state"
-    "agent-shell"
-    "ast-tools"
-    "bash-suite"
-    "claude-hook-bridge"
-    "custom-provider-claude-native"
-    "custom-provider-deepseek"
-    "custom-provider-groq"
-    "custom-provider-kimi"
-    "custom-provider-minimax"
-    "custom-provider-opencode-zen"
-    "custom-provider-openrouter"
-    "custom-provider-qwen-cli"
-    "custom-provider-relay"
-    "desktop-notify"
-    "lsp-suite"
-    "mcp-client"
-    "model-roles"
-    "refine"
-    "prompt-history"
-    "questionnaire"
-    "spec-driven"
-    "stats-dashboard"
-    "token-suite"
-    "workspace-config"
-    "small-model"
-    "local"
-    "headroom"
-    "subagent"
-    "openwiki"
-    "memory"
-    "todos"
-    "add-dir"
-    "verify-gate"
-    "checkpoints"
-    "handoff"
-    "budget"
-    "thinking-renderer"})
+  (set (map :namespace registry)))
 
 (defn ^:async test-all-builtins-load-with-correct-namespaces []
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
@@ -179,7 +141,7 @@
           (fn []
             (it "/plan resolves to exactly one command after a full load"
                 test-plan-resolves-after-full-load)
-            (it "all 30 expected namespaces load and none collide on 'index'"
+            (it "every registry namespace loads and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"
                 test-no-duplicate-namespaces)

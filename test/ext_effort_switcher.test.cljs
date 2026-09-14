@@ -1,23 +1,14 @@
 (ns ext-effort-switcher.test
   "Tests for the effort switcher feature."
   (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
+            [tool-ctx-fixture :refer [mk-api-mock]]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.features.effort-switcher :as effort-switcher]))
 
 ;;; ─── Mock API ─────────────────────────────────────────────────
 
-(defn- make-mock-api []
-  (let [registered-commands (atom {})
-        notifications       (atom [])]
-    #js {:ui          #js {:available true
-                           :notify    (fn [msg _level] (swap! notifications conj msg))}
-         :registerCommand   (fn [name opts]
-                              (swap! registered-commands assoc name opts))
-         :unregisterCommand (fn [name]
-                              (swap! registered-commands dissoc name))
-         :_commands         registered-commands
-         :_notifications    notifications}))
+(defn- make-mock-api [] (mk-api-mock))
 
 ;;; ─── Mock connection ──────────────────────────────────────────
 
@@ -79,7 +70,7 @@
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (handler #js ["high"] nil)
-        (-> (expect (some #(str/includes? % "No agent") @(.-_notifications api)))
+        (-> (expect (some #(str/includes? % "No agent") @(.-_notes api)))
             (.toBe true)))))
   (it "/effort with no args shows usage"
     (fn []
@@ -87,7 +78,7 @@
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (handler #js [] nil)
-        (-> (expect (some #(str/includes? % "Usage") @(.-_notifications api)))
+        (-> (expect (some #(str/includes? % "Usage") @(.-_notes api)))
             (.toBe true)))))))
 
 ;;; ─── Group 3: Validation ──────────────────────────────────────
@@ -99,7 +90,7 @@
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (handler #js [] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (str/includes? notif "low")) (.toBe true))
           (-> (expect (str/includes? notif "max")) (.toBe true))))))
   (it "invalid level shows error with the invalid name"
@@ -110,7 +101,7 @@
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (handler #js ["banana"] nil)
-        (let [notif (str/join " " @(.-_notifications api))]
+        (let [notif (str/join " " @(.-_notes api))]
           (-> (expect (str/includes? notif "Invalid")) (.toBe true))
           (-> (expect (str/includes? notif "banana")) (.toBe true))))))
   (it "uppercase input is lowercased before sending"
@@ -182,7 +173,7 @@
             _       (effort-switcher/activate api)
             handler (.-handler (get @(.-_commands api) "effort"))]
         (handler #js ["high"] nil)
-        (-> (expect (some #(str/includes? % "not connected") @(.-_notifications api)))
+        (-> (expect (some #(str/includes? % "not connected") @(.-_notes api)))
             (.toBe true)))))
   (it "RPC rejection shows error notification"
     (fn []
@@ -201,7 +192,7 @@
                        (js/setTimeout
                          (fn []
                            (-> (expect (some #(str/includes? % "Effort switch failed")
-                                            @(.-_notifications api)))
+                                            @(.-_notes api)))
                                (.toBe true))
                            (resolve nil))
                          10))))))

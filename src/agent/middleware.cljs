@@ -319,24 +319,22 @@
             (tool-tracking-leave events store ctx))})
 
 (defn- categorize-tool
-  "Categorize a tool for permission checking. Built-ins by name; anything
-   else by the safety metadata it registered (`registerTool` reads a
-   `:safety` field off the tool def). No metadata → \"other\", which no
-   role policy maps, so the gate allows it — an extension tool that edits
-   files and says nothing about itself is invisible to /plan and ask-mode."
+  "Permission category from the tool's safety metadata — one table for
+   built-ins (`tool_metadata/builtin-metadata`) and extension tools
+   (`registerTool` reads a `:safety` field off the def). A tool with no
+   metadata is \"other\", which no role policy maps, so the gate allows
+   it — an extension tool that edits files and says nothing about itself is
+   invisible to /plan and ask-mode."
   [tool-name]
-  (cond
-    (#{"bash"} tool-name)                     "exec"
-    (tool-metadata/file-editing? tool-name)   "write"
-    (#{"read" "glob" "grep" "ls"} tool-name)  "read"
-    (#{"web_fetch" "web_search"} tool-name)   "network"
-    :else
-    (let [s (tool-metadata/tool-safety tool-name)]
-      (cond
-        (:destructive? s)                          "write"
-        (:network? s)                              "network"
-        (contains? (or (:capabilities s) #{}) :shell) "exec"
-        :else                                      "other"))))
+  (let [s    (tool-metadata/tool-safety tool-name)
+        caps (or (:capabilities s) #{})]
+    (cond
+      (contains? caps :shell)                  "exec"
+      (tool-metadata/file-editing? tool-name)  "write"
+      (:destructive? s)                        "write"
+      (:network? s)                            "network"
+      (:read-only? s)                          "read"
+      :else                                    "other")))
 
 (defn- agent-ui
   "The live interactive UI handle (or nil). Reached from the agent's extension
