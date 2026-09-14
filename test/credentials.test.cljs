@@ -133,3 +133,45 @@
                                                                                :api-key-env "TEST_RELAY_KEY"})]
                                               (-> (expect (fn [] ((:create-model entry) "some-model")))
                                                   (.toThrow #"/login testrelay")))))))
+
+;;; ─── file permissions ───────────────────────────────────────
+;;; API keys were written with the default mode, so umask decided: on the usual
+;;; 022 they landed 0644 — world-readable, in the one file whose whole job is
+;;; holding secrets.
+
+(defn- mode-of [p]
+  (bit-and (.-mode (fs/statSync p)) 0777))
+
+(describe "saved API keys are not world-readable"
+          (fn []
+            (it "tightens an existing 0644 credentials file on read"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-secret"})
+                        p   (path/join dir ".nyma" "credentials.json")]
+                    (fs/chmodSync p 0644)
+                    (-> (expect (mode-of p)) (.toBe 420))   ;; 0644, as written today
+                    (credentials/read-all)
+                    (-> (expect (mode-of p)) (.toBe 384))   ;; 0600
+                    (fs/rmSync dir #js {:recursive true}))))
+
+            (it "leaves an already-private file alone"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-secret"})
+                        p   (path/join dir ".nyma" "credentials.json")]
+                    (fs/chmodSync p 0600)
+                    (-> (expect (credentials/harden! p)) (.toBe false))
+                    (-> (expect (mode-of p)) (.toBe 384))
+                    (fs/rmSync dir #js {:recursive true}))))
+
+            (it "still returns the keys after tightening"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-secret"})]
+                    (fs/chmodSync (path/join dir ".nyma" "credentials.json") 0644)
+                    (-> (expect (credentials/read-credential "anthropic")) (.toBe "sk-secret"))
+                    (fs/rmSync dir #js {:recursive true}))))
+
+            (it "0600 is 384, not whatever the literal happened to compile to"
+                (fn []
+          ;; Clojure spells octal `0600`; `0o600` is not a valid Clojure number
+          ;; at all and fails the squint compile. This pins the value.
+                  (-> (expect credentials/private-mode) (.toBe 384))))))

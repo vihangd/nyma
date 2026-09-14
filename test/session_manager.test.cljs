@@ -3,7 +3,8 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
-            ["./agent/sessions/manager.mjs" :refer [create-session-manager]]
+            [clojure.string :as str]
+            ["./agent/sessions/manager.mjs" :refer [create-session-manager parse-lines]]
             [agent.events :refer [create-event-bus]]))
 
 (describe "agent.sessions.manager (in-memory)"
@@ -172,3 +173,53 @@
                       ;; Inert for the model: the name is not a conversation turn.
                       (-> (expect (count ((:build-context sm2)))) (.toBe 1)))
                     (.rmSync fs tmp-dir #js {:recursive true}))))))
+
+;;; ─── a half-written last line ───────────────────────────────
+;;; A session file's final line is truncated whenever the previous run was
+;;; killed mid-append — Ctrl-C during a stream, a crash, an OOM. `mapv
+;;; JSON.parse` threw on it, so `-c` and `-r` died on exactly the sessions a
+;;; user most wants back. `sessions/listing.cljs` has always skipped bad lines,
+;;; which is why the picker LISTED a session that then refused to open.
+
+(defn- write-truncated! [lines trailing]
+  (let [dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-trunc-"))
+        file (.join path dir "session.jsonl")]
+    (fs/writeFileSync file (str (str/join "\n" (map #(js/JSON.stringify (clj->js %)) lines))
+                                "\n" trailing))
+    [dir file]))
+
+(describe "resuming a session whose last line is half-written"
+          (fn []
+            (it "loads the good turns instead of throwing"
+                (fn []
+                  (let [[dir file] (write-truncated!
+                                    [{:id "a" :parent-id nil :role "user" :content "hi"}
+                                     {:id "b" :parent-id "a" :role "assistant" :content "hello"}]
+                                    "{\"id\":\"c\",\"role\":\"assis")
+                        sm (create-session-manager file)]
+                    ((:load sm))
+                    (-> (expect (count ((:get-tree sm)))) (.toBe 2))
+                    (-> (expect (count ((:build-context sm)))) (.toBe 2))
+                    (.rmSync fs dir #js {:recursive true}))))
+
+            (it "leaves the leaf on the last GOOD entry, so the next turn chains to it"
+                (fn []
+                  (let [[dir file] (write-truncated!
+                                    [{:id "a" :parent-id nil :role "user" :content "hi"}
+                                     {:id "b" :parent-id "a" :role "assistant" :content "hello"}]
+                                    "{\"id\":\"c\"")
+                        sm (create-session-manager file)]
+                    ((:load sm))
+                    (-> (expect ((:leaf-id sm))) (.toBe "b"))
+                    (.rmSync fs dir #js {:recursive true}))))
+
+            (it "counts every skipped line, not just the last"
+                (fn []
+                  (-> (expect (:skipped (parse-lines "{\"a\":1}\nnot json\n{\"b\":2}\n{\"c\":")))
+                      (.toBe 2))
+                  (-> (expect (count (:entries (parse-lines "{\"a\":1}\nnot json\n{\"b\":2}"))))
+                      (.toBe 2))))
+
+            (it "is a no-op for a clean file"
+                (fn []
+                  (-> (expect (:skipped (parse-lines "{\"a\":1}\n{\"b\":2}\n"))) (.toBe 0))))))
