@@ -251,11 +251,24 @@
 ;;; ─── Phase 4: mode status-line segment (color-coded) ──
 
 (describe "model-roles-modes:status-segment" (fn []
-                                               (it "default mode + default role are both hidden (no badge)"
+                                               ;; Hiding both defaults made the COMMON case show nothing,
+                                               ;; and nothing reads the same as "these segments are not
+                                               ;; installed". Muted and labelled instead.
+                                               (it "default mode + default role are shown, labelled and muted"
                                                    (fn []
-                                                     (-> (expect (:visible? (status-seg/render-mode "default"))) (.toBeFalsy))
-                                                     (-> (expect (:visible? (status-seg/render-role "default"))) (.toBeFalsy))
-                                                     (-> (expect (:visible? (status-seg/render-role ""))) (.toBeFalsy))))
+                                                     (let [m (status-seg/render-mode "default")
+                                                           r (status-seg/render-role "default")]
+                                                       (-> (expect (:visible? m)) (.toBe true))
+                                                       (-> (expect (:content m)) (.toBe "mode:default"))
+                                                       (-> (expect (:visible? r)) (.toBe true))
+                                                       (-> (expect (:content r)) (.toBe "role:default"))
+                                                       ;; muted, so they never compete with a real badge
+                                                       (-> (expect (:color m)) (.toBe (:color r))))))
+
+                                               (it "an EMPTY axis is still hidden — no data is not a default"
+                                                   (fn []
+                                                     (-> (expect (:visible? (status-seg/render-role ""))) (.toBeFalsy))
+                                                     (-> (expect (:visible? (status-seg/render-mode ""))) (.toBeFalsy))))
 
                                                (it "plan / accept-edits / full-auto each render a visible, colored mode badge"
                                                    (fn []

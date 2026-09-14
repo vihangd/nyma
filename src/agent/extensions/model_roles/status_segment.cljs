@@ -1,11 +1,16 @@
 (ns agent.extensions.model-roles.status-segment
   "Status-line segments for the two orthogonal axes:
      role segment — the active MODEL role (deep/fast/commit/custom), muted;
-                    'default' is hidden.
+                    'default' shows as a muted `role:default`.
      mode segment — the active permission MODE, color-coded so a permissive one
                     is visually obvious (Claude's `⏵⏵ accept edits on` analog);
-                    'default' is hidden.
+                    'default' shows as a muted `mode:default`.
    Both show together, so e.g. `fast` + `⏵⏵ full-auto` coexist.
+
+   The two defaults used to be hidden, which made the common case — a default
+   role in a default mode — show nothing at all. Nothing is ambiguous: it reads
+   the same whether the axes are at their defaults or the segments never
+   registered. Muted, and labelled, so the quiet state is still an answer.
 
    The render context the status bar passes is sparse ({:theme} only), so the
    segments cannot read agent state from it — `register!` closes over `role-fn`
@@ -26,23 +31,28 @@
 
 (defn render-mode
   "Pure: a permission-mode string (+ optional theme) → a status segment map.
-   Modes get a color-coded glyph badge; 'default' (or empty) is hidden. Colors
-   resolve from the theme, falling back to fixed hexes. Exposed for tests."
+   The three non-default modes get a color-coded glyph badge; 'default' shows
+   muted and labelled; an EMPTY string is hidden (no data, not a default).
+   Colors resolve from the theme, falling back to fixed hexes. Exposed for
+   tests."
   [mode & [theme]]
   (case (str mode)
     "plan"         {:content "◯ plan"         :color (themed theme :info color-plan)      :visible? true}
     "accept-edits" {:content "✎ accept-edits" :color (themed theme :warning color-accept) :visible? true}
     "full-auto"    {:content "⏵⏵ full-auto"   :color (themed theme :error color-auto)     :visible? true}
+    "default"      {:content "mode:default"   :color (themed theme :muted color-role)     :visible? true}
     {:visible? false}))
 
 (defn render-role
   "Pure: a model-role string (+ optional theme) → a status segment map. Renders
-   the role name muted; 'default' (or empty) is hidden. Exposed for tests."
+   the role name muted; 'default' is labelled 'role:default' so the segment is
+   never blank; an EMPTY string is hidden. Exposed for tests."
   [role & [theme]]
   (let [r (str role)]
-    (if (or (= r "default") (= r ""))
-      {:visible? false}
-      {:content r :color (themed theme :muted color-role) :visible? true})))
+    (cond
+      (= r "")        {:visible? false}
+      (= r "default") {:content "role:default" :color (themed theme :muted color-role) :visible? true}
+      :else           {:content r :color (themed theme :muted color-role) :visible? true})))
 
 (defn render-escalated
   "Pure: the escalated 'provider/model' spec (or nil) → a status segment map.
