@@ -10,9 +10,10 @@
      4. an exit→execute handoff that restores the prior role and kicks off
         execution, optionally tracking [DONE:n] step markers
 
-   Entry is a guarded /plan (Decision D): /planmode always works; /plan is
-   claimed only when not already taken (e.g. by the ACP agent_shell mode
-   switcher), so the two never collide.
+   Entry is /planmode, or `/mode plan`. There is no /plan: this ns and
+   agent_shell's ACP mode switcher both used to claim it behind mirror-image
+   guards, so ownership depended on load order, and two registrations made the
+   resolver ambiguous. The ACP agent's plan mode is `/agent mode plan`.
 
    Squint notes: async handlers are top-level defns called by sync wrappers
    (named, so testable; `^:async (fn …)` with the meta on the FORM also
@@ -415,28 +416,14 @@ the user will approve the plan before execution begins.")
     (.on api "provider_error" on-perr)
     (.on api "session_end" on-send)
 
-    ;; /planmode always works.
+    ;; /planmode, and only /planmode. There is no /plan: both this extension
+    ;; and agent_shell's ACP mode switcher used to claim it behind mirror-image
+    ;; guards, so which one you got depended on load order — and if both ever
+    ;; registered, the resolver saw two "__plan" keys and /plan resolved to
+    ;; nothing. `/mode plan` also enters native plan mode.
     (.registerCommand api "planmode"
                       #js {:description "Toggle native plan mode (read-only → approve → execute)"
                            :handler plan-handler})
 
-    ;; /plan only when free (guarded — Decision D).
-    ;; getCommands returns the GLOBAL command map with namespace-PREFIXED
-    ;; keys ("agent-shell__plan"), so check for any "*__plan" / "plan" key,
-    ;; not a bare "plan". If the ACP agent_shell already owns /plan we skip
-    ;; ours (native stays reachable via /planmode); the resolver would
-    ;; otherwise see two "__plan" suffixes and resolve /plan to nothing.
-    (let [taken? (when-let [gc (.-getCommands api)]
-                   (let [cmds (gc)
-                         ks   (try (vec (keys cmds)) (catch :default _e []))]
-                     (some (fn [k] (let [s (str k)]
-                                     (or (= s "plan") (.endsWith s "__plan"))))
-                           ks)))]
-      (when-not taken?
-        (.registerCommand api "plan"
-                          #js {:description "Toggle plan mode (read-only exploration)"
-                               :handler plan-handler})))
-
     (fn []
-      (.unregisterCommand api "planmode")
-      (.unregisterCommand api "plan"))))
+      (.unregisterCommand api "planmode"))))

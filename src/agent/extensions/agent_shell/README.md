@@ -4,7 +4,9 @@
 
 ## What it does
 
-`agent-shell` lets nyma drive other coding agents as backends. It speaks **ACP** (Agent Client Protocol — JSON-RPC 2.0 over stdio) to spawn and supervise an external agent, then routes user input, tool calls, and approvals between the nyma TUI and the agent process. Switch agents with `/agent`, swap models with `/model`, change autonomy with `/plan`, `/yolo`, `/approve`, and `/auto-edit`, and hand off a session to a different agent with `/agent handoff`.
+`agent-shell` lets nyma drive other coding agents as backends. It speaks **ACP** (Agent Client Protocol — JSON-RPC 2.0 over stdio) to spawn and supervise an external agent, then routes user input, tool calls, and approvals between the nyma TUI and the agent process. Switch agents with `/agent`, swap models with `/model`, change autonomy with `/agent mode <id>`, `/yolo`, `/approve`, and `/auto-edit`, and hand off a session to a different agent with `/agent handoff`.
+
+These change the **ACP agent's** mode, not nyma's own approval policy — that is `/mode`. Plan mode is `/agent mode plan` here and `/planmode` in nyma; there is no `/plan`, because both extensions used to register one and the resolver could not tell them apart.
 
 This is the most feature-rich extension in the tree. For details — wire format, sub-features, MCP discovery, cost tracking, transcript handling — see [`docs/agent-shell.md`](../../../../docs/agent-shell.md) (881 lines).
 
@@ -15,7 +17,7 @@ This is the most feature-rich extension in the tree. For details — wire format
 | `/agent` | Connect, detach, disconnect, list, or switch the active agent; `/agent handoff` transfers the session |
 | `/disconnect` | Disconnect the currently active agent |
 | `/model` | Show the model picker, list models, or switch model directly |
-| `/plan` | Plan / read-only mode |
+| `/agent mode <id>` | Set the ACP agent's mode — this is where plan mode lives (`/agent mode plan`) |
 | `/yolo` | Auto-approve every action |
 | `/approve` | Default mode — prompt for every tool call |
 | `/auto-edit` | Auto-approve edits, prompt for shell |
@@ -70,7 +72,7 @@ file changes — a declined write changed nothing. Set plan mode once with
 |---|---|
 | `agent_switcher.cljs` | `/agent` — connect / disconnect / list / switch |
 | `model_switcher.cljs` | `/model` — fuzzy picker, agent-specific dispatch |
-| `mode_switcher.cljs` | `/plan`, `/yolo`, `/approve`, `/auto-edit` |
+| `mode_switcher.cljs` | `/yolo`, `/approve`, `/auto-edit`, and the `/agent mode <id>` dispatch |
 | `effort_switcher.cljs` | `/effort` thinking-level control |
 | `session_mgmt.cljs` | `/sessions` list / resume / new |
 | `handoff.cljs` | `/agent handoff` with context capture and transfer |

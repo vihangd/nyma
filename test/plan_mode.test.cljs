@@ -50,7 +50,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
                                                                         :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "openai/gpt-5")))))
 
             (it "falls back to the :default role's model when no base-spec (non-cli paths)"
@@ -59,7 +59,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
                                                                         :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "anthropic/claude-sonnet-4-20250514")))))
 
             ;; B6: effective-model-spec is the single resolver — "default" → base
@@ -70,7 +70,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
                                                               :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
-                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                        :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/effective-model-spec api "default")) (.toBe "openai/gpt-5"))
                     (-> (expect (pm/effective-model-spec api :deep)) (.toBe "anthropic/claude-opus-4-20250514")))))))
 
@@ -89,7 +89,7 @@
                                  :getSettings     (fn [] {:roles {:default {:provider "anthropic"
                                                                             :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
                                  :setModel        (fn [m] (swap! set-calls conj m))
                                  :sendUserMessage (fn [_t _o] nil)
                                  :ui              #js {:available false :notify (fn [_ _] nil)}}]
@@ -208,7 +208,12 @@
                     (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (count @sent)) (.toBe 0)))))))
 
-;; ── /plan guard: only register /plan when no extension owns a *__plan ──
+;; ── there is no /plan ──
+;;
+;; Both this extension and agent_shell's ACP mode switcher used to register
+;; /plan behind mirror-image guards: ownership depended on load order, and two
+;; registrations made the resolver return nothing for /plan at all. Native plan
+;; mode is /planmode; the ACP agent's is /agent mode plan.
 (defn- guard-api [cmds registered]
   #js {:getCommands       (fn [] @cmds)
        :registerCommand   (fn [n o] (swap! registered assoc n o))
@@ -216,20 +221,12 @@
        :on                (fn [_e _h] nil)
        :off               (fn [_e _h] nil)})
 
-(describe "plan-mode:plan-command-guard"
+(describe "plan-mode:command-registration"
           (fn []
-            (it "registers /plan when no extension owns a __plan command"
+            (it "registers /planmode and never /plan"
                 (fn []
                   (let [registered (atom {})
                         api (guard-api (atom {"model-roles__role" {}}) registered)]
-                    (pm/activate api)
-                    (-> (expect (contains? @registered "planmode")) (.toBe true))
-                    (-> (expect (contains? @registered "plan")) (.toBe true)))))
-
-            (it "skips /plan when agent_shell already owns a __plan command"
-                (fn []
-                  (let [registered (atom {})
-                        api (guard-api (atom {"agent-shell__plan" {}}) registered)]
                     (pm/activate api)
                     (-> (expect (contains? @registered "planmode")) (.toBe true))
                     (-> (expect (contains? @registered "plan")) (.toBe false)))))))

@@ -155,8 +155,8 @@
                                                  activate (.-default shell-index)
                                                  _        (activate api)
                                                  cmds     @(.-_commands api)]
-        ;; mode commands
-                                             (-> (expect (contains? cmds "plan")) (.toBe true))
+        ;; mode commands — no /plan: ACP plan mode is /agent mode plan
+                                             (-> (expect (contains? cmds "plan")) (.toBe false))
                                              (-> (expect (contains? cmds "yolo")) (.toBe true))
                                              (-> (expect (contains? cmds "approve")) (.toBe true))
         ;; agent switcher
@@ -481,34 +481,42 @@
 ;;; ─── Mode switcher ──────────────────────────────────────────────────────────
 
 (describe "agent-shell:mode-switcher" (fn []
-                                        (it "registers /plan /yolo /approve /auto-edit commands on activate"
+                                        (it "registers /yolo /approve /auto-edit — and never /plan"
                                             (fn []
                                               (let [api  (make-mock-api)
                                                     _    (mode-switcher/activate api)
                                                     cmds @(.-_commands api)]
-                                                (-> (expect (contains? cmds "plan")) (.toBe true))
+                                                ;; /plan was claimed here AND by model_roles' native plan
+                                                ;; mode, behind mirror-image guards: whoever activated
+                                                ;; second skipped, so ownership depended on load order.
+                                                ;; ACP plan mode is /agent mode plan.
+                                                (-> (expect (contains? cmds "plan")) (.toBe false))
                                                 (-> (expect (contains? cmds "yolo")) (.toBe true))
                                                 (-> (expect (contains? cmds "approve")) (.toBe true))
                                                 (-> (expect (contains? cmds "auto-edit")) (.toBe true)))))
 
-                                        (it "deactivator unregisters all 4 commands"
+                                        (it "deactivator unregisters all 3 commands"
                                             (fn []
                                               (let [api  (make-mock-api)
                                                     deact (mode-switcher/activate api)]
                                                 (deact)
                                                 (let [cmds @(.-_commands api)]
-                                                  (-> (expect (contains? cmds "plan")) (.toBe false))
+                                                  (-> (expect (contains? cmds "approve")) (.toBe false))
                                                   (-> (expect (contains? cmds "yolo")) (.toBe false))))))
 
-                                        (it "handler with no active agent notifies error"
+                                        (it "with no agent, /yolo says which mode it would have switched"
                                             (fn []
+                                              ;; "No agent connected" alone leaves the user thinking /yolo
+                                              ;; should have loosened nyma's own approval gate. It does not.
                                               (reset! shared/active-agent nil)
                                               (let [api     (make-mock-api)
                                                     _       (mode-switcher/activate api)
-                                                    handler (.-handler (get @(.-_commands api) "plan"))]
+                                                    handler (.-handler (get @(.-_commands api) "yolo"))]
                                                 (handler [] nil)
-                                                (-> (expect (some #(str/includes? % "No agent") @(.-_notifications api)))
-                                                    (.toBe true)))))
+                                                (let [all (str/join " " @(.-_notifications api))]
+                                                  (-> (expect (str/includes? all "no agent connected")) (.toBe true))
+                                                  (-> (expect (str/includes? all "ACP agent's mode")) (.toBe true))
+                                                  (-> (expect (str/includes? all "/mode")) (.toBe true))))))
 
                                         (it "handler with no connection notifies error"
                                             (fn []
@@ -516,10 +524,33 @@
                                               (reset! shared/connections {})
                                               (let [api     (make-mock-api)
                                                     _       (mode-switcher/activate api)
-                                                    handler (.-handler (get @(.-_commands api) "plan"))]
+                                                    handler (.-handler (get @(.-_commands api) "yolo"))]
                                                 (handler [] nil)
                                                 (-> (expect (some #(str/includes? % "not connected") @(.-_notifications api)))
-                                                    (.toBe true)))))))
+                                                    (.toBe true)))))
+
+                                        ;; ACP plan mode's new home.
+                                        (it "/agent mode plan routes to the ACP mode switch"
+                                            (fn []
+                                              (reset! shared/active-agent nil)
+                                              (let [api     (make-mock-api)
+                                                    _       (agent-switcher/activate api)
+                                                    handler (.-handler (get @(.-_commands api) "agent"))]
+                                                (handler ["mode" "plan"] nil)
+                                                (-> (expect (some #(str/includes? % "no agent connected")
+                                                                  @(.-_notifications api)))
+                                                    (.toBe true)))))
+
+                                        (it "/agent mode with no id prints usage naming /mode"
+                                            (fn []
+                                              (reset! shared/active-agent "claude")
+                                              (let [api     (make-mock-api)
+                                                    _       (agent-switcher/activate api)
+                                                    handler (.-handler (get @(.-_commands api) "agent"))]
+                                                (handler ["mode"] nil)
+                                                (let [all (str/join " " @(.-_notifications api))]
+                                                  (-> (expect (str/includes? all "Usage: /agent mode <id>")) (.toBe true))
+                                                  (-> (expect (str/includes? all "/mode")) (.toBe true))))))))
 
 ;;; ─── Model switcher ─────────────────────────────────────────────────────────
 
