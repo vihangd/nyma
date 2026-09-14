@@ -40,8 +40,6 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/context.cljs` | `agent.context` | Message filtering, context building |
 | `src/agent/interceptors.cljs` | `agent.interceptors` | Pedestal-style interceptor chain engine |
 | `src/agent/middleware.cljs` | `agent.middleware` | Middleware pipeline for tool execution |
-| `src/agent/protocols.cljs` | `agent.protocols` | ISessionStore, IToolProvider, IContextBuilder |
-| `src/agent/schema.cljs` | `agent.schema` | Data-driven Zod schema compiler |
 | `src/agent/state.cljs` | `agent.state` | Event-sourced state store |
 | `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system |
 | `src/agent/extension_scope.cljs` | `agent.extension-scope` | Namespaced + capability-gated extension API |
@@ -406,77 +404,11 @@ api.addMiddleware({
 api.removeMiddleware("rate-limiter");
 ```
 
-## Protocols
+## Squint: no `defmulti`
 
-`src/agent/protocols.cljs` defines protocols for pluggable subsystems. Squint compiles `defprotocol` to Symbol-based dispatch, which works at runtime.
-
-```clojure
-(defprotocol ISessionStore
-  (session-load [this])
-  (session-append [this entry])
-  (session-build-context [this])
-  (session-branch [this entry-id])
-  (session-get-tree [this])
-  (session-leaf-id [this]))
-
-(defprotocol IToolProvider
-  (provide-tools [this])
-  (register-tool [this name tool-def])
-  (unregister-tool [this name])
-  (set-active-tools [this names])
-  (get-active-tools [this]))
-
-(defprotocol IContextBuilder
-  (build-ctx [this agent opts]))
-```
-
-Implementations set Symbol keys via `aset` on returned objects. The existing map-of-closures interface is preserved for backwards compatibility — both `(session-load mgr)` (protocol dispatch) and `((:load mgr))` (old style) work.
-
-**Note:** `defmulti`/`defmethod` does **not** work in Squint — it compiles to undefined `defmulti()` calls. Use `defprotocol` instead.
-
-## Data-Driven Schemas
-
-`src/agent/schema.cljs` provides a data-first API for defining tool parameter schemas. Plain Clojure maps compile to Zod schemas at runtime.
-
-### Schema Format
-
-```clojure
-{:field-name {:type        <type-spec>
-              :description "Human-readable description"
-              :optional    true   ; optional, defaults to false
-              :default     value  ; optional default value
-              }}
-```
-
-Supported type specs:
-
-| Spec | Zod output |
-|------|-----------|
-| `:string` | `z.string()` |
-| `:number` | `z.number()` |
-| `:boolean` | `z.boolean()` |
-| `[:tuple :string :number]` | `z.tuple([z.string(), z.number()])` |
-| `[:enum "a" "b" "c"]` | `z.enum(["a", "b", "c"])` |
-| `[:array :string]` | `z.array(z.string())` |
-| `[:object {...nested}]` | `z.object({...})` |
-
-### API
-
-```clojure
-(require '[agent.schema :refer [data-tool compile-schema]])
-
-;; Define a tool from data
-(def my-tool
-  (data-tool
-    {:description "Read a file"
-     :schema {:path  {:type :string :description "File path"}
-              :range {:type [:tuple :number :number] :optional true}}
-     :execute (fn ^:async [{:keys [path range]}]
-                ...)}))
-
-;; Compile a schema directly
-(def schema (compile-schema {:query {:type :string :description "Search query"}}))
-```
+`defmulti`/`defmethod` does **not** work in Squint — it compiles to undefined
+`defmulti()` calls. Use a map of closures (the shape every nyma subsystem
+already returns) or a `cond` dispatch instead.
 
 ## Event-Sourced State Store
 
@@ -673,7 +605,7 @@ Settings are resolved in priority order:
 | `:on-submit` prop in JSX | `:onSubmit` (camelCase to match React) |
 | `(js/Bun.spawn ...)` without pipes | Add `#js {:stdout "pipe" :stderr "pipe"}` |
 | `(defn f [& {:keys [a]}] ...)` keyword args | `(defn f [opts] ...)` explicit opts map |
-| `(defmulti ...)` / `(defmethod ...)` | `(defprotocol ...)` — multimethods don't compile |
+| `(defmulti ...)` / `(defmethod ...)` | a map of closures or `cond` — multimethods don't compile |
 
 ### Extension Development
 

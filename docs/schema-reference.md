@@ -1,83 +1,8 @@
 # Schema Reference
 
-Nyma provides a data-driven schema system that compiles Clojure maps to Zod schemas
-at runtime, plus a TypeBox adapter for porting pi-mono extensions.
-
-## Data-Driven Schemas (ClojureScript)
-
-### Type Specifiers
-
-| Specifier | Zod Output | Example |
-|-----------|------------|---------|
-| `:string` | `z.string()` | `{:name :string}` |
-| `:number` | `z.number()` | `{:count :number}` |
-| `:boolean` | `z.boolean()` | `{:active :boolean}` |
-| `[:tuple :string :number]` | `z.tuple([z.string(), z.number()])` | Typed tuples |
-| `[:enum "a" "b" "c"]` | `z.enum(["a","b","c"])` | String enums |
-| `[:array :string]` | `z.array(z.string())` | Arrays with item type |
-| `[:object {...}]` | `z.object({...})` | Nested objects |
-
-### compile-type
-
-Converts a type specifier to a Zod schema:
-
-```clojure
-(require '[agent.schema :refer [compile-type]])
-
-(compile-type :string)              ; => z.string()
-(compile-type :number)              ; => z.number()
-(compile-type [:enum "json" "text"]) ; => z.enum(["json","text"])
-(compile-type [:array :number])     ; => z.array(z.number())
-```
-
-### compile-field
-
-Converts a field spec map to a Zod schema with metadata:
-
-```clojure
-(require '[agent.schema :refer [compile-field]])
-
-(compile-field {:type :string :description "User name"})
-; => z.string().describe("User name")
-
-(compile-field {:type :number :optional true})
-; => z.number().optional()
-
-(compile-field {:type :string :default "json"})
-; => z.string().default("json")
-; Note: default implies optional input but concrete return type
-```
-
-### compile-schema
-
-Converts a full schema map to a Zod object:
-
-```clojure
-(require '[agent.schema :refer [compile-schema]])
-
-(compile-schema
-  {:query   {:type :string :description "Search query"}
-   :limit   {:type :number :description "Max results" :optional true :default 10}
-   :filters {:type [:array :string] :description "Tags"}})
-; => z.object({query: z.string().describe("..."), limit: z.number()...})
-
-;; Shorthand — just type keywords:
-(compile-schema {:name :string :age :number})
-```
-
-### data-tool
-
-Creates an AI SDK tool from a data-driven definition:
-
-```clojure
-(require '[agent.schema :refer [data-tool]])
-
-(data-tool
-  {:description "Search the database"
-   :schema {:query {:type :string :description "Search query"}
-            :limit {:type :number :optional true :default 10}}
-   :execute (fn [args] (str "Results for: " (:query args)))})
-```
+Nyma provides a TypeBox/JSON-Schema adapter for porting pi-mono extensions.
+Extensions declare tool parameters as JSON Schema literals; the adapter
+compiles them to Zod at runtime.
 
 ## TypeBox Adapter (Pi-Mono Compat)
 

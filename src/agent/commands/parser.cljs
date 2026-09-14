@@ -3,22 +3,14 @@
    cc-kit's CommandRegistry (packages/ui/src/commands/registry.ts)
    with nyma's existing command-map shape kept intact.
 
-   Before this module:
-     - `autocomplete_builtins.cljs:slash-provider` dumped every
-       registered command and relied on the downstream fuzzy filter.
-     - `app.cljs` + `autocomplete_provider.cljs` used loose
-       `.startsWith(\"/\")` checks that we've already debugged twice
-       (the `/agent qwen` arg-swallowing bug and the `/agent @file`
-       command-clobbering bug).
-
-   After this module:
-     - `parse-command-line` is the single authoritative way to ask
-       'is this editor text a completed /cmd invocation, and if so
-       what's the command + args?'. It returns nil for bare slashes,
-       unknown commands, hidden commands, or disabled commands.
+   Before this module, `autocomplete_builtins.cljs:slash-provider`
+   dumped every registered command and relied on the downstream fuzzy
+   filter. Now:
      - `command-suggestions` replaces ad-hoc filtering with a prefix
        match that understands aliases + visibility.
      - `visible-commands` centralises hidden/disabled filtering.
+     - `compute-display-names` shortens namespaced command names and
+       handles collisions.
 
    Command map shape (extension — all fields except :description are
    optional, existing commands keep working):
@@ -47,8 +39,7 @@
 
 (defn visible?
   "A command is visible iff it's not hidden AND it's enabled. Used by
-   both the suggestions list and by parse-command-line to reject
-   invocations of disabled commands."
+   the suggestions list and by `visible-commands`."
   [cmd]
   (and (not (hidden? cmd)) (enabled? cmd)))
 
@@ -59,58 +50,6 @@
    never nil."
   [cmd]
   (or (:aliases cmd) []))
-
-(defn- find-by-name-or-alias
-  "Look up a command in the commands map by canonical name first,
-   falling back to an alias scan. Returns `[canonical-name cmd]` or
-   nil. Aliases are case-sensitive — same as cc-kit's contract at
-   registry.ts:37-40."
-  [commands name]
-  (when (and commands name)
-    (if-let [direct (get commands name)]
-      [name direct]
-      ;; Fallback — scan entries for an alias match.
-      (some (fn [[cname spec]]
-              (when (some #{name} (aliases-of spec))
-                [cname spec]))
-            commands))))
-
-;;; ─── Parsing ───────────────────────────────────────────
-
-(defn parse-command-line
-  "Parse the raw editor text. Returns
-     {:name canonical-name :command cmd-spec :args args-string}
-   when `text` is a well-formed invocation of a visible, enabled
-   command, or nil otherwise.
-
-   Returns nil for:
-     - nil / non-string input
-     - text that doesn't start with '/'
-     - bare '/' (no command name yet)
-     - unknown command names
-     - hidden or disabled commands
-
-   `:args` is the whitespace-trimmed string after the first space.
-   Empty when no arguments were provided.
-
-   Mirrors cc-kit's registry.ts:30-43."
-  [text commands]
-  (when (string? text)
-    (let [trimmed (str/trim text)]
-      (when (and (> (count trimmed) 1)
-                 (str/starts-with? trimmed "/"))
-        (let [space-idx (.indexOf trimmed " ")
-              name      (if (neg? space-idx)
-                          (subs trimmed 1)
-                          (subs trimmed 1 space-idx))
-              args      (if (neg? space-idx)
-                          ""
-                          (str/trim (subs trimmed (inc space-idx))))]
-          (when-let [[canonical cmd] (find-by-name-or-alias commands name)]
-            (when (visible? cmd)
-              {:name    canonical
-               :command cmd
-               :args    args})))))))
 
 ;;; ─── Display names (namespace stripping + collision handling) ─
 

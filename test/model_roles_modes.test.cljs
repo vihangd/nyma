@@ -25,8 +25,8 @@
                                                         roles (policy/build-roles floor-roles user "opencode-zen" "big-pickle")
                                                         plan  (get roles "plan")]
         ;; user's model wins, but allowed-tools/permissions survive
-                                                    (-> (expect (or (:model plan) (get plan "model"))) (.toBe "m3"))
-                                                    (-> (expect (or (:provider plan) (get plan "provider"))) (.toBe "minimax"))
+                                                    (-> (expect (:model plan)) (.toBe "m3"))
+                                                    (-> (expect (:provider plan)) (.toBe "minimax"))
                                                     (-> (expect (count (:allowed-tools plan))) (.toBe 2))
                                                     (-> (expect (get (:permissions plan) "write")) (.toBe "deny")))))
 
@@ -35,14 +35,14 @@
                                                   (let [roles (policy/build-roles floor-roles {} "opencode-zen" "big-pickle")
                                                         deep  (get roles "deep")]
         ;; anthropic deep ≠ opencode-zen default → inherits big-pickle (no leak)
-                                                    (-> (expect (or (:provider deep) (get deep "provider"))) (.toBe "opencode-zen"))
-                                                    (-> (expect (or (:model deep) (get deep "model"))) (.toBe "big-pickle")))))
+                                                    (-> (expect (:provider deep)) (.toBe "opencode-zen"))
+                                                    (-> (expect (:model deep)) (.toBe "big-pickle")))))
 
                                             (it "no regression: matching-provider shipped presets are kept"
                                                 (fn []
                                                   (let [roles (policy/build-roles floor-roles {} "anthropic" "sonnet")
                                                         deep  (get roles "deep")]
-                                                    (-> (expect (or (:model deep) (get deep "model"))) (.toBe "opus")))))
+                                                    (-> (expect (:model deep)) (.toBe "opus")))))
 
                                             (it "a user-set role is always kept, even cross-provider"
                                                 (fn []
@@ -54,7 +54,7 @@
                                                 (fn []
                                                   (let [roles (policy/build-roles floor-roles {} "opencode-zen" "big-pickle")
                                                         ae    (get roles "accept-edits")]
-                                                    (-> (expect (or (:provider ae) (get ae "provider"))) (.toBeNil))
+                                                    (-> (expect (:provider ae)) (.toBeNil))
                                                     (-> (expect (:policy ae)) (.toBeDefined)))))))
 
 ;; A1: tool-access combines the two axes' :allowed-tools as an intersection.

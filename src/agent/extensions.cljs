@@ -7,6 +7,7 @@
             [agent.tool-metadata :as tool-metadata]
             [agent.pricing :as pricing]
             [agent.ui.status-line-segments :as status-segments]
+            [agent.utils.js-interop :as ji]
             [agent.debug :as dbg]))
 
 (defn ext-flag-short-name
@@ -269,7 +270,7 @@
        ;; ── Provider management ─────────────────────────────
          :registerProvider  (fn [name config]
                               (let [;; Convert JS config to CLJ via JSON round-trip
-                                    cfg-raw (js/JSON.parse (js/JSON.stringify config))
+                                    cfg-raw (ji/js->clj* config)
                                   ;; Extract functions that survive JSON (they won't — handle separately)
                                     create-fn (or (.-createModel config) (aget config "create-model"))
                                     oauth-obj (.-oauth config)

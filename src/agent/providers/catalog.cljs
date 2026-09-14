@@ -30,7 +30,7 @@
   (let [models (or (:models entry) [])]
     (keep (fn [m]
             (let [m    (if (map? m) m (ji/js->clj* m))
-                  id   (or (:id m) (get m "id"))
+                  id   (:id m)
                   ;; What the user types / what setModel expects.
                   spec (str provider-name "/" id)]
               (when (seq (str id))

@@ -19,7 +19,7 @@ build on pi-tui's own `matchesKey`.
 
 ### 1b. CommandRegistry aliases / hidden / enabled in `builtins.cljs`
 
-- **What's ready:** `src/agent/commands/parser.cljs` supports `:aliases`, `:hidden?`, `:enabled?` on any command spec. `autocomplete_builtins.cljs:slash-provider` already consumes the filtered, sorted suggestions list. Full coverage in `test/commands_parser.test.cljs`.
+- **What's ready:** `src/agent/commands/parser.cljs` supports `:aliases`, `:hidden?`, `:enabled?` on any command spec via `command-suggestions` / `visible-commands`. `autocomplete_builtins.cljs:slash-provider` already consumes the filtered, sorted suggestions list. Coverage in `test/commands_parser.test.cljs`. (`parse-command-line` was removed — it never had a caller; `modes/interactive.cljs:run-command!` + `commands/resolver.cljs` own dispatch, with an args *vector* and `ns__cmd` suffix resolution the cc-kit port did not match.)
 - **What's wired:** the shape is read end-to-end, but `src/agent/commands/builtins.cljs` doesn't declare any aliases, hide any commands, or gate any of them. Existing commands work because the parser treats all three fields as optional.
 - **Why we stopped:** mechanical, low leverage until a real need surfaces.
 - **When to do it:**
@@ -185,7 +185,7 @@ For the record, these cc-kit findings **have** been borrowed in phases 8–15 an
 
 - Canonical `key-name` mapper with escape-meta quirk (phase 8 — `keybinding_registry/key-name`)
 - `FuzzyPicker` clamp/step/window math (phase 9 — `ui/picker_math`)
-- `CommandRegistry.parse()` + `getSuggestions()` (phase 10 — `commands/parser`)
+- `CommandRegistry.getSuggestions()` (phase 10 — `commands/parser`; `.parse()` was ported and later removed, unused)
 - `resolveKeyWithChordState` (phase 11 — `keybinding_resolver`)
 - Picker input dispatcher consolidation + shared frame rendering (phase 12 — `ui/picker_input`, `ui/picker_frame`)
 - Env-gated debug logger with pluggable sink (phase 12 — `utils/debug`)

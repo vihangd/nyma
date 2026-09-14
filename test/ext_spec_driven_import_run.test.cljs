@@ -157,10 +157,9 @@
         ;; Written with `(.-__state-atom api)` and read back through
         ;; `getState` — squint munges the hyphen, so this locks that the two
         ;; halves meet.
-        (-> (expect (boolean (or (:spec-loop-pending @state)
-                                 (get @state "spec-loop-pending"))))
+        (-> (expect (boolean (:spec-loop-pending @state)))
             (.toBe true))
-        (-> (expect (or (:active-spec @state) (get @state "active-spec")))
+        (-> (expect (:active-spec @state))
             (.toBe "token-store"))))))
 
 (defn test-import-without-run-queues-but-stays-inactive []
@@ -173,8 +172,7 @@
         ;; Decomposition is queued either way — `--run` only decides whether
         ;; the spec activates and the loop arms behind it.
         (-> (expect (count @(:follow-queue agent))) (.toBe 1))
-        (-> (expect (boolean (or (:spec-loop-pending @state)
-                                 (get @state "spec-loop-pending"))))
+        (-> (expect (boolean (:spec-loop-pending @state)))
             (.toBe false))))))
 
 (defn test-import-without-agent-does-not-claim-success []
@@ -191,7 +189,7 @@
         (let [all (apply str @notes)]
           (-> (expect (.includes all "no agent")) (.toBe true))
           (-> (expect (.includes all "Decomposition queued")) (.toBe false)))
-        (-> (expect (or (:active-spec @state) (get @state "active-spec")))
+        (-> (expect (:active-spec @state))
             (.toBeUndefined))))))
 
 ;;; ─── The queue actually drains ─────────────────────────────
@@ -305,12 +303,11 @@
         (let [{:keys [api notes state]} (harness)]
           (aset api "state" (persistent-state tmp))
           (activate! api)
-          (-> (expect (or (:active-spec @state) (get @state "active-spec")))
+          (-> (expect (:active-spec @state))
               (.toBe "token-store"))
           ;; The flag must NOT come back: nothing is queued to satisfy it, so
           ;; a restored `pending` would leave the loop waiting forever.
-          (-> (expect (boolean (or (:spec-loop-pending @state)
-                                   (get @state "spec-loop-pending"))))
+          (-> (expect (boolean (:spec-loop-pending @state)))
               (.toBe false))
           (-> (expect (aget (read-ext-state tmp) "spec-loop-pending")) (.toBeUndefined))
           ;; And it has to say what to do, since the user's only other signal
@@ -478,22 +475,20 @@
         (spec-cmd! h agent ["import" "token-store" "--run"])
         ;; Still pending: tasks are the scaffold, so promotion must NOT fire.
         (fire-agent-end! h)
-        (-> (expect (boolean (or (:spec-loop-armed @state)
-                                 (get @state "spec-loop-armed"))))
+        (-> (expect (boolean (:spec-loop-armed @state)))
             (.toBe false))
         ;; The decomposition turn lands.
         (write-real-tasks! tmp "token-store")
         (fire-agent-end! h)
-        (-> (expect (boolean (or (:spec-loop-armed @state)
-                                 (get @state "spec-loop-armed"))))
+        (-> (expect (boolean (:spec-loop-armed @state)))
             (.toBe true))
         ;; Armed at `plan`, then advanced in the SAME agent_end: decide sees
         ;; real, non-template tasks with no open clarifications and moves on.
         ;; That is the decomposition→implementation handoff, and it happens
         ;; without a human.
-        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+        (-> (expect (:spec-phase @state))
             (.toBe "execute"))
-        (-> (expect (or (:active-role @state) (get @state "active-role")))
+        (-> (expect (:active-role @state))
             (.toBe "fast"))))))
 
 (defn test-promotion-respects-an-explicit-phase []
@@ -508,9 +503,9 @@
         (spec-cmd! h agent ["phase" "execute"])
         (write-real-tasks! tmp "token-store")
         (fire-agent-end! h)
-        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+        (-> (expect (:spec-phase @state))
             (.toBe "execute"))
-        (-> (expect (or (:active-role @state) (get @state "active-role")))
+        (-> (expect (:active-role @state))
             (.toBe "fast"))))))
 
 (defn test-promotion-reports-phase-and-role []
@@ -720,9 +715,9 @@
         ;; thing that runs, and it must already have a model AND a phase — the
         ;; `plan` phase, whose gate keeps it writing spec files rather than
         ;; implementing.
-        (-> (expect (or (:spec-phase @state) (get @state "spec-phase")))
+        (-> (expect (:spec-phase @state))
             (.toBe "plan"))
-        (-> (expect (or (:active-role @state) (get @state "active-role")))
+        (-> (expect (:active-role @state))
             (.toBe "advisor"))))))
 
 (defn test-import-without-run-binds-nothing []
@@ -734,7 +729,7 @@
         ;; Without --run the user has not asked for a loop, so nothing should
         ;; seize their current model.
         (spec-cmd! h agent ["import" "token-store"])
-        (-> (expect (or (:active-role @state) (get @state "active-role")))
+        (-> (expect (:active-role @state))
             (.toBeUndefined))))))
 
 (defn test-promotion-is-idempotent []
@@ -750,10 +745,9 @@
         ;; it must not change anything or double-fire. Phase stays `plan` —
         ;; advancing to execute is decide's job, and it happens in this same
         ;; agent_end once tasks.md is real and carries no open clarifications.
-        (-> (expect (or (:spec-phase @state) (get @state "spec-phase"))) (.toBe "execute"))
-        (-> (expect (or (:active-role @state) (get @state "active-role"))) (.toBe "fast"))
-        (-> (expect (boolean (or (:spec-loop-armed @state)
-                                 (get @state "spec-loop-armed"))))
+        (-> (expect (:spec-phase @state)) (.toBe "execute"))
+        (-> (expect (:active-role @state)) (.toBe "fast"))
+        (-> (expect (boolean (:spec-loop-armed @state)))
             (.toBe true))))))
 
 (defn test-import-names-the-decomposition-role []

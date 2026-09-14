@@ -100,7 +100,7 @@
 
 ;;; ─── Token rate (sliding window) ───────────────────────
 
-(defn- sample-ts [s] (or (get s :ts) (get s "ts") 0))
+(defn- sample-ts [s] (or (get s :ts) 0))
 (defn- sample-delta [s]
   (or (get s :delta-tokens) (get s "deltaTokens") 0))
 

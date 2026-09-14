@@ -511,10 +511,11 @@ with every section below present.
    That section (`settings/manager.cljs:12`, `{:enabled true :threshold 0.85}`)
    shipped as a default that NOTHING read — the 0.85 was hardcoded inside
    `compact`, so turning compaction off or retuning it did nothing at all.
-   Tolerates keyword (CLJS defaults) and string (user JSON) keys."
+   Keyword and string keys are the same string under squint, so a
+   CLJS default and a user's JSON both read through one `get`."
   [settings]
-  (let [c (or (:compaction settings) (get settings "compaction"))
-        g (fn [k] (let [v (or (get c k) (get c (str k)))] v))]
+  (let [c (:compaction settings)
+        g (fn [k] (get c k))]
     {:enabled?  (let [v (g :enabled)] (if (some? v) v true))
      :threshold (let [v (g :threshold)] (if (number? v) v default-threshold))
      :reserve   (let [v (g :reserve-tokens)] (if (number? v) v default-reserve-tokens))

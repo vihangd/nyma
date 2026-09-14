@@ -1,10 +1,5 @@
 (ns agent.tool-registry
-  (:require ["ai" :refer [jsonSchema]]
-            [agent.protocols :refer [IToolProvider_provide_tools
-                                     IToolProvider_register_tool
-                                     IToolProvider_unregister_tool
-                                     IToolProvider_set_active_tools
-                                     IToolProvider_get_active_tools]]))
+  (:require ["ai" :refer [jsonSchema]]))
 
 (defn- raw-json-schema?
   "True if `s` looks like a plain JSON Schema object — has a `type`
@@ -34,8 +29,7 @@
     t))
 
 (defn create-registry
-  "Manage tools: built-in + extension-registered. Tracks active state.
-   Conforms to IToolProvider protocol."
+  "Manage tools: built-in + extension-registered. Tracks active state."
   [initial-tools]
   (let [_          (doseq [[_ t] initial-tools] (normalize-tool! t))
         tools      (atom initial-tools)
@@ -81,10 +75,4 @@
              :get-active get-active-fn
              :all        all-fn}]
 
-    ;; Protocol conformance
-    (aset reg IToolProvider_provide_tools (fn [_] (all-fn)))
-    (aset reg IToolProvider_register_tool (fn [_ name t] (register-fn name t)))
-    (aset reg IToolProvider_unregister_tool (fn [_ name] (unregister-fn name)))
-    (aset reg IToolProvider_set_active_tools (fn [_ names] (set-active-fn names)))
-    (aset reg IToolProvider_get_active_tools (fn [_] (get-active-fn)))
     reg))

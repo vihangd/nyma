@@ -395,7 +395,7 @@
                                               #js {:tool     tool-name
                                                    :args     (clj->js args)
                                                    :category (categorize-tool tool-name)
-                                                   :path     (or (get args :path) (get args "path"))}))
+                                                   :path     (get args :path)}))
             decision (get result "decision")
             reason   (get result "reason")]
         (cond
