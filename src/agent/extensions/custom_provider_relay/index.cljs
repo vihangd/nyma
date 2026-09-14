@@ -325,6 +325,27 @@
 ;; thinking level above.
 (def active-tools-atom (atom (fn [] #{})))
 
+;; ── Reasoning dialect ─────────────────────────────────────────────
+;; Measured against yunwu:
+;;   deepseek-v4-pro, no param         → 0 reasoning chars, and answers
+;;                                       "17*23" as 403 (wrong)
+;;   deepseek-v4-pro, reasoning_effort → 73-90 reasoning chars, answers 391
+;;                                       (right)
+;;   deepseek-v4-flash                 → already reasons by default; the param
+;;                                       is accepted and changes little
+;; The relay speaks the OpenAI dialect, which tops out at `high`.
+;;
+;; One dialect name for every preset: they are all New-API style gateways
+;; speaking the same chat protocol, so the preset id is not the dispatch key.
+(def ^:private reasoning-dialect "relay")
+
+(defmethod rr/reasoning-body reasoning-dialect [_ level _model-id]
+  (when-let [l (rr/active-level level)]
+    {:reasoning_effort (case l
+                         "minimal" "low"
+                         "xhigh"   "high"
+                         l)}))
+
 (defn chat-request-rewriter
   "Lift <think> back into reasoning_content (as before), then add the relay's
    reasoning effort.
@@ -339,7 +360,9 @@
   (fn [body-str init]
     (let [lifted (rs/lift-think-request-rewriter body-str init)]
       (try
-        (if-let [r (rr/relay (when-let [f @level-fn-atom] (f)))]
+        (if-let [r (rr/reasoning-body reasoning-dialect
+                                      (when-let [f @level-fn-atom] (f))
+                                      nil)]
           (let [body (js/JSON.parse lifted)]
             (if (nil? (.-reasoning_effort body))
               (do (aset body "reasoning_effort" (:reasoning_effort r))

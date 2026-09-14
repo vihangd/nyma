@@ -88,6 +88,9 @@
                :req-file       "spec.md"
                :design-file    "plan.md"
                :tasks-file     "tasks.md"
+               :label          "spec-kit"
+               :req-label      "Spec"
+               :design-label   "Plan"
                :optional-files ["data-model.md" "quickstart.md" "research.md"]
                :optional-dirs  ["contracts"]
                :project-files  [".specify/memory/constitution.md"]}
@@ -96,11 +99,34 @@
                :req-file       "requirements.md"
                :design-file    "design.md"
                :tasks-file     "tasks.md"
+               :label          "Kiro"
+               :req-label      "Requirements"
+               :design-label   "Design"
                :optional-files []
                :optional-dirs  []
                ;; Kiro's project-wide guidance lives under .kiro/steering/.
                ;; Treated as a directory to glob (* expansion happens later).
                :project-files  [".kiro/steering"]}})
+
+;; Squint compiles a keyword to its name string, so `:spec-kit` IS the map key
+;; "spec-kit" — `(shape-of spec)` is a plain lookup and needs no reverse index.
+;; That identity is deliberate: a shape's key and its `:source` tag are the same
+;; name, which is why every row's `:source` must match the key it sits under.
+
+(defn- shape-of
+  "The shape table row for anything carrying a `:source` tag (a discovered
+   spec, a create/import result), or nil when the tag is absent or unknown.
+
+   Replaced twelve hand-written `(case (:source …) :kiro … :spec-kit …)`
+   branches, each of which had to be edited to add a third shape."
+  [m]
+  (get spec-shapes (:source m)))
+
+(defn- shape-label
+  "How a shape is named to the user. Falls back to the generic word, which is
+   what every one of the old `case` branches did for an unknown source."
+  [m]
+  (or (:label (shape-of m)) "spec"))
 
 ;; ── Settings-driven shape selection ────────────────────────────
 
@@ -409,9 +435,7 @@
    `phase` is optional and trailing: an unknown or absent phase simply omits
    the banner, so the six 2-arity call sites keep working."
   [cwd spec & [phase]]
-  (let [shape    (get spec-shapes (case (:source spec)
-                                    :spec-kit "spec-kit"
-                                    :kiro     "kiro"))
+  (let [shape    (shape-of spec)
         req      (read-if-exists (:req spec))
         design   (read-if-exists (:design spec))
         tasks    (read-if-exists (:tasks spec))
@@ -435,7 +459,7 @@
                                     (inline-block (str name "/" (path/basename f)) c))))
                         (str/join ""))]
     (str "\n\n## Active Spec: " (:name spec) "  ("
-         (case (:source spec) :kiro "Kiro" :spec-kit "spec-kit" "spec")
+         (shape-label spec)
          "; " (:done progress) "/" (:total progress) " tasks done)\n"
          (when-let [banner (get phase-banner (str phase))]
            (str "\n" banner "\n"))
@@ -447,11 +471,11 @@
                      (str/join ""))))
          (when req
            (str "\n### "
-                (case (:source spec) :spec-kit "Spec" :kiro "Requirements" "Spec")
+                (or (:req-label shape) "Spec")
                 "\n" req "\n"))
          (when design
            (str "\n### "
-                (case (:source spec) :spec-kit "Plan" :kiro "Design" "Plan")
+                (or (:design-label shape) "Plan")
                 "\n" design "\n"))
          (when tasks
            (let [parsed     (parse-tasks tasks)
@@ -494,7 +518,7 @@
    `requirements.md`."
   ([feat-name] (requirements-template feat-name :spec-kit))
   ([feat-name source]
-   (let [section (case source :kiro "Requirements" "Spec")]
+   (let [section (or (:req-label (get spec-shapes source)) "Spec")]
      (str "# " feat-name " — " section "\n\n"
           "## What & Why\n\n"
           "<!-- A short description of what this feature is and why it exists.\n"
@@ -508,7 +532,7 @@
    it `design.md`. Headings differ accordingly."
   ([feat-name] (design-template feat-name :spec-kit))
   ([feat-name source]
-   (let [section (case source :kiro "Design" "Plan")]
+   (let [section (or (:design-label (get spec-shapes source)) "Plan")]
      (str "# " feat-name " — " section "\n\n"
           "## Approach\n\n"
           "<!-- The technical plan: data flows, key types, file changes. -->\n\n"
@@ -742,9 +766,7 @@
             spec      (when feat-name (get specs feat-name))
             shape-key (cond
                         (:project-wide? recipe) (:default-shape settings)
-                        spec                    (case (:source spec)
-                                                  :spec-kit "spec-kit"
-                                                  :kiro     "kiro")
+                        spec                    (:source spec)
                         :else                   (:default-shape settings))
             shape     (get spec-shapes shape-key)
             spec-dir  (when spec (:dir spec))
@@ -754,7 +776,7 @@
           (not allowed?)
           {:ok? false
            :error (str "Artifact \"" kind "\" is not defined for "
-                       (case shape-key "kiro" "Kiro" "spec-kit" "spec-kit" "this")
+                       (or (:label (get spec-shapes shape-key)) "this")
                        " shape. Valid shapes: "
                        (str/join ", " (:shapes recipe)) ".")}
 
@@ -894,10 +916,7 @@
                 (let [tasks (parse-tasks (read-if-exists (:tasks spec)))
                       {:keys [done total]} (task-progress tasks)
                       marker (if (= name active) " ◀ active" "")
-                      shape  (case (:source spec)
-                               :kiro     "Kiro"
-                               :spec-kit "spec-kit"
-                               "spec")]
+                      shape  (shape-label spec)]
                   (str "  " name " [" shape "] — " done "/" total " tasks done"
                        marker))))
          (str/join "\n")
@@ -1221,8 +1240,7 @@
                         result  (create-spec! cwd target shape-name)]
                     (if (:ok? result)
                       (.notify (.-ui ctx)
-                               (str "✓ Created " (case (:source result)
-                                                   :kiro "Kiro" :spec-kit "spec-kit" "spec")
+                               (str "✓ Created " (shape-label result)
                                     " spec: " target "\n"
                                     (->> (:files result)
                                          (map #(str "    " %))
@@ -1309,8 +1327,7 @@
                       (.notify (.-ui ctx) (or clear-err (:error result)) "error")
                       (.notify (.-ui ctx)
                                (str "✓ Imported "
-                                    (case (:source result)
-                                      :kiro "Kiro" :spec-kit "spec-kit" "spec")
+                                    (shape-label result)
                                     " spec: " target "\n"
                                     (when (and force? prior)
                                       (str "  replaced the previous spec"
@@ -1405,8 +1422,7 @@
                                   (when (:reason e) (warn (str "spec: " (:reason e))))
                                   (set-phase! (:phase e) warn)))
                               (.notify (.-ui ctx)
-                                       (str "✓ Imported " (case (:source result)
-                                                            :kiro "Kiro" :spec-kit "spec-kit" "spec")
+                                       (str "✓ Imported " (shape-label result)
                                             " spec: " target "\n"
                                             (when (and force? prior)
                                               (str "  replaced the previous spec"

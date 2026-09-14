@@ -63,6 +63,12 @@
 
 (def level-fn-atom (atom nil))
 
+;; Unlike the other dialects this one never returns nil: Moonshot's flag is a
+;; boolean, and `off` has to send `false` to turn thinking off. The extension
+;; used to hardcode `true`, so `/thinking off` never reached the server.
+(defmethod rr/reasoning-body provider-name [_ level _model-id]
+  {:thinking (boolean (rr/active-level level))})
+
 (defn make-request-rewriter [model-id]
   (fn [body-str init]
     (let [lifted (rs/lift-think-request-rewriter body-str init)]
@@ -73,7 +79,10 @@
                 kwargs (or (.-chat_template_kwargs body) #js {})
                 ;; Was hardcoded `true`, so `/thinking off` left Moonshot
                 ;; thinking anyway — the level now decides.
-                want   (:thinking (rr/kimi (when-let [f @level-fn-atom] (f))))]
+                want   (:thinking (rr/reasoning-body
+                                   provider-name
+                                   (when-let [f @level-fn-atom] (f))
+                                   model-id))]
             (when (nil? (.-thinking kwargs))
               (aset kwargs "thinking" want))
             (aset body "chat_template_kwargs" kwargs)

@@ -74,13 +74,35 @@
 ;; field, so the mapper gates on the model id.
 (def level-fn-atom (atom nil))
 
+;; ── Reasoning dialect ─────────────────────────────────────────────
+;; `reasoning_effort` is accepted only by the models Groq documents for it;
+;; sending it to the others is an error, so the method reads the model id.
+;; `reasoning_format: "parsed"` puts the chain in its own field instead of
+;; inline <think>, which is what reasoning_stream would otherwise have to strip.
+
+(def ^:private reasoning-models
+  #{"qwen/qwen3-32b" "qwen/qwen3.6-27b" "openai/gpt-oss-20b" "openai/gpt-oss-120b"
+    "openai/gpt-oss-safeguard-20b"})
+
+(defn reasoning-model?
+  "Pure: does this Groq model accept reasoning parameters?"
+  [model-id]
+  (contains? reasoning-models (str model-id)))
+
+;; Groq's scale tops out at `high`, so xhigh clamps.
+(defmethod rr/reasoning-body provider-name [_ level model-id]
+  (when-let [l (rr/active-level level)]
+    (when (reasoning-model? model-id)
+      {:reasoning_effort (if (= l "xhigh") "high" l)
+       :reasoning_format "parsed"})))
+
 (defn make-request-rewriter
   "Per-request: read the live thinking level and inject Groq's reasoning fields."
   [model-id]
   (fn [body-str _init]
     (try
       (let [lvl  (when-let [f @level-fn-atom] (f))
-            r    (rr/groq lvl model-id)]
+            r    (rr/reasoning-body provider-name lvl model-id)]
         (if-not r
           body-str
           (let [body (js/JSON.parse body-str)]
