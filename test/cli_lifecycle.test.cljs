@@ -12,7 +12,9 @@
    These tests pin the contract."
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
+            [agent.commands.builtins :refer [register-builtins]]
             [agent.cli :refer [agent-stats
+                               sigint-action
                                emit-session-ready!
                                emit-session-shutdown!
                                emit-session-shutdown-async!]]))
@@ -176,3 +178,70 @@
                 test-shutdown-async-awaits-handlers)
             (it "session_shutdown carries {:reason 'sigint'}"
                 test-shutdown-async-reason-payload)))
+
+;;; ─── Ctrl-C during a turn stops the turn, not the session ───
+;;; SIGINT exited, full stop. Every other agent CLI treats the first press
+;;; during a response as "stop generating", so the reflex for abandoning a bad
+;;; answer killed the session and the context that made the next prompt worth
+;;; writing. A second press inside the window still exits.
+
+(describe "Ctrl-C"
+          (fn []
+            (it "aborts the turn on the first press while streaming"
+                (fn []
+                  (-> (expect (sigint-action {:streaming? true :last-sigint-ms nil :now 1000}))
+                      (.toBe :interrupt))))
+
+            (it "exits on the second press inside the window"
+                (fn []
+                  (-> (expect (sigint-action {:streaming? true :last-sigint-ms 1000 :now 1500}))
+                      (.toBe :shutdown))))
+
+            (it "offers the abort again once the window has passed"
+                (fn []
+          ;; Otherwise one interrupted turn would arm exit-on-Ctrl-C for the
+          ;; rest of the session.
+                  (-> (expect (sigint-action {:streaming? true :last-sigint-ms 1000 :now 4000}))
+                      (.toBe :interrupt))))
+
+            (it "exits immediately when nothing is streaming"
+                (fn []
+                  (-> (expect (sigint-action {:streaming? false :last-sigint-ms nil :now 1000}))
+                      (.toBe :shutdown))
+          ;; The TUI has not written the flag yet on a fresh session.
+                  (-> (expect (sigint-action {:streaming? nil :last-sigint-ms nil :now 1000}))
+                      (.toBe :shutdown))))))
+
+;;; ─── /exit takes the async shutdown path ────────────────────
+;;; It called process.exit itself, which runs the synchronous `exit` handler
+;;; and nothing else — MCP sockets and LSP clients killed rather than closed.
+
+(defn- exit-agent []
+  (let [agent (create-agent {:model "test" :system-prompt "test"})]
+    (reset! (:session agent) {:get-file-path (fn [] nil)})
+    (register-builtins agent @(:session agent) {})
+    agent))
+
+(describe "/exit"
+          (fn []
+            (it "emits the exit event instead of calling process.exit"
+                (fn []
+                  (let [agent (exit-agent)
+                        seen  (atom [])]
+            ;; cli.cljs registers exactly this handler; standing in for it here
+            ;; is what proves /exit no longer takes the process down itself.
+                    ((:on (:events agent)) "exit" (fn [d] (swap! seen conj d)))
+                    ((:handler (get @(:commands agent) "exit")) [] nil)
+                    (-> (expect (count @seen)) (.toBe 1))
+                    (-> (expect (:reason (first @seen))) (.toBe "exit")))))
+
+            (it "does not fire session_shutdown itself — the shutdown path owns that"
+                (fn []
+          ;; Two emitters meant session_shutdown could fire twice, or fire and
+          ;; then be followed by a process.exit that skipped session_end.
+                  (let [agent (exit-agent)
+                        shut  (atom 0)]
+                    ((:on (:events agent)) "exit" (fn [_] nil))
+                    ((:on (:events agent)) "session_shutdown" (fn [_] (swap! shut inc)))
+                    ((:handler (get @(:commands agent) "exit")) [] nil)
+                    (-> (expect @shut) (.toBe 0)))))))

@@ -6,7 +6,11 @@
             ["node:path" :as path]
             [agent.version :refer [version]]
             [clojure.string :as str]
-            [agent.cli :refer [resolve-ext-flags resolve-model-via-registry help-text]]))
+            ["node:os" :as os]
+            ["node:util" :refer [parseArgs]]
+            [agent.cli :refer [resolve-ext-flags resolve-model-via-registry help-text
+                               parse-args-error error-line resolve-session cli-options
+                               interactive-resources]]))
 
 ;; ── resolve-ext-flags ──────────────────────────────────────
 
@@ -211,3 +215,148 @@
                   ;; `nyma --version` is meant to be usable in a shell
                   ;; substitution, so nothing but the number goes to stdout.
                   (-> (expect version) (.toMatch #"^\d+\.\d+\.\d+"))))))
+
+;;; ─── the positional prompt reaches interactive mode ─────────
+;;; `Usage: nyma [options] [prompt]` is what --help has always said, and
+;;; interactive mode dropped the positional: `nyma "fix the build"` opened an
+;;; empty session with the prompt gone.
+
+(describe "nyma \"<prompt>\" with no -p"
+          (fn []
+            (it "hands the prompt to the TUI as seed-prompt"
+                (fn []
+                  (let [r (interactive-resources {:settings :s} ["fix the build"])]
+                    (-> (expect (:seed-prompt r)) (.toBe "fix the build"))
+            ;; The TUI reads it with aget, so it has to be a plain string key.
+                    (-> (expect (aget r "seed-prompt")) (.toBe "fix the build"))
+            ;; And nothing else in the map is disturbed.
+                    (-> (expect (:settings r)) (.toBe :s)))))
+
+            (it "joins multiple positionals the way the shell split them"
+                (fn []
+                  (-> (expect (:seed-prompt (interactive-resources {} ["fix" "the" "build"])))
+                      (.toBe "fix the build"))))
+
+            (it "is an empty string with no positionals, which the TUI treats as absent"
+                (fn []
+                  (-> (expect (:seed-prompt (interactive-resources {} []))) (.toBe ""))
+                  (-> (expect (:seed-prompt (interactive-resources {} nil))) (.toBe ""))))))
+
+;;; ─── a mistyped flag ────────────────────────────────────────
+;;; An unrecognised flag escaped as an unhandled Error: node printed its class,
+;;; its `code` and a stack through squint's compiled output, and the process
+;;; died on the default handler's exit code rather than the 2 a shell expects
+;;; for a usage error.
+
+(defn- parse-throw
+  "Run the REAL parseArgs against argv and hand back what it threw."
+  [argv]
+  (try
+    (parseArgs #js {:args (clj->js argv) :options cli-options :allowPositionals true})
+    nil
+    (catch :default e e)))
+
+(describe "an unknown flag"
+          (fn []
+            (it "prints one line naming the flag and pointing at --help"
+                (fn []
+                  (let [e (parse-throw ["--x"])]
+                    (-> (expect (some? e)) (.toBe true))
+                    (-> (expect (parse-args-error e))
+                        (.toBe "nyma: unknown option '--x' (see --help)")))))
+
+            (it "names the long form of an unknown short flag too"
+                (fn []
+                  (let [msg (parse-args-error (parse-throw ["-z"]))]
+                    (-> (expect msg) (.toContain "see --help"))
+                    (-> (expect msg) (.toContain "nyma: ")))))
+
+            (it "says nothing about arguments that parse"
+                (fn []
+                  (-> (expect (parse-throw ["-p" "hello" "--model" "x"])) (.toBeNull))))
+
+            (it "leaves a non-parseArgs error alone, so a real bug is not swallowed"
+                (fn []
+                  (-> (expect (parse-args-error (js/Error. "boom"))) (.toBeNull))))))
+
+;;; ─── a thrown error is one line, not a stack ────────────────
+
+(describe "a failure from mode dispatch"
+          (fn []
+            (it "reads `nyma: <message>`"
+                (fn []
+                  (-> (expect (error-line (js/Error. "ENOENT: no such file or directory")))
+                      (.toBe "nyma: ENOENT: no such file or directory"))))
+
+            (it "still says something for a thrown non-Error"
+                (fn []
+                  (-> (expect (error-line "plain string")) (.toBe "nyma: plain string"))))))
+
+;;; ─── -c / -r with nothing to resume ─────────────────────────
+;;; Both printed NOTHING and silently started fresh, which reads as "my session
+;;; is gone". And -p -c / -p -r / -p --fork parsed, did nothing, and said
+;;; nothing: `nyma -p -c "and then?"` looked like it was continuing a
+;;; conversation and was starting a new one.
+
+(defn- capture-stderr [f]
+  (let [lines (atom [])
+        orig  (.-write (.-stderr js/process))]
+    (set! (.-write (.-stderr js/process)) (fn [d] (swap! lines conj (str d)) true))
+    (-> (js/Promise.resolve (f))
+        (.finally (fn [] (set! (.-write (.-stderr js/process)) orig)))
+        (.then (fn [v] {:value v :stderr (str/join "" @lines)})))))
+
+(defn- empty-sessions-dir []
+  (path/join (fs/mkdtempSync (path/join (os/tmpdir) "nyma-nosess-")) "sessions"))
+
+(defn ^:async test-continue-with-no-sessions []
+  (let [dir (empty-sessions-dir)
+        r   (js-await (capture-stderr
+                       (fn [] (resolve-session {:continue true} "interactive" dir))))]
+    (-> (expect (:stderr r)) (.toContain "no sessions for this project — starting fresh"))
+    ;; And it really does start one, rather than dying.
+    (-> (expect (some? ((:get-file-path (:value r))))) (.toBe true))))
+
+(defn ^:async test-resume-with-no-sessions []
+  (let [dir (empty-sessions-dir)
+        r   (js-await (capture-stderr
+                       (fn [] (resolve-session {:resume true} "interactive" dir))))]
+    (-> (expect (:stderr r)) (.toContain "no sessions for this project — starting fresh"))))
+
+(defn ^:async test-print-mode-ignores-continue []
+  (let [dir (empty-sessions-dir)
+        r   (js-await (capture-stderr
+                       (fn [] (resolve-session {:continue true} "print" dir))))]
+    (-> (expect (:stderr r))
+        (.toContain "-c/-r/--fork are ignored in print mode; use --session"))
+    ;; One-shot runs stay ephemeral — the warning does not change that.
+    (-> (expect ((:get-file-path (:value r)))) (.toBeNull))))
+
+(defn ^:async test-print-mode-with-session-is-quiet []
+  (let [dir  (empty-sessions-dir)
+        file (path/join dir "explicit.jsonl")
+        r    (js-await (capture-stderr
+                        (fn [] (resolve-session {:continue true :session file} "print" dir))))]
+    ;; --session is the documented way to do this, so it is not a mistake.
+    (-> (expect (.includes (:stderr r) "ignored in print mode")) (.toBe false))
+    (fs/rmSync dir #js {:recursive true :force true})))
+
+(defn ^:async test-interactive-is-quiet-with-sessions []
+  (let [dir (empty-sessions-dir)]
+    (fs/mkdirSync dir #js {:recursive true})
+    (fs/writeFileSync (path/join dir "1.jsonl")
+                      (str (js/JSON.stringify
+                            #js {:id "a" :role "user" :content "hi"}) "\n"))
+    (let [r (js-await (capture-stderr
+                       (fn [] (resolve-session {:continue true} "interactive" dir))))]
+      (-> (expect (.includes (:stderr r) "no sessions")) (.toBe false))
+      (fs/rmSync dir #js {:recursive true :force true}))))
+
+(describe "-c / -r / --fork feedback"
+          (fn []
+            (it "says so when there is nothing to continue" test-continue-with-no-sessions)
+            (it "says so when there is nothing to resume" test-resume-with-no-sessions)
+            (it "warns that -c is ignored in print mode" test-print-mode-ignores-continue)
+            (it "stays quiet when --session says what to use" test-print-mode-with-session-is-quiet)
+            (it "stays quiet when there IS a session to continue"
+                test-interactive-is-quiet-with-sessions)))

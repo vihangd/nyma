@@ -449,8 +449,19 @@
           {:description "Exit the agent"
            :aliases     ["quit" "q"]
            :handler (fn [_args _ctx]
-                      ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
-                      (js/process.exit 0))}
+                      ;; `/exit` used to call process.exit itself. That runs the
+                      ;; synchronous `exit` handler and nothing else, so MCP
+                      ;; sockets and LSP clients were killed rather than closed
+                      ;; and any extension awaiting cleanup never finished. The
+                      ;; bus event routes it into cli's async shutdown — the
+                      ;; same one SIGINT takes — so session_shutdown fires once.
+                      (let [events (:events agent)]
+                        (if (pos? ((:handler-count events) "exit"))
+                          ((:emit events) "exit" {:reason "exit"})
+                          ;; No cli handler (sdk mode, a test harness): the old
+                          ;; behaviour, rather than a /exit that does nothing.
+                          (do ((:emit events) "session_shutdown" {:reason "exit"})
+                              (js/process.exit 0)))))}
 
           "theme"
           {:description "Switch the color theme (applies on next launch). Usage: /theme [name]"
