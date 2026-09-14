@@ -2,18 +2,16 @@
   "Pure helpers extracted from agent.ui.app.
 
    These live here — not inline in App — so they are reachable from tests
-   without mounting React. Two distinct sets of logic are covered:
+   without mounting a TUI: the tool-execution message-list reducers
+   (`apply-tool-start`, `apply-tool-end`, `apply-tool-update`), which the
+   mode's `on-start`/`on-end`/`on-update` event handlers are thin wrappers
+   around, plus `make-submit-guard`.
 
-   1. Tool-execution message-list reducers (`apply-tool-start`,
-      `apply-tool-end`, `apply-tool-update`). The App's `on-start`/`on-end`/
-      `on-update` event handlers are thin wrappers around these.
-   2. Bracketed-paste edit-suppression helpers (`make-guarded-setter`,
-      `make-ink-paste-fn`, `make-stdin-paste-handler`). The App wires these
-      into React refs and the ink / stdin event buses.
-
-   Neither group touches React or ink directly — all external state
-   (refs, setters, schedulers) is passed in, which is also the reason
-   tests can stub it trivially.")
+   A set of bracketed-paste edit-suppression helpers used to live here too
+   (`make-guarded-setter`, `make-ink-paste-fn`, `make-stdin-paste-handler`),
+   left over from the ink UI. They were dead: pi-tui's Editor collapses a
+   >10-line paste into its own `[paste #1 +50 lines]` marker (pi-tui README,
+   \"Large paste handling\"), so nothing wired them up and nothing should.")
 
 ;;; ─── Tool execution reducers ─────────────────────────────
 
@@ -87,6 +85,10 @@
                      ;; line drops back to the generic arg preview.
                      (and start-msg (:custom-one-line-args start-msg))
                      (assoc :custom-one-line-args (:custom-one-line-args start-msg))
+                     ;; middleware emits :isError; without copying it the
+                     ;; renderer had no way to tell a failure from a success
+                     ;; and drew "✓" on both.
+                     (get data :isError)             (assoc :is-error true)
                      (get data :customOneLineResult) (assoc :custom-one-line-result (get data :customOneLineResult))
                      (get data :customIcon)            (assoc :custom-icon (get data :customIcon)))]
     (if (some? idx)
@@ -105,51 +107,6 @@
       (assoc-in prev-v [idx :custom-status-text] (str (get data :data)))
       prev-v)))
 
-;;; ─── Bracketed-paste edit suppression ────────────────────
-
-(defn make-guarded-setter
-  "Build a wrapper around a React-style setter that drops direct (string)
-   setState calls while `block-ref.current` is truthy, but always lets
-   functional updates through.
-
-   Functional updates must pass unconditionally because the paste
-   state-machine appends its `[paste #N +X lines]` marker using
-   `(fn [prev] (str prev marker))` — if we suppressed that, the marker
-   would never land and the user would see nothing.
-
-   Direct string updates come from ink-text-input's onChange calls during
-   the three-event split of a bracketed paste. Those are the ones we
-   want to drop."
-  [block-ref set-value]
-  (fn [v]
-    (if (fn? v)
-      (set-value v)
-      (when-not (.-current block-ref)
-        (set-value v)))))
-
-(defn make-ink-paste-fn
-  "Build an 'input' listener for ink's internal_eventEmitter.
-
-   On the paste-start sequence it sets `block-ref.current` to true
-   synchronously. On the paste-end sequence it defers clearing via
-   `schedule-clear` — the clear must not happen in the same tick as
-   TextInput's synchronous useInput handler for that same event, or the
-   ref would already be false by the time TextInput tries to append the
-   literal '[201~' to the editor value.
-
-   `schedule-clear` should be something like `#(js/setTimeout % 0)` in
-   production; tests inject a collector so they can run the pending
-   callback manually."
-  [block-ref schedule-clear]
-  (fn [raw]
-    (cond
-      (= raw "\u001b[200~")
-      (set! (.-current block-ref) true)
-
-      (= raw "\u001b[201~")
-      (schedule-clear
-       (fn [] (set! (.-current block-ref) false))))))
-
 (defn make-submit-guard
   "Wrap submit-fn so that:
    - empty text is rejected immediately (returns nil, no side effects)
@@ -167,16 +124,3 @@
           (.catch (fn [e]
                     (set! (.-current submit-lock-ref) false)
                     (throw e)))))))
-
-(defn make-stdin-paste-handler
-  "Build the process.stdin 'data' listener responsible for running the
-   bracketed-paste state machine and appending the `[paste #N]` marker
-   to the editor. Short-circuits when an overlay (dialog, picker) is
-   active: in that case ink's TextInput receives the paste bytes as
-   normal keystrokes and we must not also consume them here."
-  [process-fn overlay-ref set-value]
-  (fn [data]
-    (when-not (.-current overlay-ref)
-      (let [result (process-fn data)]
-        (when (and (:handled result) (:marker result))
-          (set-value (fn [prev] (str (or prev "") (:marker result)))))))))
