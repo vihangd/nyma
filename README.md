@@ -594,6 +594,7 @@ before relying on a value here.
   "retry": { "enabled": true, "max-retries": 5 },
   "max-steps": 100,
   "extensions": {},
+  "context-files": ["AGENTS.md", "CLAUDE.md"],
   "steering-mode": "one-at-a-time",
   "follow-up-mode": "one-at-a-time",
   "transport": "auto",
@@ -917,7 +918,17 @@ JSON theme files in `~/.nyma/themes/` or `.nyma/themes/`. Built-in themes: `dark
 
 ### System Prompt
 
-Create a `SYSTEM.md` in `.nyma/` or `~/.nyma/` to provide a custom system prompt. Create an `AGENTS.md` at the project root to provide project-specific context.
+Create a `SYSTEM.md` in `.nyma/` or `~/.nyma/` to provide a custom system prompt. Create an `AGENTS.md` (or a `CLAUDE.md`) at the project root to provide project-specific context.
+
+Context files are read from `~/`, `~/.nyma/`, every ancestor from the repository root down to
+the working directory, the working directory and its `.nyma/`, lowest precedence first. At each
+of those directories the first name in the `context-files` setting that exists is taken — default
+`["AGENTS.md", "CLAUDE.md"]`, so a repo carrying both injects AGENTS.md only. Change the order,
+or add a name, in settings:
+
+```json
+{ "context-files": ["CLAUDE.md", "AGENTS.md", "CONVENTIONS.md"] }
+```
 
 ## Dependencies
 

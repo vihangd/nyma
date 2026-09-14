@@ -297,7 +297,10 @@
       (reload-fn)))
   ;; 3. Rediscover resources
   (let [new-resources (js-await (discover {:events (:events agent)
-                                           :reason "reload"}))]
+                                           :reason "reload"
+                                           :context-files (when-let [s (:settings resources)]
+                                                            (when (fn? (:get s))
+                                                              (:context-files ((:get s)))))}))]
     ;; 4. Rebuild system prompt
     (when-let [build-fn (:build-system-prompt new-resources)]
       (aset (:config agent) "system-prompt" (build-fn)))

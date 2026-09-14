@@ -440,7 +440,9 @@
 (defn- setup-context-dir []
   (let [dir (path/join (os/tmpdir) (str "nyma-ctx-test-" (js/Date.now)))]
     (fs/mkdirSync dir #js {:recursive true})
-    (fs/writeFileSync (path/join dir "CLAUDE.md")
+    ;; CONTEXT.md, not CLAUDE.md: the core loader injects CLAUDE.md into the
+    ;; system prompt now, so the tool no longer lists it.
+    (fs/writeFileSync (path/join dir "CONTEXT.md")
                       "# Project\nThis is a test project.\n## Build\nbun run build\n")
     (fs/writeFileSync (path/join dir ".cursorrules")
                       "Use TypeScript. Prefer functional style.\n")
@@ -468,7 +470,7 @@
         (when ctx-tool
           (let [result (js-await ((.-execute ctx-tool) #js {:action "list"}))]
             (-> (expect result) (.toContain "Hot"))
-            (-> (expect result) (.toContain "CLAUDE.md")))))
+            (-> (expect result) (.toContain "CONTEXT.md")))))
       (finally
         (js/process.chdir orig-cwd)
         (cleanup-context-dir dir)))))
@@ -484,7 +486,7 @@
             tools  ((:get-active (:tool-registry agent)))
             ctx-tool (get tools "context_files")]
         (when ctx-tool
-          (let [result (js-await ((.-execute ctx-tool) #js {:action "read" :path "CLAUDE.md"}))]
+          (let [result (js-await ((.-execute ctx-tool) #js {:action "read" :path "CONTEXT.md"}))]
             (-> (expect result) (.toContain "test project")))))
       (finally
         (js/process.chdir orig-cwd)
@@ -565,7 +567,7 @@
                                                (let [agent (make-agent)
                                                      api   (make-api agent)
                                                      _deact (structured-context/activate api)]
-            ;; Should discover CLAUDE.md + .cursorrules (hot) + src/components/CONTEXT.md (warm)
+            ;; Should discover CONTEXT.md + .cursorrules (hot) + src/components/CONTEXT.md (warm)
                                                  (-> (expect (:files-discovered (:structured-context @shared/suite-stats)))
                                                      (.toBeGreaterThanOrEqual 2)))
                                                (finally

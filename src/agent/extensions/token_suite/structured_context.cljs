@@ -95,7 +95,7 @@
   "Discover all context files and classify into hot/warm/cold tiers."
   [cwd config api]
   (let [patterns (or (:file-patterns config)
-                     ["CLAUDE.md" "CONTEXT.md" ".cursorrules"])
+                     ["CONTEXT.md" ".cursorrules"])
         mdc-dir (or (:mdc-dir config) ".cursor/rules")
         scan-depth (or (:scan-depth config) 3)
         hot-budget (or (:hot-budget config) 2000)
@@ -166,7 +166,7 @@
       (doseq [f cold]
         (swap! lines conj (str "  " (:path f) " (" (:tokens f) " tokens)"))))
     (when (and (empty? hot) (empty? warm) (empty? cold))
-      (swap! lines conj "  No context files found (CLAUDE.md, CONTEXT.md, .cursorrules)"))
+      (swap! lines conj "  No context files found (CONTEXT.md, .cursorrules)"))
     (str/join "\n" @lines)))
 
 (defn ^:async context-files-read [discovered fpath cwd]
@@ -284,7 +284,7 @@
     ;; Register context_files tool
     (.registerTool api "context_files"
                    (tool
-                    #js {:description "List or read project context files (CLAUDE.md, CONTEXT.md, .cursorrules, etc.). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
+                    #js {:description "List or read project context files (CONTEXT.md, .cursorrules, etc.; AGENTS.md and CLAUDE.md are already in the system prompt). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
                          :inputSchema (.object z
                                                #js {:action (-> (.enum z #js ["list" "read"])
                                                                 (.describe "list = show all files; read = get content"))

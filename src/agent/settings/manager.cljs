@@ -143,7 +143,11 @@
    ;; Extensions switched off by namespace: {"openwiki" false}. Builtin or
    ;; user, either scope; `/extensions disable <ns>` writes it. Merged PER KEY
    ;; across global and project (see `:get`), unlike the top-level replace.
-   :extensions     {}})
+   :extensions     {}
+   ;; Project-context files read into the system prompt at session start,
+   ;; in order of preference: at each directory level the FIRST name that
+   ;; exists wins, so a repo carrying both injects AGENTS.md only.
+   :context-files  ["AGENTS.md" "CLAUDE.md"]})
 
 (defn detect-duplicate-keys
   "Scan a JSON source string for duplicate keys inside the same

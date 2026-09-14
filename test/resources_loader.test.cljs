@@ -1,8 +1,74 @@
 (ns resources-loader.test
   (:require ["bun:test" :refer [describe it expect]]
             ["node:fs" :as fs]
+            ["node:os" :as os]
             ["node:path" :as path]
-            [agent.resources.loader :refer [discover]]))
+            [agent.resources.loader :refer [discover find-agents-files]]))
+
+;; ── context-files: AGENTS.md / CLAUDE.md selection ─────────────
+;;
+;; Each test builds <tmp>/home and <tmp>/repo (with a .git entry) and calls
+;; find-agents-files with explicit home/cwd, so nothing outside the tree —
+;; the developer's own ~/AGENTS.md included — can leak in.
+
+(defn- ctx-tree []
+  (let [root (fs/mkdtempSync (path/join (os/tmpdir) "nyma-ctxfiles-"))
+        home (path/join root "home")
+        repo (path/join root "repo")]
+    (fs/mkdirSync home #js {:recursive true})
+    (fs/mkdirSync (path/join repo ".git") #js {:recursive true})
+    {:root root :home home :repo repo}))
+
+(defn- touch [dir name]
+  (fs/mkdirSync dir #js {:recursive true})
+  (fs/writeFileSync (path/join dir name) (str "# " name)))
+
+(defn- basenames [paths] (mapv #(path/basename %) paths))
+
+(describe "context files in the system prompt (context-files setting)"
+          (fn []
+            (it "picks CLAUDE.md when AGENTS.md is absent"
+                (fn []
+                  (let [{:keys [root home repo]} (ctx-tree)]
+                    (try
+                      (touch repo "CLAUDE.md")
+                      (-> (expect (basenames (find-agents-files home repo))) (.toEqual ["CLAUDE.md"]))
+                      (finally (fs/rmSync root #js {:recursive true :force true}))))))
+
+            (it "prefers AGENTS.md when both exist at the same level"
+                (fn []
+                  (let [{:keys [root home repo]} (ctx-tree)]
+                    (try
+                      (touch repo "AGENTS.md")
+                      (touch repo "CLAUDE.md")
+                      (-> (expect (basenames (find-agents-files home repo))) (.toEqual ["AGENTS.md"]))
+                      (finally (fs/rmSync root #js {:recursive true :force true}))))))
+
+            (it "honours a custom context-files order"
+                (fn []
+                  (let [{:keys [root home repo]} (ctx-tree)]
+                    (try
+                      (touch repo "AGENTS.md")
+                      (touch repo "CLAUDE.md")
+                      (touch home "CONVENTIONS.md")
+                      (-> (expect (basenames (find-agents-files home repo ["CLAUDE.md" "CONVENTIONS.md"])))
+                          (.toEqual ["CONVENTIONS.md" "CLAUDE.md"]))
+                      (finally (fs/rmSync root #js {:recursive true :force true}))))))
+
+            (it "walks ancestors up to the repo root and no further"
+                (fn []
+                  (let [{:keys [root home repo]} (ctx-tree)
+                        sub (path/join repo "packages" "foo")]
+                    (try
+                      (touch root "CLAUDE.md")                     ; above the repo: must not be read
+                      (touch repo "CLAUDE.md")                     ; repo root
+                      (touch (path/join repo "packages") "AGENTS.md")
+                      (touch sub "CLAUDE.md")                      ; cwd
+                      (-> (expect (find-agents-files home sub))
+                          (.toEqual [(path/join repo "CLAUDE.md")
+                                     (path/join repo "packages" "AGENTS.md")
+                                     (path/join sub "CLAUDE.md")]))
+                      (finally (fs/rmSync root #js {:recursive true :force true}))))))))
 
 ;; Test resource discovery with temp directories.
 ;; discover is async, returns {:skills :prompts :themes :agents-md :extension-dirs :build-system-prompt}
@@ -22,7 +88,7 @@
     (fs/writeFileSync (str skills-dir "/SKILL.md") "# My Skill\nDoes things.")
     (fs/writeFileSync (str prompts-dir "/greet.md") "Hello {{name}}!")
     (fs/writeFileSync (str themes-dir "/dark.json")
-      (js/JSON.stringify #js {:name "dark" :colors #js {:primary "#fff"}}))))
+                      (js/JSON.stringify #js {:name "dark" :colors #js {:primary "#fff"}}))))
 
 (defn- cleanup-recursive [dir-path]
   (when (fs/existsSync dir-path)
@@ -56,6 +122,6 @@
   (-> (expect (fn? discover)) (.toBe true)))
 
 (describe "agent.resources.loader/discover" (fn []
-  (it "returns expected shape with all keys" test-discover-returns-expected-shape)
-  (it "build-system-prompt includes environment block" test-build-system-prompt-includes-env)
-  (it "handles missing directories gracefully" test-discover-handles-missing-dirs)))
+                                              (it "returns expected shape with all keys" test-discover-returns-expected-shape)
+                                              (it "build-system-prompt includes environment block" test-build-system-prompt-includes-env)
+                                              (it "handles missing directories gracefully" test-discover-handles-missing-dirs)))

@@ -643,7 +643,7 @@ Examples:
         _         (when-let [w (inert-warning ((:user-settings settings)))]
                     (d/warn "settings" w))
         sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
-        resources (-> (js-await (discover))
+        resources (-> (js-await (discover {:context-files (:context-files merged)}))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
         session   (js-await (resolve-session values mode sessions-dir))

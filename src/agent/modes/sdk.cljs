@@ -34,7 +34,7 @@
      :modes                 — #{kw} filter tools by allowed runtime mode"
   [opts]
   (let [settings  (create-settings-manager)
-        resources (js-await (discover))
+        resources (js-await (discover {:context-files (:context-files ((:get settings)))}))
         session   (create-session-manager (or (:session-path opts)
                                               (temp-session-path)))
         agent     (create-agent

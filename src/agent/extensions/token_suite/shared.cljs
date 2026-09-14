@@ -32,7 +32,7 @@
                         :hot-budget 2000
                         :warm-budget 4000
                         :scan-depth 3
-                        :file-patterns ["CLAUDE.md" "CONTEXT.md" ".cursorrules"]
+                        :file-patterns ["CONTEXT.md" ".cursorrules"]
                         :mdc-dir ".cursor/rules"}
    :smart-compaction   {:background-threshold 0.50
                         :full-threshold 0.85

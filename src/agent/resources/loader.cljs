@@ -4,6 +4,7 @@
             ["node:os" :as os]
             [clojure.string :as str]
             [agent.resources.skills :as skills]
+            [agent.settings.manager :refer [defaults]]
             [agent.builtin-extensions :as builtin-extensions]))
 
 (def global-dir (path/join (os/homedir) ".nyma"))
@@ -71,8 +72,20 @@ When multiple independent tool calls are needed, make them in parallel.
 ;; into the system prompt — frontmatter governs *whether* the file
 ;; applies, not its content.
 
+(def default-context-files
+  "The `context-files` setting's default, for callers with no settings."
+  (:context-files defaults))
+
+(defn- first-existing
+  "The first of `names` present in `dir`, as a path, or nil. One file per
+   directory level: a repo that carries AGENTS.md and a CLAUDE.md copy
+   for another tool must not have both injected."
+  [dir names]
+  (some (fn [n] (let [p (path/join dir n)] (when (fs/existsSync p) p))) names))
+
 (defn walk-up-for-agents-md
-  "Walk up from start-dir collecting every AGENTS.md file along the way.
+  "Walk up from start-dir collecting the context file at each level (the
+   first of `names` that exists there, AGENTS.md then CLAUDE.md by default).
    Stops at filesystem root or once the parent matches stop-at-dir
    (typically the user's home directory; the global AGENTS.md is
    collected separately to avoid double-counting).
@@ -80,13 +93,13 @@ When multiple independent tool calls are needed, make them in parallel.
    Returns paths in farthest-first order (lowest precedence first), so
    the caller can concatenate and have the closest-to-cwd file win on
    conflict — the agents.md spec's monorepo nesting rule."
-  [start-dir stop-at-dir]
-  (let [results (atom [])]
+  [start-dir stop-at-dir & [names]]
+  (let [names   (or names default-context-files)
+        results (atom [])]
     (loop [d start-dir]
       (when d
-        (let [candidate (path/join d "AGENTS.md")]
-          (when (fs/existsSync candidate)
-            (swap! results conj candidate)))
+        (when-let [candidate (first-existing d names)]
+          (swap! results conj candidate))
         (let [parent (path/dirname d)]
           (when (and (not= parent d)              ; not at filesystem root
                      (not= d stop-at-dir))         ; haven't crossed home yet
@@ -125,7 +138,7 @@ When multiple independent tool calls are needed, make them in parallel.
         (when (not= parent d) (recur parent))))))
 
 (defn find-agents-files
-  "Returns a vec of AGENTS.md paths to load at session start, in lowest→
+  "Returns a vec of context-file paths to load at session start, in lowest→
    highest precedence:
      1. ~/AGENTS.md                          (user global, Codex convention)
      2. ~/.nyma/AGENTS.md                    (user global, nyma-scoped)
@@ -135,27 +148,33 @@ When multiple independent tool calls are needed, make them in parallel.
      4. <cwd>/AGENTS.md                      (project root or subdir)
      5. <cwd>/.nyma/AGENTS.md                (nyma-private project scope)
 
-   The ancestor walk is bounded by the nearest `.git` directory, so we
+   At each of those directories the first of `names` that exists is taken
+   (the `context-files` setting; AGENTS.md then CLAUDE.md by default), so
+   a level holding both contributes one file.
+
+   The ancestor walk is bounded by the nearest repository root, so we
    never escape the repo and never pick up unrelated parents like
-   `/tmp/AGENTS.md`. If cwd is not inside a git repo (or is itself the
+   `/tmp/AGENTS.md`. If cwd is not inside a repo (or is itself the
    repo root), step 3 contributes nothing.
 
    Runtime monorepo resolution when the editing target is known (e.g.
    `packages/foo/AGENTS.md` overriding the root) still uses
    `walk-up-for-agents-md` from the call-site."
   ([] (find-agents-files (os/homedir) (js/process.cwd)))
-  ([home cwd]
-   (let [repo-root (find-repo-root cwd home)
+  ([home cwd] (find-agents-files home cwd nil))
+  ([home cwd names]
+   (let [names     (or names default-context-files)
+         repo-root (find-repo-root cwd home)
          ancestors (if (and repo-root (not= repo-root cwd))
-                     (walk-up-for-agents-md (path/dirname cwd) repo-root)
+                     (walk-up-for-agents-md (path/dirname cwd) repo-root names)
                      [])]
      (->> (concat
-           [(path/join home "AGENTS.md")
-            (path/join home ".nyma" "AGENTS.md")]
+           [(first-existing home names)
+            (first-existing (path/join home ".nyma") names)]
            ancestors
-           [(path/join cwd "AGENTS.md")
-            (path/join cwd ".nyma" "AGENTS.md")])
-          (filter #(fs/existsSync %))
+           [(first-existing cwd names)
+            (first-existing (path/join cwd ".nyma") names)])
+          (remove nil?)
           (distinct)
           vec))))
 
@@ -236,8 +255,10 @@ When multiple independent tool calls are needed, make them in parallel.
 
 (defn ^:async discover
   "Discover all resources from global and project directories.
-   Optionally accepts an events bus to emit resources_discover for extensions."
-  [& [{:keys [events reason]}]]
+   Optionally accepts an events bus to emit resources_discover for extensions,
+   and `:context-files` (the setting) naming the files to read as AGENTS.md;
+   the loader has no settings manager of its own, so the caller passes it."
+  [& [{:keys [events reason context-files]}]]
   (let [;; Skill discovery walks both nyma's own paths AND the cross-vendor
         ;; paths used by Claude Code, Cursor 2.4, Codex, and the proposed
         ;; agentskills.io standard. Project paths win over global; nyma's
@@ -257,7 +278,7 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; AGENTS.md: walk every collected file, parse optional YAML
         ;; frontmatter, and concatenate the BODIES (not the raw files
         ;; with their frontmatter blocks).
-        agents-md (->> (find-agents-files home cwd)
+        agents-md (->> (find-agents-files home cwd context-files)
                        (map (fn [p] (fs/readFileSync p "utf8")))
                        (keep agents-body-or-nil)
                        (str/join "\n\n"))
