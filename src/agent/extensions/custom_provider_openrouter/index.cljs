@@ -99,6 +99,17 @@
         all (:provider cfg)]
     (or one all)))
 
+;; ── Reasoning dialect ─────────────────────────────────────────────
+;; https://openrouter.ai/docs/use-cases/reasoning-tokens
+;; effort ∈ none|minimal|low|medium|high|xhigh|max — nyma's levels are
+;; minimal|low|medium|high|xhigh, so this is a 1:1 pass-through. 284 of
+;; OpenRouter's 415 models accept it, and OpenRouter drops parameters a backend
+;; does not support rather than erroring, so the model id is not consulted.
+
+(defmethod rr/reasoning-body provider-name [_ level _model-id]
+  (when-let [l (rr/active-level level)]
+    {:effort l}))
+
 (defn make-request-rewriter
   "Inject the backend routing block and the reasoning effort.
 
@@ -120,7 +131,9 @@
           (when (and routing (nil? (.-provider body)))
             (aset body "provider" (clj->js routing)))
           (when (nil? (.-reasoning body))
-            (when-let [r (rr/openrouter (when level-fn (level-fn)))]
+            (when-let [r (rr/reasoning-body provider-name
+                                            (when level-fn (level-fn))
+                                            nil)]
               (aset body "reasoning" (clj->js r))))
           (js/JSON.stringify body))
         (catch :default _ body-str)))))
