@@ -11,7 +11,6 @@
 
 (defn ^:export default [api]
   (let [ledger   (atom [])            ; session-scoped [{:content :status}]
-        handlers (atom [])
         wrote?   (atom false)         ; set by todo_write, consumed by the reminder
         stop-reminder (atom nil)
 
@@ -38,7 +37,6 @@
               #js {:system-prompt-additions #js [block]})))]
 
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
     ;; ── Nag reminder ──────────────────────────────────────────────────────
     ;; Models write a list and then abandon it: across 26 real sessions only 4
@@ -131,5 +129,4 @@
       (.unregisterTool api "todo_write")
       (.unregisterTool api "todo_read")
       (when-let [unreg (.-unregisterStatusSegment api)]
-        (try (unreg "todos.progress") (catch :default _ nil)))
-      (doseq [[e h] @handlers] (.off api e h)))))
+        (try (unreg "todos.progress") (catch :default _ nil))))))

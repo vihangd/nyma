@@ -180,8 +180,7 @@
         (.notify ui (str "Mode: " mode) "info")))))
 
 (defn ^:export default [api]
-  (let [handlers (atom [])
-        plan-deactivate (atom nil)
+  (let [plan-deactivate (atom nil)
         esc-deactivate  (atom nil)
         seg-deactivate  (atom nil)
 
@@ -296,15 +295,11 @@
               #js {:decision (str decision)})))]
 
     (.on api "model_resolve" on-resolve)
-    (swap! handlers conj ["model_resolve" on-resolve])
 
     (.on api "tool_access_check" on-tool-access)
-    (swap! handlers conj ["tool_access_check" on-tool-access])
 
     (.on api "permission_request" on-permission)
-    (swap! handlers conj ["permission_request" on-permission])
     (.on api "role_change" on-role-change)
-    (swap! handlers conj ["role_change" on-role-change])
 
     ;; /role command
     (.registerCommand api "role"
@@ -402,8 +397,6 @@
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.unregisterCommand api "role")
       (.unregisterCommand api "roles")
       (.unregisterCommand api "mode")

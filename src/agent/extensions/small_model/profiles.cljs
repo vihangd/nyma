@@ -132,9 +132,7 @@
 (defn activate
   "Wire profile hooks. Returns a cleanup fn."
   [api config]
-  (let [handlers (atom [])
-
-        ;; model_resolve — apply thinking level for this model
+  (let [;; model_resolve — apply thinking level for this model
         on-resolve
         (fn [_data _ctx]
           (when-let [p (profile-for config api)]
@@ -200,18 +198,13 @@
                       ctx)}]
 
     (.on api "model_resolve" on-resolve)
-    (swap! handlers conj ["model_resolve" on-resolve])
 
     (.on api "before_provider_request" on-before-request)
-    (swap! handlers conj ["before_provider_request" on-before-request])
 
     (.on api "tool_access_check" on-tool-access)
-    (swap! handlers conj ["tool_access_check" on-tool-access])
 
     (.addMiddleware api result-cap-mw)
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.removeMiddleware api "small-model/profiles-result-cap"))))

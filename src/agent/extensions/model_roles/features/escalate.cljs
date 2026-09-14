@@ -549,8 +549,7 @@
 (defn activate
   "Wire the feature. Returns a cleanup thunk."
   [api]
-  (let [handlers (atom [])
-        on-mres  (fn [data] (on-resolve api data))
+  (let [on-mres  (fn [data] (on-resolve api data))
         on-perr  (fn [data] (on-provider-error api data))
         on-final (fn [data] (on-turn-finalize api data))
         on-user  (fn [data] (on-user-message api data))
@@ -562,16 +561,10 @@
     (.on api "turn_finalize" on-final)
     (.on api "input_submit" on-user)
     (.on api "small-model/verify-exhausted" on-vexh)
-    (swap! handlers into [["model_resolve" on-mres]
-                          ["provider_error" on-perr]
-                          ["turn_finalize" on-final]
-                          ["input_submit" on-user]
-                          ["small-model/verify-exhausted" on-vexh]])
 
     (.registerCommand api "escalate"
                       #js {:description "Hand this task to the stronger model. Usage: /escalate [off|status]"
                            :handler (fn [args ctx] (command-handler api args ctx))})
 
     (fn []
-      (doseq [[event handler] @handlers] (.off api event handler))
       (.unregisterCommand api "escalate"))))

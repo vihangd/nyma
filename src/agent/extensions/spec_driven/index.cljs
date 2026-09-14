@@ -946,7 +946,9 @@
   (or (get phase-prompt (str phase)) continue-prompt))
 
 (defn ^:export default [api]
-  (let [handlers (atom [])
+  (let [;; The status segment's own unregister thunk — a registration the
+        ;; scope sweep does not own, so deactivate still calls it.
+        status-seg-cleanup (atom nil)
         ;; Filled in when the loop registers below; the command handler is
         ;; built before that point and closes over the atom, not the map.
         loop-controls (atom nil)
@@ -1825,15 +1827,12 @@
 
     (.on api "context_assembly" on-context-assembly)
     (.on api "before_tool_call" on-before-tool)
-    (swap! handlers conj ["before_tool_call" on-before-tool])
-    (swap! handlers conj ["context_assembly" on-context-assembly])
 
     ;; Status segment. Without it a spec run is invisible: after
     ;; `/spec import --run` the decomposition is queued as a follow-up, so it
     ;; does not start until the next turn ends, and nothing on screen said a
     ;; spec was active or that work was pending.
-    (swap! handlers conj
-           [:status-segment
+    (reset! status-seg-cleanup
             (status-segment/register!
              api
              (fn []
@@ -1850,7 +1849,7 @@
                   ;; still the scaffold, decomposition has not landed
                   :analyzing? (boolean (:spec-analyzing st))
                   :pending? (boolean (:spec-loop-pending st))
-                  :armed?   (boolean (:spec-loop-armed st))})))])
+                  :armed?   (boolean (:spec-loop-armed st))}))))
 
     ;; Rehydrate the active spec from the persistent store, but only if it
     ;; still exists on disk — a spec deleted between sessions must not
@@ -1950,9 +1949,7 @@
                     (emit "spec_task_complete"
                           #js {:spec spec :task t :source "agent"}))))))]
       (.on api "tool_execution_start" on-write-start)
-      (.on api "tool_execution_end" on-write-end)
-      (swap! handlers conj ["tool_execution_start" on-write-start])
-      (swap! handlers conj ["tool_execution_end" on-write-end]))
+      (.on api "tool_execution_end" on-write-end))
 
     ;; ── The phase loop ────────────────────────────────────────
     ;;
@@ -2124,14 +2121,12 @@
                       (say (str "spec loop stopped: " (:reason d))))))))]
 
       (.on api "agent_end" on-agent-end)
-      (swap! handlers conj ["agent_end" on-agent-end])
       ;; verify_gate publishes these on the main bus via emitGlobal; every
       ;; subscriber picks them up with plain api.on (cf. self_tune.cljs:205).
       (doseq [[ev h] [["small-model/verify-fail" on-verify-fail]
                       ["small-model/verify-exhausted" on-verify-fail]
                       ["small-model/verify-pass" on-verify-ok]]]
-        (.on api ev h)
-        (swap! handlers conj [ev h]))
+        (.on api ev h))
       (reset! loop-controls {:set-fresh! (fn [v] (swap! (.-__state-atom api)
                                                         assoc :spec-loop-fresh (boolean v)))
                              :fresh?     (fn [] (fresh? (phases/config (safe-settings))))
@@ -2148,10 +2143,7 @@
 
     ;; Cleanup
     (fn []
-      (doseq [[event handler] @handlers]
-        (if (= :status-segment event)
-          (when (fn? handler) (handler))
-          (.off api event handler)))
+      (when-let [f @status-seg-cleanup] (f))
       (.unregisterCommand api "spec")
       ;; Clear active-spec from extension state so a hot-reload doesn't
       ;; silently re-attach with stale spec docs in every turn.

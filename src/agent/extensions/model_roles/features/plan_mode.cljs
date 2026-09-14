@@ -382,8 +382,7 @@ the user will approve the plan before execution begins.")
 (defn activate
   "Register plan-mode handlers + commands. Returns a deactivate fn."
   [api]
-  (let [handlers (atom [])
-        on-bas   (fn [data] (on-before-agent-start api data))
+  (let [on-bas   (fn [data] (on-before-agent-start api data))
         on-final (fn [data] (on-turn-finalize api data))
         on-tend  (fn [data] (on-turn-end api data))
         on-mres  (fn [data] (on-plan-resolve api data))
@@ -411,12 +410,6 @@ the user will approve the plan before execution begins.")
     (.on api "model_resolve" on-mres -10)
     (.on api "provider_error" on-perr)
     (.on api "session_end" on-send)
-    (swap! handlers into [["before_agent_start" on-bas]
-                          ["turn_finalize" on-final]
-                          ["turn_end" on-tend]
-                          ["model_resolve" on-mres]
-                          ["provider_error" on-perr]
-                          ["session_end" on-send]])
 
     ;; /planmode always works.
     (.registerCommand api "planmode"
@@ -441,7 +434,5 @@ the user will approve the plan before execution begins.")
                                :handler plan-handler})))
 
     (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler))
       (.unregisterCommand api "planmode")
       (.unregisterCommand api "plan"))))

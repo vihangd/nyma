@@ -44,7 +44,6 @@
 (defn ^:export default [api]
   (let [config   (shared/config (.settings api))
         dir      (:dir config)
-        handlers (atom [])
 
         on-before-start
         (fn [_data _ctx]
@@ -52,7 +51,6 @@
             #js {:system-prompt-additions #js [(str "# Memory (your persistent notes)\n\n" block)]}))]
 
     (.on api "before_agent_start" on-before-start)
-    (swap! handlers conj ["before_agent_start" on-before-start])
 
     (.registerTool api "memory_write"
                    #js {:description "Save or update a durable fact in your persistent MEMORY.md (survives across sessions). Use for stable project conventions, decisions, and hard-won insights — NOT transient state. Keep it terse; a bloated memory hurts you."
@@ -82,5 +80,4 @@
 
     (fn []
       (.unregisterTool api "memory_write")
-      (.unregisterTool api "memory_forget")
-      (doseq [[e h] @handlers] (.off api e h)))))
+      (.unregisterTool api "memory_forget"))))

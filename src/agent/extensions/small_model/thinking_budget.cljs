@@ -16,7 +16,6 @@
   (let [tb-cfg    (:thinking-budget config)
         max-tok   (or (:max-tokens tb-cfg) 8000)
         retry?    (not= false (:retry-without-thinking tb-cfg))
-        handlers  (atom [])
         ;; Track whether we're in a no-thinking retry to avoid infinite loop
         in-retry  (atom false)
 
@@ -45,19 +44,14 @@
               #js {:retry true})))]
 
     (.on api "before_provider_request" on-before-request)
-    (swap! handlers conj ["before_provider_request" on-before-request])
 
     (.on api "provider_error" on-provider-error)
-    (swap! handlers conj ["provider_error" on-provider-error])
 
     ;; Reset in-retry flag after each completed turn
     (let [on-agent-end
           (fn [_data _ctx]
             (reset! in-retry false))]
-      (.on api "agent_end" on-agent-end)
-      (swap! handlers conj ["agent_end" on-agent-end]))
+      (.on api "agent_end" on-agent-end))
 
     ;; Cleanup
-    (fn []
-      (doseq [[event handler] @handlers]
-        (.off api event handler)))))
+    (fn [] nil)))
