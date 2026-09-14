@@ -60,8 +60,6 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | Modes | `agent.modes.*` | Interactive, print, RPC, SDK |
 | **Interceptors** | `agent.interceptors` | Pedestal-style interceptor chain engine |
 | **Middleware** | `agent.middleware` | Middleware pipeline for tool execution |
-| **Protocols** | `agent.protocols` | ISessionStore, IToolProvider, IContextBuilder |
-| **Schema** | `agent.schema` | Data-driven Zod schema compiler |
 | **State** | `agent.state` | Event-sourced state store with history |
 | **Permissions** | `agent.permissions` | Extension capability system |
 | **Extension Scope** | `agent.extension-scope` | Namespaced + capability-gated extension API |
@@ -226,8 +224,6 @@ src/
     context.cljs
     interceptors.cljs   Interceptor chain engine
     middleware.cljs     Tool execution middleware pipeline
-    protocols.cljs      ISessionStore, IToolProvider, IContextBuilder
-    schema.cljs         Data-driven Zod schema compiler
     state.cljs          Event-sourced state store
     permissions.cljs    Extension capability gating
     extension_scope.cljs  Namespaced extension API wrapper

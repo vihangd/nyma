@@ -1,5 +1,4 @@
-(ns agent.context
-  (:require [agent.protocols :refer [IContextBuilder_build_ctx]]))
+(ns agent.context)
 
 (defn- message-entry? [entry]
   (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry)))
@@ -46,9 +45,3 @@
         (into {} (filter (fn [[k _]] (contains? allowed-set k)) all-tools)))
       all-tools)))
 
-(def default-context-builder
-  "Default IContextBuilder implementation."
-  (let [builder {}]
-    (aset builder IContextBuilder_build_ctx
-          (fn [_ agent _opts] (build-context agent)))
-    builder))

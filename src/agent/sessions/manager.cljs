@@ -2,13 +2,7 @@
   (:require [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
             [agent.sessions.partial :as partial]
-            [agent.sessions.archive :as archive]
-            [agent.protocols :refer [ISessionStore_session_load
-                                     ISessionStore_session_append
-                                     ISessionStore_session_build_context
-                                     ISessionStore_session_branch
-                                     ISessionStore_session_get_tree
-                                     ISessionStore_session_leaf_id]]))
+            [agent.sessions.archive :as archive]))
 
 (defn- nanoid []
   (-> (js/Math.random) (.toString 36) (.slice 2 11)))
@@ -209,13 +203,6 @@
                                                       :entry-count (count @entries)}))
                                    new-path))}]
 
-    ;; Protocol conformance — set Symbol keys for protocol dispatch
-    (aset mgr ISessionStore_session_load (fn [_] (load-fn)))
-    (aset mgr ISessionStore_session_append (fn [_ entry] (append-fn entry)))
-    (aset mgr ISessionStore_session_build_context (fn [_] (build-context-fn)))
-    (aset mgr ISessionStore_session_branch (fn [_ eid] (branch-fn eid)))
-    (aset mgr ISessionStore_session_get_tree (fn [_] (get-tree-fn)))
-    (aset mgr ISessionStore_session_leaf_id (fn [_] (leaf-id-fn)))
     mgr))
 
 (defn attach-session-persistence!

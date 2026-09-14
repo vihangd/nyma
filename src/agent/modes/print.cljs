@@ -37,7 +37,7 @@
    with reasoning stripped."
   [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))
-        c (when a (or (:content a) (get a "content")))]
+        c (when a (:content a))]
     (strip-reasoning
      (cond
        (string? c) c

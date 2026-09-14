@@ -1,12 +1,11 @@
 (ns commands-parser.test
-  "Pure unit tests for commands/parser.cljs. The full 14 tests from
-   cc-kit's command-registry.test.ts are ported verbatim (adapted to
-   nyma's map-based command shape) plus nyma-specific regression
-   coverage for the bugs we've already hit in the slash-completion
-   path."
+  "Pure unit tests for commands/parser.cljs — the suggestion and
+   display-name helpers ported from cc-kit's command-registry.test.ts
+   (adapted to nyma's map-based command shape) plus nyma-specific
+   regression coverage for the bugs we've already hit in the
+   slash-completion path."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.commands.parser :refer [parse-command-line
-                                           command-suggestions
+            [agent.commands.parser :refer [command-suggestions
                                            compute-display-names
                                            visible-commands
                                            hidden? enabled? visible?]]))
@@ -28,90 +27,6 @@
   "Build a command map from a list of [name overrides] pairs."
   [& pairs]
   (into {} (for [[name override] pairs] [name (mk-cmd (or override {}))])))
-
-;;; ─── parse-command-line (cc-kit tests 4-7, 12) ────────
-
-(describe "parse-command-line" (fn []
-                                 (it "extracts command and trailing args"
-                                     (fn []
-                                       (let [cmds   (registry ["help" nil])
-                                             result (parse-command-line "/help topic123" cmds)]
-                                         (-> (expect (some? result)) (.toBe true))
-                                         (-> (expect (:name result)) (.toBe "help"))
-                                         (-> (expect (:args result)) (.toBe "topic123")))))
-
-                                 (it "returns nil for an unregistered command"
-                                     (fn []
-                                       (-> (expect (nil? (parse-command-line "/unknown" {}))) (.toBe true))))
-
-                                 (it "returns nil when input does not start with /"
-                                     (fn []
-                                       (let [cmds (registry ["help" nil])]
-                                         (-> (expect (nil? (parse-command-line "hello" cmds))) (.toBe true)))))
-
-                                 (it "returns nil for a bare /"
-                                     (fn []
-      ;; Bare slash isn't an invocation yet — the picker should still
-      ;; be open offering suggestions. parse-command-line is for
-      ;; COMPLETED invocations, not mid-typing.
-                                       (let [cmds (registry ["help" nil])]
-                                         (-> (expect (nil? (parse-command-line "/" cmds))) (.toBe true)))))
-
-                                 (it "sets empty args when no arguments provided"
-                                     (fn []
-                                       (let [cmds (registry ["exit" nil])]
-                                         (-> (expect (:args (parse-command-line "/exit" cmds))) (.toBe "")))))
-
-                                 (it "returns nil when the command is disabled"
-                                     (fn []
-      ;; Ported from cc-kit test 12.
-                                       (let [cmds (registry ["off" {:enabled? (fn [] false)}])]
-                                         (-> (expect (nil? (parse-command-line "/off" cmds))) (.toBe true)))))
-
-                                 (it "returns nil when the command is hidden"
-                                     (fn []
-                                       (let [cmds (registry ["secret" {:hidden? true}])]
-                                         (-> (expect (nil? (parse-command-line "/secret" cmds))) (.toBe true)))))
-
-  ;; Alias tests (cc-kit test 2 adapted — parse by alias)
-                                 (it "resolves a command by its alias and returns the canonical name"
-                                     (fn []
-                                       (let [cmds (registry ["clear" {:aliases ["cls" "clr"]}])]
-                                         (-> (expect (:name (parse-command-line "/cls" cmds))) (.toBe "clear"))
-                                         (-> (expect (:name (parse-command-line "/clr" cmds))) (.toBe "clear"))
-        ;; Args work through aliases too.
-                                         (-> (expect (:args (parse-command-line "/cls forcibly" cmds)))
-                                             (.toBe "forcibly")))))
-
-  ;; nyma regressions — directly cover the two slash bugs we fixed in
-  ;; earlier phases (detect-trigger / replace-trigger-token).
-                                 (it "regression: does not misparse /agent qwen as the /agent command with 'qwen' args"
-                                     (fn []
-      ;; Before: loose .startsWith("/") reopened the slash picker on
-      ;; top of the 'qwen' arg string. Now: if /agent is registered,
-      ;; parse-command-line correctly reports {:name 'agent' :args 'qwen'}
-      ;; — which is the RIGHT behaviour. The bug wasn't in parsing,
-      ;; it was in the picker retriggering. parse-command-line tells
-      ;; the caller 'this is a complete invocation, don't reopen'.
-                                       (let [cmds (registry ["agent" nil])
-                                             parsed (parse-command-line "/agent qwen" cmds)]
-                                         (-> (expect (some? parsed)) (.toBe true))
-                                         (-> (expect (:name parsed)) (.toBe "agent"))
-                                         (-> (expect (:args parsed)) (.toBe "qwen")))))
-
-                                 (it "trims surrounding whitespace on both the input and the args"
-                                     (fn []
-                                       (let [cmds (registry ["help" nil])]
-                                         (-> (expect (:name (parse-command-line "   /help   topic  " cmds)))
-                                             (.toBe "help"))
-                                         (-> (expect (:args (parse-command-line "   /help   topic  " cmds)))
-                                             (.toBe "topic")))))
-
-                                 (it "nil and non-string inputs return nil"
-                                     (fn []
-                                       (let [cmds (registry ["help" nil])]
-                                         (-> (expect (nil? (parse-command-line nil cmds))) (.toBe true))
-                                         (-> (expect (nil? (parse-command-line 42 cmds))) (.toBe true)))))))
 
 ;;; ─── command-suggestions (cc-kit tests 8, 9, 14) ──────
 

@@ -1,9 +1,8 @@
 (ns gateway.protocols
   "Protocol definitions for the gateway channel system.
 
-   Adapters may be written in ClojureScript (using the defprotocols below)
-   or in TypeScript/JavaScript (using plain objects with the documented key shapes).
-   Both forms are accepted by gateway.core — the `valid-channel?` and
+   Adapters are plain maps (CLJS) or plain objects (TS/JS) with the key shapes
+   documented below. gateway.core accepts either — the `valid-channel?` and
    `valid-response-context?` validators check only that the required keys exist.
 
    ─── IChannel (runtime adapter) ─────────────────────────────────────────
@@ -46,32 +45,6 @@
                                                           :tool-start :tool-end :done
      :interrupt!       fn      (fn [reason str]) → nil
                                signal that the user interrupted; callers abort the run")
-
-;;; ─── ClojureScript protocols (for CLJS-to-CLJS adapters) ───────────────
-
-(defprotocol IChannel
-  "Runtime channel adapter protocol."
-  (channel-name     [this])
-  (channel-caps     [this])
-  (channel-start!   [this on-message])
-  (channel-stop!    [this]))
-
-(defprotocol IChannelSetup
-  "Optional one-time interactive setup."
-  (channel-setup!   [this]))
-
-(defprotocol IChannelConfig
-  "Config validation before accepting live traffic."
-  (validate-config! [this cfg]))
-
-(defprotocol IResponseContext
-  "Per-message reply handle."
-  (ctx-send!        [this content-map])
-  (ctx-stream!      [this chunk])
-  (ctx-meta!        [this op args])
-  (ctx-interrupt!   [this reason])
-  (ctx-conversation-id [this])
-  (ctx-capabilities [this]))
 
 ;;; ─── Plain-map validators (for JS/TS adapters) ──────────────────────────
 

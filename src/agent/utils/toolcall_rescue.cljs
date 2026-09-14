@@ -456,9 +456,8 @@
   [settings provider model override]
   (boolean
    (or override
-       (let [cfg   (or (get settings "toolcall-rescue")
-                       (get settings :toolcall-rescue))
-             gets  (fn [k] (or (get cfg k) (get cfg (keyword k))))
+       (let [cfg   (get settings "toolcall-rescue")
+             gets  (fn [k] (get cfg k))
              provs (or (gets "providers") [])
              mods  (or (gets "models") [])
              spec  (str provider "/" model)]

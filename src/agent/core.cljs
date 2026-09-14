@@ -121,19 +121,14 @@
                                      ;; attempts. Carry it through instead.
                                      ;; Same carry as :max-retries — the loop
                                      ;; must not hardcode what settings owns.
-                                     :max-output-tokens    (let [n (or (get merged-settings :max-output-tokens)
-                                                                       (get merged-settings "max-output-tokens"))]
+                                     :max-output-tokens    (let [n (get merged-settings :max-output-tokens)]
                                                              (if (number? n) n 8000))
-                                     :temperature          (let [t (or (get merged-settings :temperature)
-                                                                       (get merged-settings "temperature"))]
+                                     :temperature          (let [t (get merged-settings :temperature)]
                                                              (if (number? t) t 0.2))
-                                     :max-retries          (let [r (or (get merged-settings :retry)
-                                                                       (get merged-settings "retry"))
-                                                                 on? (let [e (or (get r :enabled)
-                                                                                 (get r "enabled"))]
+                                     :max-retries          (let [r (get merged-settings :retry)
+                                                                 on? (let [e (get r :enabled)]
                                                                        (if (some? e) (boolean e) true))
-                                                                 n   (or (get r :max-retries)
-                                                                         (get r "max-retries"))]
+                                                                 n   (get r :max-retries)]
                                                              (if on? (or n 5) 0))
                                      :require-capabilities require-capabilities
                                      :exclude-capabilities exclude-capabilities

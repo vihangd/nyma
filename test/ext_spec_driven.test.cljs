@@ -29,9 +29,9 @@
    so we take a plain map argument."
   ([root shape sname] (write-spec root shape sname {}))
   ([root shape sname opts]
-   (let [req       (or (:req opts) (get opts "req"))
-         design    (or (:design opts) (get opts "design"))
-         tasks     (or (:tasks opts) (get opts "tasks"))
+   (let [req       (:req opts)
+         design    (:design opts)
+         tasks     (:tasks opts)
          spec-root (case shape
                      :kiro     ".kiro/specs"
                      :spec-kit ".specify/specs")
