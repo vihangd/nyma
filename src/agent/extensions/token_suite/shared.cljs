@@ -1,6 +1,7 @@
 (ns agent.extensions.token-suite.shared
   (:require ["node:fs" :as fs]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.utils.js-interop :as ji]))
 
 ;; ── Stats tracking ───────────────────────────────────────────
 (def suite-stats
@@ -186,7 +187,7 @@
               parsed (js/JSON.parse raw)
               suite  (aget parsed "token-suite")]
           (if suite
-            (merge-with merge default-config (js/JSON.parse (js/JSON.stringify suite)))
+            (merge-with merge default-config (ji/js->clj* suite))
             default-config))
         (catch :default _e default-config))
       default-config)))
