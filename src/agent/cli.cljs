@@ -182,7 +182,7 @@
             (swap! (:flags agent) assoc-in [full-name :value]
                    (ext/coerce-flag-value (:type flag-config) raw))))))))
 
-(def ^:private help-text
+(def help-text
   "Usage: nyma [options] [prompt]
 
 Modes (default: interactive):
@@ -191,8 +191,13 @@ Modes (default: interactive):
       --output-format <f> With -p: 'text' (default) or 'json' — a single
                          claude-style result object {result, is_error,
                          session_id, total_cost_usd, usage, duration_ms} for
-                         headless orchestrators (e.g. cw).
-      --mode <mode>      Explicit mode: interactive | print | json | rpc.
+                         headless orchestrators (e.g. cw). Either format exits
+                         1 when the run fails (is_error true).
+      --mode <mode>      Explicit mode: interactive | print | json | rpc |
+                         pi-rpc (JSONL protocol for the pi Emacs frontend).
+      --approve, --no-approve
+                         Accepted for compatibility with the pi frontend and
+                         ignored; permissions come from --permission-mode.
       --permission-mode <m>  Initial permission mode: default | accept-edits |
                          plan | full-auto. Interactive defaults to 'default'
                          (asks before write/shell); headless defaults to
@@ -213,11 +218,11 @@ Session:
       --all              With -r: list sessions from every project.
       --fork <path>      Branch a copy of an existing session into a new file.
       --session <path>   Use a specific session file (jsonl).
+                         (Default: a fresh session file per launch.)
       --no-session       Don't read or write any session file.
       --discover         With -p: fetch provider catalogues at startup. Off by
                          default in one-shot runs, which only need the model
                          named on the command line (saves ~3s per launch).
-                         (Default: a fresh session file per launch.)
 
 Tools:
       --tools <list>     Comma-separated allowlist of built-in tools.
@@ -232,6 +237,15 @@ Other:
                          lines go to ~/.nyma/debug.log.
   -h, --help             Show this help and exit.
   -v, --version          Print the version and exit.
+
+Environment:
+  ANTHROPIC_API_KEY      Credentials for the built-in providers. Also settable
+  OPENAI_API_KEY         with /login <provider>, which stores them in
+  GOOGLE_GENERATIVE_AI_API_KEY
+                         ~/.nyma/credentials.json.
+  NYMA_DEBUG=1           Debug logging to ~/.nyma/debug.log (same as --debug).
+  NYMA_NO_MODEL_DISCOVERY=1
+                         Never fetch provider catalogues at startup.
 
 Examples:
   nyma                                  Start the interactive UI

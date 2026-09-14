@@ -1,6 +1,6 @@
 (ns print-result.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.modes.print :refer [result-object]]))
+            [agent.modes.print :refer [result-object last-assistant-text start-result]]))
 
 (defn- fake-agent [state-map session]
   {:state (atom state-map) :session (atom session)})
@@ -85,25 +85,85 @@
 ;;; that case passes through intact.
 
 (describe "one-shot output strips reasoning"
-  (fn []
-    (it "keeps the answer and drops the think block"
-        (fn []
-          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
-                                              {:role "assistant"
-                                               :content "<think>let me see</think>\nThe answer is 42."}]} nil)
-                r     (result-object agent 10 nil)]
-            (-> (expect (.-result r)) (.toBe "The answer is 42."))
-            (-> (expect (.-is_error r)) (.toBe false)))))
+          (fn []
+            (it "keeps the answer and drops the think block"
+                (fn []
+                  (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                                      {:role "assistant"
+                                                       :content "<think>let me see</think>\nThe answer is 42."}]} nil)
+                        r     (result-object agent 10 nil)]
+                    (-> (expect (.-result r)) (.toBe "The answer is 42."))
+                    (-> (expect (.-is_error r)) (.toBe false)))))
 
-    (it "passes a reasoning-only reply through rather than blanking it"
-        (fn []
-          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
-                                              {:role "assistant" :content "<think>ok then</think>\n\n"}]} nil)
-                r     (result-object agent 10 nil)]
-            (-> (expect (.-result r)) (.toContain "ok then")))))
+            (it "passes a reasoning-only reply through rather than blanking it"
+                (fn []
+                  (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                                      {:role "assistant" :content "<think>ok then</think>\n\n"}]} nil)
+                        r     (result-object agent 10 nil)]
+                    (-> (expect (.-result r)) (.toContain "ok then")))))
 
-    (it "leaves a plain answer untouched"
-        (fn []
-          (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
-                                              {:role "assistant" :content "ok"}]} nil)]
-            (-> (expect (.-result (result-object agent 10 nil))) (.toBe "ok")))))))
+            (it "leaves a plain answer untouched"
+                (fn []
+                  (let [agent (fake-agent {:messages [{:role "user" :content "hi"}
+                                                      {:role "assistant" :content "ok"}]} nil)]
+                    (-> (expect (.-result (result-object agent 10 nil))) (.toBe "ok")))))))
+
+;;; ─── `-p` text mode prints the same answer as `--output-format json` ───
+;;; Text mode printed `(:content (last messages))`: whatever message happened to
+;;; be last — a tool_result, a user echo — with `<think>` blocks intact. The two
+;;; one-shot paths disagreed about what the answer even was.
+
+(describe "-p text mode"
+          (fn []
+            (it "prints the last assistant message, not the last message"
+                (fn []
+                  (let [msgs [{:role "user" :content "q"}
+                              {:role "assistant" :content "the answer"}
+                              {:role "tool_result" :content "grep: 14 matches"}]]
+                    (-> (expect (last-assistant-text msgs)) (.toBe "the answer")))))
+
+            (it "strips <think> blocks from the printed text"
+                (fn []
+                  (let [msgs [{:role "assistant"
+                               :content "<think>weighing options</think>\nThe answer is 42."}]]
+                    (-> (expect (last-assistant-text msgs)) (.toBe "The answer is 42.")))))
+
+            (it "prints exactly what --output-format json puts in `result`"
+                (fn []
+                  (let [msgs [{:role "user" :content "q"}
+                              {:role "assistant" :content "<think>hm</think>\nfinal"}
+                              {:role "tool_result" :content "noise"}]
+                        a    (fake-agent {:messages msgs} nil)]
+                    (-> (expect (last-assistant-text msgs))
+                        (.toBe (.-result (result-object a 1 nil)))))))))
+
+;;; ─── exit code ──────────────────────────────────────────────
+;;; Text mode has always exited 1 on failure; JSON mode exited 0 on every
+;;; outcome, so `nyma -p --output-format json && deploy` deployed on a failed
+;;; run. A shell's only error channel is the exit code.
+
+(defn ^:async test-json-mode-exit-1 []
+  (let [orig-code (.-exitCode js/process)
+        orig-log  js/console.log
+        lines     (atom [])]
+    (set! (.-exitCode js/process) 0)
+    (set! js/console.log (fn [line] (swap! lines conj (str line))))
+    (try
+      ;; A bare map is not a runnable agent: `run` throws, which is the same
+      ;; path a provider error takes.
+      (js-await (start-result (fake-agent {:messages []} nil) "hi"))
+      (finally
+        (set! js/console.log orig-log)))
+    (let [code (.-exitCode js/process)
+          out  (js/JSON.parse (first @lines))]
+      ;; Restore before asserting — a failed expect must not leak exitCode 1
+      ;; into bun's own status and redden the whole suite.
+      (set! (.-exitCode js/process) (or orig-code 0))
+      (-> (expect (.-is_error out)) (.toBe true))
+      (-> (expect code) (.toBe 1))
+      ;; The JSON still reaches stdout intact — the exit code is additive.
+      (-> (expect (.-type out)) (.toBe "result")))))
+
+(describe "--output-format json exit code"
+          (fn []
+            (it "exits 1 when is_error is true" test-json-mode-exit-1)))

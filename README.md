@@ -107,6 +107,10 @@ bun install
 # Build (compile ClojureScript to JavaScript)
 bun run build
 
+# Credentials — one of these, or `/login <provider>` inside the TUI
+export ANTHROPIC_API_KEY=sk-ant-...    # OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY
+                                       # for the other two built-in providers
+
 # Run the agent
 bun run start
 ```
@@ -487,19 +491,29 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 
 ### CLI Flags
 
+`nyma --help` is the authoritative list; this table is the same set.
+
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-m, --model` | LLM model to use | `claude-sonnet-4-20250514` |
-| `--provider` | AI provider | `anthropic` |
-| `--mode` | Operational mode | `interactive` |
+| `--provider` | Provider id (`anthropic`, `openai`, `google`, or any extension-registered one) | `anthropic` |
+| `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc` | `interactive` |
 | `-p, --print` | Print mode shorthand | — |
+| `--output-format` | With `-p`: `text` or `json`. Either exits 1 when the run fails | `text` |
+| `--permission-mode` | `default` \| `accept-edits` \| `plan` \| `full-auto` | `default` (headless: `full-auto`) |
 | `-c, --continue` | Continue last session | — |
-| `-r, --resume` | Resume a session | — |
-| `--tools` | Comma-separated tool list | `read,write,edit,bash` |
-| `--thinking` | Enable extended thinking | `off` |
-| `--session` | Custom session path | — |
-| `--fork` | Fork current session | — |
+| `-r, --resume` | Resume a session (numbered picker) | — |
+| `--all` | With `-r`: list sessions from every project | — |
+| `--tools` | Comma-separated allowlist of built-in tools | omit = all built-ins |
+| `--thinking` | Extended thinking: `off`…`xhigh` | `off` |
+| `--session` | Custom session path | a fresh file per launch |
+| `--fork` | Branch a copy of an existing session | — |
 | `--no-session` | Disable session persistence | — |
+| `--discover` | With `-p`: fetch provider catalogues at startup | off in one-shot runs |
+| `--ext-<name>[=v]` | Set a flag registered by an extension | — |
+| `--debug` | Debug logging to `~/.nyma/debug.log` | — |
+| `--approve`, `--no-approve` | Accepted for pi-frontend compatibility and ignored | — |
+| `-h, --help` / `-v, --version` | Print help / version and exit | — |
 
 ### SDK / Programmatic Usage
 
