@@ -97,8 +97,9 @@
        (contains? #{"truecolor" "24bit"} (g "COLORTERM")) 16777216
        (.includes (g "TERM") "256color")            256
        (.includes (g "TERM") "color")               16
-       (seq (g "TERM"))                             16777216
-       :else                                        16))))
+       ;; No TERM at all (CI, a pipe, a test runner) is not a 16-colour
+       ;; terminal — it is no terminal. NO_COLOR is the opt-out.
+       :else                                        16777216))))
 
 (defn- hex->rgb [hex]
   (let [h (str (or hex ""))]
