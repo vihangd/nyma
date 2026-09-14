@@ -15,6 +15,10 @@
   "Event names nyma emits. The lint requires a producer for every one."
   ["session_start" "session_end" "session_before_switch" "session_switch"
    "session_before_fork" "session_shutdown"
+   ;; A request to leave, not a report that it happened: `/exit` emits it and
+   ;; cli.cljs runs the async shutdown (the same one SIGINT takes). `/exit`
+   ;; used to call process.exit itself, which killed MCP and LSP mid-socket.
+   "exit"
    ;; Everything loaded, session attached, model resolved — the one point
    ;; where ui.available is guaranteed true. Fires at startup AND after
    ;; /reload, so anything set up on it comes back after a reload.

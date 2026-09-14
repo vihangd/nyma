@@ -1,8 +1,29 @@
 (ns agent.sessions.manager
   (:require [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
+            [agent.debug :as d]
             [agent.sessions.partial :as partial]
             [agent.sessions.archive :as archive]))
+
+(defn parse-lines
+  "Parse JSONL text into entries, skipping lines that don't parse.
+
+   A session file's last line is half-written whenever the previous run was
+   killed mid-append — Ctrl-C during a stream, a crash, an OOM. `mapv
+   JSON.parse` threw on it, so `-c` and `-r` died on exactly the sessions a
+   user most wants back. `sessions/listing.cljs` has skipped bad lines since it
+   was written, which is why the picker LISTED a session that then refused to
+   open.
+
+   Returns {:entries [...] :skipped n} so the caller can say what it dropped
+   rather than losing turns quietly."
+  [content]
+  (reduce (fn [acc line]
+            (try
+              (update acc :entries conj (js/JSON.parse line))
+              (catch :default _ (update acc :skipped inc))))
+          {:entries [] :skipped 0}
+          (filter seq (.split content "\n"))))
 
 (defn- nanoid []
   (-> (js/Math.random) (.toString 36) (.slice 2 11)))
@@ -87,9 +108,13 @@
             ;; disk as <path>.zstd. Appending still requires a plain file, which
             ;; is why cli restores before opening one for write.
             (when-let [content (and fp (archive/read-text fp))]
-              (let [lines   (->> (.split content "\n")
-                                 (filter seq)
-                                 (mapv #(js/JSON.parse %)))]
+              (let [{lines :entries skipped :skipped} (parse-lines content)]
+                (when (pos? skipped)
+                  ;; Once per load, naming the file: a resumed session that is
+                  ;; quietly short a turn is worse than one that says so.
+                  (d/warn "sessions"
+                          (str "skipped " skipped " unparseable line"
+                               (when (> skipped 1) "s") " in " fp)))
                 (reset! entries lines)
                 (reset! leaf-id (:id (last lines)))
                 (reset! index (build-index lines))

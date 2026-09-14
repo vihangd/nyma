@@ -3,13 +3,6 @@
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [clojure.string :as str]))
 
-(defn ^:async start [agent prompt]
-  (when prompt
-    (js-await (run agent prompt))
-    (let [messages (:messages @(:state agent))
-          last-msg  (last messages)]
-      (println (:content last-msg)))))
-
 (defn ^:async start-json [agent prompt]
   (when prompt
     (js-await (run agent prompt))
@@ -32,9 +25,15 @@
   (let [stripped (str/trim (str (strip-think-tags (str text))))]
     (if (seq stripped) stripped (str text))))
 
-(defn- last-assistant-text
+(defn last-assistant-text
   "The final assistant message's text (string or array-of-{type text} content),
-   with reasoning stripped."
+   with reasoning stripped.
+
+   Both one-shot paths go through this. Text mode used to print
+   `(:content (last messages))` instead: whatever message happened to be last —
+   a tool_result, a user echo — with `<think>` blocks intact. Two printers for
+   one contract is how `-p` and `-p --output-format json` came to disagree about
+   what the answer even was."
   [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))
         c (when a (:content a))]
@@ -47,6 +46,14 @@
                            (map #(or (.-text %) (get % "text")))))
        (some? c) (str c)
        :else ""))))
+
+(defn ^:async start
+  "`-p` / `--mode print`: run once and print the assistant's answer as plain
+   text."
+  [agent prompt]
+  (when prompt
+    (js-await (run agent prompt))
+    (println (last-assistant-text (:messages @(:state agent))))))
 
 (defn- session-id [agent]
   (or (when-let [s @(:session agent)]
@@ -96,7 +103,14 @@
 (defn ^:async start-result
   "Run one prompt and print a single claude-style result JSON object.
    Catches run errors so a structured {is_error:true} object is always
-   emitted (exit 0, claude-style) rather than crashing the orchestrator."
+   emitted — the JSON still reaches stdout intact — but the process exits 1
+   when `is_error` is set.
+
+   Text mode has always exited 1 on failure. JSON mode exited 0 on every
+   outcome, so `nyma -p --output-format json && deploy` deployed on a failed
+   run: a shell's only error channel is the exit code, and a structured object
+   nobody parses is not one. `finish-one-shot!` exits with `process.exitCode`,
+   so setting it here is the whole wiring."
   [agent prompt]
   (when prompt
     (let [t0  (js/Date.now)
@@ -104,4 +118,7 @@
       (try
         (js-await (run agent prompt))
         (catch :default e (reset! err (or (.-message e) (str e)))))
-      (println (js/JSON.stringify (result-object agent (- (js/Date.now) t0) @err))))))
+      (let [result (result-object agent (- (js/Date.now) t0) @err)]
+        (when (.-is_error result)
+          (set! (.-exitCode js/process) 1))
+        (println (js/JSON.stringify result))))))

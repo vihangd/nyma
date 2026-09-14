@@ -16,6 +16,7 @@
             [agent.ui.skill-picker :as skill-picker]
             [agent.providers.catalog :as catalog]
             [agent.thinking :as thinking]
+            [agent.utils.credentials :as creds-util]
             [clojure.string :as str]
             ["node:fs" :as fs]))
 
@@ -183,23 +184,72 @@
   ((:emit (:events agent)) "reload" {})
   (notify ctx "Extensions reloaded"))
 
+(def global-settings-path
+  "Where `/settings` writes. Mirrors create-settings-manager's default."
+  "~/.nyma/settings.json")
+
+(defn nested-setting?
+  "True for a value the one-line prompt cannot round-trip: a map or a vector.
+
+   `:roles`, `:permissions`, `:scoped-models` are all of this shape, and a row
+   reading `roles = {\"build\" {...}}` invited an edit that could only ever make
+   things worse."
+  [v]
+  ;; typeof, not map?/vector?: settings arrive from JSON.parse as plain JS
+  ;; objects and arrays, and in squint a map IS a plain object — one check
+  ;; covers all three, and `some?` keeps null (typeof "object") out.
+  (and (some? v) (= "object" (js/typeof v))))
+
+(defn settings-row
+  "One `/settings` row. Nested values collapse to `key = {…}` rather than
+   spilling a whole subtree into a picker line."
+  [k v]
+  (str k " = " (if (nested-setting? v) "{…}" (pr-str v))))
+
+(defn coerce-setting-value
+  "Parse a typed setting value as JSON, falling back to the raw string.
+
+   Everything the picker wrote used to land as a string: `max-steps` became
+   \"200\" and `(or (:max-steps merged) 100)` happily took it, so the agent ran
+   with a step limit that was a string; `true` became \"true\", which is truthy
+   whatever the user typed. JSON is the right parser because the settings file
+   IS JSON — whatever round-trips through it is exactly what is legal there."
+  [s]
+  (let [t (str/trim (str s))]
+    (try (js/JSON.parse t) (catch :default _ t))))
+
 (defn ^:async handle-settings
-  "Interactive settings viewer/editor."
+  "Interactive settings viewer/editor.
+
+   An edit is PERSISTED (`:save-global` → ~/.nyma/settings.json). It used to go
+   to `:set-override` only, which lives in memory for the life of the process:
+   the user saw the confirmation, restarted, and the setting was gone."
   [resources ctx]
   (let [settings (:settings resources)
         current  (when settings ((:get settings)))
         entries  (when current
-                   (mapv (fn [[k v]] (str k " = " (pr-str v)))
+                   (mapv (fn [[k v]] (settings-row k v))
                          (sort-by first current)))]
     (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
       (show-info ctx (str "Settings:\n" (str/join "\n" (map #(str "  " %) entries))))
       (let [choice (js-await (.select (.-ui ctx) "Settings (select to edit):" (clj->js entries)))]
         (when choice
-          (let [key-name (first (.split choice " = "))
-                new-val  (js-await (.input (.-ui ctx) (str "New value for " key-name ":") ""))]
-            (when (and new-val (seq (.trim new-val)))
-              ((:set-override settings) key-name (.trim new-val))
-              (notify ctx (str key-name " = " (.trim new-val))))))))))
+          (let [key-name (first (.split choice " = "))]
+            (if (nested-setting? (get current key-name))
+              (notify ctx (str key-name " is a nested value — edit it in "
+                               global-settings-path)
+                      "error")
+              (let [new-val (js-await (.input (.-ui ctx)
+                                              (str "New value for " key-name ":") ""))]
+                (when (and new-val (seq (.trim new-val)))
+                  (let [v (coerce-setting-value new-val)]
+                    ((:save-global settings) (assoc {} key-name v))
+                    ;; Also for THIS process: :save-global writes the file but
+                    ;; does not touch the in-memory global map, so `:get` would
+                    ;; keep returning the old value until a restart.
+                    ((:set-override settings) key-name v)
+                    (notify ctx (str key-name " = " (pr-str v)
+                                     " (saved to " global-settings-path ")"))))))))))))
 
 (defn- ^:async handle-oauth-login
   "Run OAuth flow for a provider. Returns true on success."
@@ -236,23 +286,49 @@
         (catch :default e
           (notify ctx (str "OAuth login failed: " (.-message e)) "error"))))))
 
+(defn registered-providers
+  "Sorted names of every provider in the agent's registry."
+  [agent]
+  (vec (sort (keys (or (when-let [reg (:provider-registry agent)] ((:list reg))) {})))))
+
+(defn unknown-provider-message
+  "Refusal text for a provider nobody registered, or nil when it is known.
+
+   `/login gogle` used to prompt for a key and save it under \"gogle\": a
+   credential for a provider that does not exist, with no error at any point.
+   The next run looked up the REAL provider's (still missing) key and said
+   \"No credentials found\", so the typo was invisible from both ends. Naming
+   the registered set is what tells a typo apart from an extension that failed
+   to load — they need opposite fixes."
+  [provider known]
+  (when-not (contains? (set known) provider)
+    (str "Unknown provider '" provider "'. Registered: " (str/join ", " known))))
+
 (defn- ^:async handle-key-login
-  "Prompt for API key and save to credentials file."
+  "Prompt for an API key and save it to ~/.nyma/credentials.json, 0600."
   [provider ctx]
-  (let [cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
+  (let [cred-path (creds-util/credentials-path)]
     (if-not (and ctx (.-ui ctx) (.-input (.-ui ctx)))
       (notify ctx "Login requires interactive mode" "error")
       (let [key (js-await (.input (.-ui ctx) (str "API key for " provider ":") "sk-..."))]
         (when (and key (seq (.trim key)))
-          (let [existing (if (fs/existsSync cred-path)
-                           (js/JSON.parse (fs/readFileSync cred-path "utf8"))
-                           #js {})
-                _ (aset existing provider (.trim key))
-                dir (str (.. js/process -env -HOME) "/.nyma")]
-            (when-not (fs/existsSync dir)
-              (fs/mkdirSync dir #js {:recursive true}))
-            (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
-            (notify ctx (str "Saved " provider " API key"))))))))
+          (let [{:keys [ok error]} (creds-util/read-for-write)]
+            (if error
+              ;; Never rewrite a file we could not read: "unparseable" and
+              ;; "empty" look the same to a reader, and treating them the same
+              ;; here would drop every other provider's key.
+              (notify ctx error "error")
+              (let [dir (str (.. js/process -env -HOME) "/.nyma")]
+                (aset ok provider (.trim key))
+                (when-not (fs/existsSync dir)
+                  (fs/mkdirSync dir #js {:recursive true :mode 0700}))
+                (fs/writeFileSync cred-path (js/JSON.stringify ok nil 2)
+                                  #js {:encoding "utf8" :mode creds-util/private-mode})
+                ;; `:mode` is create-only, so an existing 0644 file keeps its
+                ;; mode through the write — this is the half that fixes the
+                ;; ones already on disk.
+                (creds-util/harden! cred-path)
+                (notify ctx (str "Saved " provider " API key"))))))))))
 
 (defn ^:async handle-login
   "Handle /login command.
@@ -265,14 +341,16 @@
                     (or (first args) "anthropic"))
         p-config  (when-let [reg (:provider-registry agent)]
                     ((:get reg) provider))
-        oauth-cfg (when p-config (:oauth p-config))]
-    (if is-oauth
-      ;; /login oauth [provider] — OAuth flow
-      (if-not oauth-cfg
-        (notify ctx (str "Provider '" provider "' does not support OAuth") "error")
-        (handle-oauth-login provider oauth-cfg ctx agent))
-      ;; /login [provider] — API key
-      (handle-key-login provider ctx))))
+        oauth-cfg (when p-config (:oauth p-config))
+        ;; p-config was already computed here and consulted only on the OAuth
+        ;; branch; the key branch never looked at it.
+        unknown   (unknown-provider-message provider (registered-providers agent))]
+    (cond
+      unknown  (notify ctx unknown "error")
+      is-oauth (if-not oauth-cfg
+                 (notify ctx (str "Provider '" provider "' does not support OAuth") "error")
+                 (handle-oauth-login provider oauth-cfg ctx agent))
+      :else    (handle-key-login provider ctx))))
 
 ;;; ─── Registration ───────────────────────────────────────────
 
@@ -376,8 +454,19 @@
           {:description "Exit the agent"
            :aliases     ["quit" "q"]
            :handler (fn [_args _ctx]
-                      ((:emit (:events agent)) "session_shutdown" {:reason "exit"})
-                      (js/process.exit 0))}
+                      ;; `/exit` used to call process.exit itself. That runs the
+                      ;; synchronous `exit` handler and nothing else, so MCP
+                      ;; sockets and LSP clients were killed rather than closed
+                      ;; and any extension awaiting cleanup never finished. The
+                      ;; bus event routes it into cli's async shutdown — the
+                      ;; same one SIGINT takes — so session_shutdown fires once.
+                      (let [events (:events agent)]
+                        (if (pos? ((:handler-count events) "exit"))
+                          ((:emit events) "exit" {:reason "exit"})
+                          ;; No cli handler (sdk mode, a test harness): the old
+                          ;; behaviour, rather than a /exit that does nothing.
+                          (do ((:emit events) "session_shutdown" {:reason "exit"})
+                              (js/process.exit 0)))))}
 
           "theme"
           {:description "Switch the color theme (applies on next launch). Usage: /theme [name]"
@@ -562,7 +651,7 @@
                                         (when (seq failed)
                                           (str "\n\nFailed to load:\n"
                                                (str/join "\n" (map (fn [[ns r]] (str "  " ns " — " r))
-                                                                    (sort-by first failed)))))
+                                                                   (sort-by first failed)))))
                                         "\n\nErrors are also in ~/.nyma/debug.log (NYMA_DEBUG=1 or --debug for more)."))))}
 
      ;; ── New pi-mono-compatible commands ─────────────────────
@@ -783,23 +872,38 @@
                       (handle-login args ctx agent))}
 
           "logout"
-          {:description "Remove credentials for a provider"
+          {:description "Remove credentials for a provider. Usage: /logout <provider>"
            :handler (fn [args ctx]
-                      (let [provider (or (first args) "anthropic")
-                       ;; Check for OAuth credentials
-                            oauth-creds (oauth/load-credentials provider)
-                            cred-path (str (.. js/process -env -HOME) "/.nyma/credentials.json")]
-                        (if oauth-creds
-                     ;; Clear OAuth credentials
-                          (do (oauth/clear-credentials provider)
-                              (notify ctx (str "Removed OAuth credentials for " provider)))
-                     ;; Clear API key from credentials.json
-                          (if-not (fs/existsSync cred-path)
-                            (notify ctx "No credentials found" "error")
-                            (let [existing (js/JSON.parse (fs/readFileSync cred-path "utf8"))]
-                              (js-delete existing provider)
-                              (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2))
-                              (notify ctx (str "Removed " provider " API key")))))))}
+                      ;; Bare `/logout` used to default to anthropic and delete
+                      ;; a credential the user never named — a destructive
+                      ;; default for a command whose only job is destruction.
+                      (let [provider (first args)]
+                        (cond
+                          (not (seq (str (or provider ""))))
+                          (notify ctx (str "Usage: /logout <provider>\nRegistered: "
+                                           (str/join ", " (registered-providers agent)))
+                                  "error")
+
+                          :else
+                          (let [oauth-creds (oauth/load-credentials provider)
+                                cred-path   (creds-util/credentials-path)]
+                            (if oauth-creds
+                              (do (oauth/clear-credentials provider)
+                                  (notify ctx (str "Removed OAuth credentials for " provider)))
+                              (if-not (and cred-path (fs/existsSync cred-path))
+                                (notify ctx "No credentials found" "error")
+                                (let [{:keys [ok error]} (creds-util/read-for-write)]
+                                  (if error
+                                    ;; Rewriting a file we could not parse would
+                                    ;; remove every key, not the one asked for.
+                                    (notify ctx error "error")
+                                    (do
+                                      (js-delete ok provider)
+                                      (fs/writeFileSync cred-path (js/JSON.stringify ok nil 2)
+                                                        #js {:encoding "utf8"
+                                                             :mode creds-util/private-mode})
+                                      (creds-util/harden! cred-path)
+                                      (notify ctx (str "Removed " provider " API key")))))))))))}
 
           "scoped-models"
           {:description "Show or set per-extension model overrides"
@@ -823,18 +927,24 @@
                                                       (map (fn [[k v]] (str "  " k " → " v)) scoped))))))))}
 
           "new-extension"
-          {:description "Create a new extension from template"
+          {:description "Create a new extension from template. Usage: /new-extension <name>"
            :handler (fn [args ctx]
-                      (let [ext-name (or (first args) "my-extension")
-                            ext-dir  (str (.. js/process -env -HOME) "/.nyma/extensions")
-                            file     (str ext-dir "/" ext-name ".cljs")]
-                        (if (fs/existsSync file)
-                          (notify ctx (str "Extension already exists: " file) "error")
-                          (do
-                            (when-not (fs/existsSync ext-dir)
-                              (fs/mkdirSync ext-dir #js {:recursive true}))
-                            (fs/writeFileSync file (scaffold-extension ext-name))
-                            (notify ctx (str "Created extension: " file))))))}
+                      ;; Bare `/new-extension` used to scaffold a file literally
+                      ;; called my-extension.cljs in ~/.nyma/extensions, which
+                      ;; then loaded on every launch. A missing argument is a
+                      ;; usage error, not a name.
+                      (if-not (seq (str (or (first args) "")))
+                        (notify ctx "Usage: /new-extension <name>" "error")
+                        (let [ext-name (first args)
+                              ext-dir  (str (.. js/process -env -HOME) "/.nyma/extensions")
+                              file     (str ext-dir "/" ext-name ".cljs")]
+                          (if (fs/existsSync file)
+                            (notify ctx (str "Extension already exists: " file) "error")
+                            (do
+                              (when-not (fs/existsSync ext-dir)
+                                (fs/mkdirSync ext-dir #js {:recursive true}))
+                              (fs/writeFileSync file (scaffold-extension ext-name))
+                              (notify ctx (str "Created extension: " file)))))))}
 
           "skill"
           {:description "Activate a skill by name. Usage: /skill <name>"

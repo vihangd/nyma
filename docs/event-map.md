@@ -39,6 +39,7 @@ elsewhere (or is empty) — read the emit site.
 | `compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/kv_cache.cljs, src/agent/modes/pi_rpc.cljs | after, before, summary |
 | `context_assembly` | src/agent/loop.cljs | src/agent/extensions/headroom/compress.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/token_suite/priority_assembly.cljs | contextWindow, inputBudget, messages, model, overheadTokens, systemPrompt, tokenBudget, tokensUsed |
 | `editor_change` | src/agent/modes/interactive.cljs | src/agent/extensions/token_suite/token_preview.cljs | text |
+| `exit` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/cli.cljs, src/agent/extensions/bash_suite/background_jobs.cljs, src/agent/extensions/lsp_suite/lsp_client.cljs | reason |
 | `input` | src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/features/input_router.cljs | input |
 | `input_submit` | src/agent/modes/interactive.cljs | src/agent/extensions/claude_hook_bridge/events/user_prompt_submit.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/prompt_history/index.cljs | text |
 | `message_before_store` | src/agent/loop.cljs | src/agent/extensions/small_model/respond_tool.cljs | content, model, role |

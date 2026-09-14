@@ -1,7 +1,10 @@
 (ns commands-builtins.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
-            [agent.commands.builtins :refer [register-builtins informative-name model->item]]
+            [agent.commands.builtins :refer [register-builtins informative-name model->item
+                                             unknown-provider-message registered-providers
+                                             handle-settings settings-row nested-setting?
+                                             coerce-setting-value]]
             [agent.commands.share :refer [messages->html messages->markdown]]
             [agent.commands.resolver :refer [resolve-command]]))
 
@@ -336,13 +339,13 @@
                                      (-> (expect (get @(:commands agent) "login")) (.toBeDefined)))))))
 
 (describe "/extensions command" (fn []
-  (it "lists loaded extensions and load failures"
-      (fn []
-        (let [agent (make-agent-with-builtins)
-              {:keys [ctx overlays]} (make-ctx)
-              handler (get-handler agent "extensions")]
-          (handler nil ctx)
-          (-> (expect (first @overlays)) (.toContain "Extensions (0 loaded")))))))
+                                  (it "lists loaded extensions and load failures"
+                                      (fn []
+                                        (let [agent (make-agent-with-builtins)
+                                              {:keys [ctx overlays]} (make-ctx)
+                                              handler (get-handler agent "extensions")]
+                                          (handler nil ctx)
+                                          (-> (expect (first @overlays)) (.toContain "Extensions (0 loaded")))))))
 
 (describe "/reload command" (fn []
                               (it "registered as a command"
@@ -384,7 +387,6 @@
                                       (-> (expect (some? result)) (.toBe true))
                                       (-> (expect ((:handler result))) (.toBe "builtin")))))))
 
-
 ;; ── /model picker: a display name that contradicts the id ────────
 ;;
 ;; A gateway can serve a model under a vendor's id that is NOT that vendor's
@@ -395,45 +397,195 @@
 
 (describe "informative-name" (fn []
 
-  (it "shows a name that says something the id does not"
-      (fn []
-        (-> (expect (informative-name {:spec "freellmapi/claude-opus-4-5"
-                                       :name "Opus slot (auto-routed to a free model)"}))
-            (.toBe "Opus slot (auto-routed to a free model)"))
-        (-> (expect (informative-name {:spec "freellmapi/auto"
-                                       :name "Auto (router picks the best available model)"}))
-            (.toBeTruthy))))
+                               (it "shows a name that says something the id does not"
+                                   (fn []
+                                     (-> (expect (informative-name {:spec "freellmapi/claude-opus-4-5"
+                                                                    :name "Opus slot (auto-routed to a free model)"}))
+                                         (.toBe "Opus slot (auto-routed to a free model)"))
+                                     (-> (expect (informative-name {:spec "freellmapi/auto"
+                                                                    :name "Auto (router picks the best available model)"}))
+                                         (.toBeTruthy))))
 
-  (it "suppresses a name that is just the id prettified"
-      (fn []
-        (-> (expect (informative-name {:spec "freellmapi/qwen3-32b" :name "Qwen3 32B"})) (.toBeNil))
+                               (it "suppresses a name that is just the id prettified"
+                                   (fn []
+                                     (-> (expect (informative-name {:spec "freellmapi/qwen3-32b" :name "Qwen3 32B"})) (.toBeNil))
         ;; Regression guard: a non-global regex stripped only the FIRST
         ;; separator, so "GPT-OSS 120B" normalised to "gptoss 120b" and read as
         ;; different from `gpt-oss-120b`.
-        (-> (expect (informative-name {:spec "freellmapi/gpt-oss-120b" :name "GPT-OSS 120B"})) (.toBeNil))
-        (-> (expect (informative-name {:spec "freellmapi/deepseek-v4-flash" :name "DeepSeek V4 Flash"})) (.toBeNil))
-        (-> (expect (informative-name {:spec "freellmapi/mistral-7b-instruct-v0.3"
-                                       :name "Mistral 7B Instruct v0.3"})) (.toBeNil))))
+                                     (-> (expect (informative-name {:spec "freellmapi/gpt-oss-120b" :name "GPT-OSS 120B"})) (.toBeNil))
+                                     (-> (expect (informative-name {:spec "freellmapi/deepseek-v4-flash" :name "DeepSeek V4 Flash"})) (.toBeNil))
+                                     (-> (expect (informative-name {:spec "freellmapi/mistral-7b-instruct-v0.3"
+                                                                    :name "Mistral 7B Instruct v0.3"})) (.toBeNil))))
 
-  (it "handles a missing name and compares against the id, not the provider"
-      (fn []
-        (-> (expect (informative-name {:spec "openlux/glm-5.3"})) (.toBeNil))
-        (-> (expect (informative-name {:spec "openlux/glm-5.3" :name "glm-5.3"})) (.toBeNil))))))
+                               (it "handles a missing name and compares against the id, not the provider"
+                                   (fn []
+                                     (-> (expect (informative-name {:spec "openlux/glm-5.3"})) (.toBeNil))
+                                     (-> (expect (informative-name {:spec "openlux/glm-5.3" :name "glm-5.3"})) (.toBeNil))))))
 
 (describe "model->item" (fn []
 
-  (it "appends an informative name after the context window"
-      (fn []
-        (let [d (:description (model->item {:spec "freellmapi/claude-opus-4-5"
-                                            :name "Opus slot (auto-routed to a free model)"
-                                            :context-window 1048576}))]
-          (-> (expect (.includes d "Opus slot")) (.toBe true))
+                          (it "appends an informative name after the context window"
+                              (fn []
+                                (let [d (:description (model->item {:spec "freellmapi/claude-opus-4-5"
+                                                                    :name "Opus slot (auto-routed to a free model)"
+                                                                    :context-window 1048576}))]
+                                  (-> (expect (.includes d "Opus slot")) (.toBe true))
           ;; The metadata must survive alongside it, not be replaced.
-          (-> (expect (.includes d "·")) (.toBe true)))))
+                                  (-> (expect (.includes d "·")) (.toBe true)))))
 
-  (it "does not repeat a redundant name after the context window"
-      (fn []
-        (let [d (:description (model->item {:spec "freellmapi/qwen3-32b"
-                                            :name "Qwen3 32B"
-                                            :context-window 32768}))]
-          (-> (expect (.includes d "Qwen3 32B")) (.toBe false)))))))
+                          (it "does not repeat a redundant name after the context window"
+                              (fn []
+                                (let [d (:description (model->item {:spec "freellmapi/qwen3-32b"
+                                                                    :name "Qwen3 32B"
+                                                                    :context-window 32768}))]
+                                  (-> (expect (.includes d "Qwen3 32B")) (.toBe false)))))))
+
+;;; ─── notify-capturing ctx ───────────────────────────────────
+
+(defn- notify-ctx
+  "A ctx whose ui only records notifications. Returns [ctx notes]."
+  []
+  (let [notes (atom [])]
+    [#js {:ui #js {:notify (fn [msg level]
+                             (swap! notes conj {:msg msg :level (or level "info")}))}}
+     notes]))
+
+(defn- run-command! [agent cmd args ctx]
+  ((:handler (get @(:commands agent) cmd)) args ctx))
+
+;;; ─── /login refuses a provider nobody registered ────────────
+;;; `/login gogle` prompted for a key and saved it under "gogle": a credential
+;;; for a provider that does not exist, with no error at any point. The next run
+;;; looked up the real provider's (still missing) key and said "No credentials
+;;; found", so the typo was invisible from both ends.
+
+(describe "/login <typo>"
+          (fn []
+            (it "refuses and lists the registered providers"
+                (fn []
+                  (let [msg (unknown-provider-message "gogle" ["anthropic" "google" "openai"])]
+                    (-> (expect msg) (.toContain "Unknown provider 'gogle'"))
+                    (-> (expect msg) (.toContain "Registered: anthropic, google, openai")))))
+
+            (it "says nothing for a provider that is registered"
+                (fn []
+                  (-> (expect (unknown-provider-message "google" ["anthropic" "google"]))
+                      (.toBeNull))))
+
+            (it "reads the live registry, so extension providers count as known"
+                (fn []
+                  (let [agent (make-agent-with-builtins)]
+                    ((:register (:provider-registry agent)) "zai" {:create-model (fn [_] nil)})
+                    (-> (expect (contains? (set (registered-providers agent)) "zai")) (.toBe true))
+                    (-> (expect (unknown-provider-message "zai" (registered-providers agent)))
+                        (.toBeNull)))))))
+
+;;; ─── /logout with no provider ───────────────────────────────
+
+(describe "/logout with no provider"
+          (fn []
+            (it "shows usage instead of deleting the anthropic credential"
+                (fn []
+                  (let [agent       (make-agent-with-builtins)
+                        [ctx notes] (notify-ctx)]
+                    (run-command! agent "logout" [] ctx)
+                    (let [n (first @notes)]
+                      (-> (expect (:level n)) (.toBe "error"))
+                      (-> (expect (:msg n)) (.toContain "Usage: /logout <provider>"))
+                      (-> (expect (:msg n)) (.toContain "anthropic"))
+                      (-> (expect (:msg n)) (.not.toContain "Removed"))))))))
+
+;;; ─── /new-extension with no name ────────────────────────────
+
+(describe "/new-extension with no name"
+          (fn []
+            (it "shows usage instead of scaffolding my-extension.cljs"
+                (fn []
+                  (let [agent       (make-agent-with-builtins)
+                        [ctx notes] (notify-ctx)]
+                    (run-command! agent "new-extension" [] ctx)
+                    (let [n (first @notes)]
+                      (-> (expect (:level n)) (.toBe "error"))
+                      (-> (expect (:msg n)) (.toBe "Usage: /new-extension <name>"))))))))
+
+;;; ─── /settings persists, and keeps types ────────────────────
+;;; Edits went to `:set-override` only — in memory for the life of the process,
+;;; so the user saw the confirmation, restarted, and the setting was gone. And
+;;; every value was stored as a string: `max-steps` became "200", `true` became
+;;; "true" (truthy whatever you typed).
+
+(defn- fake-settings [current]
+  (let [saved     (atom nil)
+        overrides (atom {})]
+    {:mgr       {:get          (fn [] current)
+                 :save-global  (fn [m] (reset! saved m))
+                 :set-override (fn [k v] (swap! overrides assoc k v))}
+     :saved     saved
+     :overrides overrides}))
+
+(defn- edit-ctx
+  "A ui that picks `row` from the list and types `typed` at the prompt."
+  [row typed]
+  (let [notes (atom [])]
+    [#js {:ui #js {:select (fn [_p _items] (js/Promise.resolve row))
+                   :input  (fn [_p _d] (js/Promise.resolve typed))
+                   :notify (fn [msg level]
+                             (swap! notes conj {:msg msg :level (or level "info")}))}}
+     notes]))
+
+(defn ^:async test-settings-saves-a-number []
+  (let [{:keys [mgr saved overrides]} (fake-settings {"max-steps" 100})
+        [ctx notes] (edit-ctx "max-steps = 100" "200")]
+    (js-await (handle-settings {:settings mgr} ctx))
+    (-> (expect (get @saved "max-steps")) (.toBe 200))
+    ;; Not "200": a string step limit is truthy and silently wrong.
+    (-> (expect (js/typeof (get @saved "max-steps"))) (.toBe "number"))
+    (-> (expect (get @overrides "max-steps")) (.toBe 200))
+    (-> (expect (:msg (first @notes))) (.toContain "~/.nyma/settings.json"))))
+
+(defn ^:async test-settings-saves-a-boolean []
+  (let [{:keys [mgr saved]} (fake-settings {"stream" false})
+        [ctx _] (edit-ctx "stream = false" "true")]
+    (js-await (handle-settings {:settings mgr} ctx))
+    (-> (expect (get @saved "stream")) (.toBe true))))
+
+(defn ^:async test-settings-keeps-a-plain-string []
+  (let [{:keys [mgr saved]} (fake-settings {"model" "sonnet"})
+        [ctx _] (edit-ctx "model = \"sonnet\"" "claude-opus-5")]
+    (js-await (handle-settings {:settings mgr} ctx))
+    ;; Not valid JSON, so it stays the string the user typed.
+    (-> (expect (get @saved "model")) (.toBe "claude-opus-5"))))
+
+(defn ^:async test-settings-refuses-a-nested-value []
+  (let [{:keys [mgr saved]} (fake-settings {"roles" #js {"build" #js {"model" "x"}}})
+        [ctx notes] (edit-ctx "roles = {…}" "nope")]
+    (js-await (handle-settings {:settings mgr} ctx))
+    (-> (expect @saved) (.toBeNull))
+    (-> (expect (:msg (first @notes))) (.toContain "~/.nyma/settings.json"))
+    (-> (expect (:level (first @notes))) (.toBe "error"))))
+
+(describe "/settings edits"
+          (fn []
+            (it "writes the value to ~/.nyma/settings.json as a number"
+                test-settings-saves-a-number)
+            (it "writes a boolean as a boolean, not the string \"true\""
+                test-settings-saves-a-boolean)
+            (it "keeps a value that is not JSON as the string it was typed as"
+                test-settings-keeps-a-plain-string)
+            (it "refuses a nested value and names the file to edit instead"
+                test-settings-refuses-a-nested-value)
+
+            (it "shows a nested value as `key = {…}` rather than a spilled subtree"
+                (fn []
+                  (-> (expect (settings-row "roles" #js {"build" #js {"model" "x"}}))
+                      (.toBe "roles = {…}"))
+                  (-> (expect (settings-row "max-steps" 100)) (.toBe "max-steps = 100"))
+                  (-> (expect (nested-setting? nil)) (.toBe false))
+                  (-> (expect (nested-setting? "x")) (.toBe false))
+                  (-> (expect (nested-setting? #js [1 2])) (.toBe true))))
+
+            (it "parses JSON and falls back to the raw string"
+                (fn []
+                  (-> (expect (coerce-setting-value " 42 ")) (.toBe 42))
+                  (-> (expect (coerce-setting-value "false")) (.toBe false))
+                  (-> (expect (coerce-setting-value "claude-opus-5")) (.toBe "claude-opus-5"))))))
