@@ -144,6 +144,7 @@
 
 (describe "saved API keys are not world-readable"
           (fn []
+            (afterEach (fn [] (set-home! real-home)))
             (it "tightens an existing 0644 credentials file on read"
                 (fn []
                   (let [dir (write-creds! {"anthropic" "sk-secret"})
@@ -183,6 +184,7 @@
 
 (describe "writing to a credentials file that will not parse"
           (fn []
+            (afterEach (fn [] (set-home! real-home)))
             (it "refuses, naming the file, instead of overwriting it"
                 (fn []
                   (let [dir (write-creds! {"anthropic" "sk-a" "openai" "sk-o"})

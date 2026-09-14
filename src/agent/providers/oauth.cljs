@@ -3,15 +3,17 @@
             ["node:path" :as path]
             [agent.utils.credentials :as creds-util]))
 
-(def ^:private auth-dir
+;; Read HOME per call, not at load: tests (and a future `nyma --home`) change it.
+(defn- auth-dir []
   (path/join (.-HOME (.-env js/process)) ".nyma" "auth"))
 
 (defn- ensure-dir! []
-  (when-not (fs/existsSync auth-dir)
-    (fs/mkdirSync auth-dir #js {:recursive true :mode 0700})))
+  (let [d (auth-dir)]
+    (when-not (fs/existsSync d)
+      (fs/mkdirSync d #js {:recursive true :mode 0700}))))
 
 (defn- creds-path [provider-name]
-  (path/join auth-dir (str provider-name ".json")))
+  (path/join (auth-dir) (str provider-name ".json")))
 
 (defn save-credentials
   "Write OAuth credentials to ~/.nyma/auth/{provider}.json, owner-readable only."

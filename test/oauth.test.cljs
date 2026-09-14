@@ -5,25 +5,25 @@
             [agent.providers.oauth :as oauth]))
 
 (def ^:private test-provider "test-oauth-provider")
-(def ^:private auth-dir (path/join (.-HOME (.-env js/process)) ".nyma" "auth"))
-(def ^:private test-path (path/join auth-dir (str test-provider ".json")))
+(defn- test-path []
+  (path/join (.-HOME (.-env js/process)) ".nyma" "auth" (str test-provider ".json")))
 
 (afterEach (fn []
-             (when (fs/existsSync test-path)
-               (fs/unlinkSync test-path))))
+             (when (fs/existsSync (test-path))
+               (fs/unlinkSync (test-path)))))
 
 (describe "oauth - save-credentials" (fn []
                                        (it "writes credentials to disk"
                                            (fn []
                                              (oauth/save-credentials test-provider
                                                                      {:access "tok-123" :refresh "ref-456" :expires-at 9999999999999})
-                                             (-> (expect (fs/existsSync test-path)) (.toBe true))))
+                                             (-> (expect (fs/existsSync (test-path))) (.toBe true))))
 
                                        (it "writes valid JSON"
                                            (fn []
                                              (oauth/save-credentials test-provider
                                                                      {:access "tok" :refresh "ref" :expires-at 1000})
-                                             (let [raw (fs/readFileSync test-path "utf8")
+                                             (let [raw (fs/readFileSync (test-path) "utf8")
                                                    parsed (js/JSON.parse raw)]
                                                (-> (expect (.-access parsed)) (.toBe "tok"))
                                                (-> (expect (.-refresh parsed)) (.toBe "ref")))))))
@@ -46,9 +46,9 @@
                                         (it "deletes stored credentials"
                                             (fn []
                                               (oauth/save-credentials test-provider {:access "x" :refresh "y" :expires-at 1})
-                                              (-> (expect (fs/existsSync test-path)) (.toBe true))
+                                              (-> (expect (fs/existsSync (test-path))) (.toBe true))
                                               (oauth/clear-credentials test-provider)
-                                              (-> (expect (fs/existsSync test-path)) (.toBe false))))
+                                              (-> (expect (fs/existsSync (test-path))) (.toBe false))))
 
                                         (it "does nothing if no credentials exist"
                                             (fn []
@@ -102,21 +102,21 @@
           (fn []
             (it "creates the credentials file 0600"
                 (fn []
-                  (when (fs/existsSync test-path) (fs/unlinkSync test-path))
+                  (when (fs/existsSync (test-path)) (fs/unlinkSync (test-path)))
                   (oauth/save-credentials test-provider
                                           {:access "a" :refresh "r" :expires-at 1})
-                  (-> (expect (mode-of test-path)) (.toBe 384))
-                  (fs/unlinkSync test-path)))
+                  (-> (expect (mode-of (test-path))) (.toBe 384))
+                  (fs/unlinkSync (test-path))))
 
             (it "tightens a file that is already on disk 0644"
                 (fn []
           ;; `:mode` applies on CREATE only, so rewriting a loose file leaves it
           ;; loose — which is every token written before this landed.
                   (oauth/save-credentials test-provider {:access "a" :refresh "r"})
-                  (fs/chmodSync test-path 0644)
+                  (fs/chmodSync (test-path) 0644)
                   (oauth/load-credentials test-provider)
-                  (-> (expect (mode-of test-path)) (.toBe 384))
-                  (fs/unlinkSync test-path)))
+                  (-> (expect (mode-of (test-path))) (.toBe 384))
+                  (fs/unlinkSync (test-path))))
 
             (it "still round-trips the token after tightening"
                 (fn []
@@ -128,4 +128,4 @@
                     (-> (expect (:access c)) (.toBe "tok"))
                     (-> (expect (:refresh c)) (.toBe "ref"))
                     (-> (expect (:expires-at c)) (.toBe 99)))
-                  (fs/unlinkSync test-path)))))
+                  (fs/unlinkSync (test-path))))))
