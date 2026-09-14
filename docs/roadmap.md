@@ -1485,14 +1485,18 @@ not rediscovered:
   `bash_suite`, `openwiki` call `Bun.spawn` directly, so `:spawn` is unenforceable for
   compiled-in extensions. Only a lint (`Bun.spawn` outside `bash_suite`/`agent_shell` needs
   `spawn` declared) makes the capability mean anything.
-- **State-atom discipline (Phase 5, not started).** `spec_driven/index.cljs` `swap!`s
-  `:messages []` past the event-sourced store (`ctx.newSession` exists); `agent_shell` and
-  `spec_driven` write `:active-role`, which `model_roles` owns; `spec_driven` keeps ~14
-  unnamespaced keys in the shared atom while `api.state` sits unused; core `sendMessage` does
-  the same bypass. Detector: `grep -rn "__state" src/agent/extensions | grep swap!`.
-- **Six copy-paste OpenAI-compatible providers (Phase 6, not started).** deepseek, groq, kimi,
-  minimax, opencode_zen, openrouter differ in base URL, key env, model table, reasoning wrap —
-  ~770 lines for one settings-driven table.
+- **State-atom discipline — landed 2026-09-14.** `model_roles` owns `:active-role` through one
+  `activate-role!` and a `role_change` event; spec_driven and agent_shell emit it. Message
+  writes (spec_driven reset, small_model relief, core `sendMessage`) go through the store via
+  `api.dispatchState`. The `:spec-*` keys stay in the shared atom: spec_driven is the only
+  reader. Detector still valid: `grep -rn "__state" src/agent/extensions | grep swap!` — the
+  remaining hits are model_roles writing its own keys.
+- **Six OpenAI-compatible providers — NOT merged, by evidence.** At the wire level they are
+  five reasoning dialects (groq gates `reasoning_effort` per model and errors otherwise; kimi
+  `chat_template_kwargs`; minimax `reasoning_split`; openrouter headers + backend routing;
+  opencode-zen per-model `/chat` vs `/responses`). Relay's unconditional `reasoning_effort`
+  would break groq. What WAS duplicated — three private `credentials.json` readers — is gone.
+  If a seventh plain provider shows up, the template is `custom_provider_deepseek` (60 lines).
 - **Four compaction paths** (`token_suite/smart_compaction`, `token_suite/anthropic_compaction`,
   `headroom/compress`, core `ctx.compact`) and **two `/handoff`s** (`handoff/`,
   `agent_shell/features/handoff.cljs`).

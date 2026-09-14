@@ -1,6 +1,9 @@
 (ns model-roles-modes.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extension-scope :refer [create-scoped-api]]
+            [agent.extension-loader :refer [deactivate-all]]
             [agent.events :refer [combine-decision]]
             [agent.extensions.model-roles.policy :as policy]
             [agent.extensions.model-roles.status-segment :as status-seg]
@@ -327,3 +330,29 @@
                             {:a {:model "m" :provider "p"}
                              :b {:policy {"write" "allow"}}}))]
             (-> (expect names) (.toEqual (set [:a]))))))))
+
+;; ── role_change: the seam other extensions use instead of writing :active-role ──
+;;
+;; spec_driven's phase binding and agent_shell's plan handoff used to assoc
+;; :active-role into the shared atom directly. They emit `role_change` now;
+;; model_roles owns the key and does the switch (model + escalation reset).
+
+(defn ^:async test-role-change-event-switches-role []
+  (let [agent  (create-agent {:model "test" :system-prompt "x"})
+        api    (create-extension-api agent)
+        scoped (create-scoped-api api "model-roles" #{:all})
+        deact  (js-await ((.-default mr) scoped))]
+    (try
+      (swap! (:state agent) assoc :escalated-to "deep")
+      ((:emit (:events agent)) "role_change" #js {:role "fast" :source "test"})
+      (-> (expect (str (:active-role @(:state agent)))) (.toBe "fast"))
+      (-> (expect (:escalated-to @(:state agent))) (.toBeNil))
+      ;; Unknown role: refused, state untouched.
+      ((:emit (:events agent)) "role_change" #js {:role "no-such-role"})
+      (-> (expect (str (:active-role @(:state agent)))) (.toBe "fast"))
+      (finally
+        (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
+
+(describe "model-roles:role_change event" (fn []
+  (it "switches the role for another extension and refuses unknown names"
+      test-role-change-event-switches-role)))
