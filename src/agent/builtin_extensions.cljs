@@ -129,7 +129,7 @@
     :manifest  #js {"namespace" "handoff" "description" "`/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md`" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
    {:namespace "headroom"
     :module    ext-headroom
-    :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
+    :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands" "flags" "ui"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
     :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}

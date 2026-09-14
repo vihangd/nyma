@@ -24,8 +24,27 @@
 
 ;; ── Settings loader ──────────────────────────────────────────────
 
-(defn load-config []
-  (let [load-file
+(defn malformed-settings-message
+  "The error shown for a settings file whose `headroom` section will not
+   load. Names the section AND the file: with neither, a typo'd settings
+   file is indistinguishable from never having enabled the extension.
+   Pure, so the test needs no filesystem and no UI."
+  [file-path err-msg]
+  (str "Malformed `headroom` settings section in " file-path " — " err-msg
+       ". Falling back to defaults (headroom stays off)."))
+
+(defn read-config
+  "Load the merged headroom config, and the parse failures met on the way.
+   Returns {:config {...} :errors [{:path p :message m}]}.
+
+   This reads the two settings files itself rather than going through
+   `(.settings api \"headroom\")` on purpose: the section is documented in
+   camelCase (proxyUrl, compressionThreshold) and needs `kebab-keys`, and
+   the merged-settings path would have already swallowed the parse error
+   this function exists to report."
+  []
+  (let [errors (atom [])
+        load-file
         (fn [p]
           (when (fs/existsSync p)
             (try
@@ -41,12 +60,30 @@
                 ;; default-config keys are kebab-case, so even once the throw
                 ;; was fixed every key but `enabled` would still be ignored.
                 (when h (ji/kebab-keys h)))
-              (catch :default _ nil))))
+              ;; The catch used to eat this and hand back the defaults, so a
+              ;; broken settings file and a deliberate `"enabled": false` were
+              ;; the same silence. Record it; the caller says so out loud.
+              (catch :default e
+                (swap! errors conj {:path p :message (or (.-message e) (str e))})
+                nil))))
         global-path  (path/join (.. js/process -env -HOME) ".nyma" "settings.json")
         project-path (path/join (js/process.cwd) ".nyma" "settings.json")]
-    (merge default-config
-           (or (load-file global-path) {})
-           (or (load-file project-path) {}))))
+    {:config (merge default-config
+                    (or (load-file global-path) {})
+                    (or (load-file project-path) {}))
+     :errors @errors}))
+
+(defn load-config []
+  (:config (read-config)))
+
+(defn disabled-hint
+  "What `/headroom-stats` answers when the extension is off. Names the exact
+   setting and the proxy the user would need — a bare \"unknown command\" left
+   them with nothing to act on. Pure."
+  [proxy-url]
+  (str "headroom is off — set headroom.enabled: true in .nyma/settings.json "
+       "(proxy at " (or proxy-url (:proxy-url default-config))
+       ") or start with --ext-headroom"))
 
 ;; ── Proxy health check ────────────────────────────────────────────
 
