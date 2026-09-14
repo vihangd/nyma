@@ -7,6 +7,7 @@
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
+            [agent.commands.resolver :refer [resolve-command]]
             [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures]]
             [agent.extension-scope :refer [handler-errors]]
             [agent.resources.loader :refer [discover]]
@@ -166,6 +167,120 @@
        "  (js/console.log \"[" ext-name "] loaded\")\n"
        "  ;; Return deactivate function for cleanup\n"
        "  (fn [] (js/console.log \"[" ext-name "] deactivated\")))\n"))
+
+(def ^:private help-group-order
+  "Section order and titles for `/help`. `:extensions` is a placeholder —
+   one subsection per extension namespace is spliced in at that point."
+  [[:session    "Session"]
+   [:model      "Model"]
+   [:modes      "Modes & roles"]
+   [:extensions "Extensions"]
+   [:agent      "Agent commands (forwarded via //)"]
+   [:other      "Other"]])
+
+(def ^:private modes-and-roles
+  "Commands that belong under 'Modes & roles' whatever registered them.
+   These five come from the model-roles extension, so grouping purely by
+   namespace would file them under Extensions — where nobody looks for
+   `/mode`."
+  #{"mode" "planmode" "role" "roles" "escalate"})
+
+(defn- short-of [name]
+  (let [i (.indexOf (str name) "__")]
+    (if (neg? i) (str name) (.slice (str name) (+ i 2)))))
+
+(defn- agent-forwarded? [cmd]
+  (= "agent-shell"
+     (or (:forward-to cmd)
+         (when (some? cmd)
+           (try (aget cmd "forward-to") (catch :default _ nil))))))
+
+(defn- extension-ns
+  "`model-roles__role` → \"model-roles\", or nil for an unnamespaced name."
+  [name]
+  (let [i (.indexOf (str name) "__")]
+    (when-not (neg? i) (.slice (str name) 0 i))))
+
+(defn help-group
+  "Which `/help` section a command belongs in.
+
+   Builtins declare `:group` on their registration map. Extension commands
+   are grouped by their namespace prefix — except the five that are really
+   modes, which an explicit table pulls out. Anything unclaimed is :other,
+   so a new command is listed rather than lost."
+  [name cmd]
+  (cond
+    (agent-forwarded? cmd)                 :agent
+    (contains? modes-and-roles (short-of name)) :modes
+    (some? (:group cmd))                   (keyword (str (:group cmd)))
+    (some? (extension-ns name))            :extensions
+    :else                                  :other))
+
+(defn- help-line [prefix shown cmd]
+  (let [aliases (:aliases cmd)]
+    (str "  " prefix (.trimEnd (str shown))
+         (when (seq aliases) (str " (" (str/join ", " aliases) ")"))
+         " — " (or (:description cmd) ""))))
+
+(defn help-sections
+  "The grouped `/help` text for a commands map.
+
+   The flat alphabetical dump this replaces put `/cls` between `/clear` and
+   `/compact` and buried every extension's commands among the builtins, so
+   the one question help is asked — 'what can I do with sessions?' — took a
+   full read of 40 lines. Sections answer it; within a section the order is
+   alphabetical by the name shown.
+
+   Hidden and disabled commands are filtered by `visible-commands`, and
+   names come from `compute-display-names`, so this and the slash picker
+   name commands identically. Pure."
+  [commands]
+  (let [visible   (cmd-parser/visible-commands commands)
+        displays  (cmd-parser/compute-display-names (vec (keys visible)))
+        entries   (map (fn [[name cmd]]
+                         {:name    name
+                          :shown   (.trim (str (get displays name name)))
+                          :cmd     cmd
+                          :group   (help-group name cmd)})
+                       visible)
+        by-group  (group-by :group entries)
+        fmt       (fn [e] (help-line (if (= :agent (:group e)) "//" "/")
+                                     (:shown e) (:cmd e)))
+        sort-ent  (fn [es] (sort-by :shown es))
+        section   (fn [title es]
+                    (when (seq es)
+                      (str title "\n" (str/join "\n" (map fmt (sort-ent es))))))
+        ext-block (let [es (get by-group :extensions [])
+                        by-ns (group-by (fn [e] (or (extension-ns (:name e)) "")) es)]
+                    (when (seq es)
+                      (str "Extensions\n"
+                           (str/join "\n"
+                                     (map (fn [ns]
+                                            (str "  [" ns "]\n"
+                                                 (str/join "\n"
+                                                           (map (fn [e] (str "  " (fmt e)))
+                                                                (sort-ent (get by-ns ns))))))
+                                          (sort (keys by-ns)))))))
+        blocks    (keep (fn [[g title]]
+                          (if (= g :extensions)
+                            ext-block
+                            (section title (get by-group g []))))
+                        help-group-order)]
+    (str (str/join "\n\n" blocks)
+         "\n\nRun /help <command> for one command's details.")))
+
+(defn help-for-command
+  "`/help <cmd>` — one command's name, aliases and description, or a
+   not-found line. Resolution goes through the same namespace-suffix
+   fallback the input dispatcher uses, so `/help role` works."
+  [commands name]
+  (let [n (str name)]
+    (if-let [cmd (resolve-command commands n)]
+      (str "/" n
+           (when (seq (:aliases cmd))
+             (str " (aliases: " (str/join ", " (:aliases cmd)) ")"))
+           "\n  " (or (:description cmd) "(no description)"))
+      (str "No such command: /" n "\nRun /help to list commands."))))
 
 ;;; ─── Async command handlers ──
 
@@ -385,50 +500,19 @@
   [agent session resources & [extensions-atom resolve-flags-fn]]
   (swap! (:commands agent) merge
          {"help"
-          {:description "Show available commands"
+          {:description "Show available commands, grouped. /help <command> for one"
            :aliases     ["?"]
-           :handler (fn [_args ctx]
-                      ;; Split help output into a nyma
-                      ;; section and an (optional) agent-forwarded
-                      ;; section so the user can tell which commands go
-                      ;; to the ACP agent (`//name`) and which are
-                      ;; local to nyma (`/name`).
-                      (let [cmds        @(:commands agent)
-                            agent-fwd?  (fn [cmd]
-                                          (= "agent-shell"
-                                             (or (:forward-to cmd)
-                                                 (when (some? cmd)
-                                                   (try (aget cmd "forward-to")
-                                                        (catch :default _ nil))))))
-                            split       (group-by (fn [[_ cmd]] (agent-fwd? cmd)) cmds)
-                            nyma-cmds   (get split false [])
-                            agent-cmds  (get split true [])
-                            display-map (cmd-parser/compute-display-names
-                                         (mapv first nyma-cmds))
-                            fmt         (fn [prefix shown cmd]
-                                          (let [alias-seq (:aliases cmd)
-                                                alias-str (when (seq alias-seq)
-                                                            (str " (" (str/join ", " alias-seq) ")"))]
-                                            (str "  " prefix (.trimEnd shown)
-                                                 (or alias-str "")
-                                                 " — " (or (:description cmd) ""))))
-                            nyma-lines  (mapv (fn [[name cmd]]
-                                                (fmt "/" (get display-map name name) cmd))
-                                              (sort-by first nyma-cmds))
-                            agent-lines (mapv (fn [[name cmd]]
-                                                (fmt "//" name cmd))
-                                              (sort-by first agent-cmds))
-                            sections    (cond-> []
-                                          (seq nyma-lines)
-                                          (conj (str "Available commands:\n"
-                                                     (str/join "\n" nyma-lines)))
-                                          (seq agent-lines)
-                                          (conj (str "\nAgent commands (forwarded via //):\n"
-                                                     (str/join "\n" agent-lines))))]
-                        (show-info ctx (str/join "\n" sections))))}
+           :handler (fn [args ctx]
+                      (let [cmds @(:commands agent)
+                            argv (let [p (positional-args ctx)]
+                                   (if (some? p) p (vec args)))]
+                        (if (seq argv)
+                          (show-info ctx (help-for-command cmds (first argv)))
+                          (show-info ctx (help-sections cmds)))))}
 
           "model"
-          {:description "Pick a model (no args), switch to one, or `list` them all"
+          {:group       :model
+           :description "Pick a model (no args), switch to one, or `list` them all"
            :handler (fn [args ctx]
                       (cond
                         ;; `/model list` — full catalogue as scrollable text
@@ -456,7 +540,8 @@
                             (notify ctx (str "Model: " (current-model-id agent)))))))}
 
           "clear"
-          {:description "Clear messages and reset agent session"
+          {:group       :session
+           :description "Reset the context in THIS session file — the transcript and the model's context, nothing on disk"
            :handler (fn [_args ctx]
                       ((:dispatch! (:store agent)) :messages-cleared {})
                       ((:emit (:events agent)) "session_clear" {})
@@ -469,7 +554,8 @@
      ;; issues the same ANSI escape sequence (CSI 2J + CSI 3J + CSI H)
      ;; as cc-kit, which clears both the visible screen AND the
      ;; scrollback on terminals that support the CSI 3J extension.
-          {:description "Clear the terminal screen and scrollback"
+          {:group       :session
+           :description "Clear the terminal screen and scrollback only — the conversation is untouched"
            :handler (fn [_args _ctx]
                       (.write (.-stdout js/process) "\u001b[2J\u001b[3J\u001b[H"))}
 
@@ -592,14 +678,16 @@
                                             :install-hint (:install-hint result)}))))))))}
 
           "new"
-          {:description "Start a new session"
+          {:group       :session
+           :description "Start a FRESH session file — the old one stays on disk and is resumable"
            :handler (fn [_args ctx]
                       ((:dispatch! (:store agent)) :messages-cleared {})
                       ((:emit (:events agent)) "session_start" {:reason "new"})
                       (notify ctx "New session started"))}
 
           "fork"
-          {:description "Fork conversation at current point"
+          {:group       :session
+           :description "Fork conversation at current point"
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
                         (let [leaf ((:leaf-id s))]
@@ -609,7 +697,8 @@
                           (notify ctx "Session forked"))))}
 
           "tree"
-          {:description "Show session tree"
+          {:group       :session
+           :description "Show session tree"
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
                         (if (and ctx (.-ui ctx) (.-custom (.-ui ctx)))
@@ -628,7 +717,8 @@
                                             (when (> (count tree) 20) "\n  ... more entries")))))))}
 
           "compact"
-          {:description "Compact conversation context now, and say by how much"
+          {:group       :session
+           :description "Compact conversation context now, and say by how much"
            :handler (fn [_args ctx]
                       ;; Returned, so the dispatcher's busy state and .catch
                       ;; cover it: this used to fire "Compaction complete"
@@ -727,7 +817,8 @@
                             (notify ctx (str "Session: " (or current "(unnamed)")))))))}
 
           "session"
-          {:description "Show session info and stats"
+          {:group       :session
+           :description "Show session info and stats"
            :handler (fn [_args ctx]
                       (let [s    @(:state agent)
                             sess @(:session agent)
@@ -786,7 +877,8 @@
                         (show-info ctx (str/join "\n" lines))))}
 
           "export"
-          {:description "Export session to file (html, md, jsonl)"
+          {:group       :session
+           :description "Export session to file (html, md, jsonl)"
            :handler (fn [args ctx]
                       (let [format  (or (first args) "html")
                             sess    @(:session agent)
@@ -808,7 +900,8 @@
                                (fn [_] (notify ctx (str "Exported to " out-path))))))}
 
           "resume"
-          {:description "Resume a previous session"
+          {:group       :session
+           :description "Resume a previous session"
            :handler (fn [_args ctx]
                       (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
                             all      (list-sessions dir)
@@ -858,7 +951,8 @@
                                            (notify ctx (str "Resumed: " (:name sess))))))))))))}
 
           "import"
-          {:description "Import and resume a session from a JSONL file"
+          {:group       :session
+           :description "Import and resume a session from a JSONL file"
            :handler (fn [args ctx]
                       (let [file-path (first args)]
                         (cond
@@ -901,7 +995,8 @@
                           (notify ctx "No CHANGELOG.md found" "error"))))}
 
           "thinking"
-          {:description (str "Set extended thinking level: /thinking <"
+          {:group       :model
+           :description (str "Set extended thinking level: /thinking <"
                              (str/join "|" thinking/levels) ">")
            :handler (fn [args ctx]
                       (let [level (some-> (first args) str/trim str/lower-case)
@@ -925,12 +1020,14 @@
                                         (str "Thinking level: " level)))))))}
 
           "login"
-          {:description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"
+          {:group       :model
+           :description "Login: /login [provider] for API key, /login oauth [provider] for OAuth"
            :handler (fn [args ctx]
                       (handle-login args ctx agent))}
 
           "logout"
-          {:description "Remove credentials for a provider. Usage: /logout <provider>"
+          {:group       :model
+           :description "Remove credentials for a provider. Usage: /logout <provider>"
            :handler (fn [args ctx]
                       ;; Bare `/logout` used to default to anthropic and delete
                       ;; a credential the user never named — a destructive
@@ -964,7 +1061,8 @@
                                       (notify ctx (str "Removed " provider " API key")))))))))))}
 
           "scoped-models"
-          {:description "Show or set per-extension model overrides"
+          {:group       :model
+           :description "Show or set per-extension model overrides"
            :handler (fn [args ctx]
                       (let [settings (:settings resources)
                             current  (when settings ((:get settings)))
