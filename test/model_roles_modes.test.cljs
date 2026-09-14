@@ -298,38 +298,38 @@
 ;;; roles carry none.
 
 (describe "role cycling excludes permission modes"
-  (fn []
-    (it "offers only roles that carry a model"
-        (fn []
-          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
-            (-> (expect (contains? names :default)) (.toBe true))
-            (-> (expect (contains? names :fast)) (.toBe true))
-            (-> (expect (contains? names :deep)) (.toBe true)))))
+          (fn []
+            (it "offers only roles that carry a model"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+                    (-> (expect (contains? names :default)) (.toBe true))
+                    (-> (expect (contains? names :fast)) (.toBe true))
+                    (-> (expect (contains? names :deep)) (.toBe true)))))
 
-    (it "never offers full-auto, which would disable the ask gate"
-        (fn []
-          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
-            (-> (expect (contains? names :full-auto)) (.toBe false))
-            (-> (expect (contains? names :accept-edits)) (.toBe false)))))
+            (it "never offers full-auto, which would disable the ask gate"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+                    (-> (expect (contains? names :full-auto)) (.toBe false))
+                    (-> (expect (contains? names :accept-edits)) (.toBe false)))))
 
-    (it "confirms why: full-auto's allow overrides the default mode's ask"
-        (fn []
+            (it "confirms why: full-auto's allow overrides the default mode's ask"
+                (fn []
           ;; The consequence this guards against, stated as a test rather than
           ;; a comment: combine-decision is deny > allow > ask.
-          (let [mode-d (policy/resolve-decision
-                        (:default (:roles defaults)) "write" "write")
-                role-d (policy/resolve-decision
-                        (:full-auto (:roles defaults)) "write" "write")]
-            (-> (expect (str mode-d)) (.toBe "ask"))
-            (-> (expect (str role-d)) (.toBe "allow"))
-            (-> (expect (str (combine-decision mode-d role-d))) (.toBe "allow")))))
+                  (let [mode-d (policy/resolve-decision
+                                (:default (:roles defaults)) "write" "write")
+                        role-d (policy/resolve-decision
+                                (:full-auto (:roles defaults)) "write" "write")]
+                    (-> (expect (str mode-d)) (.toBe "ask"))
+                    (-> (expect (str role-d)) (.toBe "allow"))
+                    (-> (expect (str (combine-decision mode-d role-d))) (.toBe "allow")))))
 
-    (it "skips a model-less custom role too"
-        (fn []
-          (let [names (set (mr/cyclable-role-names
-                            {:a {:model "m" :provider "p"}
-                             :b {:policy {"write" "allow"}}}))]
-            (-> (expect names) (.toEqual (set [:a]))))))))
+            (it "skips a model-less custom role too"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names
+                                    {:a {:model "m" :provider "p"}
+                                     :b {:policy {"write" "allow"}}}))]
+                    (-> (expect names) (.toEqual (set [:a]))))))))
 
 ;; ── role_change: the seam other extensions use instead of writing :active-role ──
 ;;
@@ -355,5 +355,56 @@
         (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
 
 (describe "model-roles:role_change event" (fn []
-  (it "switches the role for another extension; binds unknown names without a model"
-      test-role-change-event-switches-role)))
+                                            (it "switches the role for another extension; binds unknown names without a model"
+                                                test-role-change-event-switches-role)))
+
+;; ── /mode must not throw away a plan the user has not decided about ──
+;;
+;; Leaving plan mode by any other route used to call cancel! on the way past —
+;; silently, and `/mode cycle` is one keystroke.
+
+(defn ^:async with-model-roles
+  "Activate model_roles on a fresh agent, run `f` with {:agent :cmds :notes}."
+  [f]
+  (let [agent  (create-agent {:model "test" :system-prompt "x"})
+        api    (create-extension-api agent)
+        scoped (create-scoped-api api "model-roles" #{:all})
+        deact  (js-await ((.-default mr) scoped))
+        notes  (atom [])
+        ctx    #js {:ui #js {:notify (fn [m & _] (swap! notes conj (str m)))}}
+        run    (fn [cmd args]
+                 ((.-handler (get @(:commands agent) (str "model-roles__" cmd)))
+                  (clj->js args) ctx))]
+    (try
+      (f {:agent agent :run run :notes notes})
+      (finally
+        (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
+
+(defn ^:async test-mode-refuses-to-discard-an-unapproved-plan []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [agent run notes]}]
+       (run "planmode" [])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (reset! notes [])
+       (run "mode" ["default"])
+       ;; refused: still planning, still read-only, and told why
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (-> (expect (str (:permission-mode @(:state agent)))) (.toBe "plan"))
+       (-> (expect (.includes (apply str @notes) "unapproved plan")) (.toBe true))
+       ;; the cycle shortcut takes the same path — one keystroke must not
+       ;; discard it either
+       (reset! notes [])
+       (run "mode" ["cycle"])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (-> (expect (.includes (apply str @notes) "unapproved plan")) (.toBe true))
+       ;; and the refusal names the two ways out
+       (run "planmode" ["cancel"])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe false))
+       (run "mode" ["accept-edits"])
+       (-> (expect (str (:permission-mode @(:state agent)))) (.toBe "accept-edits"))))))
+
+(describe "/mode while a plan is unapproved"
+          (fn []
+            (it "refuses instead of silently discarding the plan"
+                test-mode-refuses-to-discard-an-unapproved-plan)))

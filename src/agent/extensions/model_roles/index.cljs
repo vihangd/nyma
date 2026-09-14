@@ -160,8 +160,13 @@
 
 (defn- switch-mode!
   "Switch the permission mode (NOT the model role). \"plan\" engages native plan
-   mode (enter!); any other mode leaves plan mode first (discarding the draft)
-   then sets :permission-mode. The model role is untouched."
+   mode (enter!); any other mode is REFUSED while a plan is unapproved. The
+   model role is untouched.
+
+   It used to cancel! the plan draft on the way past — silently, including on
+   `/mode cycle`, which is one keystroke. The plan is work the user has not
+   decided about yet, so discarding it is their call: /planmode execute or
+   /planmode cancel."
   [api mode ctx]
   (let [state    (.getState api)
         in-plan? (:plan-mode state)
@@ -173,9 +178,11 @@
       (= mode "plan")
       (if in-plan? (.notify ui "Already in plan mode." "info") (plan-mode/enter! api))
 
+      in-plan?
+      (.notify ui "You have an unapproved plan — /planmode execute, or /planmode cancel to discard." "warning")
+
       :else
       (do
-        (when in-plan? (plan-mode/cancel! api))
         (swap! (.-__state-atom api) assoc :permission-mode mode)
         (.notify ui (str "Mode: " mode) "info")))))
 
