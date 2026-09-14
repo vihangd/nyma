@@ -161,34 +161,26 @@ Tool and command names are auto-prefixed:
 ;; Registered as "my-ext__search" — no collisions with other extensions
 ```
 
-### 5. Data-Driven Schemas
+### 5. Tool Schemas
 
-No need to import Zod. Use Clojure maps:
-
-```clojure
-(require '[agent.schema :refer [compile-schema]])
-
-(def my-schema
-  (compile-schema
-    {:query   {:type :string :description "Search query"}
-     :limit   {:type :number :description "Max results" :optional true :default 10}
-     :filters {:type [:array :string] :description "Filter tags"}}))
-```
-
-### 6. Protocols
-
-Implement custom session stores, tool providers, or context builders:
+No Zod, and no schema compiler either — a tool's `:parameters` is a JSON
+Schema literal, written as a `#js` map:
 
 ```clojure
-(require '[agent.protocols :refer [ISessionStore_session_load ...]])
-
-;; Custom session store backed by SQLite
-(defn create-sqlite-session [db-path]
-  (let [store {...}]
-    (aset store ISessionStore_session_load (fn [_] ...))
-    (aset store ISessionStore_session_append (fn [_ entry] ...))
-    store))
+#js {:type "object"
+     :required #js ["query"]
+     :properties #js {:query #js {:type "string" :description "Search query"}
+                      :limit #js {:type "number" :description "Max results"}}}
 ```
+
+(`agent.schema.typebox-adapter` still exists, for porting pi-mono
+extensions that declare TypeBox schemas.)
+
+### 6. Subsystems Are Plain Maps
+
+A custom session store, tool provider or context builder is a map of
+closures — no protocol, no `aset` on a marker key. Build the map with the
+keys the consumer reads and hand it over.
 
 ### 7. Extension CLI Flags
 
