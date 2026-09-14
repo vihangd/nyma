@@ -7,5 +7,18 @@
     "flags",
     "ui"
   ],
-  "dependsOn": []
+  "dependsOn": [],
+  "settings": {
+    "openwiki": {
+      "enabled": false,
+      "dir": "openwiki",
+      "sections": [
+        "architecture",
+        "workflows",
+        "domain",
+        "operations",
+        "testing"
+      ]
+    }
+  }
 }

@@ -1,6 +1,14 @@
 {
   "namespace": "custom-provider-openrouter",
-  "capabilities": ["providers", "model"],
+  "capabilities": [
+    "providers",
+    "model"
+  ],
   "dependsOn": [],
-  "dependencies": {}
+  "dependencies": {},
+  "settings": {
+    "openrouter": {
+      "provider": null
+    }
+  }
 }

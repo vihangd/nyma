@@ -1,5 +1,40 @@
 {
   "namespace": "model-roles",
-  "capabilities": ["events", "commands", "model", "state", "ui", "messages", "shortcuts"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "commands",
+    "model",
+    "state",
+    "ui",
+    "messages",
+    "shortcuts"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "model-roles": {
+      "cycle-key": "ctrl+g"
+    },
+    "plan-mode": {
+      "auto-approve": false,
+      "planner-role": "advisor"
+    },
+    "escalate": {
+      "mode": "ask",
+      "to": "advisor",
+      "on": {
+        "no-op-turns": 3,
+        "repeat-tool-calls": 3,
+        "verify-exhausted": true
+      },
+      "prune": true,
+      "retries-before-escalate": 1,
+      "revert": "next-request",
+      "max-per-session": 2,
+      "fallback": {
+        "default": [],
+        "cooldown-ms": 300000,
+        "revert": "cooldown"
+      }
+    }
+  }
 }

@@ -1,5 +1,15 @@
 {
   "namespace": "todos",
-  "capabilities": ["events", "tools", "ui", "state"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "tools",
+    "ui",
+    "state"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "todos": {
+      "reminder-every-n-turns": 5
+    }
+  }
 }

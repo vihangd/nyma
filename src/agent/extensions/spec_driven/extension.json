@@ -1,5 +1,19 @@
 {
   "namespace": "spec-driven",
-  "capabilities": ["events", "commands", "state", "ui", "messages"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "commands",
+    "state",
+    "ui",
+    "messages"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "spec": {
+      "profiles": null,
+      "loop": null,
+      "default-shape": "spec-kit",
+      "shape-precedence": null
+    }
+  }
 }

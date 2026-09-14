@@ -1,6 +1,21 @@
 {
   "namespace": "agent-shell",
-  "capabilities": ["spawn", "commands", "events", "ui", "messages",
-                    "flags", "state"],
-  "dependsOn": []
+  "capabilities": [
+    "spawn",
+    "commands",
+    "events",
+    "ui",
+    "messages",
+    "flags",
+    "state"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "agent-shell": {
+      "default-agent": null,
+      "auto-approve": false,
+      "auto-connect": false,
+      "agents": {}
+    }
+  }
 }

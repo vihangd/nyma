@@ -3,6 +3,7 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
+            [agent.extensions.budget.shared :as budget]
             [agent.settings.manager :refer [create-settings-manager defaults manifest-defaults
                                             camel->kebab normalize-keys]]))
 
@@ -196,28 +197,75 @@
                     (try (fs/rmdirSync tmp-dir) (catch :default _)))))))
 
 (describe "manifest-declared settings defaults" (fn []
-  (it "manifest-defaults kebab-cases sections and keys, ignores non-objects"
-      (fn []
-        (-> (expect (clj->js (manifest-defaults #js {"budget" #js {"turnTokens" 5 "wall-seconds" nil}
-                                                     "bogus" 3})))
-            (.toEqual #js {"budget" #js {"turn-tokens" 5 "wall-seconds" nil}}))
-        (-> (expect (clj->js (manifest-defaults nil))) (.toEqual #js {}))))
+                                                  (it "manifest-defaults kebab-cases sections and keys, ignores non-objects"
+                                                      (fn []
+                                                        (-> (expect (clj->js (manifest-defaults #js {"budget" #js {"turnTokens" 5 "wall-seconds" nil}
+                                                                                                     "bogus" 3})))
+                                                            (.toEqual #js {"budget" #js {"turn-tokens" 5 "wall-seconds" nil}}))
+                                                        (-> (expect (clj->js (manifest-defaults nil))) (.toEqual #js {}))))
 
-  (it "registered defaults fill a section under the user's keys, per key"
-      (fn []
-        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
-                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
-          ((:register-defaults! mgr) {"budget" {"turn-tokens" 5 "session-tokens" 100}})
-          ((:set-override mgr) "budget" {"turn-tokens" 9})
-          (let [b (get ((:get mgr)) "budget")]
+                                                  (it "registered defaults fill a section under the user's keys, per key"
+                                                      (fn []
+                                                        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                                                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
+                                                          ((:register-defaults! mgr) {"budget" {"turn-tokens" 5 "session-tokens" 100}})
+                                                          ((:set-override mgr) "budget" {"turn-tokens" 9})
+                                                          (let [b (get ((:get mgr)) "budget")]
             ;; user key wins, declared key survives — this is NOT the :roles replace
-            (-> (expect (get b "turn-tokens")) (.toBe 9))
-            (-> (expect (get b "session-tokens")) (.toBe 100))))))
+                                                            (-> (expect (get b "turn-tokens")) (.toBe 9))
+                                                            (-> (expect (get b "session-tokens")) (.toBe 100))))))
 
-  (it "a second registration merges into the section instead of replacing it"
-      (fn []
-        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
-                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
-          ((:register-defaults! mgr) {"x" {"a" 1}})
-          ((:register-defaults! mgr) {"x" {"b" 2}})
-          (-> (expect (clj->js (get ((:get mgr)) "x"))) (.toEqual #js {"a" 1 "b" 2})))))))
+                                                  (it "a second registration merges into the section instead of replacing it"
+                                                      (fn []
+                                                        (let [mgr (create-settings-manager {:global-path "/tmp/nyma-test-nonexistent-global.json"
+                                                                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
+                                                          ((:register-defaults! mgr) {"x" {"a" 1}})
+                                                          ((:register-defaults! mgr) {"x" {"b" 2}})
+                                                          (-> (expect (clj->js (get ((:get mgr)) "x"))) (.toEqual #js {"a" 1 "b" 2})))))))
+
+;; The three readers that used to hard-code their own defaults now get them from
+;; extension.json. Nothing else proves the values survived the move: an
+;; extension test stubs `.settings` and a loader test never asserts a value, so
+;; a typo'd default would ship silently green. This wires the REAL manifests
+;; through a REAL manager, the way extension-loader Pass 2b does.
+(describe "migrated readers keep their pre-migration defaults" (fn []
+                                                                 (let [manifest (fn [dir]
+                                                                                  (js/JSON.parse
+                                                                                   (fs/readFileSync (path/join (js/process.cwd) "src" "agent"
+                                                                                                               "extensions" dir "extension.json")
+                                                                                                    "utf8")))
+                                                                       mgr-with (fn [dirs]
+                                                                                  (let [m (create-settings-manager
+                                                                                           {:global-path  "/tmp/nyma-test-nonexistent-global.json"
+                                                                                            :project-path "/tmp/nyma-test-nonexistent-project.json"})]
+                                                                                    (doseq [d dirs]
+                                                                                      ((:register-defaults! m) (manifest-defaults (.-settings (manifest d)))))
+                                                                                    m))]
+
+                                                                   (it "budget stays off with no cap set"
+                                                                       (fn []
+                                                                         (let [s   ((:get (mgr-with ["budget"])))
+                                                                               cfg (budget/config s)]
+                                                                           (-> (expect (:turn-tokens cfg)) (.toBeNil))
+                                                                           (-> (expect (:session-tokens cfg)) (.toBeNil))
+                                                                           (-> (expect (:wall-seconds cfg)) (.toBeNil))
+                                                                           (-> (expect (budget/enabled? cfg)) (.toBe false)))))
+
+                                                                   (it "todos still reminds every 5 turns"
+                                                                       (fn []
+                                                                         (let [s ((:get (mgr-with ["todos"])))]
+                                                                           (-> (expect (get (get s "todos") "reminder-every-n-turns")) (.toBe 5)))))
+
+                                                                   (it "desktop-notify still defaults to on at 3s"
+                                                                       (fn []
+                                                                         (let [d ((:get (mgr-with ["desktop_notify"])))
+                                                                               s (get d "desktop-notify")]
+                                                                           (-> (expect (get s "enabled")) (.toBe true))
+                                                                           (-> (expect (get s "threshold-ms")) (.toBe 3000)))))
+
+                                                                   (it "a user value still wins over the declared default"
+                                                                       (fn []
+                                                                         (let [m (mgr-with ["todos"])]
+                                                                           ((:set-override m) "todos" {"reminder-every-n-turns" 2})
+                                                                           (-> (expect (get (get ((:get m)) "todos") "reminder-every-n-turns"))
+                                                                               (.toBe 2))))))))

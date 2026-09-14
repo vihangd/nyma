@@ -33,6 +33,22 @@
           (.-namespace (js/JSON.parse (fs/readFileSync p "utf8"))))
         (str/replace dir "_" "-"))))
 
+(defn- stable
+  "JSON with object keys sorted at every depth, so the comparison is about
+   VALUES: the generator emits keys in manifest order, and a re-ordered
+   extension.json is not drift."
+  [v]
+  (js/JSON.stringify
+   ((fn norm [x]
+      (cond
+        (array? x)   (.map x norm)
+        (object? x)  (let [out #js {}]
+                       (doseq [k (sort (vec (js/Object.keys x)))]
+                         (aset out k (norm (aget x k))))
+                       out)
+        :else        x))
+    v)))
+
 (describe "builtin registry"
           (fn []
             (it "covers every extension in the source tree"
@@ -63,4 +79,21 @@
                   (doseq [{:keys [namespace manifest]} registry]
                     (when manifest
                       (-> (expect (str namespace ": " (object? manifest)))
-                          (.toBe (str namespace ": true")))))))))
+                          (.toBe (str namespace ": true")))))))
+
+            (it "every embedded manifest matches the one on disk"
+                (fn []
+                  ;; Coverage caught a NEW extension missing from the registry;
+                  ;; nothing caught an EDITED extension.json whose owner forgot
+                  ;; `bun run gen:builtins`. A compiled binary then runs the old
+                  ;; capabilities, dependsOn and settings defaults while the
+                  ;; source tree — and every reviewer reading it — says otherwise.
+                  (let [by-ns (into {} (map (fn [e] [(:namespace e) e]) registry))]
+                    (doseq [dir (source-dirs)]
+                      (let [p    (path/join src-root dir "extension.json")
+                            disk (when (fs/existsSync p)
+                                   (js/JSON.parse (fs/readFileSync p "utf8")))
+                            e    (get by-ns (manifest-namespace dir))]
+                        (-> (expect (str dir ": " (some? e))) (.toBe (str dir ": true")))
+                        (-> (expect (str dir " " (stable disk)))
+                            (.toBe (str dir " " (stable (:manifest e))))))))))))

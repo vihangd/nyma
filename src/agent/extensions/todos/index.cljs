@@ -54,9 +54,12 @@
     ;;     calls at models where a single invalid call costs ~30pp accuracy.
     ;;     Nagging to maintain is defensible; nagging to create is not.
     ;;   - silent while a plan executes; plan mode owns progress then.
+    ;; The 5 lives in extension.json's `settings.todos`, not here — the manager
+    ;; merges it under the user's value, so `cfg` always carries the key. The
+    ;; type guard stays: a user can still write a string into settings.json.
     (let [cfg     (.settings api "todos")
           every-n (let [v (:reminder-every-n-turns cfg)]
-                    (if (number? v) v 5))]
+                    (if (number? v) v 0))]
       (when (pos? every-n)
         (let [stop ((reminder/make-reminder
                      {:every-n-steps every-n

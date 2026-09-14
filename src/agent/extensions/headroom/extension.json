@@ -1,6 +1,25 @@
 {
   "namespace": "headroom",
-  "capabilities": ["events", "commands"],
+  "capabilities": [
+    "events",
+    "commands"
+  ],
   "dependsOn": [],
-  "dependencies": { "headroom-ai": "^0.22.4" }
+  "dependencies": {
+    "headroom-ai": "^0.22.4"
+  },
+  "settings": {
+    "headroom": {
+      "enabled": false,
+      "proxy-url": "http://localhost:8787",
+      "compression-threshold": 0.5,
+      "min-tokens-to-compress": 8000,
+      "algorithms": [
+        "SmartCrusher",
+        "CodeCompressor",
+        "Kompress"
+      ],
+      "disable-ccr": true
+    }
+  }
 }
