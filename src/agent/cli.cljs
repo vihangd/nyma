@@ -12,6 +12,7 @@
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.sessions.archive :as archive]
+            [agent.sessions.storage :as storage]
             [agent.version :refer [version]]
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
@@ -616,6 +617,33 @@ Examples:
 
     ;; Attach extension API to agent so UI can access it
     (set! (.-extension-api agent) api)
+
+    ;; The SQLite store behind prompt_history (Ctrl+R) and /stats. Both read
+    ;; `api.__sqlite-store` and both shipped with nothing setting it, so the
+    ;; picker was always empty and /stats always said "require SQLite storage".
+    ;; Cross-session by design (~/.nyma/nyma.db), so --no-session does not
+    ;; disable it. Usage rows come from the store's :usage-updated dispatch.
+    (when-not (:no-session values)
+      (try
+        (let [db-path (npath/join (.. js/process -env -HOME) ".nyma" "nyma.db")
+              sqlite  (storage/create-sqlite-store db-path)]
+          (aset api "__sqlite-store" sqlite)
+          ((:subscribe (:store agent))
+           (fn [event-type state data]
+             (when (= event-type :usage-updated)
+               (try
+                 ((:record-usage sqlite)
+                  {:session-file (str (or (when-let [s @(:session agent)]
+                                            (when (fn? (:session-file s)) ((:session-file s))))
+                                          ""))
+                   :model        (let [m (:model (:config agent))]
+                                   (if (string? m) m (or (and m (.-modelId m)) "")))
+                   :input-tokens (:input-tokens data)
+                   :output-tokens (:output-tokens data)
+                   :cost         (:cost data)})
+                 (catch :default e (d/debug "sqlite" (str "usage row: " (.-message e)))))))))
+        (catch :default e
+          (d/warn "sqlite" (str "store unavailable: " (.-message e))))))
 
     ;; Load all extensions (both .cljs and .ts/.js)
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api

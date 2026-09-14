@@ -29,9 +29,12 @@
          (swap! history (fn [h]
                           (let [h' (conj h {:type event-type :data data :timestamp (js/Date.now)})]
                             (if (> (count h') 500) (vec (drop (- (count h') 500) h')) h'))))
+         ;; Subscribers get the payload as a third argument: a listener that
+         ;; needs the per-event delta (usage per run) could not recover it
+         ;; from the accumulated state.
          (let [current @state]
            (doseq [s @subs]
-             (s event-type current)))))
+             (s event-type current data)))))
 
      :subscribe
      (fn [listener]

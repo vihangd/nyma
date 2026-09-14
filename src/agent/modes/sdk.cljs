@@ -87,7 +87,7 @@
      ;; Derive a coarse agent state keyword from live state.
      ;; :tool-running — one or more tool calls in flight
      ;; :idle         — nothing running
-     ;; Phase 1 will add :thinking :streaming :awaiting-approval :error etc.
+     ;; Not yet reported: :thinking :streaming :awaiting-approval :error.
      :agent-state
      (fn []
        (let [s @(:state agent)]

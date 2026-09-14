@@ -287,7 +287,7 @@
           {:description "Show available commands"
            :aliases     ["?"]
            :handler (fn [_args ctx]
-                      ;; Phase 21: split help output into a nyma
+                      ;; Split help output into a nyma
                       ;; section and an (optional) agent-forwarded
                       ;; section so the user can tell which commands go
                       ;; to the ACP agent (`//name`) and which are
@@ -738,7 +738,7 @@
                                                      {:reason "resume" :previousSessionFile file-path})
                             (notify ctx (str "Imported session from " file-path))))))}
 
-     ;; ── Phase 3 commands ───────────────────────────────────
+     ;; ── Session, export, credentials ───────────────────────
 
           "settings"
           {:description "View or change settings"

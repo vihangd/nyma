@@ -77,7 +77,6 @@
         ;; + optional user overrides (applied later by cli.cljs).
         keybinding-registry (atom (kbr/create-registry))
         ;; Autocomplete provider registry — fresh per agent.
-        ;; Phase 2 additions
         provider-registry (create-provider-registry builtin-providers)
         ;; Seeded from --thinking / settings :thinking, both of which used to be
         ;; parsed and dropped. "off" sends no reasoning parameter at all.
@@ -144,7 +143,6 @@
                  :state             state
                  :store             store
                  :extensions        extensions
-                 ;; Phase 2 additions
                  :provider-registry provider-registry
                  :thinking-level    thinking-level
                  :abort-controller  abort-controller

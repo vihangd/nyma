@@ -70,7 +70,7 @@ For extensions with multiple files, create a directory with an `extension.json` 
 ## The activation function
 
 There is no macro layer: an extension is a module whose default export takes the scoped `api`
-and returns a cleanup fn. Tools take a data schema directly (see `docs/schema-reference.md`).
+and returns a cleanup fn. Tools declare a JSON Schema literal under `:parameters` (see §5 below).
 
 ```clojure
 (ns my-extension)
@@ -172,9 +172,6 @@ Schema literal, written as a `#js` map:
      :properties #js {:query #js {:type "string" :description "Search query"}
                       :limit #js {:type "number" :description "Max results"}}}
 ```
-
-(`agent.schema.typebox-adapter` still exists, for porting pi-mono
-extensions that declare TypeBox schemas.)
 
 ### 6. Subsystems Are Plain Maps
 

@@ -43,6 +43,14 @@
         (-> (expect (:evt @captured)) (.toBe :set-v))
         (-> (expect (:v @captured)) (.toBe 99)))))
 
+  (it "subscribers receive the dispatch payload as a third argument"
+    (fn []
+      (let [store    (create-agent-store {})
+            captured (atom nil)]
+        ((:subscribe store) (fn [_evt _state data] (reset! captured data)))
+        ((:dispatch! store) :usage-updated {:input-tokens 7 :output-tokens 0 :cost 0})
+        (-> (expect (:input-tokens @captured)) (.toBe 7)))))
+
   (it "unsubscribe stops notifications"
     (fn []
       (let [store (create-store {:v 0})

@@ -133,4 +133,15 @@
         (let [path ((:query-branch-path store) "x")]
           (-> (expect (count path)) (.toBe 1))
           (-> (expect (:content (first path))) (.toBe "v2")))
+        ((:close store)))))
+
+  (it "record-usage rows are what the dashboard sums"
+    (fn []
+      (let [store (make-store)]
+        ((:record-usage store) {:model "m1" :input-tokens 10 :output-tokens 5 :cost 0.5 :session-file "s"})
+        ((:record-usage store) {:model "m1" :input-tokens 1 :output-tokens 1 :cost 0.25})
+        (let [t ((:get-usage-totals store))]
+          (-> (expect (:total-input t)) (.toBe 11))
+          (-> (expect (:total-cost t)) (.toBeCloseTo 0.75 5)))
+        (-> (expect (count ((:get-usage-by-model store)))) (.toBe 1))
         ((:close store)))))))

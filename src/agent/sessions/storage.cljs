@@ -202,6 +202,17 @@
          (mapv (fn [row] {:text (.-text row) :session-file (.-session_file row) :timestamp (.-timestamp row)})
            rows)))
 
+     ;; The `usage` table had three readers and no writer: the dashboard summed
+     ;; rows nothing ever inserted. cli.cljs records one row per run from the
+     ;; store's :usage-updated dispatch.
+     :record-usage
+     (fn [{:keys [session-file turn-id model input-tokens output-tokens cost]}]
+       (let [stmt (.prepare db
+                    "INSERT INTO usage (session_file, turn_id, model, input_tokens, output_tokens, cost_usd, timestamp)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)")]
+         (.run stmt (or session-file "") (or turn-id "") (or model "") (or input-tokens 0)
+               (or output-tokens 0) (or cost 0) (js/Date.now))))
+
      ;; ─── Aggregate usage queries ────────────────────────────
      :get-usage-by-model
      (fn []

@@ -91,7 +91,7 @@
                                                  #js {:toolName (:tool-name ctx)
                                                       :execId   (:exec-id ctx)
                                                       :data     data}))))
-                       ;; G18 — expose active model ID string so tools can adapt behaviour.
+                       ;; Active model id as a string, so a tool can adapt to the model.
                        ;; :model in config is either a resolved provider model object
                        ;; (with a .-modelId property) or a plain string (legacy / tests).
                        (aset ext-ctx "modelId"

@@ -54,7 +54,7 @@
                (notify api (str "Connected to " (:name agent-def)
                                 (when-let [sid @(:session-id conn)]
                                   (str " (session: " (subs sid 0 8) "...)"))))
-                ;; Phase 21.7: Give the agent a short grace period to
+                ;; Give the agent a short grace period to
                 ;; push its slash-command list via
                 ;; available_commands_update. If it never does, log a
                 ;; one-shot note so the user knows `//` fallback is

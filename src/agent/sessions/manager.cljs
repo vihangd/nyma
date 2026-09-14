@@ -182,6 +182,9 @@
              :get-label        (fn [entry-id] (get @entry-labels entry-id))
              :get-entries      (fn [] @entries)
              :get-branch       (fn [] (build-context-fn))
+             ;; The file this session persists to — the key usage rows and
+             ;; prompt history are grouped by.
+             :session-file     (fn [] session-file)
              :get-leaf-id      (fn [] @leaf-id)
              ;; Runtime session switching (for /resume, /import)
              :get-file-path    (fn [] @file-path)

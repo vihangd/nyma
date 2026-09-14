@@ -318,7 +318,7 @@
                                    msgs))
                          messages)
 
-              ;; G20 — before_message_send: final transform before LLM call
+              ;; before_message_send: last transform before the provider call
               send-result (js-await
                            (emit-collect "before_message_send"
                                          #js {:messages (clj->js messages)
@@ -446,7 +446,7 @@
               (try
                 (emit "turn_start" {})
 
-              ;; G1/G2 — retry loop: stream_filter can abort and re-run up to 2 times
+              ;; retry loop: stream_filter can abort and re-run up to 2 times
                 (loop [attempt 0]
                   (reset! (:retry-state agent) nil)
 

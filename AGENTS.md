@@ -3,7 +3,7 @@
 ## Project Overview
 
 NYMA is a minimal, extensible coding agent built with:
-- **Squint** — ClojureScript-to-JS compiler (compile-time macros, threading, destructuring)
+- **Squint** — ClojureScript-to-JS compiler (threading, destructuring, plain ES modules out)
 - **Bun** — runtime, package manager, native TypeScript loader
 - **Vercel AI SDK (`ai`)** — LLM streaming, tool loop, provider abstraction
 - **Ink** — React-based terminal UI via squint's `#jsx` reader tag
@@ -55,7 +55,6 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-cost` for all supported models |
 | `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name) |
 | `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories |
-| `src/agent/schema/typebox_adapter.cljs` | `agent.schema.typebox-adapter` | TypeBox ↔ Zod schema bridge for TS extensions |
 | `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`) |
 | `src/agent/ui/app.cljs` | `agent.ui.app` | Root Ink component |
 | `src/agent/ui/chat_view.cljs` | `agent.ui.chat-view` | Message rendering |

@@ -22,7 +22,7 @@ Nyma is a spiritual successor to [pi-mono](https://github.com/badlogic/pi-mono) 
 
 - **Interceptors compose cleanly.** Adding logging, rate-limiting, or permission checks is a chain entry — not a wrapper function.
 - **Extensions are safer.** Each plugin gets a scoped API with explicit capability declarations (`tools`, `commands`, `middleware`, `state`, `ui`). No extension can reach outside its declared scope.
-- **ClojureScript extensions** get the full macro DSL, threading (`->`), and data-oriented idioms — a significant ergonomic win over imperative TS for complex agent logic.
+- **ClojureScript extensions** get threading (`->`), destructuring and data-oriented idioms — a real ergonomic win over imperative TS for complex agent logic.
 - **pi-mono extensions port with minimal changes** — the API surface is intentionally compatible. See `docs/porting-guide-ts.md`.
 
 ## Architecture
