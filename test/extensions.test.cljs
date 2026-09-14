@@ -449,3 +449,17 @@
                          (fn [data] (reset! captured data) nil))
                     (.setModel api "claude-sonnet-4-5")
                     (-> (expect (.-provider @captured)) (.toBe "")))))))
+
+(describe "api.settings" (fn []
+  (it "returns the merged map or a section, never nil"
+      (fn []
+        (let [agent (create-agent {:model "t" :system-prompt "t"
+                                   :settings {:get (fn [] {:budget {:turn-tokens 5}})}})
+              api   (create-extension-api agent)]
+          (-> (expect (get-in (.settings api) [:budget :turn-tokens])) (.toBe 5))
+          (-> (expect (:turn-tokens (.settings api "budget"))) (.toBe 5))
+          (-> (expect (clj->js (.settings api "nope"))) (.toEqual #js {})))))
+  (it "is {} on an agent with no settings manager"
+      (fn []
+        (let [api (create-extension-api (create-agent {:model "t" :system-prompt "t"}))]
+          (-> (expect (clj->js (.settings api))) (.toEqual #js {})))))))

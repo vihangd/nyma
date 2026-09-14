@@ -585,6 +585,13 @@
                               (let [sm (:settings agent)]
                                 (when (and sm (fn? (:get sm)))
                                   ((:get sm)))))
+         ;; The form every reader wants: the merged map, or one section of
+         ;; it, never nil. Replaces the try/when/or ladders around
+         ;; getSettings — which already never threw.
+         :settings          (fn [& [section]]
+                              (let [sm  (:settings agent)
+                                    all (or (when (and sm (fn? (:get sm))) ((:get sm))) {})]
+                                (if section (or (get all section) {}) all)))
 
        ;; ── Token estimation ───────────────────────────────────
          :estimateTokens    (fn [text] (te/estimate-tokens text))

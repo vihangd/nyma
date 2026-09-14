@@ -214,6 +214,7 @@
                     :resolveModel      (gate capabilities :model (.-resolveModel base-api))
                     ;; Settings access (ungated — read-only)
                     :getSettings       (.-getSettings base-api)
+                    :settings          (.-settings base-api)
                     ;; Emit to main agent event bus (gated — lets extensions
                     ;; broadcast to other extensions that subscribed via api.on)
                     :emitGlobal        (gate capabilities :events (.-emitGlobal base-api))
