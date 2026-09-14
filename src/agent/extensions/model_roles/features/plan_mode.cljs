@@ -10,9 +10,10 @@
      4. an exit→execute handoff that restores the prior role and kicks off
         execution, optionally tracking [DONE:n] step markers
 
-   Entry is a guarded /plan (Decision D): /planmode always works; /plan is
-   claimed only when not already taken (e.g. by the ACP agent_shell mode
-   switcher), so the two never collide.
+   Entry is /planmode, or `/mode plan`. There is no /plan: this ns and
+   agent_shell's ACP mode switcher both used to claim it behind mirror-image
+   guards, so ownership depended on load order, and two registrations made the
+   resolver ambiguous. The ACP agent's plan mode is `/agent mode plan`.
 
    Squint notes: async handlers are top-level defns called by sync wrappers
    (named, so testable; `^:async (fn …)` with the meta on the FORM also
@@ -240,13 +241,17 @@ the user will approve the plan before execution begins.")
       (if (and data (or (.-error data) (get data "error")))
         ;; The planning turn errored (e.g. flaky provider). Don't auto-execute a
         ;; non-existent plan — stay in plan mode and surface it so the gate is
-        ;; never silently skipped. The user can retry or /plan cancel.
-        (notify api "Plan turn failed — still in plan mode. Retry, or /plan cancel." "warn")
+        ;; never silently skipped. The user can retry or /planmode cancel.
+        (notify api "Plan turn failed — still in plan mode. Retry, or /planmode cancel." "warn")
         (let [text  (last-assistant-text (:messages s))
               todos (extract-todos text)]
           (when text
             (swap! (state-atom api) assoc :plan-todos todos)
-            (write-artifact! text))
+            ;; Say where the plan landed. The file was written and never
+            ;; mentioned, so the one durable artifact of a planning session
+            ;; was only findable by listing .nyma/plans/ and guessing.
+            (when-let [file (write-artifact! text)]
+              (notify api (str "Plan written to " file) "info")))
           (cond
             (auto-approve? api) (execute! api)
 
@@ -264,7 +269,7 @@ the user will approve the plan before execution begins.")
 
             ;; No UI and not auto-approve — notify instead of a silent no-op so
             ;; the plan isn't left finished-but-invisible. Manual escape hatch.
-            :else (notify api "Plan ready — no UI to approve. Run /plan execute or /plan cancel." "info")))))))
+            :else (notify api "Plan ready — no UI to approve. Run /planmode execute or /planmode cancel." "info")))))))
 
 (defn step->text
   "Extract assistant text from a turn_end payload. turn_end emits the
@@ -390,7 +395,7 @@ the user will approve the plan before execution begins.")
         plan-handler
         ;; Bare toggle, plus explicit subcommands so the user can drive the
         ;; transition manually when the auto-gate didn't fire (e.g. the turn
-        ;; errored, or there's no interactive UI): /plan execute | /plan cancel.
+        ;; errored, or there's no interactive UI): /planmode execute | /planmode cancel.
         (fn [args _ctx]
           (let [sub (.toLowerCase (str (or (first args) "")))
                 s   (cur-state api)]
@@ -411,28 +416,14 @@ the user will approve the plan before execution begins.")
     (.on api "provider_error" on-perr)
     (.on api "session_end" on-send)
 
-    ;; /planmode always works.
+    ;; /planmode, and only /planmode. There is no /plan: both this extension
+    ;; and agent_shell's ACP mode switcher used to claim it behind mirror-image
+    ;; guards, so which one you got depended on load order — and if both ever
+    ;; registered, the resolver saw two "__plan" keys and /plan resolved to
+    ;; nothing. `/mode plan` also enters native plan mode.
     (.registerCommand api "planmode"
                       #js {:description "Toggle native plan mode (read-only → approve → execute)"
                            :handler plan-handler})
 
-    ;; /plan only when free (guarded — Decision D).
-    ;; getCommands returns the GLOBAL command map with namespace-PREFIXED
-    ;; keys ("agent-shell__plan"), so check for any "*__plan" / "plan" key,
-    ;; not a bare "plan". If the ACP agent_shell already owns /plan we skip
-    ;; ours (native stays reachable via /planmode); the resolver would
-    ;; otherwise see two "__plan" suffixes and resolve /plan to nothing.
-    (let [taken? (when-let [gc (.-getCommands api)]
-                   (let [cmds (gc)
-                         ks   (try (vec (keys cmds)) (catch :default _e []))]
-                     (some (fn [k] (let [s (str k)]
-                                     (or (= s "plan") (.endsWith s "__plan"))))
-                           ks)))]
-      (when-not taken?
-        (.registerCommand api "plan"
-                          #js {:description "Toggle plan mode (read-only exploration)"
-                               :handler plan-handler})))
-
     (fn []
-      (.unregisterCommand api "planmode")
-      (.unregisterCommand api "plan"))))
+      (.unregisterCommand api "planmode"))))

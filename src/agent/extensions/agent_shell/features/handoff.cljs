@@ -1,10 +1,16 @@
 (ns agent.extensions.agent-shell.features.handoff
-  "Session handoff between agents. Captures conversation context from
+  "Session handoff between ACP agents. Captures conversation context from
    the current agent, disconnects, connects to a new agent, and sends
    the context as the first prompt so the new agent can continue.
 
-   When /handoff is called with no argument and a UI is available,
-   an interactive agent picker is shown instead of a usage string."
+   Reached as `/agent handoff …`, a subcommand of the agent switcher. It used
+   to register its own `/handoff`, which collided with the `handoff`
+   extension's session-brief command: two `__handoff` keys made the resolver
+   ambiguous and `/handoff` answered \"Unknown command\" whenever agent_shell
+   was loaded. This one is agent-scoped, so it lives under `/agent`.
+
+   With no target argument and a UI available, an interactive agent picker is
+   shown instead of a usage string."
   (:require [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.agents.registry :as registry]
             [agent.extensions.agent-shell.acp.pool :as pool]
@@ -70,43 +76,44 @@
                (fn [e]
                  (notify api (str "Handoff failed: " (.-message e)) "error")))))))))
 
+(defn handle
+  "The `/agent handoff [<agent>] [context message]` subcommand. `args` is the
+   words AFTER `handoff`. Called by the agent switcher; exported so the
+   subcommand can be tested without going through /agent."
+  [api args]
+  (let [from-key @shared/active-agent]
+    (cond
+      (not from-key)
+      (notify api "No agent connected. Use /agent <name> first." "error")
+
+      (empty? args)
+      ;; Interactive picker when UI is available; usage text otherwise
+      (if (and (.-ui api) (.-available (.-ui api)))
+        (let [agent-keys (keys registry/agents)
+              options    (clj->js
+                          (mapv (fn [k]
+                                  (let [def (get registry/agents k)]
+                                    #js {:value       (shared/kw-name k)
+                                         :label       (or (:name def) (shared/kw-name k))
+                                         :description (or (:description def) "")}))
+                                agent-keys))]
+          (-> (.select (.-ui api) "Select agent to hand off to:" options)
+              (.then (fn [selected]
+                       (when selected
+                         (do-handoff api from-key selected nil))))))
+        (notify api (str "Usage: /agent handoff <agent> [context message]\n"
+                         "Available agents: "
+                         (str/join ", " (map shared/kw-name (keys registry/agents))))
+                "info"))
+
+      :else
+      (let [to-key-str (first args)
+            custom-msg (when (> (count args) 1)
+                         (str/join " " (rest args)))]
+        (do-handoff api from-key to-key-str custom-msg)))))
+
 (defn activate
-  "Register the /handoff command."
-  [api]
-  (.registerCommand api "handoff"
-                    #js {:description "Hand off current session to another agent with context transfer"
-                         :handler
-                         (fn [args _ctx]
-                           (let [from-key @shared/active-agent]
-                             (cond
-                               (not from-key)
-                               (notify api "No agent connected. Use /agent <name> first." "error")
-
-                               (empty? args)
-                               ;; Interactive picker when UI is available; usage text otherwise
-                               (if (and (.-ui api) (.-available (.-ui api)))
-                                 (let [agent-keys (keys registry/agents)
-                                       options    (clj->js
-                                                   (mapv (fn [k]
-                                                           (let [def (get registry/agents k)]
-                                                             #js {:value       (shared/kw-name k)
-                                                                  :label       (or (:name def) (shared/kw-name k))
-                                                                  :description (or (:description def) "")}))
-                                                         agent-keys))]
-                                   (-> (.select (.-ui api) "Select agent to hand off to:" options)
-                                       (.then (fn [selected]
-                                                (when selected
-                                                  (do-handoff api from-key selected nil))))))
-                                 (notify api (str "Usage: /handoff <agent> [context message]\n"
-                                                  "Available agents: "
-                                                  (str/join ", " (map shared/kw-name (keys registry/agents))))
-                                         "info"))
-
-                               :else
-                               (let [to-key-str (first args)
-                                     custom-msg (when (> (count args) 1)
-                                                  (str/join " " (rest args)))]
-                                 (do-handoff api from-key to-key-str custom-msg)))))})
-
-  (fn []
-    (.unregisterCommand api "handoff")))
+  "Nothing to register: `/agent handoff` is dispatched by the agent switcher.
+   Kept so agent_shell/index.cljs' activate/deactivate list is unchanged."
+  [_api]
+  (fn [] nil))

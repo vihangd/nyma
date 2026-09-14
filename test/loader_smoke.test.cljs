@@ -125,21 +125,26 @@
                 test-two-scopes-overriding-one-native-tool)))
 
 (defn ^:async test-plan-resolves-after-full-load []
-  ;; agent_shell and model_roles both want /plan; whoever activates second
-  ;; must skip, or the resolver sees two `__plan` keys and returns nil —
-  ;; "unknown command" for a command two extensions registered. Declaring
-  ;; agent_shell dependsOn model-roles flipped the order and did exactly that.
+  ;; agent_shell and model_roles both wanted /plan, each registering only if
+  ;; the other had not — so which extension owned it depended on load order,
+  ;; and when both won the resolver saw two `__plan` keys and returned nil.
+  ;; Neither registers it now: native plan mode is /planmode (or /mode plan),
+  ;; the ACP agent's is /agent mode plan.
   (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
         api    (create-extension-api agent)
         loaded (js-await (discover-and-load [] api registry))]
     (try
-      (-> (expect (some? (resolve-command @(:commands agent) "plan"))) (.toBe true))
+      (-> (expect (some? (resolve-command @(:commands agent) "planmode"))) (.toBe true))
+      (-> (expect (some? (resolve-command @(:commands agent) "plan"))) (.toBe false))
+      ;; …and the two commands that replaced it are both there.
+      (-> (expect (some? (resolve-command @(:commands agent) "mode"))) (.toBe true))
+      (-> (expect (some? (resolve-command @(:commands agent) "agent"))) (.toBe true))
       (finally
         (js-await (deactivate-all loaded))))))
 
 (describe "loader smoke — built-in extensions"
           (fn []
-            (it "/plan resolves to exactly one command after a full load"
+            (it "/planmode resolves after a full load and /plan does not exist"
                 test-plan-resolves-after-full-load)
             (it "every registry namespace loads and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)

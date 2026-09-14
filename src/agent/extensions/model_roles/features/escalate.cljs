@@ -509,41 +509,56 @@
 ;; activation
 ;; ---------------------------------------------------------------------------
 
-(defn command-handler [api args ctx]
-  (let [sub (str/lower-case (str (first args)))
-        st  (state-atom api)
-        cfg (config (settings api))]
+(def usage-line "Usage: /escalate now | off | status")
+
+(defn status-text
+  "The /escalate status report.
+
+   The failover chain is reported too. It was invisible here, so the only way
+   to tell a configured chain from the empty default was to trigger a provider
+   error and watch — and an empty chain fails exactly like a missing one
+   (rethrow, turn dies). Resolve each entry so a chain naming a role that no
+   longer exists is obvious rather than silently inert."
+  [api]
+  (let [st    (state-atom api)
+        cfg   (config (settings api))
+        role  (or (:active-role @st) "default")
+        chain (chain-for cfg role)]
+    (str "Escalation: " (mode cfg)
+         "\nTarget: " (or (target-spec api (:to cfg)) "(unresolved)")
+         "\nActive: " (or (:escalated-to @st) "no")
+         "\nUsed: " (or (:escalations @st) 0) "/" (:max-per-session cfg)
+         "\nFallback (" role "): "
+         (if (seq chain)
+           (str/join " -> "
+                     (map (fn [e]
+                            (str e " [" (or (target-spec api e) "unresolved") "]"))
+                          chain))
+           "(none — a provider error will end the turn)")
+         (when (:escalate-disarmed @st) "\nDisarmed for this session."))))
+
+(defn command-handler
+  "Bare `/escalate` REPORTS; `/escalate now` acts.
+
+   Bare used to escalate immediately — a name that reads like a topic, on a
+   command whose whole job is to spend more money on a bigger model, with no
+   confirmation and a per-session budget it silently consumed."
+  [api args ctx]
+  (let [sub (str/lower-case (str (or (first args) "")))
+        st  (state-atom api)]
     (cond
       (or (= sub "off") (= sub "stop"))
       (do (swap! st assoc :escalate-disarmed true)
           (revert! api)
           (notify api "Escalation off for this session." "info"))
 
-      (= sub "status")
-      ;; The failover chain is reported too. It was invisible here, so the only
-      ;; way to tell a configured chain from the empty default was to trigger a
-      ;; provider error and watch — and an empty chain fails exactly like a
-      ;; missing one (rethrow, turn dies). Resolve each entry so a chain naming
-      ;; a role that no longer exists is obvious rather than silently inert.
-      (let [role  (or (:active-role @st) "default")
-            chain (chain-for cfg role)]
-        (notify api (str "Escalation: " (mode cfg)
-                         "\nTarget: " (or (target-spec api (:to cfg)) "(unresolved)")
-                         "\nActive: " (or (:escalated-to @st) "no")
-                         "\nUsed: " (or (:escalations @st) 0) "/" (:max-per-session cfg)
-                         "\nFallback (" role "): "
-                         (if (seq chain)
-                           (str/join " -> "
-                                     (map (fn [e]
-                                            (str e " [" (or (target-spec api e) "unresolved") "]"))
-                                          chain))
-                           "(none — a provider error will end the turn)")
-                         (when (:escalate-disarmed @st) "\nDisarmed for this session."))
-                "info"))
-
-      :else
+      (or (= sub "now") (= sub "go"))
       (do (swap! st dissoc :escalate-disarmed)
-          (escalate! api "you asked for it" true)))
+          (escalate! api "you asked for it" true))
+
+      ;; bare, "status", or a typo — report, don't act.
+      :else
+      (notify api (str (status-text api) "\n" usage-line) "info"))
     (when (and ctx (.-ui ctx)) nil)))
 
 (defn activate
@@ -563,7 +578,7 @@
     (.on api "small-model/verify-exhausted" on-vexh)
 
     (.registerCommand api "escalate"
-                      #js {:description "Hand this task to the stronger model. Usage: /escalate [off|status]"
+                      #js {:description "Hand this task to the stronger model. Usage: /escalate [now|off|status]"
                            :handler (fn [args ctx] (command-handler api args ctx))})
 
     (fn []

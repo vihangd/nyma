@@ -10,11 +10,16 @@ Defines named **roles** that map to provider/model pairs (and optionally `allowe
 
 | Command | What it does |
 |---|---|
-| `/model-roles__escalate` | `[/escalate]` — hand the current task to the stronger model, from a pruned context. `/escalate off` reverts and disarms for the session; `/escalate status` shows tier, budget and cooldown |
+| `/model-roles__escalate` | `[/escalate]` — bare, it reports tier, target, budget and failover chain, plus the usage line. `/escalate now` hands the current task to the stronger model from a pruned context; `/escalate off` reverts and disarms for the session; `/escalate status` is the same report as bare |
 | `/model-roles__role` | `[/role <name>]` — switch the active role. With no arg, shows the current role and the list. `/role reset` reverts to `default` |
 | `/model-roles__roles` | List every available role |
 | `/model-roles__planmode` | Enter plan mode: bind the `plan` role (read-only tools, write/edit/bash denied), capture the plan, and hand off to execution on exit |
-| `/model-roles__plan` | Same as `/planmode`; registered only when no other extension (e.g. the ACP agent shell's mode switcher) already owns `/plan` |
+| `/model-roles__mode` | `[/mode <name>]` — switch nyma's permission mode (`default`, `accept-edits`, `plan`, `full-auto`) or `cycle`. `/mode plan` enters native plan mode. With no arg, lists each mode's write/exec/network policy |
+
+There is no `/plan`. Native plan mode is `/planmode` (or `/mode plan`); the ACP
+agent's own plan mode is `/agent mode plan`. Both extensions used to register
+`/plan` behind mirror-image guards, so which one you got depended on load
+order — and two registrations made the resolver return nothing at all.
 
 ## Hooks
 

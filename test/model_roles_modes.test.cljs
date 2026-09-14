@@ -251,11 +251,24 @@
 ;;; ─── Phase 4: mode status-line segment (color-coded) ──
 
 (describe "model-roles-modes:status-segment" (fn []
-                                               (it "default mode + default role are both hidden (no badge)"
+                                               ;; Hiding both defaults made the COMMON case show nothing,
+                                               ;; and nothing reads the same as "these segments are not
+                                               ;; installed". Muted and labelled instead.
+                                               (it "default mode + default role are shown, labelled and muted"
                                                    (fn []
-                                                     (-> (expect (:visible? (status-seg/render-mode "default"))) (.toBeFalsy))
-                                                     (-> (expect (:visible? (status-seg/render-role "default"))) (.toBeFalsy))
-                                                     (-> (expect (:visible? (status-seg/render-role ""))) (.toBeFalsy))))
+                                                     (let [m (status-seg/render-mode "default")
+                                                           r (status-seg/render-role "default")]
+                                                       (-> (expect (:visible? m)) (.toBe true))
+                                                       (-> (expect (:content m)) (.toBe "mode:default"))
+                                                       (-> (expect (:visible? r)) (.toBe true))
+                                                       (-> (expect (:content r)) (.toBe "role:default"))
+                                                       ;; muted, so they never compete with a real badge
+                                                       (-> (expect (:color m)) (.toBe (:color r))))))
+
+                                               (it "an EMPTY axis is still hidden — no data is not a default"
+                                                   (fn []
+                                                     (-> (expect (:visible? (status-seg/render-role ""))) (.toBeFalsy))
+                                                     (-> (expect (:visible? (status-seg/render-mode ""))) (.toBeFalsy))))
 
                                                (it "plan / accept-edits / full-auto each render a visible, colored mode badge"
                                                    (fn []
@@ -298,38 +311,38 @@
 ;;; roles carry none.
 
 (describe "role cycling excludes permission modes"
-  (fn []
-    (it "offers only roles that carry a model"
-        (fn []
-          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
-            (-> (expect (contains? names :default)) (.toBe true))
-            (-> (expect (contains? names :fast)) (.toBe true))
-            (-> (expect (contains? names :deep)) (.toBe true)))))
+          (fn []
+            (it "offers only roles that carry a model"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+                    (-> (expect (contains? names :default)) (.toBe true))
+                    (-> (expect (contains? names :fast)) (.toBe true))
+                    (-> (expect (contains? names :deep)) (.toBe true)))))
 
-    (it "never offers full-auto, which would disable the ask gate"
-        (fn []
-          (let [names (set (mr/cyclable-role-names (:roles defaults)))]
-            (-> (expect (contains? names :full-auto)) (.toBe false))
-            (-> (expect (contains? names :accept-edits)) (.toBe false)))))
+            (it "never offers full-auto, which would disable the ask gate"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names (:roles defaults)))]
+                    (-> (expect (contains? names :full-auto)) (.toBe false))
+                    (-> (expect (contains? names :accept-edits)) (.toBe false)))))
 
-    (it "confirms why: full-auto's allow overrides the default mode's ask"
-        (fn []
+            (it "confirms why: full-auto's allow overrides the default mode's ask"
+                (fn []
           ;; The consequence this guards against, stated as a test rather than
           ;; a comment: combine-decision is deny > allow > ask.
-          (let [mode-d (policy/resolve-decision
-                        (:default (:roles defaults)) "write" "write")
-                role-d (policy/resolve-decision
-                        (:full-auto (:roles defaults)) "write" "write")]
-            (-> (expect (str mode-d)) (.toBe "ask"))
-            (-> (expect (str role-d)) (.toBe "allow"))
-            (-> (expect (str (combine-decision mode-d role-d))) (.toBe "allow")))))
+                  (let [mode-d (policy/resolve-decision
+                                (:default (:roles defaults)) "write" "write")
+                        role-d (policy/resolve-decision
+                                (:full-auto (:roles defaults)) "write" "write")]
+                    (-> (expect (str mode-d)) (.toBe "ask"))
+                    (-> (expect (str role-d)) (.toBe "allow"))
+                    (-> (expect (str (combine-decision mode-d role-d))) (.toBe "allow")))))
 
-    (it "skips a model-less custom role too"
-        (fn []
-          (let [names (set (mr/cyclable-role-names
-                            {:a {:model "m" :provider "p"}
-                             :b {:policy {"write" "allow"}}}))]
-            (-> (expect names) (.toEqual (set [:a]))))))))
+            (it "skips a model-less custom role too"
+                (fn []
+                  (let [names (set (mr/cyclable-role-names
+                                    {:a {:model "m" :provider "p"}
+                                     :b {:policy {"write" "allow"}}}))]
+                    (-> (expect names) (.toEqual (set [:a]))))))))
 
 ;; ── role_change: the seam other extensions use instead of writing :active-role ──
 ;;
@@ -355,5 +368,128 @@
         (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
 
 (describe "model-roles:role_change event" (fn []
-  (it "switches the role for another extension; binds unknown names without a model"
-      test-role-change-event-switches-role)))
+                                            (it "switches the role for another extension; binds unknown names without a model"
+                                                test-role-change-event-switches-role)))
+
+;; ── /mode must not throw away a plan the user has not decided about ──
+;;
+;; Leaving plan mode by any other route used to call cancel! on the way past —
+;; silently, and `/mode cycle` is one keystroke.
+
+(defn ^:async with-model-roles
+  "Activate model_roles on a fresh agent, run `f` with {:agent :cmds :notes}."
+  [f]
+  (let [agent  (create-agent {:model "test" :system-prompt "x"})
+        api    (create-extension-api agent)
+        scoped (create-scoped-api api "model-roles" #{:all})
+        deact  (js-await ((.-default mr) scoped))
+        notes  (atom [])
+        ctx    #js {:ui #js {:notify (fn [m & _] (swap! notes conj (str m)))}}
+        run    (fn [cmd args]
+                 ((.-handler (get @(:commands agent) (str "model-roles__" cmd)))
+                  (clj->js args) ctx))]
+    (try
+      (f {:agent agent :run run :notes notes})
+      (finally
+        (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
+
+(defn ^:async test-mode-refuses-to-discard-an-unapproved-plan []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [agent run notes]}]
+       (run "planmode" [])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (reset! notes [])
+       (run "mode" ["default"])
+       ;; refused: still planning, still read-only, and told why
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (-> (expect (str (:permission-mode @(:state agent)))) (.toBe "plan"))
+       (-> (expect (.includes (apply str @notes) "unapproved plan")) (.toBe true))
+       ;; the cycle shortcut takes the same path — one keystroke must not
+       ;; discard it either
+       (reset! notes [])
+       (run "mode" ["cycle"])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe true))
+       (-> (expect (.includes (apply str @notes) "unapproved plan")) (.toBe true))
+       ;; and the refusal names the two ways out
+       (run "planmode" ["cancel"])
+       (-> (expect (boolean (:plan-mode @(:state agent)))) (.toBe false))
+       (run "mode" ["accept-edits"])
+       (-> (expect (str (:permission-mode @(:state agent)))) (.toBe "accept-edits"))))))
+
+(describe "/mode while a plan is unapproved"
+          (fn []
+            (it "refuses instead of silently discarding the plan"
+                test-mode-refuses-to-discard-an-unapproved-plan)))
+
+;; ── /roles listed policy-only modes as if they were model roles ──
+;;
+;; accept-edits and full-auto carry no model. They appeared under "Model roles"
+;; with "(inherits model)" beside them — which reads as a role you switch to
+;; for a model, the one thing they never do.
+
+(describe "model-roles:policy-line"
+          (fn []
+            (it "reads out write / exec / network for a mode"
+                (fn []
+                  (-> (expect (policy/policy-line (:accept-edits (:roles defaults))))
+                      (.toBe "write allow, exec ask, network ask"))
+                  (-> (expect (policy/policy-line (:full-auto (:roles defaults))))
+                      (.toBe "write allow, exec allow, network allow"))
+                  (-> (expect (policy/policy-line (:default (:roles defaults))))
+                      (.toBe "write ask, exec ask, network ask"))))
+
+            (it "reads plan's per-TOOL denials, which carry no :policy at all"
+                (fn []
+                  ;; Probing by category alone would report plan as unrestricted.
+                  (let [line (policy/policy-line (:plan (:roles defaults)))]
+                    (-> (expect (.includes line "write deny")) (.toBe true))
+                    (-> (expect (.includes line "exec deny")) (.toBe true)))))
+
+            (it "a role with no policy at all is reported as the gate default"
+                (fn []
+                  (-> (expect (policy/policy-line {:model "m" :provider "p"}))
+                      (.toBe "write allow, exec allow, network allow"))))))
+
+(defn ^:async test-roles-splits-models-from-modes []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [run notes]}]
+       (reset! notes [])
+       (run "roles" [])
+       (let [out (apply str @notes)
+             ;; everything printed under the model-roles heading
+             models (first (.split out "Permission modes"))]
+         (-> (expect (.includes out "Model roles:")) (.toBe true))
+         (-> (expect (.includes out "Permission modes (use /mode)")) (.toBe true))
+         ;; model-less modes are NOT model roles
+         (-> (expect (.includes models "full-auto")) (.toBe false))
+         (-> (expect (.includes models "accept-edits")) (.toBe false))
+         (-> (expect (.includes models "(inherits model)")) (.toBe false))
+         ;; and real model roles still are
+         (-> (expect (.includes models "fast")) (.toBe true))
+         (-> (expect (.includes models "deep")) (.toBe true))
+         ;; the modes section says what each one actually does
+         (-> (expect (.includes out "write allow, exec allow, network allow")) (.toBe true)))))))
+
+(defn ^:async test-mode-bare-prints-each-policy []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [run notes]}]
+       (reset! notes [])
+       (run "mode" [])
+       (let [out (apply str @notes)]
+         (doseq [m policy/mode-cycle]
+           (-> (expect #js [m (boolean (.includes out (str "  " m " → ")))])
+               (.toEqual #js [m true])))
+         (-> (expect (.includes out "write ask, exec ask, network ask")) (.toBe true))
+         (-> (expect (.includes out "write allow, exec allow, network allow")) (.toBe true))
+         ;; and it still marks where you are
+         (-> (expect (.includes out "◀")) (.toBe true)))))))
+
+(describe "/roles and /mode say what each entry does"
+          (fn []
+            (it "/roles lists model roles and permission modes separately"
+                test-roles-splits-models-from-modes)
+            (it "/mode with no argument prints each mode's policy"
+                test-mode-bare-prints-each-policy)))

@@ -262,13 +262,20 @@ this reason.
 
 Model IDs are provided by the agent at connect time via `config_option_update` notifications. The fuzzy picker searches both the model ID and display name.
 
-### `/plan` — Plan/read-only mode
+### `/agent mode <id>` — Set the agent's mode
 
-Switches the agent to a cautious mode where it can read files and propose changes but won't execute them without confirmation.
+Sets the connected ACP agent's permission mode. Plan mode lives here:
 
 ```
-/plan
+/agent mode plan        → cautious: read and propose, do not execute
+/agent mode             → list the modes this agent declares
 ```
+
+This is the **agent's** mode, not nyma's own approval policy — that is `/mode`.
+There is no `/plan`: agent-shell and model_roles both used to register one
+behind mirror-image guards, so which you got depended on load order, and two
+registrations made the resolver return nothing. nyma's native plan mode is
+`/planmode` (or `/mode plan`).
 
 ### `/yolo` — Auto-approve everything
 
@@ -371,7 +378,7 @@ describe them. Capture still works, and warns only if the agent **actually
 completed** file changes during the session — a plan for work already done
 would send the executing model over the same ground. A write you declined
 changed nothing and is not flagged. `--any-mode` silences the warning. Run
-`/plan` after connecting, or set it once:
+`/agent mode plan` after connecting, or set it once:
 
 ```json
 { "agent-shell": { "claude": { "init-mode": "plan" } } }
@@ -414,11 +421,11 @@ request: add OAuth login to the API
 ---
 ```
 
-### `/handoff` — Transfer to another agent
+### `/agent handoff` — Transfer to another agent
 
 ```
-/handoff <agent>                  → hand off with automatic context
-/handoff <agent> <context message> → hand off with custom context
+/agent handoff <agent>                  → hand off with automatic context
+/agent handoff <agent> <context message> → hand off with custom context
 ```
 
 ---
@@ -490,7 +497,7 @@ Modes control the agent's permission behavior and execution style. Available mod
 
 | Command | Claude | Gemini | Qwen | Goose |
 |---|---|---|---|---|
-| `/plan` | `plan` | `plan` | — | — |
+| `/agent mode plan` | `plan` | `plan` | — | — |
 | `/yolo` | `bypassPermissions` | `yolo` | `yolo` | — |
 | `/approve` | `default` | `default` | `default` | `approve` |
 | `/auto-edit` | `acceptEdits` | `auto_edit` | — | — |
@@ -717,11 +724,11 @@ Note: The refreshed list only takes effect for new agent connections. Existing s
 
 ## Agent Handoff
 
-The `/handoff` command disconnects the current agent and connects a new one, preserving context via a prefilled prompt.
+The `/agent handoff` command disconnects the current agent and connects a new one, preserving context via a prefilled prompt.
 
 ```
-/handoff gemini
-/handoff claude "Focus on the authentication module"
+/agent handoff gemini
+/agent handoff claude "Focus on the authentication module"
 ```
 
 ### Handoff Process
@@ -907,12 +914,12 @@ index.cljs
       ├── input-router      → hooks 'input' event, forwards to ACP agent
       ├── agent-switcher    → /agent, /disconnect
       ├── model-switcher    → /model
-      ├── mode-switcher     → /plan, /yolo, /approve, /auto-edit
+      ├── mode-switcher     → /yolo, /approve, /auto-edit, /agent mode <id>
       ├── effort-switcher   → /effort <low|medium|high|max|auto>
       ├── permission-ui     → --auto-approve flag
       ├── session-mgmt      → /sessions
       ├── cost-tracker      → acp_usage event listener
-      ├── handoff           → /handoff
+      ├── handoff           → /agent handoff
       └── mcp-discovery     → /mcp, scans .mcp.json
 ```
 

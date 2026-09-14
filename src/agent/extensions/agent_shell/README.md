@@ -4,7 +4,9 @@
 
 ## What it does
 
-`agent-shell` lets nyma drive other coding agents as backends. It speaks **ACP** (Agent Client Protocol — JSON-RPC 2.0 over stdio) to spawn and supervise an external agent, then routes user input, tool calls, and approvals between the nyma TUI and the agent process. Switch agents with `/agent`, swap models with `/model`, change autonomy with `/plan`, `/yolo`, `/approve`, and `/auto-edit`, and hand off a session to a different agent with `/handoff`.
+`agent-shell` lets nyma drive other coding agents as backends. It speaks **ACP** (Agent Client Protocol — JSON-RPC 2.0 over stdio) to spawn and supervise an external agent, then routes user input, tool calls, and approvals between the nyma TUI and the agent process. Switch agents with `/agent`, swap models with `/model`, change autonomy with `/agent mode <id>`, `/yolo`, `/approve`, and `/auto-edit`, and hand off a session to a different agent with `/agent handoff`.
+
+These change the **ACP agent's** mode, not nyma's own approval policy — that is `/mode`. Plan mode is `/agent mode plan` here and `/planmode` in nyma; there is no `/plan`, because both extensions used to register one and the resolver could not tell them apart.
 
 This is the most feature-rich extension in the tree. For details — wire format, sub-features, MCP discovery, cost tracking, transcript handling — see [`docs/agent-shell.md`](../../../../docs/agent-shell.md) (881 lines).
 
@@ -12,15 +14,15 @@ This is the most feature-rich extension in the tree. For details — wire format
 
 | Command | What it does |
 |---|---|
-| `/agent` | Connect, detach, disconnect, list, or switch the active agent |
+| `/agent` | Connect, detach, disconnect, list, or switch the active agent; `/agent handoff` transfers the session |
 | `/disconnect` | Disconnect the currently active agent |
 | `/model` | Show the model picker, list models, or switch model directly |
-| `/plan` | Plan / read-only mode |
+| `/agent mode <id>` | Set the ACP agent's mode — this is where plan mode lives (`/agent mode plan`) |
 | `/yolo` | Auto-approve every action |
 | `/approve` | Default mode — prompt for every tool call |
 | `/auto-edit` | Auto-approve edits, prompt for shell |
 | `/effort` | Set thinking effort (low / medium / high / max / auto) |
-| `/handoff` | Hand the current session off to a different agent, with context transfer |
+| `/agent handoff` | Hand the current ACP session off to a different agent, with context transfer. (Top-level `/handoff` belongs to the `handoff` extension, which writes a session brief — the two used to collide and make `/handoff` unresolvable.) |
 | `/mcp` | Discover and manage MCP servers from project config (`.mcp.json`, `.cursor/mcp.json`, …) |
 | `/sessions` | List, resume, or create new agent sessions |
 | `/plan-capture` | Write the agent's plan to `.nyma/plans/` and detach, so a cheap local model can execute it |
@@ -70,10 +72,10 @@ file changes — a declined write changed nothing. Set plan mode once with
 |---|---|
 | `agent_switcher.cljs` | `/agent` — connect / disconnect / list / switch |
 | `model_switcher.cljs` | `/model` — fuzzy picker, agent-specific dispatch |
-| `mode_switcher.cljs` | `/plan`, `/yolo`, `/approve`, `/auto-edit` |
+| `mode_switcher.cljs` | `/yolo`, `/approve`, `/auto-edit`, and the `/agent mode <id>` dispatch |
 | `effort_switcher.cljs` | `/effort` thinking-level control |
 | `session_mgmt.cljs` | `/sessions` list / resume / new |
-| `handoff.cljs` | `/handoff` with context capture and transfer |
+| `handoff.cljs` | `/agent handoff` with context capture and transfer |
 | `permission_ui.cljs` | `--auto-approve` flag handling |
 | `mcp_discovery.cljs` | Finds `.mcp.json` / `.cursor/mcp.json` MCP server configs |
 | `acp/*` | ACP transport — JSON-RPC framing, pool, schema, sessions |

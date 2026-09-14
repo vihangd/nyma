@@ -50,7 +50,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
                                                                         :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "openai/gpt-5")))))
 
             (it "falls back to the :default role's model when no base-spec (non-cli paths)"
@@ -59,7 +59,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic"
                                                                         :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                        :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/default-model-spec api)) (.toBe "anthropic/claude-sonnet-4-20250514")))))
 
             ;; B6: effective-model-spec is the single resolver — "default" → base
@@ -70,7 +70,7 @@
                                  :getSettings (fn [] {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
                                                               :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"}
-                                                              :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
+                                                                        :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))}]
                     (-> (expect (pm/effective-model-spec api "default")) (.toBe "openai/gpt-5"))
                     (-> (expect (pm/effective-model-spec api :deep)) (.toBe "anthropic/claude-opus-4-20250514")))))))
 
@@ -89,7 +89,7 @@
                                  :getSettings     (fn [] {:roles {:default {:provider "anthropic"
                                                                             :model "claude-sonnet-4-20250514"}}})
                                  :settings (fn [sec] (let [all {:roles {:default {:provider "anthropic"
-                                                                            :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
+                                                                                  :model "claude-sonnet-4-20250514"}}}] (if sec (or (get all sec) {}) (or all {}))))
                                  :setModel        (fn [m] (swap! set-calls conj m))
                                  :sendUserMessage (fn [_t _o] nil)
                                  :ui              #js {:available false :notify (fn [_ _] nil)}}]
@@ -208,7 +208,12 @@
                     (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (count @sent)) (.toBe 0)))))))
 
-;; ── /plan guard: only register /plan when no extension owns a *__plan ──
+;; ── there is no /plan ──
+;;
+;; Both this extension and agent_shell's ACP mode switcher used to register
+;; /plan behind mirror-image guards: ownership depended on load order, and two
+;; registrations made the resolver return nothing for /plan at all. Native plan
+;; mode is /planmode; the ACP agent's is /agent mode plan.
 (defn- guard-api [cmds registered]
   #js {:getCommands       (fn [] @cmds)
        :registerCommand   (fn [n o] (swap! registered assoc n o))
@@ -216,20 +221,12 @@
        :on                (fn [_e _h] nil)
        :off               (fn [_e _h] nil)})
 
-(describe "plan-mode:plan-command-guard"
+(describe "plan-mode:command-registration"
           (fn []
-            (it "registers /plan when no extension owns a __plan command"
+            (it "registers /planmode and never /plan"
                 (fn []
                   (let [registered (atom {})
                         api (guard-api (atom {"model-roles__role" {}}) registered)]
-                    (pm/activate api)
-                    (-> (expect (contains? @registered "planmode")) (.toBe true))
-                    (-> (expect (contains? @registered "plan")) (.toBe true)))))
-
-            (it "skips /plan when agent_shell already owns a __plan command"
-                (fn []
-                  (let [registered (atom {})
-                        api (guard-api (atom {"agent-shell__plan" {}}) registered)]
                     (pm/activate api)
                     (-> (expect (contains? @registered "planmode")) (.toBe true))
                     (-> (expect (contains? @registered "plan")) (.toBe false)))))))
@@ -376,7 +373,44 @@
                                  ;; gate could not prompt → stays in plan mode, notified (not silent)
                                  (-> (expect (:plan-mode @st)) (.toBe true))
                                  (-> (expect (count @sent)) (.toBe 0))
-                                 (-> (expect (some #(.includes % "no UI") @notes)) (.toBeTruthy))))))))))
+                                 (-> (expect (some #(.includes % "no UI") @notes)) (.toBeTruthy))))))))
+
+            ;; The escape hatches must name a command that exists. /plan may be
+            ;; the ACP agent shell's, and is no longer registered by this
+            ;; extension at all — the native one is /planmode.
+            (it "every escape hatch it prints names /planmode, never /plan"
+                (fn []
+                  (let [notes (atom [])
+                        run   (fn [state data]
+                                (pm/on-turn-finalize (notify-api (atom state) (atom []) notes) data))]
+                    (-> (js/Promise.all
+                         #js [(run {:plan-mode true :active-role :plan
+                                    :messages [{:role "assistant" :content "Plan:\n1. step"}]}
+                                   #js {:error true})
+                              (run {:plan-mode true :active-role :plan
+                                    :messages [{:role "assistant" :content "Plan:\n1. do x"}]}
+                                   #js {:error false})])
+                        (.then (fn [_]
+                                 (let [all (apply str @notes)]
+                                   (-> (expect (.includes all "/planmode cancel")) (.toBe true))
+                                   (-> (expect (.includes all "/planmode execute")) (.toBe true))
+                                   (-> (expect (.includes all "/plan cancel")) (.toBe false))
+                                   (-> (expect (.includes all "/plan execute")) (.toBe false)))))))))
+
+            ;; The plan file was written and never mentioned: the one durable
+            ;; artifact of a planning session was findable only by guessing.
+            (it "says where the plan file was written"
+                (fn []
+                  (let [st    (atom {:plan-mode true :active-role :plan
+                                     :messages [{:role "assistant" :content "Plan:\n1. do x"}]})
+                        notes (atom [])
+                        api   (notify-api st (atom []) notes)]
+                    (-> (pm/on-turn-finalize api #js {:error false})
+                        (.then (fn [_]
+                                 (let [line (first (filter #(.includes % "Plan written to") @notes))]
+                                   (-> (expect (some? line)) (.toBe true))
+                                   (-> (expect (.includes (str line) ".nyma/plans/")) (.toBe true))
+                                   (-> (expect (.endsWith (str line) ".md")) (.toBe true)))))))))))
 
 ;; ── Phase 1: manual /plan execute|cancel escape hatch ──
 (defn- cmd-api [st sent notes cmds]

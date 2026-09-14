@@ -140,6 +140,34 @@
                             (or tools-hint "") marker))))
                  roles)))
 
+(defn model-roles-only
+  "Pure: the entries of `roles` that actually pin a model. The rest are
+   permission MODES (accept-edits, full-auto) — /roles listed them under
+   \"Model roles\" with \"(inherits model)\" beside them, which reads as a role
+   you can switch to for a model and is the one thing they never do."
+  [roles]
+  (into {} (filter (fn [[_ cfg]] (:model cfg)) roles)))
+
+(defn policy-roles-only
+  "Pure: the model-LESS entries — the permission modes."
+  [roles]
+  (into {} (remove (fn [[_ cfg]] (:model cfg)) roles)))
+
+(defn- format-roles-listing
+  "The /roles output: model roles, then the permission modes under their own
+   heading pointing at the command that actually switches them."
+  [roles active-role default-spec]
+  (let [models (model-roles-only roles)
+        modes  (policy-roles-only roles)]
+    (str "Model roles:\n"
+         (format-role-list models active-role default-spec)
+         (when (seq modes)
+           (str "\n\nPermission modes (use /mode):\n"
+                (str/join "\n"
+                          (map (fn [[mname mcfg]]
+                                 (str "  " mname " → " (policy/policy-line mcfg)))
+                               modes)))))))
+
 ;; ── permission modes (orthogonal to the model role) ──
 ;; :permission-mode is a SECOND state slot, independent of :active-role (the
 ;; model role). The mode drives the approval policy + plan gate; the role drives
@@ -160,8 +188,13 @@
 
 (defn- switch-mode!
   "Switch the permission mode (NOT the model role). \"plan\" engages native plan
-   mode (enter!); any other mode leaves plan mode first (discarding the draft)
-   then sets :permission-mode. The model role is untouched."
+   mode (enter!); any other mode is REFUSED while a plan is unapproved. The
+   model role is untouched.
+
+   It used to cancel! the plan draft on the way past — silently, including on
+   `/mode cycle`, which is one keystroke. The plan is work the user has not
+   decided about yet, so discarding it is their call: /planmode execute or
+   /planmode cancel."
   [api mode ctx]
   (let [state    (.getState api)
         in-plan? (:plan-mode state)
@@ -173,9 +206,11 @@
       (= mode "plan")
       (if in-plan? (.notify ui "Already in plan mode." "info") (plan-mode/enter! api))
 
+      in-plan?
+      (.notify ui "You have an unapproved plan — /planmode execute, or /planmode cancel to discard." "warning")
+
       :else
       (do
-        (when in-plan? (plan-mode/cancel! api))
         (swap! (.-__state-atom api) assoc :permission-mode mode)
         (.notify ui (str "Mode: " mode) "info")))))
 
@@ -360,8 +395,8 @@
                                    state   (.getState api)
                                    current (or (:active-role state) :default)]
                                (.notify (.-ui ctx)
-                                        (str "Model Roles:\n"
-                                             (format-role-list roles current (plan-mode/default-model-spec api))))))})
+                                        (format-roles-listing
+                                         roles current (plan-mode/default-model-spec api)))))})
 
     ;; /mode command — permission modes (modes-as-roles).
     (.registerCommand api "mode"
@@ -371,11 +406,21 @@
                              (let [arg (.toLowerCase (str (or (first args) "")))]
                                (cond
                                  (= arg "")
-                                 (.notify (.-ui ctx)
-                                          (str "Active mode: " (current-mode api)
-                                               "\nModes: " (str/join ", " mode-cycle)
-                                               "\nUsage: /mode <name> | /mode cycle")
-                                          "info")
+                                 ;; Each mode's actual policy, not just its
+                                 ;; name: four bare names left the difference
+                                 ;; between them readable only in the source.
+                                 (let [roles (get-roles api)
+                                       cur   (current-mode api)]
+                                   (.notify (.-ui ctx)
+                                            (str "Active mode: " cur "\n\nModes:\n"
+                                                 (str/join "\n"
+                                                           (map (fn [m]
+                                                                  (str "  " m " → "
+                                                                       (policy/policy-line (get roles m))
+                                                                       (when (= m cur) " ◀")))
+                                                                mode-cycle))
+                                                 "\n\nUsage: /mode <name> | /mode cycle")
+                                            "info"))
                                  (= arg "cycle")
                                  (switch-mode! api (next-mode (current-mode api)) ctx)
                                  :else

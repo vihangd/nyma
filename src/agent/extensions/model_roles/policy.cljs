@@ -78,3 +78,29 @@
         policy (:policy role-cfg)]
     (or (get perms (str tool))
         (get policy (str category)))))
+
+;; ── what a mode actually does, in one line ───────────────────────────────
+;; `/mode` listed four names and nothing else, so choosing between them meant
+;; reading model_roles' source. The three categories the gate can ask about,
+;; each probed through the tool the gate would actually see: :plan states its
+;; restrictions per-TOOL (write/edit/bash deny) rather than as a :policy, so
+;; probing by category alone would report it as unrestricted.
+
+(def policy-categories ["write" "exec" "network"])
+
+(def ^:private category-probe
+  {"write" "write" "exec" "bash" "network" "web_fetch"})
+
+(defn policy-summary
+  "Pure: role-cfg → [[category decision] …] over `policy-categories`, in that
+   fixed order. No entry from either axis means the gate's default, allow."
+  [cfg]
+  (mapv (fn [c] [c (str (or (resolve-decision cfg (get category-probe c) c) "allow"))])
+        policy-categories))
+
+(defn policy-line
+  "Pure: role-cfg → \"write ask, exec ask, network ask\"."
+  [cfg]
+  (.join (.map (clj->js (policy-summary cfg))
+               (fn [pair] (str (aget pair 0) " " (aget pair 1))))
+         ", "))

@@ -1442,7 +1442,12 @@
                                                    " (decomposition runs on this)\n"))
                                             "\n\nDecomposition queued — the next agent turn will read\n"
                                             "  " (path/relative cwd src-path) "\n"
-                                            "and populate the files. Send any message (e.g. \"go\") to start.\n"
+                                            ;; --run calls start-turn! below, so telling the user to
+                                            ;; send a message was wrong: it invited a second turn
+                                            ;; on top of the one already running.
+                                            (if run?
+                                              "and populate the files. Decomposition turn started.\n"
+                                              "and populate the files. Send any message (e.g. \"go\") to start.\n")
                                             (if run?
                                               (str "\nSpec activated; the loop arms itself as soon as the\n"
                                                    "decomposition lands. Started without /spec analyze —\n"

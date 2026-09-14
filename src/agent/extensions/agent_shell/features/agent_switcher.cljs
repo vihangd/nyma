@@ -4,6 +4,8 @@
             [agent.extensions.agent-shell.agents.registry :as registry]
             [agent.extensions.agent-shell.acp.pool :as pool]
             [agent.extensions.agent-shell.acp.client :as client]
+            [agent.extensions.agent-shell.features.handoff :as handoff]
+            [agent.extensions.agent-shell.features.mode-switcher :as mode-switcher]
             [clojure.string :as str]))
 
 (defn- notify [api msg & [level]]
@@ -132,11 +134,27 @@
                         agents)]
     (notify api (str "Available agents:\n" (str/join "\n" lines)))))
 
+(defn- set-mode!
+  "`/agent mode <id>` — the ACP agent's own permission mode. Plan mode lives
+   here rather than at /plan, which both this extension and model_roles' native
+   plan mode used to claim (load-order dependent, and ambiguous when both won)."
+  [api mode-id]
+  (if (empty? (str (or mode-id "")))
+    (let [agent-def (get registry/agents @shared/active-agent)
+          modes     (keys (:modes agent-def))]
+      (notify api (str "Usage: /agent mode <id>"
+                       (when (seq modes)
+                         (str "\n" (:name agent-def) " supports: "
+                              (str/join ", " (map shared/kw-name modes))))
+                       "\n(this is the ACP agent's mode; for nyma's own permission mode use /mode)")
+              "info"))
+    (mode-switcher/switch-mode! api (str mode-id))))
+
 (defn activate
   "Register the /agent command."
   [api]
   (.registerCommand api "agent"
-                    #js {:description "Connect to a coding agent. /agent <key> | detach | disconnect"
+                    #js {:description "Connect to a coding agent. /agent <key> | handoff | mode <id> | detach | disconnect"
                          :handler (fn [args _ctx]
                                     (let [subcmd (first args)]
                                       (cond
@@ -148,6 +166,16 @@
 
                                         (= subcmd "detach")
                                         (detach-agent! api)
+
+                                        ;; Agent-scoped handoff. The top-level
+                                        ;; /handoff belongs to the `handoff`
+                                        ;; extension (session brief); this one
+                                        ;; moves an ACP session to another agent.
+                                        (= subcmd "handoff")
+                                        (handoff/handle api (vec (rest args)))
+
+                                        (= subcmd "mode")
+                                        (set-mode! api (second args))
 
                                         :else
                                         (connect-agent! api subcmd))))})
