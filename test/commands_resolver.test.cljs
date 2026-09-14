@@ -58,4 +58,11 @@
 
                                               (it "returns nil when no exact and no suffix matches"
                                                   (fn []
-                                                    (-> (expect (resolve-command commands "nonexistent")) (.toBeNil))))))
+                                                    (-> (expect (resolve-command commands "nonexistent")) (.toBeNil))))
+
+                                              (it "resolves an alias a registration declares (/q → exit)"
+                                                  (fn []
+                                                    ;; /help printed `/exit (quit, q)` for months while /q did nothing.
+                                                    (let [cmds (assoc commands "exit" {:handler :exit-fn :aliases ["quit" "q"]})]
+                                                      (-> (expect (:handler (resolve-command cmds "q"))) (.toBe :exit-fn))
+                                                      (-> (expect (:handler (resolve-command cmds "quit"))) (.toBe :exit-fn)))))))
