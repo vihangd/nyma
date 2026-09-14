@@ -15,8 +15,8 @@
    :sections ["architecture" "workflows" "domain" "operations" "testing"]})
 
 (defn config
-  "Merge user settings#openwiki over defaults. `settings` is the JS object
-   returned by api.getSettings (or nil)."
+  "Merge user settings#openwiki over defaults. `settings` is the merged map
+   from `(.settings api)` (or nil)."
   [settings]
   (let [ow (when settings (aget settings "openwiki"))]
     (merge default-config

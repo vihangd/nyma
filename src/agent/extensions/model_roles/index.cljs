@@ -61,17 +61,13 @@
    disabled (empty string) without a code change; ctrl+r is deliberately not
    the default because prompt_history registers it."
   [api]
-  (let [settings (try (when (.-getSettings api) (.getSettings api))
-                      (catch :default _ nil))
+  (let [settings (.settings api)
         ;; Top-level, same as `roles` (index/get-roles) and as documented in
         ;; the README's settings table. A nested "model-roles" map is also
         ;; accepted so either spelling works.
-        mr       (when settings
-                   (or (get settings "model-roles") (get settings :model-roles)))
-        k        (or (when settings
-                       (or (get settings "cycle-key") (get settings :cycle-key)))
-                     (when mr
-                       (or (get mr "cycle-key") (get mr :cycle-key))))]
+        mr       (get settings "model-roles")
+        k        (or (get settings "cycle-key")
+                     (when mr (get mr "cycle-key")))]
     (if (some? k) (str k) "ctrl+g")))
 
 (defn cyclable-role-names
@@ -97,11 +93,10 @@
    a non-default provider inherits the default model, so no cross-provider leak).
    Accepts both CLJS maps and plain JS objects (from JSON.parse)."
   [api]
-  (let [settings   (when-let [get-fn (.-getSettings api)] (get-fn))
-        raw-roles  (or (when settings (get settings "roles"))
-                       (when settings (get settings :roles)))
-        def-prov   (when settings (or (:provider settings) (get settings "provider")))
-        def-model  (when settings (or (:model settings) (get settings "model")))
+  (let [settings   (.settings api)
+        raw-roles  (get settings "roles")
+        def-prov   (:provider settings)
+        def-model  (:model settings)
         user-roles (cond
                      (map? raw-roles)    raw-roles
                      (some? raw-roles)   (js-obj->map raw-roles)

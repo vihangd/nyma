@@ -264,8 +264,7 @@
 ;; ── Entry point ──────────────────────────────────────────────────
 
 (defn ^:export default [api]
-  (let [settings       (try (when (.-getSettings api) (.getSettings api))
-                            (catch :default _ nil))
+  (let [settings       (.settings api)
         user-entries   (some-> settings load-settings-models
                                (->> (mapv normalize-entry)))
         ;; Merge: user entries override presets with the same name

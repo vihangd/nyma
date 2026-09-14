@@ -36,8 +36,7 @@ the user will approve the plan before execution begins.")
 (defn- state-atom [api] (.-__state-atom api))
 (defn- cur-state [api] (.getState api))
 
-(defn- settings [api]
-  (when-let [g (.-getSettings api)] (g)))
+(defn- settings [api] (.settings api))
 
 (defn- auto-approve? [api]
   ;; Tolerate keyword (CLJS defaults) and string (user JSON) keys.

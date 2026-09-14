@@ -98,7 +98,8 @@
                :off               (fn [_e _h] nil)
                :events            #js {:emit (fn [_e _d] nil)}
                :sendUserMessage   (fn [_t _o] nil)
-               :getSettings       (fn [] #js {})}
+               :getSettings       (fn [] #js {})
+               :settings (fn [sec] (let [all #js {}] (if sec (or (get all sec) {}) (or all {}))))}
      :state st :notes notes :cmds cmds :evs evs}))
 
 (defn- spec-cmd!

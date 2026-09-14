@@ -42,8 +42,7 @@
     f))
 
 (defn ^:export default [api]
-  (let [settings (try (when (.-getSettings api) (.getSettings api)) (catch :default _ nil))
-        config   (shared/config settings)
+  (let [config   (shared/config (.settings api))
         dir      (:dir config)
         handlers (atom [])
 

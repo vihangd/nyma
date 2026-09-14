@@ -57,6 +57,7 @@
          :registerTool            (fn [name spec] (swap! tools assoc name spec))
          :unregisterTool          (fn [name] (swap! tools dissoc name))
          :getSettings             (fn [] (clj->js @settings))
+         :settings (fn [sec] (let [all (clj->js @settings)] (if sec (or (get all sec) {}) (or all {}))))
          :updateSettings          (fn [patch] (swap! settings merge (js->clj-safe patch)))
          :log                     (fn [& _args])
          :exec                    (fn [_bin _args]

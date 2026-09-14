@@ -99,7 +99,8 @@
     #js {:getState     (fn [] {:messages (or messages [])})
          :resolveModel (fn [_p _m] resolved-model)
          :__state_atom (atom {:config {:model resolved-model}})
-         :getSettings  (fn [] settings)}))
+         :getSettings  (fn [] settings)
+         :settings (fn [sec] (let [all settings] (if sec (or (get all sec) {}) (or all {}))))}))
 
 (defn ^:async test-consult-empty-transcript []
   (let [api (make-fake-api {:messages []})
@@ -154,7 +155,8 @@
         api #js {:getState     (fn [] {:messages [{:role "user" :content "hi"}]})
                  :resolveModel (fn [_ _] (throw (js/Error. "No credentials")))
                  :__state_atom (atom {:model current-model})
-                 :getSettings  (fn [] {})}
+                 :getSettings  (fn [] {})
+                 :settings (fn [sec] (let [all {}] (if sec (or (get all sec) {}) (or all {}))))}
         captured (atom nil)
         gen (fn [cfg]
               (reset! captured cfg)
@@ -173,7 +175,8 @@
   (let [api #js {:getState     (fn [] {:messages [{:role "user" :content "hi"}]})
                  :resolveModel (fn [_ _] nil)
                  :__state_atom (atom {:config {:model nil}})
-                 :getSettings  (fn [] {})}
+                 :getSettings  (fn [] {})
+                 :settings (fn [sec] (let [all {}] (if sec (or (get all sec) {}) (or all {}))))}
         result (js-await (adv/consult-advisor api {} {}))]
     (-> (expect (.includes result "no model resolved")) (.toBe true))))
 

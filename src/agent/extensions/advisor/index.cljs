@@ -223,9 +223,7 @@ plain text; the executor will read it on its next turn.")
                       :execute    (fn [args]
                                     (consult-advisor
                                      api
-                                     (or (and (.-getSettings api)
-                                              (.getSettings api))
-                                         {})
+                                     (.settings api)
                                      {:focus (.-focus args)}))})
 
   ;; Slash command: user-driven forced consultation.
@@ -234,9 +232,7 @@ plain text; the executor will read it on its next turn.")
                          :handler
                          (fn [args ctx]
                            (let [focus (when (seq args) (.join (clj->js args) " "))
-                                 settings (or (and (.-getSettings api)
-                                                   (.getSettings api))
-                                              {})]
+                                 settings (.settings api)]
                              (-> (consult-advisor api settings {:focus focus})
                                  (.then (fn [text]
                                           (.notify (.-ui ctx)

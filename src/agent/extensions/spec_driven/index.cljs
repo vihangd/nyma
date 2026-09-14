@@ -973,9 +973,7 @@
         ;; Merged live settings (defaults < global < project < overrides).
         ;; read-spec-settings deliberately reads the PROJECT file only, for the
         ;; shape dials; phase config has to see global settings too.
-        safe-settings (fn []
-                        (try (when (.-getSettings api) (.getSettings api))
-                             (catch :default _ nil)))
+        safe-settings (fn [] (.settings api))
 
         ;; ── Phase state ────────────────────────────────────────
         ;; Phase and profile live beside :active-spec — in the state atom for
@@ -1569,35 +1567,35 @@
                                  (str "spec: analyzing " target
                                       " — checking the plan against the spec"))
                         (-> (generateText
-                           #js {:model    model
-                                :messages #js [#js {:role    "user"
-                                                    :content prompt}]
-                                :maxTokens 4096})
-                          (.then
-                           (fn [result]
-                             (let [report (.-text result)
-                                   parsed (analyze/parse-analyze-output report)
-                                   hash   (analyze/compute-content-hash
-                                           {:spec-content         spec-c
-                                            :plan-content         plan-c
-                                            :tasks-content        tasks-c
-                                            :constitution-content const-c})]
+                             #js {:model    model
+                                  :messages #js [#js {:role    "user"
+                                                      :content prompt}]
+                                  :maxTokens 4096})
+                            (.then
+                             (fn [result]
+                               (let [report (.-text result)
+                                     parsed (analyze/parse-analyze-output report)
+                                     hash   (analyze/compute-content-hash
+                                             {:spec-content         spec-c
+                                              :plan-content         plan-c
+                                              :tasks-content        tasks-c
+                                              :constitution-content const-c})]
                                ;; Persist the run for soft-block on start.
-                               (analyze/write-analyze-result!
-                                cwd target
-                                {:content-hash   hash
-                                 :critical-count (:critical-count parsed)
-                                 :finding-count  (count (:findings parsed))})
+                                 (analyze/write-analyze-result!
+                                  cwd target
+                                  {:content-hash   hash
+                                   :critical-count (:critical-count parsed)
+                                   :finding-count  (count (:findings parsed))})
                                ;; Render the full Markdown report.
+                                 (set-analyzing! false)
+                                 (.notify (.-ui ctx) (or report "")))))
+                            (.catch
+                             (fn [e]
                                (set-analyzing! false)
-                               (.notify (.-ui ctx) (or report "")))))
-                          (.catch
-                           (fn [e]
-                             (set-analyzing! false)
-                             (.notify (.-ui ctx)
-                                      (str "Analyze failed: "
-                                           (or (.-message e) (str e)))
-                                      "error")))))))))
+                               (.notify (.-ui ctx)
+                                        (str "Analyze failed: "
+                                             (or (.-message e) (str e)))
+                                        "error")))))))))
 
               "install-skill"
               (let [opts   (vec rest-)
@@ -2098,7 +2096,7 @@
                   (do (swap! loop-iteration inc)
                       (when (fresh? cfg) (reset-context!))
                       ((.-sendUserMessage api) (prompt-for-phase phase)
-                       #js {:deliverAs "followUp"}))
+                                               #js {:deliverAs "followUp"}))
 
                   "advance"
                   (let [nxt (:next-phase d)
@@ -2109,7 +2107,7 @@
                     ;; The prompt of the phase we are entering, not the one we
                     ;; just left.
                     ((.-sendUserMessage api) (prompt-for-phase nxt)
-                     #js {:deliverAs "followUp"}))
+                                             #js {:deliverAs "followUp"}))
 
                   "hold"
                   ;; Verify holds silently: verify_gate's fix follow-up is the

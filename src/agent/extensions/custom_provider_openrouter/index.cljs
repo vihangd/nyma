@@ -149,8 +149,7 @@
            id)))
 
 (defn ^:export default [api]
-  (reset! settings-atom (try (when (.-getSettings api) (.getSettings api))
-                             (catch :default _e nil)))
+  (reset! settings-atom (.settings api))
   (reset! level-fn-atom (when (.-getThinkingLevel api)
                           (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name

@@ -19,6 +19,7 @@
     #js {:__state_atom st
          :getState     (fn [] @st)
          :getSettings  (fn [] (or (:settings opts) settings))
+         :settings (fn [sec] (let [all (or (:settings opts) settings)] (if sec (or (get all sec) {}) (or all {}))))
          :setModel     (fn [m] (swap! (:set-calls opts) conj m))
          :resolveModel (fn [p m] #js {:id (str p "/" m)})
          :sendUserMessage (fn [text o] (swap! (:sent opts) conj [text (.-deliverAs o)]))
