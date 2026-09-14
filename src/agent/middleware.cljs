@@ -319,14 +319,24 @@
             (tool-tracking-leave events store ctx))})
 
 (defn- categorize-tool
-  "Categorize a tool for permission checking."
+  "Categorize a tool for permission checking. Built-ins by name; anything
+   else by the safety metadata it registered (`registerTool` reads a
+   `:safety` field off the tool def). No metadata → \"other\", which no
+   role policy maps, so the gate allows it — an extension tool that edits
+   files and says nothing about itself is invisible to /plan and ask-mode."
   [tool-name]
   (cond
     (#{"bash"} tool-name)                     "exec"
     (tool-metadata/file-editing? tool-name)   "write"
     (#{"read" "glob" "grep" "ls"} tool-name)  "read"
     (#{"web_fetch" "web_search"} tool-name)   "network"
-    :else                                      "other"))
+    :else
+    (let [s (tool-metadata/tool-safety tool-name)]
+      (cond
+        (:destructive? s)                          "write"
+        (:network? s)                              "network"
+        (contains? (or (:capabilities s) #{}) :shell) "exec"
+        :else                                      "other"))))
 
 (defn- agent-ui
   "The live interactive UI handle (or nil). Reached from the agent's extension
@@ -477,7 +487,11 @@
 
      :remove
      (fn [interceptor-name]
-       (swap! chain (fn [c] (vec (remove #(= (:name %) interceptor-name) c)))))
+       ;; The two core interceptors in this chain are not an extension's to
+       ;; drop: tracking feeds the UI and persistence writes the session.
+       (if (contains? #{:tool-tracking :tool-persistence} interceptor-name)
+         (d/warn (str "[nyma] removeMiddleware refused for core interceptor " (str interceptor-name)))
+         (swap! chain (fn [c] (vec (remove #(= (:name %) interceptor-name) c))))))
 
      :execute
      (fn [tool-name tool args]
@@ -492,11 +506,14 @@
                        :events            events
                        :agent             agent
                        :abort-controller  (when agent (:abort-controller agent))}
+             ;; before-hook-compat runs BEFORE the gates: a before_tool_call
+             ;; handler may rewrite :args, and permission must be decided on
+             ;; what will actually execute, not on what was proposed.
              full     (vec (concat @chain
                                    [prepare-arguments-interceptor
+                                    (before-hook-compat events)
                                     (permission-check-interceptor events settings)
                                     (approval-check-interceptor approval-checks)
-                                    (before-hook-compat events)
                                     tool-execution-interceptor]))]
          (ic/execute full ctx)))
 

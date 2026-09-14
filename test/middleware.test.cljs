@@ -9,6 +9,7 @@
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
             [agent.state :refer [create-agent-store]]
+            [agent.tool-metadata :as tool-metadata]
             [agent.core :refer [create-agent]]))
 
 ;; Helper: create a mock tool with an execute function
@@ -152,7 +153,49 @@
         ctx      (js-await ((:execute pipeline) "t" tool {}))]
     (-> (expect (:error ctx)) (.toBeDefined))))
 
+(defn ^:async test-permission-sees-rewritten-args []
+  ;; A before_tool_call handler rewrites the args; the permission handler
+  ;; must be asked about the rewritten command, not the proposed one.
+  (let [events   (create-event-bus)
+        pipeline (create-pipeline events)
+        seen     (atom nil)
+        _        ((:on events) "before_tool_call"
+                               (fn [_] #js {:args #js {:cmd "rm -rf /"}}))
+        _        ((:on events) "permission_request"
+                               (fn [d] (reset! seen (.-cmd (.-args d))) #js {:decision "deny"}))
+        tool     (mock-tool (fn [_] "ran"))
+        ctx      (js-await ((:execute pipeline) "bash" tool {:cmd "ls"}))]
+    (-> (expect @seen) (.toBe "rm -rf /"))
+    (-> (expect (:cancelled ctx)) (.toBe true))))
+
+(defn ^:async test-extension-tool-safety-sets-category []
+  ;; An extension tool declaring :safety {:destructive? true} is categorised
+  ;; "write" so a role policy can ask/deny it; one with no safety is "other".
+  (let [agent    (create-agent {:model "test" :system-prompt "t"})
+        events   (:events agent)
+        api      (.-extension-api agent)
+        cats     (atom {})
+        _        ((:on events) "permission_request"
+                               (fn [d] (swap! cats assoc (.-tool d) (.-category d)) nil))]
+    ((:register (:tool-registry agent)) "plain" (mock-tool (fn [_] "ok")))
+    (tool-metadata/register-metadata! "editor" {:destructive? true})
+    (js-await ((:execute (:middleware agent)) "plain" (mock-tool (fn [_] "ok")) {}))
+    (js-await ((:execute (:middleware agent)) "editor" (mock-tool (fn [_] "ok")) {}))
+    (tool-metadata/unregister-metadata! "editor")
+    (-> (expect (get @cats "plain")) (.toBe "other"))
+    (-> (expect (get @cats "editor")) (.toBe "write"))))
+
+(defn test-remove-refuses-core-interceptors []
+  (let [events   (create-event-bus)
+        pipeline (create-pipeline events)
+        before   (count ((:chain pipeline)))]
+    ((:remove pipeline) :tool-tracking)
+    (-> (expect (count ((:chain pipeline)))) (.toBe before))))
+
 (describe "create-pipeline" (fn []
+                              (it "permission is decided on args after before_tool_call rewrote them" test-permission-sees-rewritten-args)
+                              (it "extension tool :safety metadata sets the permission category" test-extension-tool-safety-sets-category)
+                              (it "remove refuses core interceptors" test-remove-refuses-core-interceptors)
                               (it "empty pipeline executes tool directly" test-empty-pipeline-executes-tool)
                               (it "middleware can modify args" test-middleware-modifies-args)
                               (it "middleware can cancel tool execution" test-middleware-cancellation)

@@ -298,7 +298,8 @@
             (str "Rename error: " (.-message e))))))))
 
 (defn make-rename-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+       :description
        "Rename the symbol at a file position across the whole project (LSP rename). Applies the edits to disk. Line and col are 1-based."
        :parameters
        #js {:type "object"
@@ -382,7 +383,8 @@
             (str "Code action error: " (.-message e))))))))
 
 (defn make-code-action-tool [manager cwd diag-registry]
-  #js {:description
+  #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+       :description
        "List or apply LSP code actions (quick-fixes, refactors) at a file location. Omit `apply` to LIST available actions; pass apply=\"<title substring>\" to apply one (edits written to disk). Lines are 1-based."
        :parameters
        #js {:type "object"
@@ -424,7 +426,8 @@
             (str "Organize imports error: " (.-message e))))))))
 
 (defn make-organize-imports-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+       :description
        "Organize/sort imports in a file via the LSP source.organizeImports action. Applies the edit to disk."
        :parameters
        #js {:type "object"

@@ -4,6 +4,7 @@
             [agent.token-estimation :as te]
             [agent.providers.registry :as registry-utils :refer [build-provider-entry]]
             [agent.model-info :as model-info]
+            [agent.tool-metadata :as tool-metadata]
             [agent.pricing :as pricing]
             [agent.ui.status-line-segments :as status-segments]
             [agent.debug :as dbg]))
@@ -102,8 +103,22 @@
 
        ;; ── Tool management ─────────────────────────────────
          :registerTool      (fn [name tool-def]
+                              ;; Optional `:safety` on the def feeds the
+                              ;; permission gate's category and file-editing?
+                              ;; e.g. #js {:destructive? true
+                              ;;           :capabilities ["filesystem" "write"]}
+                              (when-let [s (and tool-def (aget tool-def "safety"))]
+                                (let [caps (aget s "capabilities")]
+                                  (tool-metadata/register-metadata!
+                                   name
+                                   (cond-> {:destructive?           (boolean (aget s "destructive?"))
+                                            :network?               (boolean (aget s "network?"))
+                                            :read-only?             (boolean (aget s "read-only?"))
+                                            :requires-confirmation? (boolean (aget s "requires-confirmation?"))}
+                                     caps (assoc :capabilities (set caps))))))
                               ((:register (:tool-registry agent)) name tool-def))
          :unregisterTool    (fn [name]
+                              (tool-metadata/unregister-metadata! name)
                               ((:unregister (:tool-registry agent)) name))
          :getActiveTools    (fn [] (clj->js (keys ((:get-active (:tool-registry agent))))))
          :getAllTools        (fn [] (clj->js (keys ((:all (:tool-registry agent))))))

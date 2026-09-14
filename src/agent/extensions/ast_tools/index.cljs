@@ -85,6 +85,8 @@
                                     :formatArgs (fn [_name args] (str (.-pattern args) " → " (.-replacement args)))
                                     :formatResult (fn [result] (if (str/includes? (str result) "No matches")
                                                                  "no matches" "applied"))}
+                      ;; Rewrites files: category "write" for the permission gate.
+                      :safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
                       :execute (fn [args] (ast-edit-execute api args))})
 
   ;; Cleanup: unregister policies and tools
