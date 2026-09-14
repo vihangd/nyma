@@ -1459,3 +1459,52 @@ memory, ACP, model roles, `lsp_suite`, `ast_tools`, background jobs. Three are n
 - **ShellStart-style event-driven wake** for background jobs. A real gap, but it needs an interrupt
   path into a running turn — bigger than the ring-buffer change it looks like.
 - **Worktree isolation** for `subagent`.
+
+## 2026-09-14 — core↔extension seam review
+
+Three explorer sweeps over the seam, every S1 claim verified by direct read or compiled output.
+Landed in four commits: namespace-owned cleanup (scope records every registration, loader sweeps
+after deactivate — five builtins leaked handlers on every `/reload`), permission fixes (gate now
+sees post-`before_tool_call` args; extension tools carry `:safety` → category; manifest-less
+extensions no longer get `:all`), dead code (`tool_dsl`, `filter-by-mode`, `reload-*`,
+`:renderers`; `thinking_renderer` finally registered), and four lints (unused capabilities,
+undeclared `dependsOn`, undeclared loop events, README↔commands). Deferred, named so they are
+not rediscovered:
+
+- **Two audits flagged callable sets and `name`/`keyword` as Squint bugs. Both are false** on
+  squint 0.14.208 (`get(new Set(...), x)`; `core.js` exports `name`, `keyword`). AGENTS.md
+  corrected. Detector: `dist/**` shows what a form compiles to — read it before filing.
+- **Function keys are stringified** by `assoc`/`add-watch`. Two closures with identical source
+  shared one slot in `extensions.cljs`'s handler map. Fixed with `js/Map`; detector: any
+  `(swap! m assoc some-fn …)` or `(add-watch a some-fn …)` in src.
+- **MCP tools are still `"other"`** for the permission gate. `mcp_client` cannot know a remote
+  tool's side effects; a per-server `safety` default in `.mcp.json` would let the user say.
+- **`emitGlobal` is unprefixed** — any extension can emit `permission_request`. A deny-list of
+  core names on that path is a five-line change; nothing legitimate emits them today.
+- **`api.exec`/`api.spawn` have no permission path**, and `lsp_suite`, `verify_gate`,
+  `bash_suite`, `openwiki` call `Bun.spawn` directly, so `:spawn` is unenforceable for
+  compiled-in extensions. Only a lint (`Bun.spawn` outside `bash_suite`/`agent_shell` needs
+  `spawn` declared) makes the capability mean anything.
+- **State-atom discipline (Phase 5, not started).** `spec_driven/index.cljs` `swap!`s
+  `:messages []` past the event-sourced store (`ctx.newSession` exists); `agent_shell` and
+  `spec_driven` write `:active-role`, which `model_roles` owns; `spec_driven` keeps ~14
+  unnamespaced keys in the shared atom while `api.state` sits unused; core `sendMessage` does
+  the same bypass. Detector: `grep -rn "__state" src/agent/extensions | grep swap!`.
+- **Six copy-paste OpenAI-compatible providers (Phase 6, not started).** deepseek, groq, kimi,
+  minimax, opencode_zen, openrouter differ in base URL, key env, model table, reasoning wrap —
+  ~770 lines for one settings-driven table.
+- **Four compaction paths** (`token_suite/smart_compaction`, `token_suite/anthropic_compaction`,
+  `headroom/compress`, core `ctx.compact`) and **two `/handoff`s** (`handoff/`,
+  `agent_shell/features/handoff.cljs`).
+- **API contract splits, all live:** `merge-results` is last-writer-wins on scalars, so the
+  lowest-priority `before_agent_start`/`context_assembly`/`before_tool_call` handler wins
+  silently; two `getTokenBudget`s and two `getModelInfo`s (ctx vs api) return different numbers;
+  `api.dispatch` emits an event, not a store dispatch; `setThinkingLevel` throws where every
+  other setter is silent; `api.ui` without `:ui` has no method stubs, so calls `TypeError`.
+- **Test gaps still open:** no throwing-command-handler isolation test; `settings/manager`
+  `:roles` replace semantics untested at that layer; `add_dir` has no tests; six test files still
+  hand-roll agent+api+scope instead of `test/tool_ctx_fixture` (§1f); tests run `dist/` with no
+  freshness guard.
+- **`advisor/index.cljs:88`** reads `(:advisor (:roles settings))` with no default — the
+  documented `:roles`-replaces trap, hit in practice: any user `:roles` map disables the advisor
+  role.
