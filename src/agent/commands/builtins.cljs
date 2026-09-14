@@ -38,6 +38,27 @@
     (.showOverlay (.-ui ctx) text)
     (js/console.log (str "\n" text "\n"))))
 
+(defn positional-args
+  "The flag-free tokens interactive mode's shared splitter put on `ctx`, or
+   nil when the caller is not interactive mode (a keybinding, an alias
+   forwarding to another command, a test). Nil means \"fall back to the
+   `args` vector you were handed\" — never an empty vector, which would be
+   indistinguishable from a command genuinely called with no arguments."
+  [ctx]
+  (when ctx
+    (when-let [p (try (aget ctx "positional") (catch :default _ nil))]
+      (vec p))))
+
+(defn command-flags
+  "`--flag` / `--flag=value` / `--no-flag` parsed by the shared splitter,
+   as a map of raw hyphenated key → true | false | string. Empty when the
+   caller did not come through interactive mode."
+  [ctx]
+  (or (when ctx
+        (when-let [f (try (aget ctx "flags") (catch :default _ nil))]
+          (into {} (map (fn [k] [k (aget f k)]) (js/Object.keys f)))))
+      {}))
+
 ;;; ─── Model selection ────────────────────────────────────────
 ;;;
 ;;; MRU is per-session and in-memory. ponytail: a cross-session MRU needs a
@@ -179,10 +200,10 @@
   ;;    startup only, so /reload deactivated all of that and brought none of
   ;;    it back. `reload` had zero listeners.
   (js-await ((:emit-async (:events agent)) "session_ready"
-             #js {:cwd        (js/process.cwd)
-                  :model      (current-model-id agent)
-                  :extensions (count (or (when extensions-atom @extensions-atom) []))
-                  :reason     "reload"}))
+                                           #js {:cwd        (js/process.cwd)
+                                                :model      (current-model-id agent)
+                                                :extensions (count (or (when extensions-atom @extensions-atom) []))
+                                                :reason     "reload"}))
   ((:emit (:events agent)) "reload" {})
   (notify ctx "Extensions reloaded"))
 
@@ -689,16 +710,21 @@
      ;; ── New pi-mono-compatible commands ─────────────────────
 
           "name"
-          {:description "Set or show session display name"
+          {:group       :session
+           :description "Set or show the session display name. Quote it: /name \"Q3 planning\""
            :handler (fn [args ctx]
-                      (if (seq args)
-                        (let [name (str/join " " args)]
-                          (when-let [s @(:session agent)]
-                            ((:set-session-name s) name))
-                          (notify ctx (str "Session named: " name)))
-                        (let [current (when-let [s @(:session agent)]
-                                        ((:get-session-name s)))]
-                          (notify ctx (str "Session: " (or current "(unnamed)"))))))}
+                      ;; Migrated to the shared splitter: `/name "Q3 planning"`
+                      ;; arrives as ONE token, and a stray `--flag` no longer
+                      ;; lands inside the session's display name.
+                      (let [argv (let [p (positional-args ctx)] (if (some? p) p (vec args)))]
+                        (if (seq argv)
+                          (let [nm (str/join " " argv)]
+                            (when-let [s @(:session agent)]
+                              ((:set-session-name s) nm))
+                            (notify ctx (str "Session named: " nm)))
+                          (let [current (when-let [s @(:session agent)]
+                                          ((:get-session-name s)))]
+                            (notify ctx (str "Session: " (or current "(unnamed)")))))))}
 
           "session"
           {:description "Show session info and stats"
@@ -828,7 +854,7 @@
                                              (finally
                                                (swap! (:state agent) assoc :replaying-session? false)))
                                            ((:emit (:events agent)) "session_start"
-                                                                    {:reason "resume" :previousSessionFile (:path sess)})
+                                            {:reason "resume" :previousSessionFile (:path sess)})
                                            (notify ctx (str "Resumed: " (:name sess))))))))))))}
 
           "import"
@@ -856,7 +882,7 @@
                               (finally
                                 (swap! (:state agent) assoc :replaying-session? false)))
                             ((:emit (:events agent)) "session_start"
-                                                     {:reason "resume" :previousSessionFile file-path})
+                             {:reason "resume" :previousSessionFile file-path})
                             (notify ctx (str "Imported session from " file-path))))))}
 
      ;; ── Session, export, credentials ───────────────────────
