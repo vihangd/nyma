@@ -12,9 +12,14 @@ This guide covers nyma-only superpowers not available in pi-mono.
 (ns my-extension)
 
 (defn ^:export default [api]
-  (.on api "agent_start" (fn [event ctx] (js/console.log "Agent started!")))
-  ;; Return deactivate function
-  (fn [] (js/console.log "Extension deactivated")))
+  ;; Settings: (.settings api) is the whole merged map, (.settings api "k")
+  ;; one section. Both are always a map — never nil, so no guard needed.
+  (let [cfg (.settings api "my-extension")]
+    (.on api "agent_start" (fn [event ctx] (js/console.log "Started!" (:greeting cfg)))))
+  ;; Optional deactivate fn. You do NOT need to unsubscribe handlers or
+  ;; unregister tools/commands here — see Extension Lifecycle. Return nil
+  ;; when there is nothing else to undo.
+  nil)
 ```
 
 The loader looks for the ES module `default` export. Use `(defn ^:export default [api] ...)` — Squint compiles this to `export default default$`.
@@ -397,6 +402,19 @@ safely without a null check.
 6. Default export called with scoped API
 7. May return deactivate function for cleanup
 8. On `/reload` or process exit, deactivate is called
+9. **Then every registration made through the scoped api is swept** —
+   handlers, tools, commands, status segments, flags, providers,
+   middleware. The scope recorded them when you registered them, so a
+   handlers atom and a matching `.off` loop on deactivate is dead code.
+
+So a deactivate fn is only for cleanup the api does not know about:
+stopping a spawned process, closing a socket, resetting a module-level
+atom, calling an unregister thunk some helper handed you. If there is
+none, return `nil`. Unsubscribing mid-life (an extension that switches
+itself off while running) still uses `.off` as before.
+
+Extension state (`api.state`) is deliberately NOT swept — it is your
+on-disk data, keyed by namespace, and must survive a `/reload`.
 
 ## System Events
 
