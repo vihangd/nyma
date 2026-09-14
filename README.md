@@ -1,8 +1,8 @@
 # Nyma
 
-**Nyma** (Nyma Yokai Mystic Agent) is a minimal, extensible AI coding agent built with **Squint** (ClojureScript) + **Bun** + **Vercel AI SDK** + **Ink**. Write your agent logic in ClojureScript — macros, threading, destructuring, data-oriented design — and ship plain ES modules with zero runtime overhead.
+**Nyma** (Nyma Yokai Mystic Agent) is a minimal, extensible AI coding agent built with **Squint** (ClojureScript) + **Bun** + **Vercel AI SDK** + **pi-tui**. Write your agent logic in ClojureScript — macros, threading, destructuring, data-oriented design — and ship plain ES modules with zero runtime overhead.
 
-Nyma compiles ClojureScript to native ES modules, runs on Bun for speed, and renders a terminal UI with Ink/React. It is designed around a **middleware pipeline**, **event-sourced state**, **Pedestal-style interceptor chains**, and a **namespaced extension system** — making it easy to extend without modifying core code.
+Nyma compiles ClojureScript to native ES modules, runs on Bun for speed, and renders a terminal UI with pi-tui (`@earendil-works/pi-tui`). It is designed around a **middleware pipeline**, **event-sourced state**, **Pedestal-style interceptor chains**, and a **namespaced extension system** — making it easy to extend without modifying core code.
 
 ## vs. pi-mono
 
@@ -30,7 +30,7 @@ Nyma is a spiritual successor to [pi-mono](https://github.com/badlogic/pi-mono) 
 ```
 @agent/cli  ─→  @agent/core  ─→  ai (Vercel AI SDK)
                      │
-                @agent/ui (Ink components)
+                @agent/ui (pi-tui components)
 ```
 
 Tool execution flows through the **middleware pipeline** (interceptor chain). Extension isolation uses namespacing and capability gating. State mutations go through an **event-sourced store**.
@@ -56,7 +56,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | Compaction | `agent.sessions.compaction` | Context window summarization |
 | Settings | `agent.settings.manager` | Two-scope config (global + project) |
 | Resources | `agent.resources.loader` | Discover prompts, skills, themes |
-| UI | `agent.ui.*` | Ink/React terminal components |
+| UI | `agent.ui.*` | pi-tui terminal components |
 | Modes | `agent.modes.*` | Interactive, print, RPC, SDK |
 | **Interceptors** | `agent.interceptors` | Pedestal-style interceptor chain engine |
 | **Middleware** | `agent.middleware` | Middleware pipeline for tool execution |
@@ -133,7 +133,7 @@ This runs two processes concurrently:
 bun run build
 ```
 
-Compiles all `.cljs` files from `src/` and `test/` to `.mjs` (ES modules) in `dist/`. JSX files (Ink components) compile to `.jsx`. JSON resources are copied as-is.
+Compiles all `.cljs` files from `src/` and `test/` to `.mjs` (ES modules) in `dist/`. JSON resources are copied as-is.
 
 ### Standalone binary
 
@@ -238,7 +238,7 @@ src/
     schema/        TypeBox ↔ Zod adapter for TS extensions
     utils/         Shared utilities (ANSI text, terminal width)
     modes/         Operational modes (interactive, print, rpc, sdk)
-    ui/            Ink/React terminal components (.jsx)
+    ui/            pi-tui terminal components
       dialogs.cljs       ConfirmDialog, PromptDialog
       notification.cljs  Inline status notifications
       tool_status.cljs   Tool execution display with spinner
@@ -264,8 +264,7 @@ Squint compiles ClojureScript to plain JavaScript:
 - Kebab-case identifiers become snake_case (`create-agent` -> `create_agent`)
 - Keywords become string keys (`:role` -> `"role"`)
 - Atoms compile to mutable wrappers with `deref()`, `swap()`, `reset()`
-- `^:async` on `defn` generates `async function` (note: does not work on anonymous `fn`)
-- `#jsx` tag enables JSX output for Ink components
+- `^:async` on `defn` or on the `(fn …)` form generates `async function` (never on the args vector)
 
 Config in `squint.edn`:
 ```clojure
@@ -314,7 +313,7 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-**Total: 9,700+ assertions across 259 test files** (run `bun test` to see live counts).
+**Total: 10,600+ assertions across 280+ test files** (run `bun run test` to see live counts).
 
 Coverage spans the full stack:
 

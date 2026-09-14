@@ -711,8 +711,8 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 - **MCP hardening** — tool-description pinning (poisoning detection), per-tool permissions, instruction-pattern flagging on untrusted results.
 - **Goal loop `/goal`** — run until a written condition passes, small-model grader per turn (small_model ext is the natural grader).
 - **Permission modal consuming tool_metadata** — the safety table is still written-but-unread (T11/1d).
-- **Extension enable/disable mechanism** — manifests have no honored `enabled`; only NYMA_NO_BUILTIN_EXT global.
-- **Live /theme re-render** — watch-theme exists; widgets bake theme at construction.
+- ~~Extension enable/disable mechanism~~ — done 2026-09-14 (`extensions` settings key, `/extensions disable`).
+- ~~Live /theme re-render~~ — done 2026-09-14 (`theme-catalog/current` atom; `watch-theme` deleted).
 
 ## 2026-07-22 round-2 audit — deferred
 
@@ -1586,10 +1586,42 @@ autocomplete in `parser.cljs`, `watch-theme`, the theme icon maps, the paste red
   and how to enable them.
 
 **Deferred, named**
-- `/theme` still needs a restart: the pane, bar and editor close over the theme at construction.
-  Live reload means they read from an atom; `watch-theme` is waiting for that.
-- Tool output is still one line and not expandable; `verbosity`/`max-lines` in interactive.cljs
-  are unread. Needs a per-message expand key and a renderer that reads them.
+- ~~`/theme` restart~~ and ~~one-line tool output~~ — both landed in the Phase A sweep below.
 - `turn-count` resets per process; no resumed-session marker on compaction summaries.
 - Session lock (D26) and onboarding nudge (C9) as before; `nyma login` / `nyma resume`
-  subcommands; streaming in `-p`.
+  subcommands.
+
+## 2026-09-14 — peer comparison, Phase A (table-stakes wiring)
+
+Compared against pi 0.85 (`earendil-works/pi`), Claude Code, opencode, Codex CLI, Gemini
+CLI, aider, Crush, goose, Cline, Amp. Nyma is ahead on extensibility and operational tooling
+(verify_gate, escalate, budget, small_model, gateway, ACP client, pi-rpc) and was missing
+seven features every peer ships. All seven were wiring of existing seams and landed:
+
+- `-p --output-format stream-json` (JSONL events, final line = the `json` result object).
+- `extensions` settings key + `/extensions disable|enable <ns> [--project]`.
+- `context-files` setting, default `["AGENTS.md" "CLAUDE.md"]`, first match per level.
+- Skills: `/skill:name args`, `$ARGUMENTS`/`$1`/`${1:-x}` substitution
+  (`utils/template_args`), body-only injection removed on deactivate, `allowed-tools`
+  downgrades `ask` to `allow` while active, model-callable `skill` tool.
+- Prompt templates in `~/.nyma/prompts` and `.nyma/prompts` register as `/<name>`.
+- ctrl+o expands the last tool result (`tool-display`, `tool-display-max-lines` revived);
+  `edit` shows a `-`/`+` diff (`ui/diff_lines`, LCS); errors preview 10 lines.
+- `/theme` applies live; theme lives in `theme-catalog/current`; `:info`/`:plan` tokens.
+- `@path` mentions: pi-tui's `@` autocomplete via `fd`/`fdfind`, fallback `git ls-files`
+  + fuzzy scorer; mentions expand to `<file>`/`<dir>` blocks on submit (200 KB cap).
+
+**Deferred, named**
+- OAuth subscription login (Claude Max, ChatGPT/Codex, Copilot) — PKCE + refresh exist in
+  `providers/oauth.cljs`; only qwen-cli populates `:oauth`. Biggest remaining daily-use gap.
+- `nyma install npm:|git:|path` + list/update/remove (pi packages, CC plugins).
+- Project trust prompt before loading `.nyma/extensions`, `.nyma/skills`, `.mcp.json`.
+- Sandboxed bash (research `@anthropic-ai/sandbox-runtime` vs pi's gondolin first).
+- Worktree isolation for subagents; session lock (D26); per-model compaction overrides.
+- `AGENTS.override.md` (pi semantics unverified); skill auto-activation from `paths` /
+  `triggers` (parsed, unwired); the `skill` tool's list is fixed at startup (`/reload` does
+  not refresh it); ACP `tool_call_update` diffs (agent_shell has no text-render seam).
+- pi edges not matched: branch summarisation on `/tree` switch, extension custom
+  components/editor, fullscreen + transcript search, Mermaid/LaTeX, strict-schema tool
+  sampling, `nyma update` self-update.
+
