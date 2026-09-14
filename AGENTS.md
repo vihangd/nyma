@@ -127,19 +127,28 @@ of this; they are still scanned at runtime.
 
 Squint compiles ClojureScript to JavaScript, but several Clojure idioms do **not** work as expected. These have caused real bugs in this codebase.
 
-### `fn ^:async` does NOT work — use `defn ^:async`
+### `^:async` goes on the `fn` FORM, not the args vector
 
-Squint only generates `async function` for top-level `defn`. The `^:async` metadata on anonymous `fn` is silently ignored, producing a non-async function where `await` becomes a runtime syntax error.
+`(fn ^:async [x] …)` puts the metadata on the argument vector, where squint never looks; the
+result is a plain `function` whose `await` is a syntax error. Put it on the form — or the name —
+and an anonymous async fn works everywhere (event handlers, `.then` callbacks, JSX props):
 
 ```clojure
-;; BROKEN — compiles to plain `function`, `await` fails at runtime
-(def handler (fn ^:async [x] (js-await (some-promise x))))
+;; BROKEN — meta on the args vector is dropped
+(.on api "ev" (fn ^:async [e] (js-await (work e))))
 
-;; CORRECT — compiles to `async function`
+;; CORRECT — meta on the form
+(.on api "ev" ^:async (fn [e] (js-await (work e))))
+(.on api "ev" (fn ^:async on-ev [e] (js-await (work e))))   ; or on the name
+(.then p ^:async #(js-await (more %)))
+
+;; defn is unaffected
 (defn ^:async handler [x] (js-await (some-promise x)))
 ```
 
-This applies everywhere: tool execute functions, event handlers, test callbacks. If you need an async callback, extract it to a named `defn ^:async`.
+For years this repo believed "fn ^:async doesn't work" and hoisted every async callback to a
+top-level `defn`. Named top-level fns are still fine (and testable); the hoisting is no longer
+required.
 
 ### `name`, `keyword`, and callable sets DO work (squint 0.14.208)
 

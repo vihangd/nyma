@@ -142,7 +142,7 @@
        "  ;; Return deactivate function for cleanup\n"
        "  (fn [] (js/console.log \"[" ext-name "] deactivated\")))\n"))
 
-;;; ─── Async handlers (fn ^:async doesn't work in Squint) ──
+;;; ─── Async command handlers ──
 
 (defn ^:async handle-reload
   "Orchestrate full reload: deactivate → settings → resources → extensions → flags."

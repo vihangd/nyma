@@ -16,8 +16,8 @@
        weak model alone, so if the target resolves to the model already running,
        refuse rather than churn.
 
-   Squint notes: no inline (fn ^:async ...) — async work lives in top-level
-   defns called by sync wrappers. Keywords ARE strings, so (:mode cfg) reads
+   Squint notes: async work lives in top-level defns called by sync wrappers
+   (named, so testable; `^:async (fn …)` with the meta on the FORM works too). Keywords ARE strings, so (:mode cfg) reads
    both CLJS defaults and user JSON."
   (:require [clojure.string :as str]
             [agent.utils.ui :refer [ui-prompt-ready?]]

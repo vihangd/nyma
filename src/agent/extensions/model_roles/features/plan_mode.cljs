@@ -14,8 +14,9 @@
    claimed only when not already taken (e.g. by the ACP agent_shell mode
    switcher), so the two never collide.
 
-   Squint notes: no inline (fn ^:async ...) — async handlers are top-level
-   defns called by sync wrappers; .-__state-atom compiles to .__state_atom."
+   Squint notes: async handlers are top-level defns called by sync wrappers
+   (named, so testable; `^:async (fn …)` with the meta on the FORM also
+   works); .-__state-atom compiles to .__state_atom."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]

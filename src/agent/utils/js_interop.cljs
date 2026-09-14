@@ -9,7 +9,8 @@
    all, by anyone, for exactly this reason.
 
    Two copies of the JSON round-trip workaround already existed
-   (agent_shell/shared, bash_suite/shared). This is the shared one.")
+   (agent_shell/shared, bash_suite/shared). This is the shared one."
+  (:require [agent.debug :as d]))
 
 (defn js->clj*
   "A JS value as something squint's `get`/`assoc`/`merge` can work with, via a
@@ -25,6 +26,26 @@
     (try
       (js/JSON.parse (js/JSON.stringify x))
       (catch :default _ nil))))
+
+(defn attempt
+  "Call `f`; nil on throw. Names the `(try … (catch :default _ nil))` shape
+   that appears ~150 times in src, and logs the swallowed error at debug
+   level so it is not lost entirely. `tag` names the caller in the log."
+  ([f] (attempt nil f))
+  ([tag f]
+   (try (f)
+        (catch :default e
+          (when tag (d/debug tag (str "swallowed: " (.-message e))))
+          nil))))
+
+(defn ^:async attempt-async
+  "Await `f` (a fn returning a promise); nil on rejection or throw."
+  ([f] (attempt-async nil f))
+  ([tag f]
+   (try (js-await (f))
+        (catch :default e
+          (when tag (d/debug tag (str "swallowed: " (.-message e))))
+          nil))))
 
 (defn- kebab
   "camelCase -> kebab-case. Leaves an already-kebab key alone."

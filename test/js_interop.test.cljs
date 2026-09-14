@@ -73,3 +73,17 @@
             (finally
               (aset js/process.env "HOME" orig)
               (fs/rmSync dir #js {:recursive true :force true}))))))))
+
+(defn ^:async test-attempt-async-swallows-rejection []
+  (let [ok  (js-await (ji/attempt-async (fn [] (js/Promise.resolve 7))))
+        bad (js-await (ji/attempt-async "t" (fn [] (js/Promise.reject (js/Error. "no")))))]
+    (-> (expect ok) (.toBe 7))
+    (-> (expect bad) (.toBeNil))))
+
+(describe "js-interop/attempt" (fn []
+  (it "returns the value, or nil on throw"
+      (fn []
+        (-> (expect (ji/attempt (fn [] 3))) (.toBe 3))
+        (-> (expect (ji/attempt "t" (fn [] (throw (js/Error. "boom"))))) (.toBeNil))))
+  (it "attempt-async resolves the value, or nil on rejection"
+      test-attempt-async-swallows-rejection)))

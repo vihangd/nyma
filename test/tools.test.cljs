@@ -21,7 +21,7 @@
 (defn- cleanup [dir]
   (.rmSync fs dir #js {:recursive true}))
 
-;; async test helpers (defn ^:async works, fn ^:async doesn't)
+;; async test helpers, named so a failure names the case
 (defn ^:async test-bash-stdout []
   (let [result (js-await (bash-execute {:command "echo hello"}))
         parsed (js/JSON.parse result)]

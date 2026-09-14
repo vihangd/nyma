@@ -203,7 +203,7 @@
                     (-> (expect (count (:messages r))) (.toBe 1)))))))
 
 ;; ── consent + application ─────────────────────────────────────────────────
-;; Squint has no inline (fn ^:async ...), so async bodies are top-level defns.
+;; Async bodies are top-level defns so each has a name in a failure trace.
 
 (defn ^:async t-no-keeps-context []
   (let [c     (collector)

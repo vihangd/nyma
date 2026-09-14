@@ -5,8 +5,8 @@
    most `limit` in flight at once, preserving result order. A worker
    that throws resolves its slot to nil (caller filters).
 
-   NOTE (Squint gotcha): inline (fn ^:async ...) is silently broken, so
-   the worker is a top-level (defn ^:async ...). `f` must be a sync fn
+   The worker is a top-level (defn ^:async ...) so it has a name in stack
+   traces (`^:async (fn …)` with the meta on the form would also work). `f` must be a sync fn
    that RETURNS a promise (e.g. a thin wrapper over a top-level async
    defn); the worker awaits it.")
 
