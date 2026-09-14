@@ -3,26 +3,14 @@
    matching the upstream design — git evidence is collected in the host
    process before the agent turn starts. Every call is guarded; a failure
    yields \"\" rather than throwing so the command handler stays robust."
-  (:require ["node:child_process" :as cp]
+  (:require [agent.utils.git-files :as gf]
             [clojure.string :as str]))
 
-(defn- git
-  "Run a git command, return trimmed stdout, or \"\" on any failure."
-  [cmd]
-  (try
-    ;; maxBuffer: execSync defaults to 1 MB, and `ls-files` on a large repo
-    ;; exceeds it — which threw ENOBUFS, hit the catch, and returned "". The
-    ;; caller cannot tell that from "clean repo", so the orientation block went
-    ;; silently empty. Exactly the failure the truncation fix was meant to end.
-    (str/trim (cp/execSync (str "git " cmd)
-                           #js {:encoding "utf-8" :maxBuffer (* 64 1024 1024)}))
-    (catch :default _ "")))
+;; The shell-out itself lives in agent.utils.git-files so core (the editor's
+;; @file autocomplete) can share it without requiring an extension.
+(def ^:private git gf/run-git)
 
-(defn in-git-repo? []
-  (try
-    (cp/execSync "git rev-parse --is-inside-work-tree" #js {:stdio "ignore"})
-    true
-    (catch :default _ false)))
+(def in-git-repo? gf/in-git-repo?)
 
 (defn head []
   (git "rev-parse HEAD"))

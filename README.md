@@ -365,6 +365,8 @@ bun run start
 
 Launches the full terminal UI with message display, text input, and keyboard shortcuts.
 
+In the editor, `@path` mentions a file or directory: on submit each one is appended to your message as a `<file path="…">` block (a directory becomes a one-level `<dir>` listing; files over 200 KB are marked skipped). Typing `@` opens fuzzy path completion (Tab accepts) — gitignore-aware via `fd` when it is on your PATH, otherwise from `git ls-files` or a directory walk. Emails and `@scope/pkg` names that resolve to nothing are left alone.
+
 ### Print Mode
 
 ```bash

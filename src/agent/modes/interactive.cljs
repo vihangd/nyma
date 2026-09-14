@@ -14,6 +14,7 @@
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
+            [agent.ui.file-mentions :as file-mentions]
             [agent.ui.overlay-host :as overlay-host]
             [agent.ui.width-guard :refer [attach-guarded-children!]]
             [agent.ui.crash-recovery :as crash-recovery]
@@ -662,10 +663,14 @@
 
             ;; ── Normal LLM prompt ────────────────────────────────────
             (not @submit-lock)
-            (do (reset! submit-lock true)
-                (.addToHistory editor trimmed)
-                (add-user-msg! trimmed)
-                (do-run! trimmed))))
+            ;; `@path` mentions expand here and nowhere else: steer, `/`, `!`
+            ;; and `$` keep their text verbatim. The expanded text is what the
+            ;; pane shows — it is what the model saw.
+            (let [expanded (:text (file-mentions/expand-mentions trimmed (js/process.cwd)))]
+              (reset! submit-lock true)
+              (.addToHistory editor trimmed)
+              (add-user-msg! expanded)
+              (do-run! expanded))))
 
         ;; An extension handling "input" streams straight into the pane. Its
         ;; messages carry :role/:content/:prompt-id but no :id, and chat-pane
@@ -807,11 +812,16 @@
                   ;; Trailing edge, so the last keystroke of a fast burst still
                   ;; reaches the widget.
                   (reset! pending (js/setTimeout #(emit-text text) 100)))))))
+    ;; `@file` completion is upstream's, but it is dead without an `fd` path;
+    ;; the nyma fallback fills that in from `git ls-files` / a directory walk.
     (.setAutocompleteProvider editor
-                              (new CombinedAutocompleteProvider
-                                   (build-slash-commands agent)
-                                   (js/process.cwd)
-                                   nil))
+                              (file-mentions/configure-provider!
+                               (new CombinedAutocompleteProvider
+                                    (build-slash-commands agent)
+                                    (js/process.cwd)
+                                    nil)
+                               (js/process.cwd)
+                               (file-mentions/detect-fd)))
 
     ;; ── Session-level event handlers ──────────────────────────────────────
     (let [;; The pane's ONLY seeding path. Everything that changes which branch
