@@ -140,6 +140,34 @@
                             (or tools-hint "") marker))))
                  roles)))
 
+(defn model-roles-only
+  "Pure: the entries of `roles` that actually pin a model. The rest are
+   permission MODES (accept-edits, full-auto) — /roles listed them under
+   \"Model roles\" with \"(inherits model)\" beside them, which reads as a role
+   you can switch to for a model and is the one thing they never do."
+  [roles]
+  (into {} (filter (fn [[_ cfg]] (:model cfg)) roles)))
+
+(defn policy-roles-only
+  "Pure: the model-LESS entries — the permission modes."
+  [roles]
+  (into {} (remove (fn [[_ cfg]] (:model cfg)) roles)))
+
+(defn- format-roles-listing
+  "The /roles output: model roles, then the permission modes under their own
+   heading pointing at the command that actually switches them."
+  [roles active-role default-spec]
+  (let [models (model-roles-only roles)
+        modes  (policy-roles-only roles)]
+    (str "Model roles:\n"
+         (format-role-list models active-role default-spec)
+         (when (seq modes)
+           (str "\n\nPermission modes (use /mode):\n"
+                (str/join "\n"
+                          (map (fn [[mname mcfg]]
+                                 (str "  " mname " → " (policy/policy-line mcfg)))
+                               modes)))))))
+
 ;; ── permission modes (orthogonal to the model role) ──
 ;; :permission-mode is a SECOND state slot, independent of :active-role (the
 ;; model role). The mode drives the approval policy + plan gate; the role drives
@@ -367,8 +395,8 @@
                                    state   (.getState api)
                                    current (or (:active-role state) :default)]
                                (.notify (.-ui ctx)
-                                        (str "Model Roles:\n"
-                                             (format-role-list roles current (plan-mode/default-model-spec api))))))})
+                                        (format-roles-listing
+                                         roles current (plan-mode/default-model-spec api)))))})
 
     ;; /mode command — permission modes (modes-as-roles).
     (.registerCommand api "mode"
@@ -378,11 +406,21 @@
                              (let [arg (.toLowerCase (str (or (first args) "")))]
                                (cond
                                  (= arg "")
-                                 (.notify (.-ui ctx)
-                                          (str "Active mode: " (current-mode api)
-                                               "\nModes: " (str/join ", " mode-cycle)
-                                               "\nUsage: /mode <name> | /mode cycle")
-                                          "info")
+                                 ;; Each mode's actual policy, not just its
+                                 ;; name: four bare names left the difference
+                                 ;; between them readable only in the source.
+                                 (let [roles (get-roles api)
+                                       cur   (current-mode api)]
+                                   (.notify (.-ui ctx)
+                                            (str "Active mode: " cur "\n\nModes:\n"
+                                                 (str/join "\n"
+                                                           (map (fn [m]
+                                                                  (str "  " m " → "
+                                                                       (policy/policy-line (get roles m))
+                                                                       (when (= m cur) " ◀")))
+                                                                mode-cycle))
+                                                 "\n\nUsage: /mode <name> | /mode cycle")
+                                            "info"))
                                  (= arg "cycle")
                                  (switch-mode! api (next-mode (current-mode api)) ctx)
                                  :else

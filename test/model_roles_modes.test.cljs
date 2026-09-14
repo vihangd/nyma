@@ -408,3 +408,75 @@
           (fn []
             (it "refuses instead of silently discarding the plan"
                 test-mode-refuses-to-discard-an-unapproved-plan)))
+
+;; ── /roles listed policy-only modes as if they were model roles ──
+;;
+;; accept-edits and full-auto carry no model. They appeared under "Model roles"
+;; with "(inherits model)" beside them — which reads as a role you switch to
+;; for a model, the one thing they never do.
+
+(describe "model-roles:policy-line"
+          (fn []
+            (it "reads out write / exec / network for a mode"
+                (fn []
+                  (-> (expect (policy/policy-line (:accept-edits (:roles defaults))))
+                      (.toBe "write allow, exec ask, network ask"))
+                  (-> (expect (policy/policy-line (:full-auto (:roles defaults))))
+                      (.toBe "write allow, exec allow, network allow"))
+                  (-> (expect (policy/policy-line (:default (:roles defaults))))
+                      (.toBe "write ask, exec ask, network ask"))))
+
+            (it "reads plan's per-TOOL denials, which carry no :policy at all"
+                (fn []
+                  ;; Probing by category alone would report plan as unrestricted.
+                  (let [line (policy/policy-line (:plan (:roles defaults)))]
+                    (-> (expect (.includes line "write deny")) (.toBe true))
+                    (-> (expect (.includes line "exec deny")) (.toBe true)))))
+
+            (it "a role with no policy at all is reported as the gate default"
+                (fn []
+                  (-> (expect (policy/policy-line {:model "m" :provider "p"}))
+                      (.toBe "write allow, exec allow, network allow"))))))
+
+(defn ^:async test-roles-splits-models-from-modes []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [run notes]}]
+       (reset! notes [])
+       (run "roles" [])
+       (let [out (apply str @notes)
+             ;; everything printed under the model-roles heading
+             models (first (.split out "Permission modes"))]
+         (-> (expect (.includes out "Model roles:")) (.toBe true))
+         (-> (expect (.includes out "Permission modes (use /mode)")) (.toBe true))
+         ;; model-less modes are NOT model roles
+         (-> (expect (.includes models "full-auto")) (.toBe false))
+         (-> (expect (.includes models "accept-edits")) (.toBe false))
+         (-> (expect (.includes models "(inherits model)")) (.toBe false))
+         ;; and real model roles still are
+         (-> (expect (.includes models "fast")) (.toBe true))
+         (-> (expect (.includes models "deep")) (.toBe true))
+         ;; the modes section says what each one actually does
+         (-> (expect (.includes out "write allow, exec allow, network allow")) (.toBe true)))))))
+
+(defn ^:async test-mode-bare-prints-each-policy []
+  (js-await
+   (with-model-roles
+     (fn [{:keys [run notes]}]
+       (reset! notes [])
+       (run "mode" [])
+       (let [out (apply str @notes)]
+         (doseq [m policy/mode-cycle]
+           (-> (expect #js [m (boolean (.includes out (str "  " m " → ")))])
+               (.toEqual #js [m true])))
+         (-> (expect (.includes out "write ask, exec ask, network ask")) (.toBe true))
+         (-> (expect (.includes out "write allow, exec allow, network allow")) (.toBe true))
+         ;; and it still marks where you are
+         (-> (expect (.includes out "◀")) (.toBe true)))))))
+
+(describe "/roles and /mode say what each entry does"
+          (fn []
+            (it "/roles lists model roles and permission modes separately"
+                test-roles-splits-models-from-modes)
+            (it "/mode with no argument prints each mode's policy"
+                test-mode-bare-prints-each-policy)))
