@@ -247,6 +247,11 @@
               (d/error
                (str "[nyma] Skipping extension " namespace
                     " — its dependency " bad " failed to load")))
+          ;; Held outside the try so a throw mid-activation can sweep what the
+          ;; extension registered before it died. Without this a half-activated
+          ;; extension left its handlers and commands live under a namespace
+          ;; marked failed — and nothing would ever deactivate them.
+          (let [scoped-box (atom nil)]
           (try
             ;; Resolve npm dependencies before loading. A builtin's deps are
             ;; nyma's own and already installed, so this only has work to do for
@@ -259,7 +264,8 @@
                   caps   (parse-capabilities
                           (when manifest (.-capabilities manifest))
                           namespace)
-                  scoped (create-scoped-api api namespace caps)]
+                  scoped (create-scoped-api api namespace caps)
+                  _      (reset! scoped-box scoped)]
               (when ext-fn
                 (let [result (js-await (ext-fn scoped))]
                   (swap! extensions conj
@@ -273,8 +279,9 @@
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
               (swap! failed conj namespace)
+              (dispose-scope! @scoped-box)
               (d/error
-               (str "[nyma] Failed to load extension (" path "):") e)))))
+               (str "[nyma] Failed to load extension (" path "):") e))))))
       @extensions)))
 
 (defn ^:async deactivate-all

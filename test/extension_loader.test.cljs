@@ -195,6 +195,23 @@
     (-> (expect (count result)) (.toBe 0))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
+(defn ^:async test-throwing-activation-leaves-nothing-registered []
+  ;; Registers a command, then throws. The loader marks it failed; the
+  ;; command must not survive — nothing would ever deactivate it.
+  (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
+        ext-path (path/join tmp-dir "half-ext.mjs")
+        _        (.writeFileSync fs ext-path
+                                 "export default function(api) { api.registerCommand('x', {handler(){}}); throw new Error('mid-activate'); }")
+        orig     js/console.error
+        _        (set! js/console.error (fn [& _]))
+        agent    (create-agent {:model "mock" :system-prompt "test"})
+        api      (create-extension-api agent)
+        result   (js-await (discover-and-load [tmp-dir] api))]
+    (set! js/console.error orig)
+    (-> (expect (count result)) (.toBe 0))
+    (-> (expect (contains? @(:commands agent) "half-ext__x")) (.toBe false))
+    (.rmSync fs tmp-dir #js {:recursive true})))
+
 (defn ^:async test-loads-manifest []
   ;; When extension.json exists in the dir, only index.* is loaded as entry point
   (let [tmp-dir  (.mkdtempSync fs (str (.tmpdir os) "/nyma-ext-test-"))
@@ -219,6 +236,7 @@
             (it "deactivate is nil when extension returns nothing" test-deactivate-nil-when-no-return)
             (it "skips non-extension files" test-skips-non-extension-files)
             (it "handles extension that throws during load" test-handles-throwing-extension)
+            (it "sweeps what a throwing activation registered" test-throwing-activation-leaves-nothing-registered)
             (it "loads extension.json manifest for namespace" test-loads-manifest)))
 
 ;; ── Multi-file entry-point filtering ─────────────────────────
