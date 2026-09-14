@@ -335,6 +335,15 @@
                                    (let [agent (make-agent-with-builtins)]
                                      (-> (expect (get @(:commands agent) "login")) (.toBeDefined)))))))
 
+(describe "/extensions command" (fn []
+  (it "lists loaded extensions and load failures"
+      (fn []
+        (let [agent (make-agent-with-builtins)
+              {:keys [ctx overlays]} (make-ctx)
+              handler (get-handler agent "extensions")]
+          (handler nil ctx)
+          (-> (expect (first @overlays)) (.toContain "Extensions (0 loaded")))))))
+
 (describe "/reload command" (fn []
                               (it "registered as a command"
                                   (fn []

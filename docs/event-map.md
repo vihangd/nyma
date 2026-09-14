@@ -11,69 +11,74 @@ with no consumer survived several releases because nothing showed the pair.
 ## Core events
 
 `test/event_emitter_lint.test.cljs` fails when the emitters column is empty.
-The listeners column is reported only.
+The listeners column is reported only. Payload keys are the union over the
+emit sites that pass a literal map; a `-` there means the payload is built
+elsewhere (or is empty) — read the emit site.
 
-| Event | Emitted in | Listened in |
-| --- | --- | --- |
-| `acp_commands_update` | src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_connect` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/pool.cljs | - |
-| `acp_disconnect` | src/agent/extensions/agent_shell/acp/pool.cljs | - |
-| `acp_message` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_mode_change` | src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_plan` | src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_thought` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | src/agent/extensions/thinking_renderer/index.cljs |
-| `acp_tool_start` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_tool_update` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `acp_usage` | src/agent/extensions/agent_shell/acp/notifications.cljs | - |
-| `after_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs |
-| `agent_end` | src/agent/loop.cljs, src/agent/loop.cljs (stream-event-types) | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/finalize_warn.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/pi_rpc.cljs |
-| `agent_start` | src/agent/loop.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/pi_rpc.cljs |
-| `before_agent_start` | src/agent/loop.cljs | src/agent/extensions/add_dir/index.cljs, src/agent/extensions/bash_suite/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/handoff/index.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/memory/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/evidence.cljs, src/agent/extensions/small_model/knowledge_inject.cljs, src/agent/extensions/small_model/self_tune.cljs, src/agent/extensions/todos/index.cljs, src/agent/extensions/token_suite/repo_map.cljs, src/agent/extensions/token_suite/structured_context.cljs, src/agent/middleware/self_reminder.cljs |
-| `before_branch_switch` | src/agent/sessions/manager.cljs | - |
-| `before_compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/smart_compaction.cljs, src/agent/modes/pi_rpc.cljs |
-| `before_message_send` | src/agent/loop.cljs | - |
-| `before_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/profiles.cljs, src/agent/extensions/small_model/respond_tool.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs |
-| `before_tool_call` | src/agent/loop.cljs, src/agent/middleware.cljs, src/agent/ui/editor_bash.cljs | src/agent/extensions/bash_suite/env_filter.cljs, src/agent/extensions/bash_suite/security_analysis.cljs, src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/pre_tool_use.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/file_access.cljs |
-| `compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/kv_cache.cljs, src/agent/modes/pi_rpc.cljs |
-| `context_assembly` | src/agent/loop.cljs | src/agent/extensions/headroom/compress.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/token_suite/priority_assembly.cljs |
-| `editor_change` | src/agent/modes/interactive.cljs | src/agent/extensions/token_suite/token_preview.cljs |
-| `input` | src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/features/input_router.cljs |
-| `input_submit` | src/agent/modes/interactive.cljs | src/agent/extensions/claude_hook_bridge/events/user_prompt_submit.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/prompt_history/index.cljs |
-| `message_before_store` | src/agent/loop.cljs | src/agent/extensions/small_model/respond_tool.cljs |
-| `message_end` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
-| `message_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
-| `message_update` | src/agent/loop.cljs (stream-event-types) | src/agent/loop.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs |
-| `model_resolve` | src/agent/loop.cljs | src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/profiles.cljs |
-| `model_select` | src/agent/extensions.cljs | src/agent/modes/interactive.cljs |
-| `notification` | src/agent/extensions/desktop_notify/index.cljs | - |
-| `permission_request` | src/agent/extensions/agent_shell/acp/handlers.cljs, src/agent/middleware.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/bash_suite/permissions.cljs, src/agent/extensions/claude_hook_bridge/events/permission_request.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/modes/pi_rpc.cljs |
-| `provider_error` | src/agent/loop.cljs | src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/thinking_budget.cljs |
-| `reasoning_delta` | src/agent/loop.cljs (stream-event-types) | src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs |
-| `reasoning_end` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
-| `reasoning_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
-| `reload` | src/agent/commands/builtins.cljs, src/agent/extension_context.cljs | - |
-| `resources_discover` | src/agent/resources/loader.cljs | - |
-| `role_change` | src/agent/extensions/agent_shell/features/plan_capture.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/extensions/model_roles/index.cljs |
-| `session_before_fork` | src/agent/commands/builtins.cljs | - |
-| `session_before_switch` | src/agent/sessions/manager.cljs | - |
-| `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs |
-| `session_end` | src/agent/cli.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs |
-| `session_shutdown` | src/agent/cli.cljs, src/agent/commands/builtins.cljs, src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/mcp_client/index.cljs |
-| `session_start` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/interactive.cljs |
-| `session_switch` | src/agent/sessions/manager.cljs | - |
-| `stream_filter` | src/agent/loop.cljs | src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs |
-| `tool_call` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - |
-| `tool_complete` | src/agent/middleware.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/post_tool_use.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/stats_dashboard/index.cljs, src/agent/extensions/verify_gate/index.cljs |
-| `tool_execution_end` | src/agent/middleware.cljs | src/agent/extensions/openwiki/events.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/stats_dashboard/index.cljs, src/agent/extensions/token_suite/repo_map.cljs, src/agent/extensions/token_suite/structured_context.cljs, src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs |
-| `tool_execution_start` | src/agent/middleware.cljs | src/agent/extensions/openwiki/events.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs |
-| `tool_execution_update` | src/agent/middleware.cljs | src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs |
-| `tool_result` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - |
-| `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs |
-| `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs |
-| `turn_request` | src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs |
-| `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs |
-| `user_bash` | src/agent/ui/editor_bash.cljs | - |
-| `user_eval` | src/agent/ui/editor_eval.cljs | - |
+| Event | Emitted in | Listened in | Payload keys |
+| --- | --- | --- | --- |
+| `acp_commands_update` | src/agent/extensions/agent_shell/acp/notifications.cljs | - | - |
+| `acp_connect` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/pool.cljs | - | agent-key, session-id |
+| `acp_disconnect` | src/agent/extensions/agent_shell/acp/pool.cljs | - | agent-key, exit-code |
+| `acp_message` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - | agent-key, chunk, text, type |
+| `acp_mode_change` | src/agent/extensions/agent_shell/acp/notifications.cljs | - | agent-key, mode |
+| `acp_plan` | src/agent/extensions/agent_shell/acp/notifications.cljs | - | - |
+| `acp_thought` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | src/agent/extensions/thinking_renderer/index.cljs | agent-key, text, thought |
+| `acp_tool_start` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - | agent-key, kind, status, title, tool-id, toolCallId, toolName |
+| `acp_tool_update` | src/agent/extensions/agent_runner_claude_sdk/index.cljs, src/agent/extensions/agent_shell/acp/notifications.cljs | - | agent-key, content, status, tool-id, toolCallId |
+| `acp_usage` | src/agent/extensions/agent_shell/acp/notifications.cljs | - | agent-key, cost, size, used |
+| `after_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs | cost, inputTokens, outputTokens, usage |
+| `agent_end` | src/agent/loop.cljs, src/agent/loop.cljs (stream-event-types) | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/finalize_warn.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/pi_rpc.cljs | finishReason, text, usage |
+| `agent_start` | src/agent/loop.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `before_agent_start` | src/agent/loop.cljs | src/agent/extensions/add_dir/index.cljs, src/agent/extensions/bash_suite/index.cljs, src/agent/extensions/budget/index.cljs, src/agent/extensions/handoff/index.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/memory/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/evidence.cljs, src/agent/extensions/small_model/knowledge_inject.cljs, src/agent/extensions/small_model/self_tune.cljs, src/agent/extensions/todos/index.cljs, src/agent/extensions/token_suite/repo_map.cljs, src/agent/extensions/token_suite/structured_context.cljs, src/agent/middleware/self_reminder.cljs | system-prompt, systemPrompt, userMessage |
+| `before_branch_switch` | src/agent/sessions/manager.cljs | - | new-leaf, old-leaf |
+| `before_compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/smart_compaction.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `before_message_send` | src/agent/loop.cljs | - | messages, model, system |
+| `before_provider_request` | src/agent/loop.cljs | src/agent/extensions/small_model/profiles.cljs, src/agent/extensions/small_model/respond_tool.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/token_suite/anthropic_compaction.cljs, src/agent/extensions/token_suite/kv_cache.cljs | - |
+| `before_tool_call` | src/agent/loop.cljs, src/agent/middleware.cljs, src/agent/ui/editor_bash.cljs | src/agent/extensions/bash_suite/env_filter.cljs, src/agent/extensions/bash_suite/security_analysis.cljs, src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/pre_tool_use.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/file_access.cljs | - |
+| `compact` | src/agent/sessions/compaction.cljs | src/agent/extensions/claude_hook_bridge/events/compact.cljs, src/agent/extensions/token_suite/kv_cache.cljs, src/agent/modes/pi_rpc.cljs | after, before, summary |
+| `context_assembly` | src/agent/loop.cljs | src/agent/extensions/headroom/compress.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/token_suite/priority_assembly.cljs | contextWindow, inputBudget, messages, model, overheadTokens, systemPrompt, tokenBudget, tokensUsed |
+| `editor_change` | src/agent/modes/interactive.cljs | src/agent/extensions/token_suite/token_preview.cljs | text |
+| `input` | src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/features/input_router.cljs | input |
+| `input_submit` | src/agent/modes/interactive.cljs | src/agent/extensions/claude_hook_bridge/events/user_prompt_submit.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/prompt_history/index.cljs | text |
+| `message_before_store` | src/agent/loop.cljs | src/agent/extensions/small_model/respond_tool.cljs | content, model, role |
+| `message_end` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs | - |
+| `message_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs | - |
+| `message_update` | src/agent/loop.cljs (stream-event-types) | src/agent/loop.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs | - |
+| `model_resolve` | src/agent/loop.cljs | src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/profiles.cljs | - |
+| `model_select` | src/agent/extensions.cljs | src/agent/modes/interactive.cljs | model, modelId, provider |
+| `notification` | src/agent/extensions/desktop_notify/index.cljs | - | body, source, title |
+| `permission_request` | src/agent/extensions/agent_shell/acp/handlers.cljs, src/agent/middleware.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/bash_suite/permissions.cljs, src/agent/extensions/claude_hook_bridge/events/permission_request.cljs, src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/supervisor.cljs, src/agent/modes/pi_rpc.cljs | args, category, path, tool |
+| `provider_error` | src/agent/loop.cljs | src/agent/extensions/claude_hook_bridge/events/stop.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/context_relief.cljs, src/agent/extensions/small_model/thinking_budget.cljs | config, error, message, model, source |
+| `reasoning_delta` | src/agent/loop.cljs (stream-event-types) | src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `reasoning_end` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs | - |
+| `reasoning_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs | - |
+| `reload` | src/agent/commands/builtins.cljs, src/agent/extension_context.cljs | - | - |
+| `resources_discover` | src/agent/resources/loader.cljs | - | cwd, reason |
+| `role_change` | src/agent/extensions/agent_shell/features/plan_capture.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/extensions/model_roles/index.cljs | role, source |
+| `session_before_fork` | src/agent/commands/builtins.cljs | - | leaf-id |
+| `session_before_switch` | src/agent/sessions/manager.cljs | - | new-path, old-path |
+| `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs | - |
+| `session_end` | src/agent/cli.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs | - |
+| `session_end_summary` | src/agent/cli.cljs | src/agent/extensions/desktop_notify/index.cljs | - |
+| `session_ready` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/mcp_client/index.cljs | cwd, extensions, model, reason |
+| `session_shutdown` | src/agent/cli.cljs, src/agent/commands/builtins.cljs, src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/mcp_client/index.cljs | reason |
+| `session_start` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/interactive.cljs | path, previousSessionFile, reason |
+| `session_switch` | src/agent/sessions/manager.cljs | - | entry-count, new-path, old-path |
+| `stream_filter` | src/agent/loop.cljs | src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs | chunk, delta, type |
+| `tool_access_check` | src/agent/context.cljs | src/agent/extensions/model_roles/index.cljs, src/agent/extensions/small_model/profiles.cljs, src/agent/extensions/token_suite/index.cljs | active-role, activeRole, context, default, tools |
+| `tool_call` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - | - |
+| `tool_complete` | src/agent/middleware.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/claude_hook_bridge/events/post_tool_use.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/stats_dashboard/index.cljs, src/agent/extensions/verify_gate/index.cljs | args, cancelled, details, duration, exec-id, isError, result, result-details, result-is-error, tool-name, toolCallId, toolName |
+| `tool_execution_end` | src/agent/middleware.cljs | src/agent/extensions/openwiki/events.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/extensions/stats_dashboard/index.cljs, src/agent/extensions/token_suite/repo_map.cljs, src/agent/extensions/token_suite/structured_context.cljs, src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `tool_execution_start` | src/agent/middleware.cljs | src/agent/extensions/openwiki/events.cljs, src/agent/extensions/spec_driven/index.cljs, src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `tool_execution_update` | src/agent/middleware.cljs | src/agent/modes/interactive.cljs, src/agent/modes/pi_rpc.cljs | data, exec-id, execId, tool-name, toolName |
+| `tool_result` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - | - |
+| `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs | error, finishReason, no-op-turns, noOpTurns, state, toolCalls |
+| `turn_request` | src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | text |
+| `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs | - |
+| `user_bash` | src/agent/ui/editor_bash.cljs | - | blocked, command, exit-code, reason, stderr, stdout |
+| `user_eval` | src/agent/ui/editor_eval.cljs | - | exit-code, expr, stderr, stdout, unavailable |
 
 ## pi-compat events
 

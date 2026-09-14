@@ -178,12 +178,18 @@
           (d/warn "[nyma] Extension dependency cycle detected, loading in scan order")
           entries)))))
 
+(def last-load-failures
+  "namespace → reason, for the most recent discover-and-load. The loader
+   logged failures and then forgot them; /extensions reads this."
+  (atom {}))
+
 (defn ^:async discover-and-load
   "Scan directories for extension files, load them, and wire them up.
    Extensions may return a deactivate function for cleanup.
    If an extension.json manifest exists, it provides namespace, capabilities, and dependsOn.
    Extensions are loaded in dependency order (topological sort)."
   [dirs api & [builtins]]
+  (reset! last-load-failures {})
   ;; Pass 1: collect metadata — the statically compiled builtins first, then
   ;; whatever the user directories hold.
   ;;
@@ -244,6 +250,7 @@
       (doseq [{:keys [path entry namespace manifest deps module]} sorted]
         (if-let [bad (first (filter @failed (or deps [])))]
           (do (swap! failed conj namespace)
+              (swap! last-load-failures assoc namespace (str "dependency " bad " failed to load"))
               (d/error
                (str "[nyma] Skipping extension " namespace
                     " — its dependency " bad " failed to load")))
@@ -279,6 +286,7 @@
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
               (swap! failed conj namespace)
+              (swap! last-load-failures assoc namespace (str (.-message e)))
               (dispose-scope! @scoped-box)
               (d/error
                (str "[nyma] Failed to load extension (" path "):") e))))))
