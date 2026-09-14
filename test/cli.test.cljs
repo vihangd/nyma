@@ -191,7 +191,10 @@
 
             (it "says --output-format exits 1 on error"
                 (fn []
-                  (-> (expect (str/includes? help-text "exits\n                         1"))
+                  ;; Two substrings rather than one that spans the wrap: the
+                  ;; claim is what matters, not where the paragraph breaks.
+                  (-> (expect (str/includes? help-text "--output-format")) (.toBe true))
+                  (-> (expect (str/includes? help-text "1 when the run fails"))
                       (.toBe true))))
 
             (it "puts the fresh-session default under --session, not --discover"

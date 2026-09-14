@@ -175,3 +175,47 @@
           ;; Clojure spells octal `0600`; `0o600` is not a valid Clojure number
           ;; at all and fails the squint compile. This pins the value.
                   (-> (expect credentials/private-mode) (.toBe 384))))))
+
+;;; ─── a corrupt credentials file is not a blank one ──────────
+;;; `read-all` returns nil for missing AND for unparseable. A writer that reads
+;;; it as "start from {}" rewrites the file with one key in it — every other
+;;; provider's key gone, from a file that was merely half-written.
+
+(describe "writing to a credentials file that will not parse"
+          (fn []
+            (it "refuses, naming the file, instead of overwriting it"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-a" "openai" "sk-o"})
+                        p   (path/join dir ".nyma" "credentials.json")]
+                    (fs/writeFileSync p "{\"anthropic\": \"sk-a\", \"openai\"")
+                    (let [r (credentials/read-for-write)]
+                      (-> (expect (:ok r)) (.toBeFalsy))
+                      (-> (expect (:error r)) (.toContain "not valid JSON"))
+                      (-> (expect (:error r)) (.toContain p)))
+            ;; The bytes on disk are untouched — that is the whole point.
+                    (-> (expect (fs/readFileSync p "utf8"))
+                        (.toBe "{\"anthropic\": \"sk-a\", \"openai\""))
+                    (fs/rmSync dir #js {:recursive true}))))
+
+            (it "treats a missing file as an empty one, so the first /login works"
+                (fn []
+                  (empty-home!)
+                  (let [r (credentials/read-for-write)]
+                    (-> (expect (:error r)) (.toBeFalsy))
+                    (-> (expect (js/Object.keys (:ok r))) (.toHaveLength 0)))))
+
+            (it "hands back the existing keys when the file is fine"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-a" "openai" "sk-o"})
+                        r   (credentials/read-for-write)]
+                    (-> (expect (:error r)) (.toBeFalsy))
+                    (-> (expect (aget (:ok r) "openai")) (.toBe "sk-o"))
+                    (fs/rmSync dir #js {:recursive true}))))
+
+            (it "read-all still answers nil, which is right for a reader"
+                (fn []
+                  (let [dir (write-creds! {"anthropic" "sk-a"})]
+                    (fs/writeFileSync (path/join dir ".nyma" "credentials.json") "{oops")
+                    (-> (expect (credentials/read-all)) (.toBeNull))
+                    (-> (expect (credentials/read-credential "anthropic")) (.toBeFalsy))
+                    (fs/rmSync dir #js {:recursive true}))))))

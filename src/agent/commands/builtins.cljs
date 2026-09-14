@@ -177,10 +177,10 @@
   ;;    startup only, so /reload deactivated all of that and brought none of
   ;;    it back. `reload` had zero listeners.
   (js-await ((:emit-async (:events agent)) "session_ready"
-                                           #js {:cwd        (js/process.cwd)
-                                                :model      (current-model-id agent)
-                                                :extensions (count (or (when extensions-atom @extensions-atom) []))
-                                                :reason     "reload"}))
+             #js {:cwd        (js/process.cwd)
+                  :model      (current-model-id agent)
+                  :extensions (count (or (when extensions-atom @extensions-atom) []))
+                  :reason     "reload"}))
   ((:emit (:events agent)) "reload" {})
   (notify ctx "Extensions reloaded"))
 
@@ -312,18 +312,23 @@
       (notify ctx "Login requires interactive mode" "error")
       (let [key (js-await (.input (.-ui ctx) (str "API key for " provider ":") "sk-..."))]
         (when (and key (seq (.trim key)))
-          (let [existing (or (creds-util/read-all) #js {})
-                _ (aset existing provider (.trim key))
-                dir (str (.. js/process -env -HOME) "/.nyma")]
-            (when-not (fs/existsSync dir)
-              (fs/mkdirSync dir #js {:recursive true :mode 0700}))
-            (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2)
-                              #js {:encoding "utf8" :mode creds-util/private-mode})
-            ;; `:mode` is create-only, so an existing 0644 file keeps its mode
-            ;; through the write — this is the half that fixes the ones already
-            ;; on disk.
-            (creds-util/harden! cred-path)
-            (notify ctx (str "Saved " provider " API key"))))))))
+          (let [{:keys [ok error]} (creds-util/read-for-write)]
+            (if error
+              ;; Never rewrite a file we could not read: "unparseable" and
+              ;; "empty" look the same to a reader, and treating them the same
+              ;; here would drop every other provider's key.
+              (notify ctx error "error")
+              (let [dir (str (.. js/process -env -HOME) "/.nyma")]
+                (aset ok provider (.trim key))
+                (when-not (fs/existsSync dir)
+                  (fs/mkdirSync dir #js {:recursive true :mode 0700}))
+                (fs/writeFileSync cred-path (js/JSON.stringify ok nil 2)
+                                  #js {:encoding "utf8" :mode creds-util/private-mode})
+                ;; `:mode` is create-only, so an existing 0644 file keeps its
+                ;; mode through the write — this is the half that fixes the
+                ;; ones already on disk.
+                (creds-util/harden! cred-path)
+                (notify ctx (str "Saved " provider " API key"))))))))))
 
 (defn ^:async handle-login
   "Handle /login command.
@@ -887,13 +892,18 @@
                                   (notify ctx (str "Removed OAuth credentials for " provider)))
                               (if-not (and cred-path (fs/existsSync cred-path))
                                 (notify ctx "No credentials found" "error")
-                                (let [existing (or (creds-util/read-all) #js {})]
-                                  (js-delete existing provider)
-                                  (fs/writeFileSync cred-path (js/JSON.stringify existing nil 2)
-                                                    #js {:encoding "utf8"
-                                                         :mode creds-util/private-mode})
-                                  (creds-util/harden! cred-path)
-                                  (notify ctx (str "Removed " provider " API key")))))))))}
+                                (let [{:keys [ok error]} (creds-util/read-for-write)]
+                                  (if error
+                                    ;; Rewriting a file we could not parse would
+                                    ;; remove every key, not the one asked for.
+                                    (notify ctx error "error")
+                                    (do
+                                      (js-delete ok provider)
+                                      (fs/writeFileSync cred-path (js/JSON.stringify ok nil 2)
+                                                        #js {:encoding "utf8"
+                                                             :mode creds-util/private-mode})
+                                      (creds-util/harden! cred-path)
+                                      (notify ctx (str "Removed " provider " API key")))))))))))}
 
           "scoped-models"
           {:description "Show or set per-extension model overrides"

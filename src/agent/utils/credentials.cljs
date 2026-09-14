@@ -44,7 +44,11 @@
 (defn read-all
   "Parsed credentials object, or nil when missing/unreadable/malformed.
 
-   Tightens the file's permissions on the way past — see `harden!`."
+   Tightens the file's permissions on the way past — see `harden!`.
+
+   Readers want nil for all three cases; a WRITER must not, because
+   \"malformed\" plus \"treat nil as empty\" means overwriting every other
+   provider's key. Use `read-for-write` on that path."
   []
   (when-let [p (credentials-path)]
     (when (fs/existsSync p)
@@ -52,6 +56,24 @@
       (try
         (js/JSON.parse (fs/readFileSync p "utf8"))
         (catch :default _ nil)))))
+
+(defn read-for-write
+  "`{:ok obj}` for a file to edit, or `{:error msg}` when it is there but
+   unparseable.
+
+   A missing file is `{:ok #js {}}`: the first `/login` has nothing to read.
+   An unreadable one is NOT — a half-written credentials.json is exactly the
+   case where `(or (read-all) #js {})` silently drops every key the file still
+   held. The inline `JSON.parse` this replaced at least threw."
+  []
+  (let [p (credentials-path)]
+    (cond
+      (nil? p)                  {:ok #js {}}
+      (not (fs/existsSync p))   {:ok #js {}}
+      :else (let [parsed (read-all)]
+              (if (some? parsed)
+                {:ok parsed}
+                {:error (str "Refusing to write: " p " is not valid JSON")})))))
 
 (defn read-credential
   "Saved key for `provider-name`, or nil.
