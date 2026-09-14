@@ -186,13 +186,13 @@
   (boolean (js/Bun.which "bb")))
 
 ((.skipIf describe (not have-bb?)) "run-eval! (integration — requires bb on PATH)"
-          (fn []
-            (it "evaluates a simple expression and captures stdout"
-                test-run-eval-happy-path)
-            (it "captures stderr and non-zero exit on thrown exceptions"
-                test-run-eval-captures-stderr-on-throw)
-            (it "prints pure return values without explicit println"
-                test-run-eval-pure-value-on-stdout)))
+                                   (fn []
+                                     (it "evaluates a simple expression and captures stdout"
+                                         test-run-eval-happy-path)
+                                     (it "captures stderr and non-zero exit on thrown exceptions"
+                                         test-run-eval-captures-stderr-on-throw)
+                                     (it "prints pure return values without explicit println"
+                                         test-run-eval-pure-value-on-stdout)))
 
 ;;; ─── user_eval event tests ─────────────────────────────
 ;;; These tests do NOT depend on bb being installed — the event
@@ -241,3 +241,79 @@
                 test-user-eval-event-not-fired-without-events)
             (it "fires user_eval even when bb is unavailable"
                 test-user-eval-event-fires-on-unavailable)))
+
+;;; ─── $expr goes through the same security gate as !cmd ─────────
+;;
+;; `!cmd` routed through before_tool_call (and so through bash_suite's
+;; security analysis, the PreToolUse hook bridge and the permission gates);
+;; `$expr` spawned bb straight away. Anything a user was not allowed to run
+;; through `!` they could run through `$`.
+
+(defn ^:async test-eval-blocked-by-before-tool-call []
+  (let [bus (create-event-bus)]
+    ((:on bus) "before_tool_call"
+               (fn [_data] #js {:block true :reason "BLOCKED: test sentinel"})
+               100)
+    (let [result (js-await (run-eval! "(println \"should-not-run\")" bus))]
+      (-> (expect (:blocked? result)) (.toBe true))
+      (-> (expect (.includes (:reason result) "test sentinel")) (.toBe true))
+      ;; bb was never spawned, so there is no output at all.
+      (-> (expect (or (:stdout result) "")) (.toBe ""))
+      (-> (expect (.includes (format-eval-output result) "blocked")) (.toBe true))
+      (-> (expect (.includes (format-eval-output result) "test sentinel")) (.toBe true)))))
+
+(defn ^:async test-eval-cancel-also-blocks []
+  (let [bus (create-event-bus)]
+    ((:on bus) "before_tool_call" (fn [_data] #js {:cancel true :reason "nope"}) 100)
+    (let [result (js-await (run-eval! "(+ 1 2)" bus))]
+      (-> (expect (:blocked? result)) (.toBe true))
+      (-> (expect (.includes (:reason result) "nope")) (.toBe true)))))
+
+(defn ^:async test-eval-honours-security-analysis-skip []
+  ;; bash_suite's security_analysis vetoes with {skip, result}, NOT
+  ;; {block, reason} — checking only block/cancel let the expression run and
+  ;; threw away the classification that explained why it should not.
+  (let [bus (create-event-bus)]
+    ((:on bus) "before_tool_call"
+               (fn [_data]
+                 #js {:skip   true
+                      :result "Command blocked by security analysis [destructive]: deletes a directory tree"})
+               100)
+    (let [result (js-await (run-eval! "(+ 1 2)" bus))]
+      (-> (expect (:blocked? result)) (.toBe true))
+      (-> (expect (.includes (:reason result) "destructive")) (.toBe true))
+      (-> (expect (.includes (format-eval-output result) "deletes a directory tree"))
+          (.toBe true)))))
+
+(defn ^:async test-eval-gate-sees-the-expression []
+  (let [bus  (create-event-bus)
+        seen (atom nil)]
+    ((:on bus) "before_tool_call"
+               (fn [data] (reset! seen {:name (.-name data)
+                                        :command (.-command (.-args data))})
+                 nil)
+               100)
+    (js-await (run-eval! "(+ 1 2)" bus))
+    (-> (expect (:command @seen)) (.toBe "(+ 1 2)"))
+    ;; Named "bash": bash_suite gates every handler on a literal
+    ;; `name == "bash"`, so a "bb" payload would be analysed by nobody.
+    (-> (expect (:name @seen)) (.toBe "bash"))))
+
+(defn ^:async test-eval-unblocked-still-runs []
+  (let [bus (create-event-bus)]
+    ((:on bus) "before_tool_call" (fn [_data] nil) 100)
+    (let [result (js-await (run-eval! "(+ 1 2)" bus))]
+      (-> (expect (boolean (:blocked? result))) (.toBe false)))))
+
+(describe "run-eval! — before_tool_call security gate"
+          (fn []
+            (it "cancels the eval when a handler returns {:block true}"
+                test-eval-blocked-by-before-tool-call)
+            (it "cancels the eval when a handler returns {:cancel true}"
+                test-eval-cancel-also-blocks)
+            (it "cancels the eval on security analysis' {:skip true :result …} veto"
+                test-eval-honours-security-analysis-skip)
+            (it "shows the gate the expression under the bash tool name"
+                test-eval-gate-sees-the-expression)
+            (it "runs normally when no handler objects"
+                test-eval-unblocked-still-runs)))

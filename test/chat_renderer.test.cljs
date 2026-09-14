@@ -13,7 +13,8 @@
             :muted     "#565f89"
             :border    "#3b4261"
             :error     "#f7768e"
-            :warning   "#e0af68"}})
+            :warning   "#e0af68"
+            :success   "#9ece6a"}})
 
 (defn- strip-ansi [s]
   (.replace s (js/RegExp. "\u001b\\[[0-9;]*m" "g") ""))
@@ -358,3 +359,128 @@
               (fn []
                 (let [lines (render {:role "user" :id "1"})]
                   (-> (expect (vector? lines)) (.toBe true))))))
+
+;;; ─── a failed tool call ───────────────────────────────────────────────────
+;;
+;; middleware emits :isError on tool_execution_end and app_reducers now copies
+;; it onto the message. Before that the icon was a flat `(if is-end "✓" "⚙")`,
+;; so a tool that threw was reported to the user as a success — the worst
+;; thing a transcript can get wrong.
+
+(describe "chat-renderer/failed tool call" (fn [])
+          (it "renders ✗ instead of ✓ when the tool failed"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "bash" :is-error true
+                                     :args {:command "false"}
+                                     :result "exit 1" :id "1"}))]
+                  (-> (expect (.includes text "✗")) (.toBe true))
+                  (-> (expect (.includes text "✓")) (.toBe false)))))
+
+          (it "paints the failed line in the theme's error colour"
+              (fn []
+                (let [raw (.join (to-array (render {:role "tool-end" :tool-name "bash"
+                                                    :is-error true :args {}
+                                                    :result "boom" :id "1"}))
+                                 "\n")]
+                  ;; #f7768e → 247;118;142
+                  (-> (expect (.includes raw "38;2;247;118;142")) (.toBe true)))))
+
+          (it "shows the first line of the result instead of a line count"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "read" :is-error true
+                                     :args {:path "/nope"}
+                                     :result "ENOENT: no such file\nstack frame\nstack frame"
+                                     :id "1"}))]
+                  (-> (expect (.includes text "ENOENT: no such file")) (.toBe true))
+                  (-> (expect (.includes text "3 lines")) (.toBe false)))))
+
+          (it "the failure icon beats a tool's own custom icon"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "questionnaire"
+                                     :is-error true :custom-icon "❓" :args {}
+                                     :result "denied" :id "1"}))]
+                  (-> (expect (.includes text "✗")) (.toBe true))
+                  (-> (expect (.includes text "❓")) (.toBe false)))))
+
+          (it "leaves a successful tool call alone"
+              (fn []
+                (let [text (visible-text (render {:role "tool-end" :tool-name "edit"
+                                                  :args {:path "/f"} :result "" :id "1"}))]
+                  (-> (expect (.includes text "✓")) (.toBe true))
+                  (-> (expect (.includes text "✗")) (.toBe false))))))
+
+;;; ─── in-flight tool progress ──────────────────────────────────────────────
+;;
+;; tool_execution_update writes :custom-status-text and nothing read it, so a
+;; long-running tool reporting progress showed a motionless "⚙ name args".
+
+(describe "chat-renderer/running tool progress" (fn [])
+          (it "appends the live status text while the tool is running"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-start" :tool-name "web_fetch"
+                                     :args {:url "https://x.dev"}
+                                     :custom-status-text "downloading 40%" :id "1"}))]
+                  (-> (expect (.includes text "⚙")) (.toBe true))
+                  (-> (expect (.includes text "https://x.dev")) (.toBe true))
+                  (-> (expect (.includes text "— downloading 40%")) (.toBe true)))))
+
+          (it "omits the separator when there is no status yet"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-start" :tool-name "web_fetch"
+                                     :args {:url "https://x.dev"} :id "1"}))]
+                  (-> (expect (.includes text "—")) (.toBe false)))))
+
+          (it "does not carry the status onto the finished line"
+              (fn []
+                (let [text (visible-text
+                            (render {:role "tool-end" :tool-name "web_fetch"
+                                     :args {:url "https://x.dev"}
+                                     :custom-status-text "downloading 40%"
+                                     :result "ok" :id "1"}))]
+                  (-> (expect (.includes text "downloading 40%")) (.toBe false))))))
+
+;;; ─── notify levels ────────────────────────────────────────────────────────
+;;
+;; `ui.notify(msg, type)` used to throw its type away, so a warning, a failure
+;; and a success all rendered as the same cyan ℹ line.
+
+(describe "chat-renderer/notify levels" (fn [])
+          (it "renders ℹ for info"
+              (fn []
+                (let [text (visible-text (render {:role "info" :content "hello" :id "1"}))]
+                  (-> (expect (.includes text "ℹ")) (.toBe true))
+                  (-> (expect (.includes text "hello")) (.toBe true)))))
+
+          (it "renders ⚠ in the warning colour for warn"
+              (fn []
+                (let [lines (render {:role "warn" :content "careful" :id "1"})
+                      raw   (.join (to-array lines) "\n")
+                      text  (visible-text lines)]
+                  (-> (expect (.includes text "⚠")) (.toBe true))
+                  (-> (expect (.includes text "careful")) (.toBe true))
+                  ;; #e0af68 → 224;175;104
+                  (-> (expect (.includes raw "38;2;224;175;104")) (.toBe true)))))
+
+          (it "renders ✗ in the error colour for error"
+              (fn []
+                (let [lines (render {:role "error" :content "it broke" :id "1"})
+                      raw   (.join (to-array lines) "\n")
+                      text  (visible-text lines)]
+                  (-> (expect (.includes text "✗")) (.toBe true))
+                  (-> (expect (.includes text "it broke")) (.toBe true))
+                  (-> (expect (.includes raw "38;2;247;118;142")) (.toBe true)))))
+
+          (it "renders ✓ in the success colour for success"
+              (fn []
+                (let [lines (render {:role "success" :content "all done" :id "1"})
+                      raw   (.join (to-array lines) "\n")
+                      text  (visible-text lines)]
+                  (-> (expect (.includes text "✓")) (.toBe true))
+                  (-> (expect (.includes text "all done")) (.toBe true))
+                  ;; #9ece6a → 158;206;106
+                  (-> (expect (.includes raw "38;2;158;206;106")) (.toBe true))))))

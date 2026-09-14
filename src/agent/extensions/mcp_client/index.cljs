@@ -25,6 +25,7 @@
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shell-shared]
+            [agent.extensions.agent-shell.features.mcp-discovery :as discovery]
             [agent.extensions.mcp-client.client :as client]
             [agent.extensions.mcp-client.manager :as mgr]
             [agent.extensions.mcp-client.tool-bridge :as bridge]
@@ -114,35 +115,52 @@
       (vec @merged))
     :else default-hidden-tools))
 
-(defn- load-settings
+(defn malformed-settings-message
+  "The error shown when `.nyma/settings.json` cannot be read as JSON.
+   Names the file AND the key, because `mcp` is the only part of that file
+   this extension reads and the rest of nyma keeps working without it."
+  [file-path err-msg]
+  (str "Malformed MCP config: " file-path " (key \"mcp\") — " err-msg
+       ". Falling back to built-in defaults; MCP settings from this file are ignored."))
+
+(defn load-settings
   "Return MCP client settings or defaults. Self-contained to avoid
    coupling to nyma's settings manager (which uses a shallow merge
-   we don't want for nested maps)."
-  []
-  (let [project-path (path/join (js/process.cwd) ".nyma" "settings.json")
-        defaults     {:show-detail-segment false
-                      :max-restarts        3
-                      :startup-timeout-ms  30000
-                      :call-timeout-ms     30000
-                      :shadow-tools        default-shadow-map
-                      :hidden-tools        default-hidden-tools
-                      :tool-overrides      override/default-overrides}]
-    (try
-      (if (fs/existsSync project-path)
-        (let [raw    (fs/readFileSync project-path "utf8")
-              parsed (js/JSON.parse raw)
-              mcp    (aget parsed "mcp")]
-          (merge defaults
-                 (when mcp
-                   {:show-detail-segment (boolean (aget mcp "show-detail-segment"))
-                    :max-restarts        (or (aget mcp "max-restarts") (:max-restarts defaults))
-                    :startup-timeout-ms  (or (aget mcp "startup-timeout-ms") (:startup-timeout-ms defaults))
-                    :call-timeout-ms     (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
-                    :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
-                    :hidden-tools        (parse-hidden-tools (aget mcp "hidden-tools"))
-                    :tool-overrides      (override/parse-overrides (aget mcp "tool-overrides"))})))
-        defaults)
-      (catch :default _e defaults))))
+   we don't want for nested maps).
+
+   `on-error` (optional) is called with a human-readable message when the
+   file exists but will not parse. It used to be `(catch :default _e
+   defaults)` — a typo in settings.json silently produced default MCP
+   behaviour with nothing anywhere saying why."
+  ([] (load-settings nil))
+  ([on-error]
+   (let [project-path (path/join (js/process.cwd) ".nyma" "settings.json")
+         defaults     {:show-detail-segment false
+                       :max-restarts        3
+                       :startup-timeout-ms  30000
+                       :call-timeout-ms     30000
+                       :shadow-tools        default-shadow-map
+                       :hidden-tools        default-hidden-tools
+                       :tool-overrides      override/default-overrides}]
+     (try
+       (if (fs/existsSync project-path)
+         (let [raw    (fs/readFileSync project-path "utf8")
+               parsed (js/JSON.parse raw)
+               mcp    (aget parsed "mcp")]
+           (merge defaults
+                  (when mcp
+                    {:show-detail-segment (boolean (aget mcp "show-detail-segment"))
+                     :max-restarts        (or (aget mcp "max-restarts") (:max-restarts defaults))
+                     :startup-timeout-ms  (or (aget mcp "startup-timeout-ms") (:startup-timeout-ms defaults))
+                     :call-timeout-ms     (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
+                     :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
+                     :hidden-tools        (parse-hidden-tools (aget mcp "hidden-tools"))
+                     :tool-overrides      (override/parse-overrides (aget mcp "tool-overrides"))})))
+         defaults)
+       (catch :default e
+         (when on-error
+           (on-error (malformed-settings-message project-path (.-message e))))
+         defaults)))))
 
 (defn compute-shadow-set
   "Given the shadow map and the current set of active tool names,
@@ -186,14 +204,27 @@
         (str "MCP servers: " (:running s) "/" (:total s) " connected\n"
              (str/join "\n" rows))))))
 
-(defn- notify [api msg]
+(defn status-report
+  "Everything /mcp-status prints: the connection table, then the config files
+   that were consulted and which of them existed. \"No MCP servers configured\"
+   on its own never said where nyma had looked."
+  [manager project-root]
+  (str (format-status-table manager)
+       "\n\n"
+       (discovery/candidate-report project-root)))
+
+(defn- notify [api msg & [level]]
   (when (and (.-ui api) (.-available (.-ui api)))
-    (.notify (.-ui api) msg "info")))
+    (.notify (.-ui api) msg (or level "info"))))
 
 ;; ── Activation ───────────────────────────────────────────────────
 
 (defn ^:export default [api]
-  (let [settings           (load-settings)
+  (let [;; Also to the debug log: the extension can load before interactive
+        ;; mode marks the UI available, and an error that can only go to a UI
+        ;; that does not exist yet is an error nobody sees.
+        report-error!      (fn [m] (d/error (str "[mcp-client] " m)) (notify api m "error"))
+        settings           (load-settings report-error!)
         manager            (mgr/create)
         manager-ref        (atom manager)
         show-detail?-ref   (atom (:show-detail-segment settings))
@@ -235,7 +266,8 @@
         _ (.registerCommand api "mcp-status"
                             #js {:description "Show MCP server connection state and tool counts"
                                  :handler (fn [_args _ctx]
-                                            (notify api (format-status-table @manager-ref)))})
+                                            (notify api (status-report @manager-ref
+                                                                       (js/process.cwd))))})
 
         ;; The in-flight bring-up, so it can be started without being waited
         ;; for. Measured: five configured servers cost 3–6 s, and awaiting them

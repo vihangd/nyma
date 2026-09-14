@@ -1,8 +1,8 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
   (:require ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
-                                            CombinedAutocompleteProvider
-                                            matchesKey]]
+                                              CombinedAutocompleteProvider
+                                              matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.ui.themes :refer [default-dark]]
@@ -45,6 +45,98 @@
   (boolean (and (matchesKey data "escape")
                 submitting?
                 (zero? (or overlay-count 0)))))
+
+(def ^:private notify-levels
+  "The notify levels a `ui.notify(msg, type)` call may name, mapped to the
+   transcript role that renders them. Anything unknown is info — an
+   unrecognised role would fall through chat-renderer's generic branch and
+   print as `whatever: text`."
+  {"info" "info" "warn" "warn" "warning" "warn"
+   "error" "error" "success" "success"})
+
+(defn notify-role
+  "Transcript role for a `ui.notify` level. `notify` used to drop its second
+   argument entirely, so an extension reporting a failure and one reporting
+   progress produced the identical cyan info line."
+  [level]
+  (or (get notify-levels (str/lower-case (str (or level "info")))) "info"))
+
+(defn classify-error-message
+  "A provider error, plus the one thing the user can do about it.
+
+   The raw message comes first — it is the only text that identifies WHICH
+   call failed — and the hint is appended. `retrying?` says whether the run
+   loop will try again on its own; the AI SDK exhausts its own retries before
+   the error ever reaches the transcript, so the call site passes false.
+
+   Pure: the classification is a substring match on the lower-cased message,
+   first hit wins, in the order context length → auth → rate limit.
+
+   That order, and the narrow auth patterns, are both deliberate. Anthropic
+   returns a context overflow as an `invalid_request_error`, so a bare
+   \"invalid\" test — or putting auth first — sends someone whose prompt is too
+   long off to check their API key. Likewise \"rate\" alone matches
+   \"generate\"."
+  [msg & [retrying?]]
+  (let [raw (str (or msg ""))
+        m   (str/lower-case raw)
+        has (fn [& subs] (boolean (some (fn [x] (.includes m x)) subs)))]
+    (str raw
+         (cond
+           (has "context" "too long" "maximum context" "context_length")
+           " — run /compact"
+
+           (has "401" "invalid api key" "invalid x-api-key" "invalid_api_key"
+                "api key" "api_key" "unauthorized" "authentication")
+           " — check ANTHROPIC_API_KEY or /login <provider>"
+
+           (has "429" "rate limit" "rate_limit" "rate-limit")
+           (if retrying? " — rate limited; retrying" " — try again")
+
+           (has "maximum")
+           " — run /compact"
+
+           :else ""))))
+
+(defn seed-prompt-of
+  "The first-turn prompt cli hands `interactive/start` in `resources`, or nil.
+
+   Read with `aget`, not `.-seed-prompt`: a hyphenated JS property name is
+   exactly the squint trap that silently reads undefined. Both the kebab and
+   the camel spelling are accepted so the CLI contract cannot be broken by a
+   casing choice."
+  [resources]
+  (let [v (when resources
+            (or (aget resources "seed-prompt") (aget resources "seedPrompt")))]
+    (when (and (string? v) (pos? (count (.trim v)))) v)))
+
+(defn submit-seed-prompt!
+  "Put the seed prompt in the editor, submit it as the first user turn, then
+   blank the editor. Returns the prompt, or nil when there was none.
+
+   The blanking is not cosmetic: the Editor clears its own buffer as part of
+   ITS submit path, and we are calling the handler directly — without this the
+   seed text sits in the input box after the turn starts and the next Enter
+   runs it a second time.
+
+   Callbacks are injected so this is testable without a TUI."
+  [resources {:keys [set-text submit]}]
+  (when-let [seed (seed-prompt-of resources)]
+    (when set-text (set-text seed))
+    (when submit (submit seed))
+    (when set-text (set-text ""))
+    seed))
+
+(defn mark-streaming!
+  "Mirror the streaming flag into the agent's state atom.
+
+   cli's SIGINT handler reads `:streaming?` there to tell whether a turn is in
+   flight; the flag lived only in this mode's local atom, so the handler could
+   never see one. No-op for a fake agent with no :state."
+  [agent on?]
+  (when-let [st (:state agent)]
+    (swap! st assoc :streaming? (boolean on?)))
+  (boolean on?))
 
 (defn pane-messages
   "Renderable messages for `session`'s current branch, or [] when there is no
@@ -262,6 +354,9 @@
         set-streaming!
         (fn [on?]
           (reset! streaming (boolean on?))
+          ;; Also into the agent's state atom — cli's SIGINT handler reads it
+          ;; there to tell an in-flight turn from an idle prompt.
+          (mark-streaming! agent on?)
           (if on?
             (when-not @tick-timer
               (reset! tick-timer
@@ -306,7 +401,11 @@
           (let [msg (.-message err)]
             (update-messages!
              (fn [msgs]
-               (conj (vec msgs) {:role "error" :content (or msg "unknown error") :id (new-id)})))))
+               (conj (vec msgs)
+                     {:role    "error"
+                      ;; Raw message first, then the one actionable next step.
+                      :content (classify-error-message (or msg "unknown error"))
+                      :id      (new-id)})))))
 
         ;; ── Tool events ────────────────────────────────────────────────────
         verbosity "collapsed"
@@ -418,10 +517,11 @@
               (reset! submit-lock true)
               (.addToHistory editor trimmed)
               (add-user-msg! trimmed)
-              (-> (editor-eval/run-eval! expr)
+              (-> (editor-eval/run-eval! expr events)
                   (.then (fn [result]
                            (let [content (editor-eval/format-eval-output result)
-                                 role    (if (:unavailable? result) "error" "shell")]
+                                 role    (if (or (:unavailable? result) (:blocked? result))
+                                           "error" "shell")]
                              (update-messages!
                               (fn [msgs]
                                 (conj (vec msgs)
@@ -429,7 +529,9 @@
                                        :content    content
                                        :id         (new-id)
                                        :local-only (= kind :eval-hidden)})))
-                             (when (= kind :eval)
+                             ;; A blocked expression never ran — do not tell
+                             ;; the model it did.
+                             (when (and (= kind :eval) (not (:blocked? result)))
                                (swap! (:state agent) update :messages conj
                                       {:role "user" :content (str trimmed "\n" content)}))
                              (reset! submit-lock false)
@@ -508,10 +610,12 @@
       (let [ui (.-ui ext)]
         (set! (.-available ui) true)
         (set! (.-notify ui)
-              (fn [msg _type]
+              (fn [msg type]
                 (update-messages!
                  (fn [msgs]
-                   (conj (vec msgs) {:role "info" :content (str msg) :id (new-id)})))
+                   (conj (vec msgs) {:role    (notify-role type)
+                                     :content (str msg)
+                                     :id      (new-id)})))
                 (.requestRender tui)))
         (set! (.-setWidget ui)
               (fn [widget-name lines _position]
@@ -744,4 +848,11 @@
                              (js/process.exit 0))
                            nil))
 
-      (.start tui))))
+      (.start tui)
+
+      ;; The prompt cli handed us (`nyma "do the thing"` with no -p). Submitted
+      ;; AFTER .start so the first frame has painted and the turn's output has
+      ;; somewhere to land.
+      (submit-seed-prompt! resources
+                           {:set-text (fn [t] (.setText editor t))
+                            :submit   on-submit}))))

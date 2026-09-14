@@ -84,8 +84,15 @@
             result  (js-await ((:emit-collect events) "before_tool_call" payload))]
         (cond
           ;; Security analysis / permissions vetoed the call.
-          (or (get result "block") (get result "cancel"))
-          (let [reason (or (get result "reason") "Command blocked by bash_suite")]
+          ;;
+          ;; Three verdict shapes, not two: bash_suite's security_analysis
+          ;; returns {skip, result} rather than {block, reason}, so checking
+          ;; only block/cancel read its veto and ran the command anyway — and
+          ;; the classification it wrote into :result was thrown away with it.
+          (or (get result "block") (get result "cancel") (get result "skip"))
+          (let [reason (or (get result "reason")
+                           (get result "result")
+                           "Command blocked by bash_suite")]
             ((:emit events) "user_bash"
                             {:command command :blocked? true :reason reason
                              :stdout "" :stderr "" :exit-code -1})

@@ -56,6 +56,13 @@
 
 ;;; ─── Tool formatting helpers (inlined from tool_status.cljs) ─────────────
 
+(defn- first-line
+  "First line of a tool result, blank-safe. A failed tool's first line is the
+   error text — that is what the transcript shows instead of a line count."
+  [s]
+  (let [t (str (or s ""))]
+    (or (first (.split t "\n")) "")))
+
 (defn- truncate-to [s max-len]
   (if (> (count s) max-len) (str (.slice s 0 max-len) "…") s))
 
@@ -147,7 +154,10 @@
         pc      (fg (get-in theme [:colors :primary]   "#7aa2f7"))
         sc      (fg (get-in theme [:colors :secondary] "#9ece6a"))
         ec      (fg (get-in theme [:colors :error]     "#f7768e"))
-        mc      (fg (get-in theme [:colors :muted]     "#565f89"))]
+        mc      (fg (get-in theme [:colors :muted]     "#565f89"))
+        wc      (fg (get-in theme [:colors :warning]   "#e0af68"))
+        gc      (fg (get-in theme [:colors :success]   "#9ece6a"))
+        cy      (fg "#7dcfff")]
     (case role
       "user"
       (wrap+split (str pc BOLD "❯ " RESET content) w)
@@ -201,14 +211,36 @@
             ;; them here, so every extension tool rendered through the generic
             ;; `k=v` branch below. That is what printed
             ;; `questions=[object Object]` for a questionnaire call.
-            icon     (or (:custom-icon msg) (if is-end "✓" "⚙"))
+            ;;
+            ;; A FAILED tool outranks both. middleware emits :isError on
+            ;; tool_execution_end and app_reducers copies it here; before that
+            ;; every failure rendered as a green-path "✓", which is the one
+            ;; thing a transcript must never say about a call that threw.
+            is-error (and is-end (boolean (:is-error msg)))
+            icon     (cond
+                       is-error           "✗"
+                       (:custom-icon msg) (:custom-icon msg)
+                       is-end             "✓"
+                       :else              "⚙")
             arg-str  (or (:custom-one-line-args msg)
                          (format-one-line-args tname args))
+            ;; In-flight status line, written by tool_execution_update. Only
+            ;; meaningful while the tool is still running — the end event
+            ;; replaces the message wholesale, so it cannot go stale.
+            status   (when-not is-end (:custom-status-text msg))
             res-str  (when is-end
-                       (or (:custom-one-line-result msg)
-                           (format-one-line-result-for-tool tname (:result msg) args)))
-            line     (str mc icon " " (or tname "?")
+                       (if is-error
+                         ;; The per-tool formatter would say "2 lines" — for a
+                         ;; failure the first line IS the information.
+                         (truncate-to (first-line (:result msg))
+                                      (max 20 (- w 30)))
+                         (or (:custom-one-line-result msg)
+                             (format-one-line-result-for-tool tname (:result msg) args))))
+            base-c   (if is-error ec mc)
+            line     (str base-c icon " " (or tname "?")
                           (when (seq arg-str) (str " " arg-str))
+                          (when (seq status)
+                            (str " " DIM "— " status RESET base-c))
                           ;; Result + duration appear in dim with a · separator so the
                           ;; eye lands on the args first, summary second.
                           (when (and is-end (seq res-str))
@@ -242,8 +274,17 @@
       "tool"
       (wrap+split (str mc DIM content RESET) w)
 
+      ;; The four notify levels. `ui.notify(msg, type)` used to throw its type
+      ;; away and file everything as "info", so a warning and a failure read
+      ;; exactly like a status line.
       "info"
-      (wrap+split (str (fg "#7dcfff") "ℹ " RESET mc content RESET) w)
+      (wrap+split (str cy "ℹ " RESET mc content RESET) w)
+
+      "warn"
+      (wrap+split (str wc "⚠ " RESET mc content RESET) w)
+
+      "success"
+      (wrap+split (str gc "✓ " RESET mc content RESET) w)
 
       "widget"
       (split-lines (or content ""))
