@@ -1,6 +1,7 @@
 (ns agent.extensions.stats-dashboard
   "Usage stats dashboard: /stats shows cost, tokens, model breakdown, daily trends."
   (:require [agent.pricing :refer [format-cost format-tokens]]
+            [agent.commands.resolver :refer [resolve-command]]
             [clojure.string :as str]))
 
 (defn- bar-chart
@@ -48,6 +49,37 @@
          totals-section
          (or model-section "")
          (or day-section ""))))
+
+(def ^:private number-commands
+  "The other commands that answer a question about numbers, and what each
+   one answers. /stats is where people go looking for all of them, so it
+   points at the ones that are registered — and only those: half of these
+   come from extensions that may be disabled, and a footer advertising a
+   command that does not exist is worse than no footer."
+  [["stats-session"  "this session's turns, tokens and cost"]
+   ["token-stats"    "token usage broken down by message"]
+   ["bash-stats"     "shell commands run, and how long they took"]
+   ["headroom-stats" "how much context window is left"]
+   ["debug"          "raw agent state"]
+   ["session"        "session file, branch and message counts"]])
+
+(defn stats-index-footer
+  "The `/stats` footer: one line per number command that is actually
+   registered. Resolution goes through `resolve-command`, so an extension's
+   namespaced `headroom__headroom-stats` is found by its short name, the
+   same name the footer prints.
+
+   Returns nil when none of them are registered. Pure — takes the commands
+   map, not the api."
+  [commands]
+  (let [rows (keep (fn [[name what]]
+                     (when (resolve-command (or commands {}) name)
+                       (str "    /" name
+                            (.repeat " " (max 1 (- 18 (count name))))
+                            what)))
+                   number-commands)]
+    (when (seq rows)
+      (str "\n\n  See also\n" (str/join "\n" rows)))))
 
 (defn- pct [part whole]
   (if (pos? whole) (js/Math.round (* 100 (/ part whole))) 0))
@@ -143,7 +175,8 @@
                                  (let [totals   ((:get-usage-totals store))
                                        by-model ((:get-usage-by-model store))
                                        by-day   ((:get-usage-by-day store) 14)
-                                       dashboard (format-dashboard {:totals totals :by-model by-model :by-day by-day})]
+                                       dashboard (str (format-dashboard {:totals totals :by-model by-model :by-day by-day})
+                                                      (or (stats-index-footer (.getCommands api)) ""))]
                                    (if (and (.-ui ctx) (.-showOverlay (.-ui ctx)))
                                      (.showOverlay (.-ui ctx) dashboard)
                                      (.notify (.-ui ctx) dashboard "info")))
