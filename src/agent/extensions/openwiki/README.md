@@ -28,6 +28,9 @@ Docs live under `openwiki/` (no leading dot), configurable via `openwiki.dir`. O
 enable with `"openwiki": {"enabled": true}` in settings or the `--ext-openwiki` flag. Every verb
 requires a git repo.
 
+While off, `/openwiki` still exists and answers with those two ways of turning it on — a command
+that has silently ceased to exist is how people conclude an extension is broken.
+
 ## Scoping a run
 
 Write `<dir>/INSTRUCTIONS.md` and it is inlined verbatim into every init/update prompt, and never

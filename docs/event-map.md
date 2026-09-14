@@ -62,7 +62,7 @@ elsewhere (or is empty) — read the emit site.
 | `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs | - |
 | `session_end` | src/agent/cli.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs | - |
 | `session_end_summary` | src/agent/cli.cljs | src/agent/extensions/desktop_notify/index.cljs | - |
-| `session_ready` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/mcp_client/index.cljs | cwd, extensions, model, reason |
+| `session_ready` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/verify_gate/index.cljs | cwd, extensions, model, reason |
 | `session_shutdown` | src/agent/cli.cljs, src/agent/commands/builtins.cljs, src/agent/modes/interactive.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/lsp_suite/index.cljs, src/agent/extensions/mcp_client/index.cljs | reason |
 | `session_start` | src/agent/cli.cljs, src/agent/commands/builtins.cljs | src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/modes/interactive.cljs | path, previousSessionFile, reason |
 | `session_switch` | src/agent/sessions/manager.cljs | - | entry-count, new-path, old-path |

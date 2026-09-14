@@ -117,13 +117,29 @@
                               (shared/tail-lines output 40) "\n```")
                          #js {:deliverAs "followUp"}))))))))]
 
-    (when (:cmd cfg)
-      (.on api "tool_complete" on-complete)
-      (.on api "turn_finalize" on-finalize))
+    (if (:cmd cfg)
+      (do
+        (.on api "tool_complete" on-complete)
+        (.on api "turn_finalize" on-finalize)
+        (fn []
+          (.off api "tool_complete" on-complete)
+          (.off api "turn_finalize" on-finalize)))
 
-    (fn []
-      (when (:cmd cfg)
-        (.off api "tool_complete" on-complete)
-        (.off api "turn_finalize" on-finalize)))))
+      ;; Off. Silent for the many users who never asked for the gate — but
+      ;; NOT for the ones who wrote a `verify` section and misspelled the
+      ;; one key that switches it on. Said once, at session_ready, when the
+      ;; UI is guaranteed to be up.
+      (let [unknown (shared/unknown-keys (.settings api "verify"))
+            on-ready (fn [_data _ctx]
+                       (when (seq unknown)
+                         (let [msg (shared/off-hint unknown)
+                               ui  (.-ui api)]
+                           (d/warn "verify-gate" msg)
+                           (when (and ui (.-available ui) (.-notify ui))
+                             (.notify ui msg "warning"))))
+                       nil)]
+        (when (seq unknown) (.on api "session_ready" on-ready))
+        (fn []
+          (when (seq unknown) (.off api "session_ready" on-ready)))))))
 
 (def ^:export default activate)

@@ -177,7 +177,7 @@
     :manifest  #js {"namespace" "token-suite" "description" "Token optimizations, smart compaction, live cost preview (`/token-preview`)" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil}}}}
    {:namespace "verify-gate"
     :module    ext-verify-gate
-    :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)" "capabilities" #js ["events" "messages"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
+    :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set)" "capabilities" #js ["events" "messages" "ui"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
    {:namespace "workspace-config"
     :module    ext-workspace-config
     :manifest  #js {"namespace" "workspace-config" "description" "Per-project aliases and flags from `.nyma/settings.json`" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])
