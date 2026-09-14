@@ -269,6 +269,22 @@
       (-> (expect (:blocked? result)) (.toBe true))
       (-> (expect (.includes (:reason result) "nope")) (.toBe true)))))
 
+(defn ^:async test-eval-honours-security-analysis-skip []
+  ;; bash_suite's security_analysis vetoes with {skip, result}, NOT
+  ;; {block, reason} — checking only block/cancel let the expression run and
+  ;; threw away the classification that explained why it should not.
+  (let [bus (create-event-bus)]
+    ((:on bus) "before_tool_call"
+               (fn [_data]
+                 #js {:skip   true
+                      :result "Command blocked by security analysis [destructive]: deletes a directory tree"})
+               100)
+    (let [result (js-await (run-eval! "(+ 1 2)" bus))]
+      (-> (expect (:blocked? result)) (.toBe true))
+      (-> (expect (.includes (:reason result) "destructive")) (.toBe true))
+      (-> (expect (.includes (format-eval-output result) "deletes a directory tree"))
+          (.toBe true)))))
+
 (defn ^:async test-eval-gate-sees-the-expression []
   (let [bus  (create-event-bus)
         seen (atom nil)]
@@ -295,6 +311,8 @@
                 test-eval-blocked-by-before-tool-call)
             (it "cancels the eval when a handler returns {:cancel true}"
                 test-eval-cancel-also-blocks)
+            (it "cancels the eval on security analysis' {:skip true :result …} veto"
+                test-eval-honours-security-analysis-skip)
             (it "shows the gate the expression under the bash tool name"
                 test-eval-gate-sees-the-expression)
             (it "runs normally when no handler objects"

@@ -148,6 +148,23 @@
       ;; should have been short-circuited before spawning sh.
       (-> (expect (.includes (or (:stdout result) "") "should-not-run")) (.toBe false)))))
 
+(defn ^:async test-run-bash-honours-security-analysis-skip []
+  ;; bash_suite's security_analysis vetoes with {skip, result}, not
+  ;; {block, reason}. run-bash! checked only block/cancel, so its veto was
+  ;; read and the command ran anyway — and the classification it wrote into
+  ;; :result went with it.
+  (let [agent  (fake-agent)
+        events (:events agent)]
+    ((:on events) "before_tool_call"
+                  (fn [_data]
+                    #js {:skip   true
+                         :result "Command blocked by security analysis [destructive]: recursive delete"})
+                  100)
+    (let [result (js-await (run-bash! agent "echo should-not-run"))]
+      (-> (expect (:blocked? result)) (.toBe true))
+      (-> (expect (.includes (:reason result) "recursive delete")) (.toBe true))
+      (-> (expect (.includes (or (:stdout result) "") "should-not-run")) (.toBe false)))))
+
 (defn ^:async test-run-bash-respects-command-rewrite []
   (let [agent  (fake-agent)
         events (:events agent)]
@@ -184,6 +201,8 @@
                 test-run-bash-happy-path)
             (it "short-circuits when a handler returns {:block true}"
                 test-run-bash-blocked-by-before-tool-call)
+            (it "short-circuits on security analysis' {:skip true :result …} veto"
+                test-run-bash-honours-security-analysis-skip)
             (it "uses the rewritten :args.command from handlers"
                 test-run-bash-respects-command-rewrite)
             (it "falls back to direct execution when :events is absent"

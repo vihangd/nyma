@@ -200,6 +200,18 @@
                                (str " " (str/join " " (:args s))))))
                       servers))))
 
+(defn server-list-report
+  "Everything `/mcp list` prints: the discovered servers, then the config
+   files that were consulted. \"No MCP servers discovered\" on its own never
+   said where nyma had looked."
+  ([servers project-root] (server-list-report servers project-root (os/homedir)))
+  ([servers project-root home]
+   (str (if (empty? servers)
+          "No MCP servers discovered. Add a .mcp.json to your project root."
+          (format-server-list servers))
+        "\n\n"
+        (candidate-report project-root home))))
+
 ;;; ─── Activation ────────────────────────────────────────────────
 
 (defn activate
@@ -221,11 +233,8 @@
                                     (let [subcmd (first args)]
                                       (cond
                                         (or (nil? subcmd) (= subcmd "list"))
-                                        (let [servers @shared/mcp-servers
-                                              report  (candidate-report (js/process.cwd))]
-                                          (if (empty? servers)
-                                            (notify api (str "No MCP servers discovered. Add a .mcp.json to your project root.\n\n" report))
-                                            (notify api (str (format-server-list servers) "\n\n" report))))
+                                        (notify api (server-list-report @shared/mcp-servers
+                                                                        (js/process.cwd)))
 
                                         (= subcmd "refresh")
                                         (let [servers (scan-and-store! (js/process.cwd)

@@ -154,9 +154,17 @@
   [expr & [events]]
   (let [verdict (when (and events (:emit-collect events))
                   (js-await ((:emit-collect events) "before_tool_call"
-                             #js {:name "bash" :args #js {:command expr}})))
-        blocked (when (and verdict (or (get verdict "block") (get verdict "cancel")))
-                  (or (get verdict "reason") "Expression blocked by bash_suite"))
+                                                    #js {:name "bash" :args #js {:command expr}})))
+        ;; Three verdict shapes, not two: bash_suite's security_analysis
+        ;; returns {skip, result}, not {block, reason}, and its explanation
+        ;; lives in :result. Checking only block/cancel saw the veto and ran
+        ;; the expression anyway.
+        blocked (when (and verdict (or (get verdict "block")
+                                       (get verdict "cancel")
+                                       (get verdict "skip")))
+                  (or (get verdict "reason")
+                      (get verdict "result")
+                      "Expression blocked by bash_suite"))
         result
         (if blocked
           {:blocked?     true
@@ -167,31 +175,31 @@
            :stderr       ""
            :exit-code    -1}
           (if-not (js-await (bb-available?))
-          {:unavailable? true
-           :expr         expr
-           :install-hint install-hint
-           :stdout       ""
-           :stderr       ""
-           :exit-code    -1}
-          (try
-            (let [proc   (js/Bun.spawn #js ["bb" "-e" expr]
-                                       #js {:timeout 30000
-                                            :stdout  "pipe"
-                                            :stderr  "pipe"})
-                  stdout (js-await (.text (js/Response. (.-stdout proc))))
-                  stderr (js-await (.text (js/Response. (.-stderr proc))))
-                  code   (js-await (.-exited proc))]
-              {:unavailable? false
-               :expr         expr
-               :stdout       (or stdout "")
-               :stderr       (or stderr "")
-               :exit-code    (or code 0)})
-            (catch :default e
-              {:unavailable? false
-               :expr         expr
-               :stdout       ""
-               :stderr       (str "bb spawn failed: " (.-message e))
-               :exit-code    -1}))))]
+            {:unavailable? true
+             :expr         expr
+             :install-hint install-hint
+             :stdout       ""
+             :stderr       ""
+             :exit-code    -1}
+            (try
+              (let [proc   (js/Bun.spawn #js ["bb" "-e" expr]
+                                         #js {:timeout 30000
+                                              :stdout  "pipe"
+                                              :stderr  "pipe"})
+                    stdout (js-await (.text (js/Response. (.-stdout proc))))
+                    stderr (js-await (.text (js/Response. (.-stderr proc))))
+                    code   (js-await (.-exited proc))]
+                {:unavailable? false
+                 :expr         expr
+                 :stdout       (or stdout "")
+                 :stderr       (or stderr "")
+                 :exit-code    (or code 0)})
+              (catch :default e
+                {:unavailable? false
+                 :expr         expr
+                 :stdout       ""
+                 :stderr       (str "bb spawn failed: " (.-message e))
+                 :exit-code    -1}))))]
     (when (and events (:emit events))
       ((:emit events) "user_eval"
                       {:expr         (:expr result)

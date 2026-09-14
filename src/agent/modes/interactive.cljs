@@ -1,8 +1,8 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
   (:require ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
-                                            CombinedAutocompleteProvider
-                                            matchesKey]]
+                                              CombinedAutocompleteProvider
+                                              matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.ui.themes :refer [default-dark]]
@@ -70,20 +70,30 @@
    the error ever reaches the transcript, so the call site passes false.
 
    Pure: the classification is a substring match on the lower-cased message,
-   first hit wins, in the order auth → rate limit → context length."
+   first hit wins, in the order context length → auth → rate limit.
+
+   That order, and the narrow auth patterns, are both deliberate. Anthropic
+   returns a context overflow as an `invalid_request_error`, so a bare
+   \"invalid\" test — or putting auth first — sends someone whose prompt is too
+   long off to check their API key. Likewise \"rate\" alone matches
+   \"generate\"."
   [msg & [retrying?]]
   (let [raw (str (or msg ""))
         m   (str/lower-case raw)
         has (fn [& subs] (boolean (some (fn [x] (.includes m x)) subs)))]
     (str raw
          (cond
-           (has "401" "invalid" "api key" "api_key" "unauthorized")
+           (has "context" "too long" "maximum context" "context_length")
+           " — run /compact"
+
+           (has "401" "invalid api key" "invalid x-api-key" "invalid_api_key"
+                "api key" "api_key" "unauthorized" "authentication")
            " — check ANTHROPIC_API_KEY or /login <provider>"
 
-           (has "429" "rate")
+           (has "429" "rate limit" "rate_limit" "rate-limit")
            (if retrying? " — rate limited; retrying" " — try again")
 
-           (has "context" "too long" "maximum")
+           (has "maximum")
            " — run /compact"
 
            :else ""))))
@@ -101,13 +111,20 @@
     (when (and (string? v) (pos? (count (.trim v)))) v)))
 
 (defn submit-seed-prompt!
-  "Put the seed prompt in the editor and submit it as the first user turn.
-   Returns the prompt, or nil when there was none. Callbacks are injected so
-   this is testable without a TUI."
+  "Put the seed prompt in the editor, submit it as the first user turn, then
+   blank the editor. Returns the prompt, or nil when there was none.
+
+   The blanking is not cosmetic: the Editor clears its own buffer as part of
+   ITS submit path, and we are calling the handler directly — without this the
+   seed text sits in the input box after the turn starts and the next Enter
+   runs it a second time.
+
+   Callbacks are injected so this is testable without a TUI."
   [resources {:keys [set-text submit]}]
   (when-let [seed (seed-prompt-of resources)]
     (when set-text (set-text seed))
     (when submit (submit seed))
+    (when set-text (set-text ""))
     seed))
 
 (defn mark-streaming!

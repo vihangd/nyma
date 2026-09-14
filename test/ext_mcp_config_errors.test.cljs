@@ -10,6 +10,7 @@
             ["node:path" :as path]
             ["node:os" :as os]
             [agent.extensions.agent-shell.features.mcp-discovery :as disco]
+            [agent.extensions.mcp-client.manager :as mgr]
             [agent.extensions.mcp-client.index :as mcp]))
 
 (def tmp-root (atom nil))
@@ -87,6 +88,24 @@
                     (-> (expect (.includes report (str "✓ " (path/join @tmp-root ".mcp.json"))))
                         (.toBe true))
                     (-> (expect (.includes report "(not found)")) (.toBe true)))))
+
+            (it "/mcp list names the consulted files, with and without servers"
+                (fn []
+                  (let [empty-out (disco/server-list-report [] @tmp-root @tmp-home)
+                        full-out  (disco/server-list-report [{:name "lean-ctx" :command "echo"}]
+                                                            @tmp-root @tmp-home)]
+                    (-> (expect (.includes empty-out "No MCP servers discovered")) (.toBe true))
+                    (-> (expect (.includes full-out "lean-ctx")) (.toBe true))
+                    (doseq [p (disco/candidate-paths @tmp-root @tmp-home)]
+                      (-> (expect (.includes empty-out p)) (.toBe true))
+                      (-> (expect (.includes full-out p))  (.toBe true))))))
+
+            (it "/mcp-status names the consulted files alongside the connection table"
+                (fn []
+                  (let [out (mcp/status-report (mgr/create) @tmp-root)]
+                    (-> (expect (.includes out "No MCP servers configured")) (.toBe true))
+                    (-> (expect (.includes out (path/join @tmp-root ".mcp.json"))) (.toBe true))
+                    (-> (expect (.includes out (path/join @tmp-root ".cursor" "mcp.json"))) (.toBe true)))))
 
             (it "formats entries without touching the filesystem"
                 (fn []

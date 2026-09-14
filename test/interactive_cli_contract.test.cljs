@@ -19,8 +19,22 @@
                     (submit-seed-prompt! #js {:seed-prompt "fix the build"}
                                          {:set-text (fn [t] (reset! typed t))
                                           :submit   (fn [t] (reset! submitted t))})
-                    (-> (expect @typed)     (.toBe "fix the build"))
-                    (-> (expect @submitted) (.toBe "fix the build")))))
+                    (-> (expect @submitted) (.toBe "fix the build"))
+                    ;; …and the editor ends up EMPTY. We call the submit
+                    ;; handler directly, bypassing the Editor's own clear, so
+                    ;; without this the seed text stays in the box and the next
+                    ;; Enter runs it a second time.
+                    (-> (expect @typed) (.toBe "")))))
+
+            (it "types the prompt into the editor before submitting it"
+                (fn []
+                  (let [order (atom [])]
+                    (submit-seed-prompt! #js {:seed-prompt "go"}
+                                         {:set-text (fn [t] (swap! order conj [:set t]))
+                                          :submit   (fn [t] (swap! order conj [:submit t]))})
+                    (-> (expect (js/JSON.stringify (clj->js @order)))
+                        (.toBe (js/JSON.stringify
+                                (clj->js [["set" "go"] ["submit" "go"] ["set" ""]])))))))
 
             (it "accepts the camelCase spelling too"
                 (fn []
@@ -124,9 +138,20 @@
                 (fn []
                   (doseq [m ["prompt is too long: 210000 tokens"
                              "context_length_exceeded"
-                             "maximum context length is 200000 tokens"]]
+                             "maximum context length is 200000 tokens"
+                             ;; Anthropic reports a context overflow as an
+                             ;; invalid_request_error — a bare "invalid" match,
+                             ;; or auth checked first, sends this to /login.
+                             "invalid_request_error: prompt is too long: 210000 tokens > 200000 maximum"]]
                     (-> (expect (.includes (classify-error-message m) "run /compact"))
-                        (.toBe true)))))
+                        (.toBe true))
+                    (-> (expect (.includes (classify-error-message m) "ANTHROPIC_API_KEY"))
+                        (.toBe false)))))
+
+            (it "does not mistake 'generate' for a rate limit"
+                (fn []
+                  (-> (expect (classify-error-message "failed to generate response"))
+                      (.toBe "failed to generate response"))))
 
             (it "adds nothing it cannot classify"
                 (fn []
