@@ -227,6 +227,8 @@ Extensions:
                          flags accept --ext-foo or --ext-foo=false.
 
 Other:
+      --debug            Debug logging on for this run (same as NYMA_DEBUG=1);
+                         lines go to ~/.nyma/debug.log.
   -h, --help             Show this help and exit.
   -v, --version          Print the version and exit.
 
@@ -427,6 +429,7 @@ Examples:
                                         (.slice js/process.argv 2)))
               :options #js {:help         #js {:type "boolean" :short "h"}
                             :version      #js {:type "boolean" :short "v"}
+                            :debug        #js {:type "boolean"}
                             :provider     #js {:type "string"}
                             :model        #js {:type "string" :short "m"}
                             :mode         #js {:type "string"}
@@ -459,6 +462,9 @@ Examples:
         _ (when (:version values)
             (print-version!)
             (js/process.exit 0))
+
+        ;; Same gate NYMA_DEBUG=1 opens; the flag is for the one-off run.
+        _ (when (:debug values) (d/set-enabled! true))
 
         mode      (or (:mode values)
                       (when (:print values) "print")

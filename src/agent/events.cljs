@@ -15,6 +15,12 @@
   "Event names nyma emits. The lint requires a producer for every one."
   ["session_start" "session_end" "session_before_switch" "session_switch"
    "session_before_fork" "session_shutdown"
+   ;; Everything loaded, session attached, model resolved — the one point
+   ;; where ui.available is guaranteed true. Fires at startup AND after
+   ;; /reload, so anything set up on it comes back after a reload.
+   "session_ready"
+   ;; Stats snapshot just before session_end (desktop_notify reads it).
+   "session_end_summary"
    "agent_start" "agent_end"
    "turn_start" "turn_end"
    ;; Awaited post-turn boundary (emit-async). Fires after agent_end on the
@@ -62,6 +68,8 @@
    "user_eval"
    ;; Extended tool lifecycle
    "tool_complete" "permission_request"
+   ;; emit-collect: handlers return {:allowed [...]}, merged by intersection.
+   "tool_access_check"
    ;; Input pipeline
    "input_submit"
    ;; An extension asking for a turn to START. `sendUserMessage` only ever

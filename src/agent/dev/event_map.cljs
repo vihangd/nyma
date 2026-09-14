@@ -40,6 +40,21 @@
 (def ^:private emit-re
   #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
 
+(def ^:private payload-re
+  ;; An emit whose payload is a literal map: the keys are the contract, or
+  ;; the closest thing this codebase has to one. A payload passed as a
+  ;; variable contributes nothing (the column shows `-`), which is honest.
+  #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"\s+(?:#js\s*)?\{([^}]*)\}")
+
+(defn- payload-keys
+  "{event #{key}} for every literal-map emit in `source`."
+  [source]
+  (reduce (fn [m [_ ev body]]
+            (update m ev (fnil into #{})
+                    (map second (re-seq #":([a-zA-Z][a-zA-Z0-9_-]*)" body))))
+          {}
+          (re-seq payload-re (str source))))
+
 (def ^:private listen-re
   #"(?:\.on|\(:on|:on\b)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
 
@@ -58,7 +73,7 @@
 
 (defn scan
   "Walk src once. Returns {:emitters {event #{file}} :listeners {event #{file}}
-   :registry-calls {api-name #{file}}}."
+   :payloads {event #{key}} :registry-calls {api-name #{file}}}."
   []
   (reduce
    (fn [acc f]
@@ -67,11 +82,12 @@
            add (fn [m k] (update m k (fnil conj #{}) r))]
        (-> acc
            (update :emitters  (fn [m] (reduce add m (names-matching emit-re src))))
+           (update :payloads  (fn [m] (merge-with into m (payload-keys src))))
            (update :listeners (fn [m] (reduce add m (into (names-matching listen-re src)
                                                           (names-matching table-listen-re src)))))
            (update :registry-calls
                    (fn [m] (reduce add m (set (map second (re-seq register-re src)))))))))
-   {:emitters {} :listeners {} :registry-calls {}}
+   {:emitters {} :listeners {} :payloads {} :registry-calls {}}
    (cljs-files src-root)))
 
 (def ^:private stream-mapped
@@ -84,13 +100,15 @@
   (if (seq files) (str/join ", " (sort files)) "-"))
 
 (defn- event-rows [scanned]
-  (let [{:keys [emitters listeners]} scanned]
+  (let [{:keys [emitters listeners payloads]} scanned]
     (for [n (sort (map str (vec events/core-event-types)))]
       (let [emits (get emitters n)
             emits (if (contains? stream-mapped n)
                     (conj (or emits #{}) "src/agent/loop.cljs (stream-event-types)")
-                    emits)]
-        (str "| `" n "` | " (cell emits) " | " (cell (get listeners n)) " |")))))
+                    emits)
+            keys' (get payloads n)]
+        (str "| `" n "` | " (cell emits) " | " (cell (get listeners n)) " | "
+             (if (seq keys') (str/join ", " (sort keys')) "-") " |")))))
 
 (defn- pi-rows [scanned]
   (for [n (sort (map str (vec events/pi-compat-event-types)))]
@@ -205,10 +223,12 @@
        "## Core events"
        ""
        "`test/event_emitter_lint.test.cljs` fails when the emitters column is empty."
-       "The listeners column is reported only."
+       "The listeners column is reported only. Payload keys are the union over the"
+       "emit sites that pass a literal map; a `-` there means the payload is built"
+       "elsewhere (or is empty) — read the emit site."
        ""
-       "| Event | Emitted in | Listened in |"
-       "| --- | --- | --- |"]
+       "| Event | Emitted in | Listened in | Payload keys |"
+       "| --- | --- | --- | --- |"]
       (event-rows scanned)
       [""
        "## pi-compat events"

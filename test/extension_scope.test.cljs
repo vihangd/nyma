@@ -1,6 +1,6 @@
 (ns extension-scope.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.extension-scope :refer [create-scoped-api derive-namespace]]
+            [agent.extension-scope :refer [handler-errors create-scoped-api derive-namespace]]
             [agent.events :refer [create-event-bus]]
             [agent.extensions :refer [create-extension-api]]
             [agent.core :refer [create-agent]]
@@ -441,3 +441,15 @@
                                                        (-> (expect (.get api2 "shared")) (.toBe "value"))
         ;; Cleanup
                                                        (.clear api1))))))
+
+(describe "handler-errors counter" (fn []
+  (it "counts each throw swallowed by the error boundary, per namespace"
+      (fn []
+        (let [agent    (make-test-agent)
+              base-api (create-extension-api agent)
+              scoped   (create-scoped-api base-api "cnt" #{:all})
+              before   (or (get @handler-errors "cnt") 0)]
+          (.on scoped "agent_start" (fn [_] (throw (js/Error. "boom"))))
+          ((:emit (:events agent)) "agent_start" #js {})
+          ((:emit (:events agent)) "agent_start" #js {})
+          (-> (expect (get @handler-errors "cnt")) (.toBe (+ before 2))))))))

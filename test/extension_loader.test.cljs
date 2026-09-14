@@ -4,7 +4,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.debug :as d]
-            [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load topo-sort last-load-failures]]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]))
 
@@ -210,6 +210,8 @@
     (set! js/console.error orig)
     (-> (expect (count result)) (.toBe 0))
     (-> (expect (contains? @(:commands agent) "half-ext__x")) (.toBe false))
+    ;; …and /extensions can say why.
+    (-> (expect (get @last-load-failures "half-ext")) (.toContain "mid-activate"))
     (.rmSync fs tmp-dir #js {:recursive true})))
 
 (defn ^:async test-loads-manifest []

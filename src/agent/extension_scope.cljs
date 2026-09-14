@@ -11,6 +11,11 @@
     (fn [& _args]
       (throw (js/Error. (str "Extension missing capability: " (str capability)))))))
 
+(def handler-errors
+  "namespace → count of event-handler throws swallowed by the error boundary
+   below. Surfaced by /extensions; nothing else reads it."
+  (atom {}))
+
 (defn dispose-scope!
   "Undo every registration a scoped API recorded, newest first, one try/catch
    each. Runs AFTER the extension's own deactivate, so anything it forgot —
@@ -66,6 +71,7 @@
                                            (try
                                              (handler data ctx)
                                              (catch :default e
+                                               (swap! handler-errors update ns-str (fnil inc 0))
                                                (try
                                                  (d/warn
                                                   (str "[" ns-str "] Error in " event " handler: " (.-message e)))

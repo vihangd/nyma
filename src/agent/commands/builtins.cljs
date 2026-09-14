@@ -5,7 +5,8 @@
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
-            [agent.extension-loader :refer [deactivate-all discover-and-load]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures]]
+            [agent.extension-scope :refer [handler-errors]]
             [agent.resources.loader :refer [discover]]
             [agent.providers.oauth :as oauth]
             [agent.ui.tree-viewer :refer [create-tree-viewer]]
@@ -170,7 +171,15 @@
     ;; 6. Re-resolve CLI flags
     (when resolve-flags-fn
       (resolve-flags-fn agent)))
-  ;; 7. Emit event and notify
+  ;; 7. session_ready again. Extensions set up their world on it — status
+  ;;    segments, ACP auto-connect, MCP servers — and it used to fire once at
+  ;;    startup only, so /reload deactivated all of that and brought none of
+  ;;    it back. `reload` had zero listeners.
+  (js-await ((:emit-async (:events agent)) "session_ready"
+             #js {:cwd        (js/process.cwd)
+                  :model      (current-model-id agent)
+                  :extensions (count (or (when extensions-atom @extensions-atom) []))
+                  :reason     "reload"}))
   ((:emit (:events agent)) "reload" {})
   (notify ctx "Extensions reloaded"))
 
@@ -535,6 +544,26 @@
           {:description "Reload extensions and configuration"
            :handler (fn [_args ctx]
                       (handle-reload agent resources extensions-atom resolve-flags-fn ctx))}
+
+          "extensions"
+          {:description "List loaded extensions, load failures, and handler error counts"
+           :handler (fn [_args ctx]
+                      (let [loaded (or (when extensions-atom @extensions-atom) [])
+                            errs   @handler-errors
+                            failed @last-load-failures
+                            row    (fn [{:keys [namespace type]}]
+                                     (str "  " namespace " (" (str type) ")"
+                                          (when-let [n (get errs namespace)]
+                                            (str " — " n " handler error" (when (> n 1) "s")))))]
+                        (show-info ctx
+                                   (str "Extensions (" (count loaded) " loaded"
+                                        (when (seq failed) (str ", " (count failed) " failed")) ")\n"
+                                        (str/join "\n" (map row (sort-by :namespace loaded)))
+                                        (when (seq failed)
+                                          (str "\n\nFailed to load:\n"
+                                               (str/join "\n" (map (fn [[ns r]] (str "  " ns " — " r))
+                                                                    (sort-by first failed)))))
+                                        "\n\nErrors are also in ~/.nyma/debug.log (NYMA_DEBUG=1 or --debug for more)."))))}
 
      ;; ── New pi-mono-compatible commands ─────────────────────
 
