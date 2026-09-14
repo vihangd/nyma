@@ -163,7 +163,7 @@
                       (.then (fn [_] (skills/activate-skill mock-skills "git" agent))))]
         (.then p (fn [_]
           (let [system-msgs (filter #(and (= (:role %) "system")
-                                         (= (:content %) "# Git\nInstructions."))
+                                         (.includes (:content %) "# Git\nInstructions."))
                                     (:messages @(:state agent)))]
             ;; Should only be injected once
             (-> (expect (count system-msgs)) (.toBe 1))))))))

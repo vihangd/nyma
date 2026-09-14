@@ -519,7 +519,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `-c, --continue` | Continue last session | — |
 | `-r, --resume` | Resume a session (numbered picker) | — |
 | `--all` | With `-r`: list sessions from every project | — |
-| `--tools` | Comma-separated allowlist of built-in tools | omit = all built-ins |
+| `--tools` | Comma-separated allowlist of built-in tools (`read`, `write`, `edit`, `bash`, `think`, `ls`, `glob`, `grep`, `web_fetch`, `web_search`, `deep_research`, `retrieve_result`, `view_image`, `skill`) | omit = all built-ins |
 | `--thinking` | Extended thinking: `off`…`xhigh` | `off` |
 | `--session` | Custom session path | a fresh file per launch |
 | `--fork` | Branch a copy of an existing session | — |
@@ -893,18 +893,24 @@ Use `emit-async` when handlers need to complete before the caller proceeds:
 
 ### Skills
 
-Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/`. Skills inject system prompt instructions and can register additional tools.
+Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/` (the cross-vendor `.claude/skills/`, `.agents/skills/`, `.cursor/skills/` and `.codex/skills/` paths are scanned too). Skills follow the [agentskills.io](https://agentskills.io/specification) layout: YAML frontmatter, then the instructions. Activating one injects the body (not the frontmatter) as a system message and loads an optional `tools.cljs`.
 
 **Activating skills:**
 - `/skills` — opens a fuzzy picker to browse and activate available skills
-- `/skill <name>` — activate a skill directly by name
+- `/skill <name> [args]` or `/skill:<name> [args]` — activate by name; `args` fill `$ARGUMENTS`, `$1`…`$9` and `${N:-default}` in the body
+- the `skill` tool — the model activates a skill itself when its description fits the task, and reads the body as the tool result
 
-Active skills are tracked in agent state (`:active-skills`) to prevent duplicate injection. The system prompt lists available skills with their description (first non-heading line of `SKILL.md`).
+Frontmatter fields that change behaviour:
+- `description` — shown in `/skills`, the system prompt's skill list and the `skill` tool
+- `allowed-tools` — space-separated tool names the skill may call **without a permission prompt** while it is active (a deny from a permission handler still wins)
+- `disable-model-invocation: true` — hidden from the model: not listed in the prompt, not reachable through the `skill` tool, `/skill <name>` only
+
+Active skills are tracked in agent state (`:active-skills`) to prevent duplicate injection.
 
 ```
 ~/.nyma/skills/
   git-helper/
-    SKILL.md      ← # Git Helper\nAutomates git workflows.
+    SKILL.md      ← ---\nname: git-helper\ndescription: Automates git workflows\nallowed-tools: bash\n---\n…
     tools.cljs    ← optional extra tools (loaded on activation)
 ```
 

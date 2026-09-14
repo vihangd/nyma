@@ -19,3 +19,13 @@
                               (seq commands))]
         (when (= (count by-alias) 1)
           (second (first by-alias))))))
+
+(defn split-skill-invocation
+  "`/skill:<name> [args]` is the agentskills.io / Claude Code spelling of
+   `/skill <name> [args]`. Only the literal `skill` prefix gets the colon
+   form — `:` is not a delimiter anywhere else, so an extension command
+   whose name contains one still resolves as typed. Returns [cmd rest-text]."
+  [cmd rest-text]
+  (if (and (string? cmd) (.startsWith cmd "skill:") (> (count cmd) 6))
+    ["skill" (str (subs cmd 6) " " (or rest-text ""))]
+    [cmd rest-text]))

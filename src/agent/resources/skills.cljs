@@ -22,11 +22,12 @@
      license                    - Optional, pass-through.
      compatibility              - Optional, pass-through.
      metadata                   - Optional map, pass-through.
-     allowed-tools              - Optional. Tools the skill needs. (Wired into
-                                  model_roles permission gating in a follow-up.)
+     allowed-tools              - Optional. Tools the skill may call without a
+                                  permission prompt while it is active (a deny
+                                  from a permission handler still wins).
      disable-model-invocation   - Optional bool. If true, skill is hidden from
-                                  the model's auto-listing; only `/skill <name>`
-                                  triggers it.
+                                  the model's auto-listing and from the `skill`
+                                  tool; only `/skill <name>` triggers it.
      paths                      - Optional list of globs. If present, the skill
                                   description is only injected into the system
                                   prompt when an active file matches.
@@ -41,7 +42,10 @@
   (:require [agent.debug :as d]
             ["node:path" :as path]
             ["node:fs" :as fs]
+            ["ai" :refer [tool]]
+            ["zod" :as z]
             [clojure.string :as str]
+            [agent.utils.template-args :as template-args]
             [agent.extension-loader :refer [load-extension]]
             [agent.extensions :refer [create-extension-api]]))
 
@@ -188,17 +192,44 @@
 
 ;;; ─── Activation ────────────────────────────────────────────────
 
+(defn skill-body
+  "The instructions a skill injects: the markdown BODY. A record built by
+   discover-skills carries it; a hand-built one (tests, extensions) may
+   only carry the raw file, whose frontmatter is metadata, not prompt."
+  [skill]
+  (or (:body skill)
+      (:body (parse-frontmatter (:markdown skill)))))
+
+(defn skill-message
+  "The system message an activated skill contributes. `:skill` tags it so
+   deactivate-skill can find it again; the tag never reaches disk — the
+   session persister keeps only user/assistant turns, and only their
+   :role/:content."
+  [skill args]
+  {:role    "system"
+   :skill   (:name skill)
+   :content (str "<skill name=\"" (:name skill) "\">\n"
+                 (template-args/substitute (skill-body skill) args)
+                 "\n</skill>")})
+
 (defn ^:async activate-skill
   "Inject skill instructions into context and load skill tools.
-   No-op if the skill is already active."
-  [skills name agent]
+   No-op if the skill is already active. `args` fill `$ARGUMENTS`/`$N`
+   in the body. Returns the injected body text (nil when nothing was
+   injected) so a caller can show the model what it asked for."
+  [skills name agent & [args]]
   (when-let [skill (get skills name)]
     (when-not (contains? (:active-skills @(:state agent)) name)
-      (swap! (:state agent)
-             (fn [s]
-               (-> s
-                   (update :messages conj {:role "system" :content (:markdown skill)})
-                   (update :active-skills conj name))))
+      (let [msg (skill-message (assoc skill :name name) args)]
+        (swap! (:state agent)
+               (fn [s]
+                 (-> s
+                     (update :messages conj msg)
+                     (update :active-skills conj name)
+                     ;; The permission gate reads this rather than the skill
+                     ;; records, which live on `resources`, not the agent.
+                     (assoc-in [:skill-allowed-tools name]
+                               (set (or (:allowed-tools skill) []))))))
       (when (:has-tools skill)
         (let [tool-file (or (let [p (path/join (:dir skill) "tools.cljs")]
                               (when (fs/existsSync p) p))
@@ -206,13 +237,67 @@
                               (when (fs/existsSync p) p)))]
           (when tool-file
             (let [ext-fn (js-await (load-extension tool-file))]
-              (ext-fn (create-extension-api agent)))))))))
+              (ext-fn (create-extension-api agent))))))
+        (:content msg)))))
 
 (defn deactivate-skill
-  "Remove a skill from active-skills tracking.
-   Cannot un-inject the system message, but prevents re-activation."
+  "Remove a skill: its tracking entry, its tool allowances, and the system
+   message it injected."
   [name agent]
-  (swap! (:state agent) update :active-skills disj name))
+  (swap! (:state agent)
+         (fn [s]
+           (-> s
+               (update :active-skills disj name)
+               (update :skill-allowed-tools dissoc name)
+               (update :messages (fn [ms] (vec (remove #(= (:skill %) name) ms))))))))
+
+;;; ─── The `skill` tool ──────────────────────────────────────────
+
+(defn model-invocable
+  "Skills the model may activate itself: everything not marked
+   `disable-model-invocation`, sorted by name."
+  [skills]
+  (->> skills
+       (remove (fn [[_ s]] (:disable-model-invocation s)))
+       (sort-by first)))
+
+(defn skill-tool-description
+  [skills]
+  (str "Activate a skill: its instructions are returned to you and stay in "
+       "context for the rest of the session. Available skills:\n"
+       (str/join "\n"
+                 (map (fn [[sname s]]
+                        (str "- " sname (when (seq (:description s)) (str " — " (:description s)))))
+                      (model-invocable skills)))))
+
+(defn ^:async skill-tool-execute
+  [skills agent {:keys [name args]}]
+  (let [sname (str name)
+        argv  (vec (or args []))]
+    (cond
+      (or (not (get skills sname))
+          (:disable-model-invocation (get skills sname)))
+      (throw (js/Error. (str "Unknown skill \"" sname "\". Available: "
+                             (str/join ", " (map first (model-invocable skills))))))
+
+      (contains? (:active-skills @(:state agent)) sname)
+      (str "Skill \"" sname "\" is already active; its instructions are in context.")
+
+      :else
+      (js-await (activate-skill skills sname agent argv)))))
+
+(defn skill-tool
+  "The model-callable counterpart of `/skill`. Same activation, same
+   dedupe; the body comes back as the tool result so the model reads it
+   in the turn it asked."
+  [skills agent]
+  (tool
+   #js {:description (skill-tool-description skills)
+        :inputSchema (.object z
+                              #js {:name (-> (.string z) (.describe "Skill name"))
+                                   :args (-> (.array z (.string z)) (.optional)
+                                             (.describe "Arguments for $ARGUMENTS / $1… in the skill"))})
+        :execute     (fn [input] (skill-tool-execute skills agent input))}))
 
 ;;; ─── Path glob matching for path-scoped skills ─────────────────
 

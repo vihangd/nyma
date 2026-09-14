@@ -1153,10 +1153,11 @@
                               (notify ctx (str "Created extension: " file)))))))}
 
           "skill"
-          {:description "Activate a skill by name. Usage: /skill <name>"
+          {:description "Activate a skill by name. Usage: /skill <name> [args] (also /skill:<name>)"
            :handler
            (fn [args ctx]
              (let [skill-name (first args)
+                   skill-args (vec (rest args))
                    all-skills (:skills resources)]
                (cond
                  (empty? skill-name)
@@ -1169,7 +1170,7 @@
                  (notify ctx (str "Skill \"" skill-name "\" is already active") "info")
 
                  :else
-                 (-> (skills/activate-skill all-skills skill-name agent)
+                 (-> (skills/activate-skill all-skills skill-name agent skill-args)
                      (.then (fn [_]
                               (notify ctx (str "Skill \"" skill-name "\" activated"))))
                      (.catch (fn [e]

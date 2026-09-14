@@ -101,7 +101,14 @@
                  :capabilities #{:network :read}
                  :modes        #{:tui :gateway}
                  :cost         :medium
-                 :timeout-ms   30000}})
+                 :timeout-ms   30000}
+   ;; Registered by cli.cljs once the skill map is known; classified here so
+   ;; it is gated like `read` (allowed under every role policy).
+   "skill"      {:read-only? true :category :meta
+                 :capabilities #{}
+                 :modes        #{:tui :gateway}
+                 :cost         :free
+                 :timeout-ms   5000}})
 
 ;;; ─── Extension-contributed metadata ─────────────────────
 

@@ -8,6 +8,7 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
+            [agent.resources.skills :as skills]
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
@@ -694,6 +695,12 @@ Examples:
             (swap! (:state agent) assoc :base-model-spec
                    (str provider "/" (:model-id resolved))))
         api (create-extension-api agent)]
+
+    ;; The `skill` tool needs the discovered skill map and the agent, so it
+    ;; cannot sit in `builtin-tools`; registered before the --tools filter so
+    ;; the allowlist governs it like any built-in.
+    (when (seq (:skills resources))
+      ((:register (:tool-registry agent)) "skill" (skills/skill-tool (:skills resources) agent)))
 
     ;; Filter active tools if --tools flag was used
     (when active-tools

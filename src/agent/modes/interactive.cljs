@@ -5,7 +5,7 @@
                                               CombinedAutocompleteProvider
                                               matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
-            [agent.commands.resolver :refer [resolve-command]]
+            [agent.commands.resolver :refer [resolve-command split-skill-invocation]]
             [agent.commands.parser :as parser]
             [agent.ui.themes :refer [default-dark]]
             [agent.ui.theme-catalog :as theme-catalog]
@@ -353,8 +353,8 @@
   ;; `(:flags ctx)`) and `ctx.positional`, which a migrated command reads
   ;; instead of pattern-matching on `--`.
   (let [after-cmd (.trim (.slice text 1))
-        cmd       (first (.split after-cmd #"\s+"))
-        rest-text (.slice after-cmd (count (str cmd)))
+        typed     (first (.split after-cmd #"\s+"))
+        [cmd rest-text] (split-skill-invocation typed (.slice after-cmd (count (str typed))))
         parsed    (parser/parse-command-args rest-text)
         args      (:args parsed)
         commands  @(:commands agent)]

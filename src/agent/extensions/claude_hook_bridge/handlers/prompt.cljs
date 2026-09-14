@@ -12,13 +12,16 @@
 
    We translate the LLM's raw text into the same envelope shape the
    command handler returns, so response/parse-one handles both."
-  (:require ["ai" :refer [generateText]]))
+  (:require ["ai" :refer [generateText]]
+            [agent.utils.template-args :as template-args]))
 
 (def default-timeout-ms 30000)
 
-(defn- substitute-args [template event-json]
-  (let [json-str (js/JSON.stringify (clj->js event-json) nil 2)]
-    (.replaceAll (str template) "$ARGUMENTS" json-str)))
+(defn- substitute-args
+  "The event payload is the one and only argument — `$ARGUMENTS`, `$@` and
+   `$1` all name it, the same vocabulary skills and prompt templates use."
+  [template event-json]
+  (template-args/substitute template [(js/JSON.stringify (clj->js event-json) nil 2)]))
 
 (defn- resolve-model
   "Pick a model spec for the prompt eval. Order of preference:

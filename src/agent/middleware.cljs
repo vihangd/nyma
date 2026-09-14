@@ -344,6 +344,25 @@
   (when agent
     (when-let [api (.-extension-api agent)] (.-ui api))))
 
+(defn- agent-state
+  "The agent's state map, or nil for the bare JS-object agents tests hand in."
+  [agent]
+  (when agent
+    (when-let [st (:state agent)]
+      (try @st (catch :default _ nil)))))
+
+(defn skill-allows-tool?
+  "True when an active skill lists `tool-name` in its `allowed-tools`.
+   `activate-skill` writes `:skill-allowed-tools {name #{tool…}}` onto the
+   state; reading it here keeps this namespace free of the skills loader
+   (which requires the extension API, which requires this)."
+  [state tool-name]
+  (boolean
+   (some (fn [[sname allowed]]
+           (and (contains? (:active-skills state) sname)
+                (contains? allowed tool-name)))
+         (:skill-allowed-tools state))))
+
 (defonce ^:private session-allowed
   ;; "Allow for this session": per process, never written to settings. Checked
   ;; in the same fast path as the project allow-list. Module-level so a test
@@ -463,8 +482,13 @@
           (= decision "deny")
           (assoc ctx :cancelled true :cancel-reason (or reason "Permission denied"))
 
+          ;; An active skill that declared the tool in `allowed-tools` has
+          ;; already answered the question for the user — but only the ask.
+          ;; A deny is decided above and a skill cannot lift it.
           (= decision "ask")
-          (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason))
+          (if (skill-allows-tool? (agent-state (:agent ctx)) tool-name)
+            ctx
+            (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason)))
 
           (= decision "allow_always_project")
           (do

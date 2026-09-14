@@ -328,7 +328,8 @@ When multiple independent tool calls are needed, make them in parallel.
                               (remove (fn [[_ s]] (:disable-model-invocation s))))
              skills-block (when (seq listable)
                             (str "\n\n## Available Skills\n"
-                                 "Use /skill <name> to activate, or /skills to browse.\n"
+                                 "Call the `skill` tool with a name to load one when its "
+                                 "description fits the task; the user can also /skill <name> or /skills.\n"
                                  (->> listable
                                       (map (fn [[sname skill]]
                                              (let [desc (or (:description skill)
