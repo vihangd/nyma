@@ -192,6 +192,42 @@
         (-> (expect (:active-spec @state))
             (.toBeUndefined))))))
 
+;;; ─── What it tells the user to do next ─────────────────────
+;;
+;; Both paths printed "Send any message (e.g. \"go\") to start." — but --run
+;; already calls start-turn!, so that line invited a second turn on top of the
+;; one already running.
+
+(defn test-import-run-says-the-turn-started []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            h     (harness)]
+        (with-turn-requests h)
+        (spec-cmd! h agent ["import" "token-store" "--run"])
+        (let [all (apply str @(:notes h))]
+          (-> (expect (.includes all "Decomposition turn started.")) (.toBe true))
+          (-> (expect (.includes all "Send any message")) (.toBe false)))))))
+
+(defn test-import-without-run-still-asks-for-a-message []
+  (with-tmp
+    (fn [tmp]
+      (write-plan! tmp)
+      (let [agent (make-test-agent)
+            h     (harness)]
+        (spec-cmd! h agent ["import" "token-store"])
+        (let [all (apply str @(:notes h))]
+          (-> (expect (.includes all "Send any message")) (.toBe true))
+          (-> (expect (.includes all "Decomposition turn started.")) (.toBe false)))))))
+
+(describe "/spec import reports what actually happens next"
+          (fn []
+            (it "--run says the decomposition turn started"
+                test-import-run-says-the-turn-started)
+            (it "without --run it still asks for a message"
+                test-import-without-run-still-asks-for-a-message)))
+
 ;;; ─── The queue actually drains ─────────────────────────────
 
 (defn ^:async test-queued-follow-up-runs-at-turn-end []
