@@ -539,7 +539,14 @@
                                                 (handler ["mode" "plan"] nil)
                                                 (-> (expect (some #(str/includes? % "no agent connected")
                                                                   @(.-_notifications api)))
-                                                    (.toBe true)))))
+                                                    (.toBe true))
+                                                ;; …and the id a user types reaches a real mode: the
+                                                ;; registry keys :modes with keywords, switch-mode!
+                                                ;; looks up the string. Squint makes those the same
+                                                ;; thing, and this is the only link the error paths
+                                                ;; above never exercise.
+                                                (-> (expect (get-in registry/agents ["claude" :modes "plan"]))
+                                                    (.toBeDefined)))))
 
                                         (it "/agent mode with no id prints usage naming /mode"
                                             (fn []
