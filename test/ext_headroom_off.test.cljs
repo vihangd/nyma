@@ -29,6 +29,18 @@
              (try (fs/rmSync @tmp-root #js {:recursive true :force true})
                   (catch :default _e nil))))
 
+(defn- stub-api [registered flags flag-val listeners]
+  #js {:registerFlag      (fn [n _] (swap! flags assoc n nil) nil)
+       :getFlag           (fn [_] flag-val)
+       :registerCommand   (fn [n spec] (swap! registered assoc n spec) nil)
+       :unregisterCommand (fn [n] (swap! registered dissoc n) nil)
+       :on                (fn [evt h & _] (swap! listeners update evt (fnil conj []) h) nil)
+       :off               (fn [evt h]
+                            (swap! listeners update evt
+                                   (fn [hs] (filterv #(not= % h) (or hs []))))
+                            nil)
+       :ui                #js {:available false}})
+
 ;;; ─── /headroom-stats answers when headroom is off ─────────────────────────
 
 (describe "headroom answers /headroom-stats when it is off"
@@ -52,11 +64,7 @@
                   (js/process.chdir @tmp-root)
                   (let [registered (atom {})
                         flags      (atom {})
-                        api #js {:registerFlag      (fn [n _] (swap! flags assoc n nil) nil)
-                                 :getFlag           (fn [n] (get @flags n))
-                                 :registerCommand   (fn [n spec] (swap! registered assoc n spec) nil)
-                                 :unregisterCommand (fn [n] (swap! registered dissoc n) nil)
-                                 :ui #js {:available false}}
+                        api (stub-api registered flags nil (atom {}))
                         dispose ((.-default index) api)]
                     (-> (expect (contains? @registered "headroom-stats")) (.toBe true))
                     ;; …and it says how to switch it on, rather than stats of nothing.
@@ -65,7 +73,19 @@
                     ;; The old disabled branch built this fn mid-`let` and dropped it.
                     (-> (expect (fn? dispose)) (.toBe true))
                     (dispose)
-                    (-> (expect (contains? @registered "headroom-stats")) (.toBe false)))))))
+                    (-> (expect (contains? @registered "headroom-stats")) (.toBe false)))))
+
+            (it "registers the real stats command when --ext-headroom is given"
+                (fn []
+                  (js/process.chdir @tmp-root)
+                  (let [registered (atom {})
+                        api (stub-api registered (atom {}) true (atom {}))]
+                    ((.-default index) api)
+                    ;; Description, not the handler: the enabled path probes the
+                    ;; proxy, and this only needs to know which one was bound.
+                    (-> (expect (.includes (.-description (get @registered "headroom-stats"))
+                                           "is off"))
+                        (.toBe false)))))))
 
 ;;; ─── a malformed headroom section is reported with its file ───────────────
 
@@ -113,4 +133,23 @@
                 (fn []
                   (let [seen (atom [])]
                     (index/notify-settings-errors! [] (fn [m lvl] (swap! seen conj [m lvl])))
-                    (-> (expect (count @seen)) (.toBe 0)))))))
+                    (-> (expect (count @seen)) (.toBe 0)))))
+
+            (it "waits for session_ready to say it, because the UI is not up yet"
+                (fn []
+                  ;; api.ui.notify is wired while interactive mode builds the
+                  ;; TUI — long after extensions load. Notifying at activation
+                  ;; hits `available: false` and falls back to debug.log, which
+                  ;; is the silence this whole change exists to end.
+                  (js/process.chdir @tmp-root)
+                  (fs/mkdirSync (path/join @tmp-root ".nyma") #js {:recursive true})
+                  (fs/writeFileSync (path/join @tmp-root ".nyma" "settings.json") "{ broken")
+                  (let [listeners (atom {})]
+                    ((.-default index) (stub-api (atom {}) (atom {}) nil listeners))
+                    (-> (expect (count (get @listeners "session_ready" []))) (.toBe 1)))
+
+                  ;; …and subscribes to nothing when the file is fine.
+                  (fs/writeFileSync (path/join @tmp-root ".nyma" "settings.json") "{}")
+                  (let [listeners (atom {})]
+                    ((.-default index) (stub-api (atom {}) (atom {}) nil listeners))
+                    (-> (expect (count (get @listeners "session_ready" []))) (.toBe 0)))))))

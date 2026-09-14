@@ -52,7 +52,13 @@
                    (let [ui (.-ui api)]
                      (when (and ui (.-available ui) (.-notify ui))
                        (.notify ui msg (or level "info")))))
-        _        (notify-settings-errors! errors notify)
+        ;; Announced at session_ready, not here: interactive mode wires
+        ;; api.ui.notify while building the TUI, well after extensions load,
+        ;; so an activation-time notify would find `available` false and be
+        ;; swallowed back into debug.log.
+        on-ready (fn [_data _ctx] (notify-settings-errors! errors notify) nil)
+        _        (when (seq errors) (.on api "session_ready" on-ready))
+        drop-ready! (fn [] (when (seq errors) (.off api "session_ready" on-ready)))
         flag-val (.getFlag api "headroom")
         config   (cond
                    (true? flag-val)  (assoc base :enabled true)
@@ -72,7 +78,9 @@
                                    (when (and ctx (.-ui ctx) (.-notify (.-ui ctx)))
                                      (.notify (.-ui ctx) text "info"))
                                    text))})
-        (fn [] (.unregisterCommand api "headroom-stats")))
+        (fn []
+          (drop-ready!)
+          (.unregisterCommand api "headroom-stats")))
 
       (let [proxy-available? (atom false)
             deactivators     (atom [])]
@@ -103,6 +111,7 @@
 
         ;; Cleanup
         (fn []
+          (drop-ready!)
           (.unregisterCommand api "headroom-stats")
           (doseq [d @deactivators]
             (when (fn? d) (d))))))))

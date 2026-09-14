@@ -168,4 +168,34 @@
                 (fn []
                   (let [seen (atom [])]
                     (index/notify-parse-errors! [] (fn [m lvl] (swap! seen conj [m lvl])))
-                    (-> (expect (count @seen)) (.toBe 0)))))))
+                    (-> (expect (count @seen)) (.toBe 0)))))
+
+            (it "waits for session_ready to say it, because the UI is not up yet"
+                (fn []
+                  ;; api.ui.notify is wired while interactive mode builds the
+                  ;; TUI, long after extensions load. Notifying at activation
+                  ;; finds `available: false` and falls straight back to
+                  ;; debug.log — the silence this change exists to end.
+                  (let [orig-cwd (js/process.cwd)
+                        listeners (atom {})
+                        api #js {:on  (fn [evt h & _]
+                                        (swap! listeners update evt (fnil conj []) h) nil)
+                                 :off (fn [evt h]
+                                        (swap! listeners update evt
+                                               (fn [hs] (filterv #(not= % h) (or hs []))))
+                                        nil)
+                                 :events #js {:on (fn [_ _ _] nil) :off (fn [_ _] nil)}
+                                 :registerCommand   (fn [_ _] nil)
+                                 :unregisterCommand (fn [_] nil)
+                                 :ui #js {:available false}}]
+                    (write! (path/join @tmp-root ".nyma" "settings.json") "{ broken")
+                    (js/process.chdir @tmp-root)
+                    (try
+                      (let [before (count (get @listeners "session_ready" []))
+                            dispose ((.-default index) api)]
+                        (-> (expect (- (count (get @listeners "session_ready" [])) before))
+                            (.toBe 1))
+                        (dispose)
+                        ;; …and the subscription is dropped on deactivation.
+                        (-> (expect (count (get @listeners "session_ready" []))) (.toBe 0)))
+                      (finally (js/process.chdir orig-cwd))))))))

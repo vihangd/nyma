@@ -69,7 +69,17 @@
                          (.notify ui msg (or level "info")))))
         cleanups   (atom [])]
 
-    (notify-parse-errors! (:errors loaded) notify)
+    ;; The parse errors are found HERE, at activation, but announced at
+    ;; session_ready: interactive mode wires api.ui.notify while building the
+    ;; TUI, long after extensions load, so a notify from this line would find
+    ;; `available` false and fall back to debug.log — the very silence this
+    ;; is here to end. d/warn goes out immediately either way.
+    (when (seq (:errors loaded))
+      (let [on-ready (fn [_data _ctx]
+                       (notify-parse-errors! (:errors @loaded-atom) notify)
+                       nil)]
+        (.on api "session_ready" on-ready)
+        (swap! cleanups conj (fn [] (.off api "session_ready" on-ready)))))
 
     ;; Expose mode + a query for the loaded hooks for diagnostic UIs.
     (try
