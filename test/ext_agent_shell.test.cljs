@@ -193,121 +193,121 @@
                                                  _        (activate api)]
                                              (-> (expect (pos? (count (get @(.-_events api) "session_shutdown" [])))) (.toBe true)))))
 
-                                     (it "registers /handoff command on activate"
+                                     (it "does not register a top-level /handoff (the handoff extension owns it)"
                                          (fn []
                                            (let [api      (make-mock-api)
                                                  activate (.-default shell-index)
                                                  _        (activate api)
                                                  cmds     @(.-_commands api)]
-                                             (-> (expect (contains? cmds "handoff")) (.toBe true)))))))
+                                             (-> (expect (contains? cmds "handoff")) (.toBe false))
+                                             (-> (expect (contains? cmds "agent")) (.toBe true)))))))
 
-;;; ─── Handoff command ────────────────────────────────────────────────────────
+;;; ─── /agent handoff ─────────────────────────────────────────────────────────
+;;
+;; Agent-scoped handoff moved under /agent. Registering a top-level /handoff
+;; here collided with the `handoff` extension's session-brief command: two
+;; `__handoff` keys made resolve-command ambiguous, so /handoff answered
+;; "Unknown command" whenever agent_shell was loaded.
 
-(describe "agent-shell:handoff" (fn []
-                                  (it "registers /handoff command on activate"
-                                      (fn []
-                                        (let [api        (make-mock-api)
-                                              deactivate (handoff/activate api)]
-                                          (-> (expect (contains? @(.-_commands api) "handoff")) (.toBe true))
-                                          (deactivate))))
+(defn- agent-handoff-handler
+  "The /agent handler, curried so `(h args)` runs `/agent handoff <args>`."
+  [api]
+  (agent-switcher/activate api)
+  (let [h (.-handler (get @(.-_commands api) "agent"))]
+    (fn [args ctx] (h (into ["handoff"] (vec args)) ctx))))
 
-                                  (it "deactivator unregisters /handoff"
-                                      (fn []
-                                        (let [api        (make-mock-api)
-                                              deactivate (handoff/activate api)]
-                                          (deactivate)
-                                          (-> (expect (contains? @(.-_commands api) "handoff")) (.toBe false)))))
+(describe "agent-shell:/agent handoff" (fn []
+                                         (it "/agent handoff reaches the handoff feature"
+                                             (fn []
+                                        ;; The subcommand is wired: with no agent connected it must
+                                        ;; produce handoff's own error, not "unknown agent: handoff".
+                                               (reset! shared/active-agent nil)
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler ["claude"] nil)
+                                                 (-> (expect (some #(str/includes? % "No agent connected")
+                                                                   @(.-_notifications api)))
+                                                     (.toBe true)))))
 
-                                  (it "handler notifies error when no agent is connected"
-                                      (fn []
-                                        (reset! shared/active-agent nil)
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler ["claude"] nil)
-                                          (-> (expect (some #(str/includes? % "No agent connected")
-                                                            @(.-_notifications api)))
-                                              (.toBe true)))))
+                                         (it "handoff/activate registers no command of its own"
+                                             (fn []
+                                               (let [api        (make-mock-api)
+                                                     deactivate (handoff/activate api)]
+                                                 (-> (expect (contains? @(.-_commands api) "handoff")) (.toBe false))
+                                                 (deactivate))))
 
-                                  (it "no arg + UI available → shows interactive picker"
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler [] nil)
-                                          (-> (expect (count @(.-_selectCalls api))) (.toBe 1)))))
+                                         (it "no arg + UI available → shows interactive picker"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler [] nil)
+                                                 (-> (expect (count @(.-_selectCalls api))) (.toBe 1)))))
 
-                                  (it "no arg + UI available → picker options include all registered agents"
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler [] nil)
-                                          (let [call    (first @(.-_selectCalls api))
-                                                options (js/Array.from (:options call))
-                                                values  (mapv #(.-value %) options)]
-                                            (-> (expect (some #(= % "claude") values)) (.toBeTruthy))))))
+                                         (it "no arg + UI available → picker options include all registered agents"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler [] nil)
+                                                 (let [call    (first @(.-_selectCalls api))
+                                                       options (js/Array.from (:options call))
+                                                       values  (mapv #(.-value %) options)]
+                                                   (-> (expect (some #(= % "claude") values)) (.toBeTruthy))))))
 
-                                  (it "no arg + user cancels picker (nil) → no handoff attempt"
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
+                                         (it "no arg + user cancels picker (nil) → no handoff attempt"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
                                         ;; select-result nil = user cancelled
-                                        (let [api     (make-mock-api {:select-result nil})
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (-> (js/Promise.resolve (handler [] nil))
-                                              (.then (fn [_]
+                                               (let [api     (make-mock-api {:select-result nil})
+                                                     handler (agent-handoff-handler api)]
+                                                 (-> (js/Promise.resolve (handler [] nil))
+                                                     (.then (fn [_]
                                                        ;; No notification about handing off or errors
-                                                       (-> (expect (count @(.-_notifications api)))
-                                                           (.toBe 0))))))))
+                                                              (-> (expect (count @(.-_notifications api)))
+                                                                  (.toBe 0))))))))
 
-                                  (it "no arg + UI unavailable → select not called"
+                                         (it "no arg + UI unavailable → select not called"
                                       ;; When UI is unavailable, the picker is skipped.
                                       ;; notify also guards on ui.available so no output fires — that is
                                       ;; expected: headless/RPC mode has no display channel.
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
-                                        (let [api     (make-mock-api {:ui-available? false})
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler [] nil)
-                                          (-> (expect (count @(.-_selectCalls api))) (.toBe 0)))))
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                               (let [api     (make-mock-api {:ui-available? false})
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler [] nil)
+                                                 (-> (expect (count @(.-_selectCalls api))) (.toBe 0)))))
 
-                                  (it "handler notifies error for unknown target agent"
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler ["zzz_no_such_agent_xyz"] nil)
-                                          (-> (expect (some #(str/includes? % "Unknown agent")
-                                                            @(.-_notifications api)))
-                                              (.toBe true)))))
+                                         (it "handler notifies error for unknown target agent"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler ["zzz_no_such_agent_xyz"] nil)
+                                                 (-> (expect (some #(str/includes? % "Unknown agent")
+                                                                   @(.-_notifications api)))
+                                                     (.toBe true)))))
 
-                                  (it "same agent as current → already connected error"
-                                      (fn []
-                                        (reset! shared/active-agent "qwen")
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler ["qwen"] nil)
-                                          (-> (expect (some #(str/includes? % "Already connected")
-                                                            @(.-_notifications api)))
-                                              (.toBe true)))))
+                                         (it "same agent as current → already connected error"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler ["qwen"] nil)
+                                                 (-> (expect (some #(str/includes? % "Already connected")
+                                                                   @(.-_notifications api)))
+                                                     (.toBe true)))))
 
-                                  (it "no-agent error check precedes argument check"
-                                      (fn []
+                                         (it "no-agent error check precedes argument check"
+                                             (fn []
                                         ;; When active-agent is nil, even empty args give the no-agent error
-                                        (reset! shared/active-agent nil)
-                                        (let [api     (make-mock-api)
-                                              _       (handoff/activate api)
-                                              handler (.-handler (get @(.-_commands api) "handoff"))]
-                                          (handler [] nil)
-                                          (-> (expect (some #(str/includes? % "No agent connected")
-                                                            @(.-_notifications api)))
-                                              (.toBe true)))))))
+                                               (reset! shared/active-agent nil)
+                                               (let [api     (make-mock-api)
+                                                     handler (agent-handoff-handler api)]
+                                                 (handler [] nil)
+                                                 (-> (expect (some #(str/includes? % "No agent connected")
+                                                                   @(.-_notifications api)))
+                                                     (.toBe true)))))))
 
 ;;; ─── ACP elicitation handler ────────────────────────────────────────────────
 
@@ -1036,32 +1036,32 @@
 
 (describe "agent-shell:edit tracking" (fn []
 
-  (it "counts only mutating tool calls that completed"
-      (fn []
+                                        (it "counts only mutating tool calls that completed"
+                                            (fn []
         ;; A denied or failed write changed nothing, and must not make
         ;; /plan-capture claim the agent already did the work.
-        (shared/clear-transcript! "claude@/x")
-        (shared/record-tool-call! "claude@/x" "edit" "completed")
-        (shared/record-tool-call! "claude@/x" "edit" "failed")
-        (shared/record-tool-call! "claude@/x" "read" "completed")
-        (shared/record-tool-call! "claude@/x" "search" "completed")
-        (-> (expect (shared/edit-count "claude@/x")) (.toBe 1))))
+                                              (shared/clear-transcript! "claude@/x")
+                                              (shared/record-tool-call! "claude@/x" "edit" "completed")
+                                              (shared/record-tool-call! "claude@/x" "edit" "failed")
+                                              (shared/record-tool-call! "claude@/x" "read" "completed")
+                                              (shared/record-tool-call! "claude@/x" "search" "completed")
+                                              (-> (expect (shared/edit-count "claude@/x")) (.toBe 1))))
 
-  (it "counts delete and move as changes too"
-      (fn []
-        (shared/clear-transcript! "claude@/y")
-        (shared/record-tool-call! "claude@/y" "delete" "completed")
-        (shared/record-tool-call! "claude@/y" "move" "completed")
-        (-> (expect (shared/edit-count "claude@/y")) (.toBe 2))))
+                                        (it "counts delete and move as changes too"
+                                            (fn []
+                                              (shared/clear-transcript! "claude@/y")
+                                              (shared/record-tool-call! "claude@/y" "delete" "completed")
+                                              (shared/record-tool-call! "claude@/y" "move" "completed")
+                                              (-> (expect (shared/edit-count "claude@/y")) (.toBe 2))))
 
-  (it "is per pool key and cleared with the transcript"
-      (fn []
-        (shared/clear-transcript! "claude@/a")
-        (shared/clear-transcript! "claude@/b")
-        (shared/record-tool-call! "claude@/a" "edit" "completed")
-        (-> (expect (shared/edit-count "claude@/b")) (.toBe 0))
-        (shared/clear-transcript! "claude@/a")
-        (-> (expect (shared/edit-count "claude@/a")) (.toBe 0))))))
+                                        (it "is per pool key and cleared with the transcript"
+                                            (fn []
+                                              (shared/clear-transcript! "claude@/a")
+                                              (shared/clear-transcript! "claude@/b")
+                                              (shared/record-tool-call! "claude@/a" "edit" "completed")
+                                              (-> (expect (shared/edit-count "claude@/b")) (.toBe 0))
+                                              (shared/clear-transcript! "claude@/a")
+                                              (-> (expect (shared/edit-count "claude@/a")) (.toBe 0))))))
 
 ;;; ─── Transcript accumulation ───────────────────────────────────────────────
 ;;
@@ -1074,65 +1074,65 @@
 
 (describe "agent-shell:transcript" (fn []
 
-  (it "keeps both roles, oldest first"
-      (fn []
+                                     (it "keeps both roles, oldest first"
+                                         (fn []
         ;; The user turn is only here because send-prompt records it at the
         ;; call site — the stream never yields it, so `request:` in the
         ;; artifact header has no other source.
-        (shared/clear-transcript! "claude@/p")
-        (shared/append-turn! "claude@/p" "user" "add OAuth login")
-        (shared/append-turn! "claude@/p" "assistant" "1. do a thing")
-        (let [ts (shared/get-transcript "claude@/p")]
-          (-> (expect (count ts)) (.toBe 2))
-          (-> (expect (:role (first ts))) (.toBe "user"))
-          (-> (expect (:text (first ts))) (.toBe "add OAuth login"))
-          (-> (expect (:role (second ts))) (.toBe "assistant")))))
+                                           (shared/clear-transcript! "claude@/p")
+                                           (shared/append-turn! "claude@/p" "user" "add OAuth login")
+                                           (shared/append-turn! "claude@/p" "assistant" "1. do a thing")
+                                           (let [ts (shared/get-transcript "claude@/p")]
+                                             (-> (expect (count ts)) (.toBe 2))
+                                             (-> (expect (:role (first ts))) (.toBe "user"))
+                                             (-> (expect (:text (first ts))) (.toBe "add OAuth login"))
+                                             (-> (expect (:role (second ts))) (.toBe "assistant")))))
 
-  (it "is keyed by pool key, so two projects do not interleave"
-      (fn []
+                                     (it "is keyed by pool key, so two projects do not interleave"
+                                         (fn []
         ;; agent-state is keyed by agent ALONE while the pool is keyed by
         ;; [agent, cwd], and the gateway deliberately fans out that way. A
         ;; transcript stored under the agent would splice two projects' plans
         ;; into one capture.
-        (shared/clear-transcript! "claude@/one")
-        (shared/clear-transcript! "claude@/two")
-        (shared/append-turn! "claude@/one" "user" "project one")
-        (shared/append-turn! "claude@/two" "user" "project two")
-        (-> (expect (count (shared/get-transcript "claude@/one"))) (.toBe 1))
-        (-> (expect (:text (first (shared/get-transcript "claude@/one"))))
-            (.toBe "project one"))
-        (-> (expect (:text (first (shared/get-transcript "claude@/two"))))
-            (.toBe "project two"))))
+                                           (shared/clear-transcript! "claude@/one")
+                                           (shared/clear-transcript! "claude@/two")
+                                           (shared/append-turn! "claude@/one" "user" "project one")
+                                           (shared/append-turn! "claude@/two" "user" "project two")
+                                           (-> (expect (count (shared/get-transcript "claude@/one"))) (.toBe 1))
+                                           (-> (expect (:text (first (shared/get-transcript "claude@/one"))))
+                                               (.toBe "project one"))
+                                           (-> (expect (:text (first (shared/get-transcript "claude@/two"))))
+                                               (.toBe "project two"))))
 
-  (it "clears, so a reconnect cannot capture the previous session's plan"
-      (fn []
+                                     (it "clears, so a reconnect cannot capture the previous session's plan"
+                                         (fn []
         ;; pool/disconnect nils active-agent and nothing else; without an
         ;; explicit clear, /plan-capture after a reconnect would happily write
         ;; a stale plan under a fresh session's name.
-        (shared/append-turn! "claude@/gone" "user" "old plan")
-        (shared/clear-transcript! "claude@/gone")
-        (-> (expect (shared/get-transcript "claude@/gone")) (.toEqual #js []))))
+                                           (shared/append-turn! "claude@/gone" "user" "old plan")
+                                           (shared/clear-transcript! "claude@/gone")
+                                           (-> (expect (shared/get-transcript "claude@/gone")) (.toEqual #js []))))
 
-  (it "ignores blank turns rather than recording phantoms"
-      (fn []
-        (shared/clear-transcript! "claude@/blank")
-        (shared/append-turn! "claude@/blank" "assistant" "   ")
-        (shared/append-turn! "claude@/blank" "assistant" "")
-        (shared/append-turn! "claude@/blank" "assistant" nil)
-        (-> (expect (count (shared/get-transcript "claude@/blank"))) (.toBe 0))))
+                                     (it "ignores blank turns rather than recording phantoms"
+                                         (fn []
+                                           (shared/clear-transcript! "claude@/blank")
+                                           (shared/append-turn! "claude@/blank" "assistant" "   ")
+                                           (shared/append-turn! "claude@/blank" "assistant" "")
+                                           (shared/append-turn! "claude@/blank" "assistant" nil)
+                                           (-> (expect (count (shared/get-transcript "claude@/blank"))) (.toBe 0))))
 
-  (it "caps a long planning session by dropping the oldest turns"
-      (fn []
+                                     (it "caps a long planning session by dropping the oldest turns"
+                                         (fn []
         ;; Unbounded otherwise, and the useful part of a planning session is
         ;; always the tail — the plan is the last thing said.
-        (shared/clear-transcript! "claude@/long")
-        (doseq [i (range 60)]
-          (shared/append-turn! "claude@/long" "user" (str "turn-" i)))
-        (let [ts (shared/get-transcript "claude@/long")]
-          (-> (expect (count ts)) (.toBeLessThanOrEqual 40))
+                                           (shared/clear-transcript! "claude@/long")
+                                           (doseq [i (range 60)]
+                                             (shared/append-turn! "claude@/long" "user" (str "turn-" i)))
+                                           (let [ts (shared/get-transcript "claude@/long")]
+                                             (-> (expect (count ts)) (.toBeLessThanOrEqual 40))
           ;; newest kept, oldest dropped
-          (-> (expect (:text (last ts))) (.toBe "turn-59"))
-          (-> (expect (some (fn [t] (= "turn-0" (:text t))) ts)) (.toBeFalsy)))))))
+                                             (-> (expect (:text (last ts))) (.toBe "turn-59"))
+                                             (-> (expect (some (fn [t] (= "turn-0" (:text t))) ts)) (.toBeFalsy)))))))
 
 ;;; ─── Live tool activity ────────────────────────────────────────────────────
 ;;
@@ -1143,51 +1143,51 @@
 
 (describe "agent-shell:tool activity lines" (fn []
 
-  (it "labels by ACP kind and prefers the reported location"
-      (fn []
+                                              (it "labels by ACP kind and prefers the reported location"
+                                                  (fn []
         ;; `locations` is what the spec provides for follow-along; a path says
         ;; more in one line than the title's prose.
-        (-> (expect (input-router/tool-line {:kind "read" :title "Reading a file"
-                                       :path "src/auth/store.ts" :status "completed"}))
-            (.toBe "⚒ Read  src/auth/store.ts  ✓"))
-        (-> (expect (input-router/tool-line {:kind "execute" :title "bun test" :status "failed"}))
-            (.toBe "⚒ Bash  bun test  ✗"))))
+                                                    (-> (expect (input-router/tool-line {:kind "read" :title "Reading a file"
+                                                                                         :path "src/auth/store.ts" :status "completed"}))
+                                                        (.toBe "⚒ Read  src/auth/store.ts  ✓"))
+                                                    (-> (expect (input-router/tool-line {:kind "execute" :title "bun test" :status "failed"}))
+                                                        (.toBe "⚒ Bash  bun test  ✗"))))
 
-  (it "shows an unknown kind rather than swallowing it"
-      (fn []
-        (-> (expect (.includes (input-router/tool-line {:kind "teleport" :title "x" :status "pending"})
-                               "teleport"))
-            (.toBe true))))
+                                              (it "shows an unknown kind rather than swallowing it"
+                                                  (fn []
+                                                    (-> (expect (.includes (input-router/tool-line {:kind "teleport" :title "x" :status "pending"})
+                                                                           "teleport"))
+                                                        (.toBe true))))
 
-  (it "appends a new call and updates it in place"
-      (fn []
-        (let [a (input-router/upsert-tool [] {:id "c1" :kind "read" :path "a.ts"
-                                        :status "pending"} 1)
-              b (input-router/upsert-tool a {:id "c1" :status "completed"} 1)]
-          (-> (expect (count a)) (.toBe 1))
-          (-> (expect (count b)) (.toBe 1))
-          (-> (expect (.includes (:content (first b)) "✓")) (.toBe true)))))
+                                              (it "appends a new call and updates it in place"
+                                                  (fn []
+                                                    (let [a (input-router/upsert-tool [] {:id "c1" :kind "read" :path "a.ts"
+                                                                                          :status "pending"} 1)
+                                                          b (input-router/upsert-tool a {:id "c1" :status "completed"} 1)]
+                                                      (-> (expect (count a)) (.toBe 1))
+                                                      (-> (expect (count b)) (.toBe 1))
+                                                      (-> (expect (.includes (:content (first b)) "✓")) (.toBe true)))))
 
-  (it "MERGES an update, so a status-only frame does not blank the title"
-      (fn []
+                                              (it "MERGES an update, so a status-only frame does not blank the title"
+                                                  (fn []
         ;; Every field but toolCallId is optional on tool_call_update.
-        (let [a (input-router/upsert-tool [] {:id "c1" :kind "edit" :path "src/x.ts"
-                                        :status "pending"} 1)
-              b (input-router/upsert-tool a {:id "c1" :title nil :kind nil :path nil
-                                       :status "completed"} 1)]
-          (-> (expect (.includes (:content (first b)) "Edit")) (.toBe true))
-          (-> (expect (.includes (:content (first b)) "src/x.ts")) (.toBe true)))))
+                                                    (let [a (input-router/upsert-tool [] {:id "c1" :kind "edit" :path "src/x.ts"
+                                                                                          :status "pending"} 1)
+                                                          b (input-router/upsert-tool a {:id "c1" :title nil :kind nil :path nil
+                                                                                         :status "completed"} 1)]
+                                                      (-> (expect (.includes (:content (first b)) "Edit")) (.toBe true))
+                                                      (-> (expect (.includes (:content (first b)) "src/x.ts")) (.toBe true)))))
 
-  (it "keeps separate calls separate, and separate prompts separate"
-      (fn []
-        (let [v (-> []
-                    (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 1)
-                    (input-router/upsert-tool {:id "c2" :kind "edit" :status "pending"} 1)
-                    (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 2))]
+                                              (it "keeps separate calls separate, and separate prompts separate"
+                                                  (fn []
+                                                    (let [v (-> []
+                                                                (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 1)
+                                                                (input-router/upsert-tool {:id "c2" :kind "edit" :status "pending"} 1)
+                                                                (input-router/upsert-tool {:id "c1" :kind "read" :status "pending"} 2))]
           ;; c1 from prompt 2 is a different line than c1 from prompt 1 —
           ;; ids are only unique within a session, and re-using a line across
           ;; turns would rewrite history.
-          (-> (expect (count v)) (.toBe 3)))))))
+                                                      (-> (expect (count v)) (.toBe 3)))))))
 
 ;;; ─── Session replay ────────────────────────────────────────────────────────
 ;;
@@ -1220,123 +1220,123 @@
 
 (describe "agent-shell:session replay" (fn []
 
-  (it "rebuilds BOTH roles into the capture transcript"
-      (fn []
-        (let [pk "claude@/replay-a"
-              conn (replay-conn pk)]
-          (shared/clear-transcript! pk)
-          (reset! (:replaying? conn) true)
-          (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "add OAuth"}) nil)
-          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "1. do it"}) nil)
-          (reset! (:replaying? conn) false)
-          (let [ts (shared/get-transcript pk)]
-            (-> (expect (count ts)) (.toBe 2))
-            (-> (expect (:role (first ts))) (.toBe "user"))
-            (-> (expect (:text (first ts))) (.toBe "add OAuth"))
-            (-> (expect (:role (second ts))) (.toBe "assistant"))))))
+                                         (it "rebuilds BOTH roles into the capture transcript"
+                                             (fn []
+                                               (let [pk "claude@/replay-a"
+                                                     conn (replay-conn pk)]
+                                                 (shared/clear-transcript! pk)
+                                                 (reset! (:replaying? conn) true)
+                                                 (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "add OAuth"}) nil)
+                                                 (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "1. do it"}) nil)
+                                                 (reset! (:replaying? conn) false)
+                                                 (let [ts (shared/get-transcript pk)]
+                                                   (-> (expect (count ts)) (.toBe 2))
+                                                   (-> (expect (:role (first ts))) (.toBe "user"))
+                                                   (-> (expect (:text (first ts))) (.toBe "add OAuth"))
+                                                   (-> (expect (:role (second ts))) (.toBe "assistant"))))))
 
-  (it "still drops user_message_chunk when NOT replaying"
-      (fn []
+                                         (it "still drops user_message_chunk when NOT replaying"
+                                             (fn []
         ;; Live, the prompt is recorded at the call site instead; recording it
         ;; here as well would double every turn.
-        (let [pk "claude@/replay-b"
-              conn (replay-conn pk)]
-          (shared/clear-transcript! pk)
-          (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "hi"}) nil)
-          (-> (expect (count (shared/get-transcript pk))) (.toBe 0)))))
+                                               (let [pk "claude@/replay-b"
+                                                     conn (replay-conn pk)]
+                                                 (shared/clear-transcript! pk)
+                                                 (notifications/dispatch-notification conn (upd "user_message_chunk" {:text "hi"}) nil)
+                                                 (-> (expect (count (shared/get-transcript pk))) (.toBe 0)))))
 
-  (it "does not count replayed edits against the plan-capture warning"
-      (fn []
-        (let [pk "claude@/replay-c"
-              conn (replay-conn pk)]
-          (shared/clear-transcript! pk)
-          (reset! (:replaying? conn) true)
-          (notifications/dispatch-notification
-           conn (upd "tool_call" {:tool-id "t1" :kind "edit" :status "completed"}) nil)
-          (-> (expect (shared/edit-count pk)) (.toBe 0))
+                                         (it "does not count replayed edits against the plan-capture warning"
+                                             (fn []
+                                               (let [pk "claude@/replay-c"
+                                                     conn (replay-conn pk)]
+                                                 (shared/clear-transcript! pk)
+                                                 (reset! (:replaying? conn) true)
+                                                 (notifications/dispatch-notification
+                                                  conn (upd "tool_call" {:tool-id "t1" :kind "edit" :status "completed"}) nil)
+                                                 (-> (expect (shared/edit-count pk)) (.toBe 0))
           ;; …but a live one still counts.
-          (reset! (:replaying? conn) false)
-          (notifications/dispatch-notification
-           conn (upd "tool_call" {:tool-id "t2" :kind "edit" :status "completed"}) nil)
-          (-> (expect (shared/edit-count pk)) (.toBe 1)))))
+                                                 (reset! (:replaying? conn) false)
+                                                 (notifications/dispatch-notification
+                                                  conn (upd "tool_call" {:tool-id "t2" :kind "edit" :status "completed"}) nil)
+                                                 (-> (expect (shared/edit-count pk)) (.toBe 1)))))
 
-  (it "hands replayed turns to the pane renderer"
-      (fn []
-        (let [pk "claude@/replay-d"
-              conn (replay-conn pk)
-              seen (atom [])]
-          (shared/clear-transcript! pk)
-          (reset! shared/replay-callback (fn [t] (swap! seen conj t)))
-          (reset! (:replaying? conn) true)
-          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "hello"}) nil)
-          (reset! (:replaying? conn) false)
-          (reset! shared/replay-callback nil)
-          (-> (expect (count @seen)) (.toBe 1))
-          (-> (expect (:role (first @seen))) (.toBe "assistant")))))
+                                         (it "hands replayed turns to the pane renderer"
+                                             (fn []
+                                               (let [pk "claude@/replay-d"
+                                                     conn (replay-conn pk)
+                                                     seen (atom [])]
+                                                 (shared/clear-transcript! pk)
+                                                 (reset! shared/replay-callback (fn [t] (swap! seen conj t)))
+                                                 (reset! (:replaying? conn) true)
+                                                 (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "hello"}) nil)
+                                                 (reset! (:replaying? conn) false)
+                                                 (reset! shared/replay-callback nil)
+                                                 (-> (expect (count @seen)) (.toBe 1))
+                                                 (-> (expect (:role (first @seen))) (.toBe "assistant")))))
 
-  (it "does not treat replay as live output"
-      (fn []
+                                         (it "does not treat replay as live output"
+                                             (fn []
         ;; The stream callback drives the "agent is answering now" rendering;
         ;; firing it for history would replay the conversation as if it were
         ;; arriving.
-        (let [conn (replay-conn "claude@/replay-e")
-              hits (atom 0)]
-          (reset! shared/stream-callback (fn [_] (swap! hits inc)))
-          (reset! (:replaying? conn) true)
-          (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "x"}) nil)
-          (reset! shared/stream-callback nil)
-          (-> (expect @hits) (.toBe 0)))))))
+                                               (let [conn (replay-conn "claude@/replay-e")
+                                                     hits (atom 0)]
+                                                 (reset! shared/stream-callback (fn [_] (swap! hits inc)))
+                                                 (reset! (:replaying? conn) true)
+                                                 (notifications/dispatch-notification conn (upd "agent_message_chunk" {:text "x"}) nil)
+                                                 (reset! shared/stream-callback nil)
+                                                 (-> (expect @hits) (.toBe 0)))))))
 
 ;;; ─── Remembered sessions ───────────────────────────────────────────────────
 
 (describe "agent-shell:remembered sessions" (fn []
 
-  (it "round-trips a session id through the state capability"
-      (fn []
+                                              (it "round-trips a session id through the state capability"
+                                                  (fn []
         ;; agent_shell declared the `state` capability and never used it, so
         ;; every session id died with the process.
-        (let [store (atom {})
-              api   #js {:state #js {:get (fn [k] (get @store (str k)))
-                                     :set (fn [k v] (swap! store assoc (str k) v))
-                                     :delete (fn [k] (swap! store dissoc (str k)))}}]
-          (shared/remember-session! api "claude" "sess-123" "OAuth work")
-          (let [got (shared/recall-session api "claude")]
-            (-> (expect (aget got "sessionId")) (.toBe "sess-123"))
-            (-> (expect (aget got "title")) (.toBe "OAuth work"))))))
+                                                    (let [store (atom {})
+                                                          api   #js {:state #js {:get (fn [k] (get @store (str k)))
+                                                                                 :set (fn [k v] (swap! store assoc (str k) v))
+                                                                                 :delete (fn [k] (swap! store dissoc (str k)))}}]
+                                                      (shared/remember-session! api "claude" "sess-123" "OAuth work")
+                                                      (let [got (shared/recall-session api "claude")]
+                                                        (-> (expect (aget got "sessionId")) (.toBe "sess-123"))
+                                                        (-> (expect (aget got "title")) (.toBe "OAuth work"))))))
 
-  (it "is keyed per project, so two checkouts do not collide"
-      (fn []
-        (-> (expect (= (shared/store-key "claude" "/a") (shared/store-key "claude" "/b")))
-            (.toBe false))))
+                                              (it "is keyed per project, so two checkouts do not collide"
+                                                  (fn []
+                                                    (-> (expect (= (shared/store-key "claude" "/a") (shared/store-key "claude" "/b")))
+                                                        (.toBe false))))
 
-  (it "is silent when the extension has no state capability"
-      (fn []
+                                              (it "is silent when the extension has no state capability"
+                                                  (fn []
         ;; Must not throw: a read-only or missing ext-state dir cannot be
         ;; allowed to break the session itself.
-        (-> (expect (shared/remember-session! #js {} "claude" "s1")) (.toBeNil))
-        (-> (expect (shared/recall-session #js {} "claude")) (.toBeNil))))))
+                                                    (-> (expect (shared/remember-session! #js {} "claude" "s1")) (.toBeNil))
+                                                    (-> (expect (shared/recall-session #js {} "claude")) (.toBeNil))))))
 
 (describe "agent-shell:session-mgmt guards" (fn []
 
-  (it "detects method-not-found by CODE, not just message text"
-      (fn []
+                                              (it "detects method-not-found by CODE, not just message text"
+                                                  (fn []
         ;; handle-response used to format the error and drop `.-code`, so the
         ;; session/load fallback could never fire on the code.
-        (let [e (js/Error. "ACP error: nope")]
-          (aset e "code" -32601)
-          (-> (expect (session-mgmt/method-not-found? e)) (.toBe true)))
-        (-> (expect (session-mgmt/method-not-found? (js/Error. "Method not found")))
-            (.toBe true))
-        (-> (expect (session-mgmt/method-not-found? (js/Error. "boom"))) (.toBe false))))
+                                                    (let [e (js/Error. "ACP error: nope")]
+                                                      (aset e "code" -32601)
+                                                      (-> (expect (session-mgmt/method-not-found? e)) (.toBe true)))
+                                                    (-> (expect (session-mgmt/method-not-found? (js/Error. "Method not found")))
+                                                        (.toBe true))
+                                                    (-> (expect (session-mgmt/method-not-found? (js/Error. "boom"))) (.toBe false))))
 
-  (it "refuses in-process runners instead of hanging"
-      (fn []
+                                              (it "refuses in-process runners instead of hanging"
+                                                  (fn []
         ;; :stdin is nil and safe-write swallows the failure, so the request
         ;; registered a promise that never settled — a silent hang.
-        (-> (expect (.includes (session-mgmt/in-process-refusal {:in-process? true} "claude-sdk")
-                               "in-process"))
-            (.toBe true))
-        (-> (expect (session-mgmt/in-process-refusal {:in-process? false} "claude")) (.toBeNil))))))
+                                                    (-> (expect (.includes (session-mgmt/in-process-refusal {:in-process? true} "claude-sdk")
+                                                                           "in-process"))
+                                                        (.toBe true))
+                                                    (-> (expect (session-mgmt/in-process-refusal {:in-process? false} "claude")) (.toBeNil))))))
 
 ;;; ─── Inline thinking ───────────────────────────────────────────────────────
 ;;
@@ -1351,16 +1351,16 @@
 
 (describe "agent-shell:inline-thinking" (fn []
 
-  (it "auto defers to a renderer that is already active"
-      (fn []
-        (-> (expect (input-router/inline-thinking? (api-with-flag true))) (.toBe false))))
+                                          (it "auto defers to a renderer that is already active"
+                                              (fn []
+                                                (-> (expect (input-router/inline-thinking? (api-with-flag true))) (.toBe false))))
 
-  (it "auto inlines when nothing else renders it"
-      (fn []
-        (-> (expect (input-router/inline-thinking? (api-with-flag false))) (.toBe true))))
+                                          (it "auto inlines when nothing else renders it"
+                                              (fn []
+                                                (-> (expect (input-router/inline-thinking? (api-with-flag false))) (.toBe true))))
 
-  (it "survives an API with no flag support"
-      (fn []
+                                          (it "survives an API with no flag support"
+                                              (fn []
         ;; Gateway/programmatic APIs have no getGlobalFlag; calling it threw
         ;; inside subscribe and took the whole turn down.
-        (-> (expect (input-router/inline-thinking? #js {})) (.toBe true))))))
+                                                (-> (expect (input-router/inline-thinking? #js {})) (.toBe true))))))

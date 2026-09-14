@@ -4,6 +4,7 @@
             [agent.extensions.agent-shell.agents.registry :as registry]
             [agent.extensions.agent-shell.acp.pool :as pool]
             [agent.extensions.agent-shell.acp.client :as client]
+            [agent.extensions.agent-shell.features.handoff :as handoff]
             [clojure.string :as str]))
 
 (defn- notify [api msg & [level]]
@@ -136,7 +137,7 @@
   "Register the /agent command."
   [api]
   (.registerCommand api "agent"
-                    #js {:description "Connect to a coding agent. /agent <key> | detach | disconnect"
+                    #js {:description "Connect to a coding agent. /agent <key> | handoff | detach | disconnect"
                          :handler (fn [args _ctx]
                                     (let [subcmd (first args)]
                                       (cond
@@ -148,6 +149,13 @@
 
                                         (= subcmd "detach")
                                         (detach-agent! api)
+
+                                        ;; Agent-scoped handoff. The top-level
+                                        ;; /handoff belongs to the `handoff`
+                                        ;; extension (session brief); this one
+                                        ;; moves an ACP session to another agent.
+                                        (= subcmd "handoff")
+                                        (handoff/handle api (vec (rest args)))
 
                                         :else
                                         (connect-agent! api subcmd))))})
