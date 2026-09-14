@@ -25,7 +25,7 @@
   [config-options]
   (let [opts (vec (or config-options []))]
     (boolean (and (seq opts)
-                  (not-any? (fn [o] (= (str (or (:configId o) (get o "configId"))) "effort"))
+                  (not-any? (fn [o] (= (str (:configId o)) "effort"))
                             opts)))))
 
 (defn- set-effort!

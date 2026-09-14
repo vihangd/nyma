@@ -80,7 +80,7 @@
   "The argv templates to use: explicit settings first, then auto-detection,
    else nil — and nil means this extension does nothing at all."
   [config agent-name]
-  (let [cmd (or (:command config) (get config "command"))]
+  (let [cmd (:command config)]
     (cond
       (and (sequential? cmd) (seq cmd)) {:report (vec cmd) :release nil}
       (false? (:enabled config))        nil

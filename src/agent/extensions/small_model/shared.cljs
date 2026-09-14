@@ -57,7 +57,7 @@
   "Merge user settings (\"small-model\" key) over defaults.
    Accepts the merged settings map from `(.settings api)`."
   [settings]
-  (let [raw (or (get settings "small-model") (get settings :small-model))]
+  (let [raw (get settings "small-model")]
     (if-not raw
       default-config
       ;; Shallow merge per sub-key; user values win.

@@ -17,16 +17,16 @@
 
 ;; ── Shaping ──────────────────────────────────────────────────────
 
-(defn- entry-role [e] (str (or (:role e) (get e "role") "")))
-(defn- entry-content [e] (str (or (:content e) (get e "content") "")))
+(defn- entry-role [e] (str (or (:role e) "")))
+(defn- entry-content [e] (str (or (:content e) "")))
 
 (defn- tool-name [e]
-  (let [m (or (:metadata e) (get e "metadata"))]
-    (when m (str (or (:tool-name m) (get m "tool-name") "")))))
+  (let [m (:metadata e)]
+    (when m (str (or (:tool-name m) "")))))
 
 (defn- tool-args [e]
-  (let [m (or (:metadata e) (get e "metadata"))]
-    (when m (or (:args m) (get m "args")))))
+  (let [m (:metadata e)]
+    (when m (:args m))))
 
 (defn- arg-get [args k]
   (when args (or (get args k) (get args (str k)))))

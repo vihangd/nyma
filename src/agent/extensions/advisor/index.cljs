@@ -86,7 +86,7 @@ plain text; the executor will read it on its next turn.")
    An unrecognised value falls back to the default rather than being sent."
   [settings]
   (let [adv   (:advisor (:roles settings))
-        raw   (or (:thinking adv) (get adv "thinking"))
+        raw   (:thinking adv)
         level (str (or raw default-advisor-thinking))]
     (if (thinking/valid-level? level) level default-advisor-thinking)))
 

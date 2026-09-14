@@ -49,7 +49,7 @@
   "Pure: settings → the escalate config, user keys merged over defaults.
    Nested :on and :fallback merge field-wise so setting one key keeps the rest."
   [settings]
-  (let [raw (or (:escalate settings) (get settings "escalate") {})]
+  (let [raw (or (:escalate settings) {})]
     (-> (merge default-config raw)
         (assoc :on       (merge (:on default-config)       (:on raw)))
         (assoc :fallback (merge (:fallback default-config) (:fallback raw))))))

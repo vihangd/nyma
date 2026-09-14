@@ -92,7 +92,7 @@ intermediate tool calls, so put everything that matters in the summary.")
    returns its summary, not a trailing tool result."
   [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))
-        c (when a (or (:content a) (get a "content")))]
+        c (when a (:content a))]
     (cond
       (nil? a) ""
       (string? c) c
@@ -291,7 +291,7 @@ intermediate tool calls, so put everything that matters in the summary.")
           agents       (all-agents settings-mgr)
           base         {:api api :settings-mgr settings-mgr :agents agents}
           async?       (let [s    ((:get settings-mgr))
-                             sub  (or (:subagent s) (get s "subagent"))
+                             sub  (:subagent s)
                              dflt (boolean (or (:async-by-default sub)
                                                (and sub (get sub "async-by-default"))))]
                          (if (nil? (.-async args)) dflt (boolean (.-async args))))]

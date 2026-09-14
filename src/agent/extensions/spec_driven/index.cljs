@@ -954,7 +954,7 @@
         ;; uses :active-role.
         get-active (fn []
                      (let [s (.getState api)]
-                       (or (:active-spec s) (get s "active-spec"))))
+                       (:active-spec s)))
         ;; Persistent store (.nyma/ext-state/spec-driven.json). The state
         ;; ATOM is per-process, so before this an /spec start did not survive
         ;; a restart — you resumed a session with the spec docs silently no
@@ -980,10 +980,10 @@
         ;; the running session, mirrored to the persistent store so a restart
         ;; resumes mid-feature instead of phase-less.
         get-phase   (fn [] (let [s (.getState api)]
-                             (or (:spec-phase s) (get s "spec-phase"))))
+                             (:spec-phase s)))
         get-profile (fn []
                       (let [s (.getState api)]
-                        (or (:spec-profile s) (get s "spec-profile")
+                        (or (:spec-profile s)
                             (:profile (:loop (phases/config (safe-settings)))))))
         known-roles (fn []
                       ;; Union of the user's declared roles and the names that
@@ -1844,16 +1844,13 @@
                      prog   (when spec (phases/progress (parse-tasks raw) raw))]
                  {:spec     active
                   :phase    (get-phase)
-                  :role     (or (:active-role st) (get st "active-role"))
+                  :role     (:active-role st)
                   :progress prog
                   ;; the previously-invisible state: spec exists, tasks are
                   ;; still the scaffold, decomposition has not landed
-                  :analyzing? (boolean (or (:spec-analyzing st)
-                                           (get st "spec-analyzing")))
-                  :pending? (boolean (or (:spec-loop-pending st)
-                                         (get st "spec-loop-pending")))
-                  :armed?   (boolean (or (:spec-loop-armed st)
-                                         (get st "spec-loop-armed")))})))])
+                  :analyzing? (boolean (:spec-analyzing st))
+                  :pending? (boolean (:spec-loop-pending st))
+                  :armed?   (boolean (:spec-loop-armed st))})))])
 
     ;; Rehydrate the active spec from the persistent store, but only if it
     ;; still exists on disk — a spec deleted between sessions must not
@@ -1981,7 +1978,6 @@
           armed?         (fn []
                            (let [st (.getState api)]
                              (boolean (or (:spec-loop-armed st)
-                                          (get st "spec-loop-armed")
                                           ;; settings#spec.loop.mode "on" was
                                           ;; parsed and never read, so opting in
                                           ;; permanently did nothing at all.
@@ -1990,7 +1986,7 @@
           disarm!        (fn [] (swap! (.-__state-atom api) dissoc :spec-loop-armed))
           fresh?         (fn [cfg]
                            (let [st (.getState api)
-                                 ov (or (:spec-loop-fresh st) (get st "spec-loop-fresh"))]
+                                 ov (:spec-loop-fresh st)]
                              (if (some? ov) (boolean ov)
                                  (boolean (:fresh-context (:loop cfg))))))
           ;; Ralph's reset, through the store's `messages-cleared` reducer
@@ -2011,7 +2007,7 @@
           promote-pending!
           (fn [progress]
             (let [st (.getState api)]
-              (when (and (or (:spec-loop-pending st) (get st "spec-loop-pending"))
+              (when (and (:spec-loop-pending st)
                          (= :in-progress (:status progress))
                          (not (phases/template-tasks? progress)))
                 (set-pending! false)

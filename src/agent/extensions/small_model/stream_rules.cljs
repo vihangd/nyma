@@ -30,9 +30,9 @@
    does not compile. A bad regex in settings disables that rule and says so —
    it must not take the turn down with it."
   [idx r]
-  (let [pattern  (or (get r "pattern") (:pattern r))
+  (let [pattern  (:pattern r)
         flags    (or (get r "flags") (:flags r) "i")
-        reminder (or (get r "reminder") (:reminder r))]
+        reminder (:reminder r)]
     (when (and pattern reminder)
       (try
         {:id       (str "rule-" idx)
@@ -70,7 +70,7 @@
   "Subscribe the rule table to `stream_filter`. Returns a cleanup fn."
   [api config]
   (let [cfg   (:stream-rules config)
-        rules (compile-rules (or (:rules cfg) (get cfg "rules")))]
+        rules (compile-rules (:rules cfg))]
     (if (empty? rules)
       (fn [])
       (let [fired    (atom #{})

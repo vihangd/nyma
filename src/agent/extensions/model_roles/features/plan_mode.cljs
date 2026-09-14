@@ -41,7 +41,7 @@ the user will approve the plan before execution begins.")
 (defn- auto-approve? [api]
   ;; Tolerate keyword (CLJS defaults) and string (user JSON) keys.
   (let [s  (settings api)
-        pm (or (:plan-mode s) (get s "plan-mode"))]
+        pm (:plan-mode s)]
     (boolean (or (:auto-approve pm) (and pm (get pm "auto-approve"))))))
 
 (defn role-model-spec
@@ -50,10 +50,10 @@ the user will approve the plan before execution begins.")
   [settings role]
   ;; Squint: keywords ARE strings, so :default == "default" — one lookup
   ;; covers both keyword (CLJS defaults) and string (user JSON) roles.
-  (let [roles (or (:roles settings) (get settings "roles"))
+  (let [roles (:roles settings)
         cfg   (or (get roles role) (get roles (str role)))
-        provider (or (:provider cfg) (get cfg "provider"))
-        model-id (or (:model cfg) (get cfg "model"))]
+        provider (:provider cfg)
+        model-id (:model cfg)]
     (when (and provider model-id) (str provider "/" model-id))))
 
 (defn default-model-spec
@@ -91,7 +91,7 @@ the user will approve the plan before execution begins.")
    false/nil (→ no switch, plan uses the :plan role's own model). Exposed
    for tests."
   [settings]
-  (let [pm   (or (:plan-mode settings) (get settings "plan-mode"))
+  (let [pm   (:plan-mode settings)
         ;; key absent (nil) → default :advisor; explicit false → disable.
         raw  (if (some? (:planner-role pm)) (:planner-role pm) (get pm "planner-role"))
         role (if (nil? raw) :advisor raw)]
@@ -116,7 +116,7 @@ the user will approve the plan before execution begins.")
 
 (defn- last-assistant-text [messages]
   (let [a (last (filter #(= "assistant" (or (:role %) (get % "role"))) messages))]
-    (when a (content->text (or (:content a) (get a "content"))))))
+    (when a (content->text (:content a)))))
 
 (defn extract-todos
   "Parse numbered steps ('1. text', '2) text') into todo maps."

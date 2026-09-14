@@ -83,7 +83,7 @@
    A role without a model is not a model switch, so it is not cyclable."
   [roles]
   (vec (keep (fn [[k cfg]]
-               (when (or (:model cfg) (get cfg "model")) k))
+               (when (:model cfg) k))
              roles)))
 
 (defn- get-roles
@@ -110,8 +110,8 @@
 (defn- resolve-role-model
   "Given a role config {:provider :model}, resolve the model object via provider registry."
   [api role-config]
-  (let [provider (or (:provider role-config) (get role-config "provider"))
-        model-id (or (:model role-config) (get role-config "model"))]
+  (let [provider (:provider role-config)
+        model-id (:model role-config)]
     (when (and provider model-id)
       ;; Use setModel which handles resolution through the provider registry
       (.setModel api (str provider "/" model-id)))))
@@ -127,14 +127,14 @@
                          model-piece
                          (cond
                            (and (= rname "default") default-spec) (str default-spec)
-                           (or (:model rconf) (get rconf "model"))
-                           (str (or (:provider rconf) (get rconf "provider") "?")
-                                "/" (or (:model rconf) (get rconf "model")))
+                           (:model rconf)
+                           (str (or (:provider rconf) "?")
+                                "/" (:model rconf))
                            ;; model-less role (a permission mode) — no model pin.
                            :else "(inherits model)")
                  ;; rname (map key) and active-role (state) are both strings.
                          marker   (if (= rname active-role) " ◀" "")]
-                     (let [allowed (or (:allowed-tools rconf) (get rconf "allowed-tools"))
+                     (let [allowed (:allowed-tools rconf)
                            tools-hint (when (seq allowed) (str " [" (count allowed) " tools]"))]
                        (str "  " rname " → " model-piece
                             (or tools-hint "") marker))))
@@ -211,8 +211,8 @@
 
               (get roles name)
               (let [role-cfg (get roles name)
-                    model-id (or (:model role-cfg) (get role-cfg "model"))
-                    provider (or (:provider role-cfg) (get role-cfg "provider"))]
+                    model-id (:model role-cfg)
+                    provider (:provider role-cfg)]
                 (swap! (.-__state-atom api) assoc :active-role name :escalated-to nil)
                 (when (and provider model-id)
                   (.setModel api (str provider "/" model-id)))
@@ -247,8 +247,8 @@
                 roles    (get-roles api)
                 role-cfg (get roles role)]
             (when (and role-cfg (not= role "default"))
-              (let [provider (or (:provider role-cfg) (get role-cfg "provider"))
-                    model-id (or (:model role-cfg) (get role-cfg "model"))]
+              (let [provider (:provider role-cfg)
+                    model-id (:model role-cfg)]
                 (when (and provider model-id)
                   ;; Re-apply setModel each turn so the correct provider model is
                   ;; always in config even if something else reset it.
@@ -266,8 +266,8 @@
                 roles    (get-roles api)
                 mode-cfg (get roles (or (:permission-mode state) "default"))
                 role-cfg (get roles (or (:active-role state) :default))
-                ma       (or (:allowed-tools mode-cfg) (get mode-cfg "allowed-tools"))
-                ra       (or (:allowed-tools role-cfg) (get role-cfg "allowed-tools"))
+                ma       (:allowed-tools mode-cfg)
+                ra       (:allowed-tools role-cfg)
                 ;; nil → no restriction; a vector (possibly EMPTY) → restrict to
                 ;; it. An empty intersection MUST be returned ({:allowed []} =
                 ;; zero tools), not dropped — else it resolves to "all tools".

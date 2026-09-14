@@ -36,7 +36,7 @@
    cross-provider preset. Model-less roles (no :provider — permission modes) are
    left alone (they preserve the active model). Pure."
   [cfg user-set? def-provider def-model]
-  (let [prov (or (:provider cfg) (get cfg "provider"))]
+  (let [prov (:provider cfg)]
     (if (and (not user-set?) def-provider prov
              (not= (str prov) (str def-provider)))
       (assoc cfg :provider def-provider :model def-model)
@@ -74,7 +74,7 @@
    entry wins; else the mode :policy by category; else nil (gate default allow).
    Tolerates keyword (CLJS) and string (user JSON) keys."
   [role-cfg tool category]
-  (let [perms  (or (:permissions role-cfg) (get role-cfg "permissions"))
-        policy (or (:policy role-cfg) (get role-cfg "policy"))]
+  (let [perms  (:permissions role-cfg)
+        policy (:policy role-cfg)]
     (or (get perms (str tool))
         (get policy (str category)))))

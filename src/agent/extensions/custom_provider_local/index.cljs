@@ -70,7 +70,7 @@
 ;; ── Config loading ───────────────────────────────────────────────
 
 (defn- load-settings-models [settings]
-  (let [raw (or (get settings "local-models") (get settings :local-models))]
+  (let [raw (get settings "local-models")]
     (when (and raw (not (empty? raw)))
       (if (array? raw)
         (vec raw)
@@ -109,8 +109,8 @@
 
 (defn- ->js-model [m]
   (let [m (if (map? m) m (ji/js->clj* m))]
-    #js {:id            (or (:id m) (get m "id") "")
-         :name          (or (:name m) (get m "name") "")
+    #js {:id            (or (:id m) "")
+         :name          (or (:name m) "")
          :contextWindow (or (:ctx m) (:context-window m)
                             (get m "contextWindow") 32768)}))
 

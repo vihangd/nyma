@@ -138,7 +138,7 @@
         on-resolve
         (fn [_data _ctx]
           (when-let [p (profile-for config api)]
-            (let [thinking (or (:thinking p) (get p "thinking"))]
+            (let [thinking (:thinking p)]
               (when (string? thinking)
                 (.setThinkingLevel api thinking))))
           ;; Return nil — don't override the model; only side-effect thinking level.
@@ -148,7 +148,7 @@
         on-before-request
         (fn [data _ctx]
           (when-let [p (profile-for config api)]
-            (let [temp (or (:temperature p) (get p "temperature"))]
+            (let [temp (:temperature p)]
               ;; streamText reads a TOP-LEVEL temperature. providerOptions is
               ;; namespaced per provider, so the value written there below never
               ;; reached the wire — this module's temperature has always been a
@@ -172,7 +172,7 @@
           (when-let [p (profile-for config api)]
             (let [allowed (or (:allowed-tools p) (get p "allowedTools")
                               (:allowedTools p))
-                  edit-strat (or (:editStrategy p) (get p "editStrategy")
+                  edit-strat (or (:editStrategy p)
                                  (:edit-strategy p))
                   hide   (edit-tools-to-hide edit-strat)
                   ;; candidate tool names from the event (the full active set)

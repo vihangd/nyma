@@ -93,10 +93,10 @@
    because a partial merge of routing rules is harder to reason about than a
    replacement. Exposed for tests."
   [settings model-id]
-  (let [cfg (or (:openrouter settings) (get settings "openrouter"))
-        per (or (:model-routing cfg) (get cfg "model-routing"))
+  (let [cfg (:openrouter settings)
+        per (:model-routing cfg)
         one (or (get per model-id) (get per (str model-id)))
-        all (or (:provider cfg) (get cfg "provider"))]
+        all (:provider cfg)]
     (or one all)))
 
 (defn make-request-rewriter

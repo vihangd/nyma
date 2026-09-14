@@ -247,7 +247,7 @@
                       (->vec (entry-get e "models" "models")))})
 
 (defn load-settings-entries [settings]
-  (let [raw (when settings (or (get settings "providers") (get settings :providers)))]
+  (let [raw (when settings (get settings "providers"))]
     (mapv normalize-entry (->vec raw))))
 
 (defn merge-entries
