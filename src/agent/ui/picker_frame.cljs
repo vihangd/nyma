@@ -15,7 +15,8 @@
    arrow-down past the last visible row immediately scrolls. The
    older centred strategy hides scrolling for the first ~half of
    the visible count and makes the list feel stuck."
-  (:require ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
+  (:require [agent.utils.ansi :refer [fg]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [clojure.string :as str]
             [agent.ui.picker-math :refer [safe-index window-trailing]]))
 
@@ -55,17 +56,6 @@
 (def ^:private BOLD  (str ESC "[1m"))
 (def ^:private DIM   (str ESC "[2m"))
 
-(defn- fg
-  "Truecolor foreground escape for a #rrggbb string, matching how status-bar
-   and chat-renderer emit colour."
-  [hex]
-  (let [h (str (or hex ""))]
-    (if (and (= (count h) 7) (.startsWith h "#"))
-      (str ESC "[38;2;"
-           (js/parseInt (.slice h 1 3) 16) ";"
-           (js/parseInt (.slice h 3 5) 16) ";"
-           (js/parseInt (.slice h 5 7) 16) "m")
-      "")))
 
 (defn- colour-of
   "Theme colour by key, with the same hardcoded fallbacks the rest of the UI

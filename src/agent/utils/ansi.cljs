@@ -75,3 +75,52 @@
            (let [kept (.slice lines 0 max-lines)
                  remaining (- (count lines) max-lines)]
              (str (.join kept "\n") "\n[..." remaining " more lines]")))))))
+
+
+;;; ─── Colour ─────────────────────────────────────────────────────────
+;;; One `fg` for every renderer. Three files each carried their own
+;;; truecolor-only copy, and none of them knew about NO_COLOR or a terminal
+;;; that cannot show 24-bit colour.
+
+(def ^:private ESC (js/String.fromCharCode 27))
+
+(defn color-depth
+  "0 (NO_COLOR set, or TERM=dumb), 16, 256 or 16777216, from the environment.
+   Pure over `env` so it is testable; defaults to process.env."
+  ([] (color-depth js/process.env))
+  ([env]
+   (let [g (fn [k] (str (or (aget env k) "")))]
+     (cond
+       (seq (g "NO_COLOR"))                         0
+       (= (g "TERM") "dumb")                        0
+       (seq (g "FORCE_COLOR"))                      16777216
+       (contains? #{"truecolor" "24bit"} (g "COLORTERM")) 16777216
+       (.includes (g "TERM") "256color")            256
+       (.includes (g "TERM") "color")               16
+       (seq (g "TERM"))                             16777216
+       :else                                        16))))
+
+(defn- hex->rgb [hex]
+  (let [h (str (or hex ""))]
+    (when (and (= (count h) 7) (.startsWith h "#"))
+      [(js/parseInt (.slice h 1 3) 16)
+       (js/parseInt (.slice h 3 5) 16)
+       (js/parseInt (.slice h 5 7) 16)])))
+
+(defn- rgb->256 [[r g b]]
+  (let [q (fn [v] (js/Math.round (* 5 (/ v 255))))]
+    (+ 16 (* 36 (q r)) (* 6 (q g)) (q b))))
+
+(defn fg
+  "Foreground SGR for a #rrggbb string at the terminal's depth; empty string
+   under NO_COLOR, so callers can concatenate unconditionally."
+  ([hex] (fg hex (color-depth)))
+  ([hex depth]
+   (if-let [[r g b] (hex->rgb hex)]
+     (cond
+       (= depth 0)  ""
+       (< depth 256) (let [lum (+ (* 0.299 r) (* 0.587 g) (* 0.114 b))]
+                       (str ESC "[" (if (> lum 128) "97" "37") "m"))
+       (= depth 256) (str ESC "[38;5;" (rgb->256 [r g b]) "m")
+       :else         (str ESC "[38;2;" r ";" g ";" b "m"))
+     "")))

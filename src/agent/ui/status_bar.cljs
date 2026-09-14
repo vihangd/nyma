@@ -11,7 +11,8 @@
    Each render call walks the registry fresh, so there's no caching
    layer to invalidate when extensions add/remove segments at
    runtime."
-  (:require ["@earendil-works/pi-tui" :refer [truncateToWidth visibleWidth]]
+  (:require [agent.utils.ansi :refer [fg]]
+            ["@earendil-works/pi-tui" :refer [truncateToWidth visibleWidth]]
             [agent.ui.status-line-segments :as segs]
             [agent.debug :as dbg]))
 
@@ -20,11 +21,6 @@
 (def ^:private BOLD  (str ESC "[1m"))
 (def ^:private DIM   (str ESC "[2m"))
 
-(defn- fg [hex]
-  (let [r (js/parseInt (.slice hex 1 3) 16)
-        g (js/parseInt (.slice hex 3 5) 16)
-        b (js/parseInt (.slice hex 5 7) 16)]
-    (str ESC "[38;2;" r ";" g ";" b "m")))
 
 (defn- render-extension-segments
   "Walk the segment registry, call each auto-append segment's render

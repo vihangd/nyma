@@ -1,16 +1,17 @@
 (ns agent.ui.skill-picker
   "Fuzzy-searchable skill picker component for ui.custom()."
-  (:require [clojure.string :as str]
-            [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
-            [agent.ui.picker-input :refer [dispatch-input]]))
+  (:require [agent.ui.picker-frame :refer [render-frame overlay-max-width]]
+            [agent.ui.picker-input :refer [dispatch-input]]
+            [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]))
 
-(defn- filter-skills [query skills]
+(defn- filter-skills
+  "Fuzzy over name + description, like every other picker; this one was a
+   substring match on the name alone."
+  [query skills]
   (if (empty? query)
-    skills
-    (filterv #(str/includes?
-               (str/lower-case (or (:name %) ""))
-               (str/lower-case query))
-             skills)))
+    (vec skills)
+    (vec (fuzzy-filter (mapv (fn [s] (assoc s :label (:name s) :description (or (:desc s) ""))) skills)
+                       query))))
 
 (defn create-picker
   "Create a pi-mono compatible {render, onInput, dispose} picker component.
@@ -18,17 +19,18 @@
    on-resolve: called with skill name string or nil on cancel."
   [skills on-resolve]
   (let [filter-text  (atom "")
-        selected-idx (atom 0)
-        max-visible  12]
+        selected-idx (atom 0)]
     #js {:render
-         (fn [w _h]
+         (fn [w h]
            (render-frame
-            {:title         "Select skill (type to filter, Enter to activate, Esc to cancel)"
+            {:title         "Select skill"
+             :hint          "(type to filter, Enter to activate, Esc to cancel)"
              :prompt-prefix "> "
              :filter-text   @filter-text
              :items         (filter-skills @filter-text skills)
              :selected-idx  @selected-idx
-             :max-visible   max-visible
+             ;; Sized by the host's box like the other pickers, not a fixed 12.
+             :max-visible   (max 1 (- (or h 24) 2))
              :max-width     (overlay-max-width w)
              :render-item   (fn [s _focused?]
                               (str (:name s)

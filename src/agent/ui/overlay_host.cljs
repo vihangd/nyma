@@ -403,7 +403,10 @@
    the overlay box; pi-tui wraps over-wide rows, and a wrapped row throws off
    the differential renderer's line accounting."
   [prompt placeholder on-resolve width-fn]
-  (let [text (atom "")]
+  (let [text   (atom "")
+        ;; Cursor index into `text`. It was append/backspace only — the API
+        ;; key field with no way to fix a typo mid-string.
+        cursor (atom 0)]
     #js {:render
          (fn [w _h]
            (let [cap   (if width-fn (width-fn) (overlay-max-width w))
@@ -426,8 +429,16 @@
              (.-escape key) (on-resolve nil)
              (.-return key) (on-resolve @text)
 
-             (or (.-backspace key) (.-delete key))
-             (swap! text (fn [s] (if (empty? s) "" (subs s 0 (dec (count s))))))
+             (.-backspace key)
+             (when (pos? @cursor)
+               (swap! text (fn [s] (str (subs s 0 (dec @cursor)) (subs s @cursor))))
+               (swap! cursor dec))
+             (.-delete key)
+             (swap! text (fn [s] (if (< @cursor (count s)) (str (subs s 0 @cursor) (subs s (inc @cursor))) s)))
+             (.-leftArrow key)  (swap! cursor (fn [c] (max 0 (dec c))))
+             (.-rightArrow key) (swap! cursor (fn [c] (min (count @text) (inc c))))
+             (.-home key)       (reset! cursor 0)
+             (.-end key)        (reset! cursor (count @text))
 
              (.-tab key) nil
 
@@ -437,7 +448,8 @@
              (.-ctrl key) nil
 
              (and input (= (count input) 1))
-             (swap! text str input)))
+             (do (swap! text (fn [s] (str (subs s 0 @cursor) input (subs s @cursor))))
+                 (swap! cursor inc))))
 
          :dispose (fn [] nil)}))
 
@@ -464,9 +476,11 @@
                  top     (min @scroll max-top)
                  window  (.slice lines top (+ top visible))
                  more?   (> total visible)
-                 header  (when more?
+                 ;; Always shown: a short overlay used to give no hint at all.
+                 header  (if more?
                            (str "(" (inc top) "-" (min total (+ top visible))
-                                " of " total " lines — ↑/↓ scroll, Esc to close)\n"))]
+                                " of " total " lines — ↑/↓ PgUp/PgDn Home/End scroll, Esc to close)\n")
+                           "(Esc to close)\n")]
              (reset! scroll top)
              (str header
                   ;; Ellipsis, not a bare slice: this renders /help, /model list
@@ -478,7 +492,11 @@
          (fn [_input key]
            (cond
              (.-upArrow key)   (swap! scroll (fn [n] (max 0 (dec n))))
-             (.-downArrow key) (swap! scroll inc)))
+             (.-downArrow key) (swap! scroll inc)
+             (.-pageUp key)    (swap! scroll (fn [n] (max 0 (- n 10))))
+             (.-pageDown key)  (swap! scroll (fn [n] (+ n 10)))
+             (.-home key)      (reset! scroll 0)
+             (.-end key)       (reset! scroll 1000000)))
 
          :dispose (fn [] nil)}))
 

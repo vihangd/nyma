@@ -69,7 +69,7 @@
                   ;; width it overflowed no matter what the entries held,
                   ;; which pi-tui turns into a dead session.
                   header  (truncate-to
-                           "Session Tree (up/down navigate, Enter fold/unfold, Esc close)"
+                           "Session Tree (↑/↓ PgUp/PgDn Home/End, Enter fold/unfold, Esc close)"
                            cols)
                   lines   (into [header ""]
                                 (map-indexed
@@ -88,6 +88,10 @@
               (cond
                 (.-upArrow key)   (do (swap! selected (fn [s] (max 0 (dec s)))) nil)
                 (.-downArrow key) (do (swap! selected (fn [s] (min max-idx (inc s)))) nil)
+                (.-pageUp key)    (do (swap! selected (fn [s] (max 0 (- s 10)))) nil)
+                (.-pageDown key)  (do (swap! selected (fn [s] (min max-idx (+ s 10)))) nil)
+                (.-home key)      (do (reset! selected 0) nil)
+                (.-end key)       (do (reset! selected max-idx) nil)
                 (.-return key)    (do (let [entry (:entry (nth visible @selected nil))]
                                         (when (and entry (has-children? tree (:id entry)))
                                           (swap! collapsed

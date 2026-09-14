@@ -1,5 +1,6 @@
 (ns theme-catalog.test
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require [agent.ui.themes :refer [icon unicode-ok? ascii-icons]]
+            ["bun:test" :refer [describe it expect]]
             [agent.ui.theme-catalog :as tc]))
 
 (describe "base16 → nyma theme conversion" (fn []
@@ -45,3 +46,16 @@
                             (it "user themes merge with the catalog"
                                 (fn []
                                   (-> (expect (:mine (tc/pick-theme "custom" {"custom" {:mine 1}} {}))) (.toBe 1))))))
+
+(describe "icons" (fn []
+  (it "fall back to ASCII when the locale is not UTF-8 or NYMA_ASCII is set"
+      (fn []
+        (-> (expect (unicode-ok? #js {"LANG" "C"})) (.toBe false))
+        (-> (expect (unicode-ok? #js {"LANG" "en_US.UTF-8"})) (.toBe true))
+        (-> (expect (unicode-ok? #js {"LANG" "en_US.UTF-8" "NYMA_ASCII" "1"})) (.toBe false))
+        (-> (expect (get ascii-icons :error)) (.toBe "x"))))
+  (it "a theme's own icon wins when unicode is fine"
+      (fn []
+        (when (unicode-ok?)
+          (-> (expect (icon {:icons {:user "»"}} :user)) (.toBe "»"))
+          (-> (expect (icon {} :tool-done)) (.toBe "✓")))))))

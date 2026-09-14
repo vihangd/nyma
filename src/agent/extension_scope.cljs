@@ -75,6 +75,16 @@
                                                (try
                                                  (d/warn
                                                   (str "[" ns-str "] Error in " event " handler: " (.-message e)))
+                                                 ;; Into the transcript too, once per
+                                                 ;; extension: a warn over a live TUI frame
+                                                 ;; is corrupted output at best. Later
+                                                 ;; throws only bump the /extensions count.
+                                                 (when (= 1 (get @handler-errors ns-str))
+                                                   (let [ui (.-ui base-api)]
+                                                     (when (and ui (.-available ui) (.-notify ui))
+                                                       (.notify ui (str ns-str ": error in " event " handler — "
+                                                                        (.-message e) " (details in /extensions)")
+                                                                "error"))))
                                                  (catch :default _ nil))
                                                nil)))
                             m            (or (.get handler-map event)

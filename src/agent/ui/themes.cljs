@@ -21,6 +21,34 @@
             :context-error   "#f7768e"}
    :icons  {:user "❯" :assistant "●" :tool "⚙" :error "✗"}})
 
+(def unicode-icons
+  {:user "❯" :assistant "●" :tool "⚙" :tool-done "✓" :error "✗"
+   :info "ℹ" :warn "⚠" :success "✓" :widget "📋"})
+
+(def ascii-icons
+  {:user ">" :assistant "*" :tool "~" :tool-done "+" :error "x"
+   :info "i" :warn "!" :success "+" :widget "#"})
+
+(defn unicode-ok?
+  "False under NYMA_ASCII=1 or a locale that is not UTF-8 — the renderers
+   hardcoded emoji and a terminal without them showed tofu."
+  ([] (unicode-ok? js/process.env))
+  ([env]
+   (let [g (fn [k] (str (or (aget env k) "")))]
+     (and (empty? (g "NYMA_ASCII"))
+          (let [loc (str (g "LC_ALL") (g "LC_CTYPE") (g "LANG"))]
+            (or (empty? loc) (.includes (.toLowerCase loc) "utf")))))))
+
+(defn icon
+  "The glyph for `k`: the theme's :icons entry, else the unicode default,
+   else its ASCII stand-in when the locale cannot show it."
+  [theme k]
+  (let [base (if (unicode-ok?) unicode-icons ascii-icons)]
+    (or (when (unicode-ok?) (get-in theme [:icons k]))
+        (get base k)
+        (get ascii-icons k)
+        "?")))
+
 (def default-light
   {:colors {:primary   "#2e7de9"
             :secondary "#587539"

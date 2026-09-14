@@ -1,6 +1,6 @@
 (ns ansi.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.utils.ansi :refer [terminal-width string-width wrap-ansi truncate-text]]))
+            [agent.utils.ansi :refer [color-depth fg terminal-width string-width wrap-ansi truncate-text]]))
 
 (describe "string-width" (fn []
   (it "returns 0 for nil"
@@ -89,3 +89,15 @@
   (it "returns a positive integer"
     (fn []
       (-> (expect (terminal-width)) (.toBeGreaterThan 0))))))
+
+(describe "colour depth" (fn []
+  (it "NO_COLOR disables colour entirely"
+      (fn []
+        (-> (expect (color-depth #js {"NO_COLOR" "1" "COLORTERM" "truecolor"})) (.toBe 0))
+        (-> (expect (fg "#ff0000" 0)) (.toBe ""))))
+  (it "COLORTERM=truecolor gives 24-bit, TERM=xterm-256color gives 256"
+      (fn []
+        (-> (expect (color-depth #js {"COLORTERM" "truecolor"})) (.toBe 16777216))
+        (-> (expect (color-depth #js {"TERM" "xterm-256color"})) (.toBe 256))
+        (-> (expect (fg "#ff0000" 256)) (.toContain "[38;5;"))
+        (-> (expect (fg "#ff0000" 16777216)) (.toContain "[38;2;255;0;0m"))))))

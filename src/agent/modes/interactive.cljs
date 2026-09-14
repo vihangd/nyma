@@ -237,7 +237,11 @@
         v      (and config (aget config "active-provider-name"))]
     (or v "")))
 
-(defn- make-editor-theme [theme]
+(defn- make-editor-theme
+  "`border-atom` holds the current border colour so the prefix mode can
+   change it live: `!` and `!!` (shell), `$` and `$$` (eval) used to look
+   exactly like a prompt until Enter."
+  [theme & [border-atom]]
   (let [ESC   (js/String.fromCharCode 27)
         RESET (str ESC "[0m")
         BOLD  (str ESC "[1m")
@@ -253,7 +257,7 @@
         error-c   (get-in theme [:colors :error]     "#f7768e")
         border    (get-in theme [:colors :border]    "#3b4261")]
 
-    #js {:borderColor (fn [s] (str (fg border) s RESET))
+    #js {:borderColor (fn [s] (str (fg (or (some-> border-atom deref) border)) s RESET))
          :selectList  #js {:selectedPrefix (fn [s] (str (fg primary) BOLD s RESET))
                            :selectedText   (fn [s] (str (fg primary) BOLD s RESET))
                            :description    (fn [s] (str (fg muted) DIM s RESET))
@@ -472,7 +476,8 @@
            (fn [msgs] (reducers/apply-tool-update msgs data))))
 
         ;; ── Submit / steer ────────────────────────────────────────────────
-        editor-theme   (make-editor-theme theme)
+        border-atom    (atom nil)
+        editor-theme   (make-editor-theme theme border-atom)
         editor         (new Editor tui editor-theme #js {:paddingX 1})
 
         do-run!
@@ -724,6 +729,16 @@
                       ((:emit (:events agent)) "editor_change" #js {:text (str text)}))]
       (set! (.-onChange editor)
             (fn [text]
+              ;; Border colour by prefix: the theme's editor-border ramp was
+              ;; defined and never read.
+              (let [ramp (get-in theme [:colors :editor-border] {})
+                    t    (str text)]
+                (reset! border-atom
+                        (cond (.startsWith t "!!") (:high ramp)
+                              (.startsWith t "!")  (:medium ramp)
+                              (.startsWith t "$")  (:high ramp)
+                              (.startsWith t "/")  (:low ramp)
+                              :else                nil)))
               (let [now (js/Date.now)]
                 (when @pending (js/clearTimeout @pending) (reset! pending nil))
                 (if (>= (- now @last-emit) 100)

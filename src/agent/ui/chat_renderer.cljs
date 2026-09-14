@@ -1,7 +1,8 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
-            [agent.utils.ansi :as ansi]
+  (:require [agent.ui.themes :refer [icon]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
+            [agent.utils.ansi :as ansi :refer [fg]]
             [agent.utils.markdown-blocks :as mb]
             [agent.ui.think-tag-parser :refer [split-think-blocks]]))
 
@@ -32,11 +33,6 @@
 (def ^:private BOLD  (str ESC "[1m"))
 (def ^:private DIM   (str ESC "[2m"))
 
-(defn- fg [hex]
-  (let [r (js/parseInt (.slice hex 1 3) 16)
-        g (js/parseInt (.slice hex 3 5) 16)
-        b (js/parseInt (.slice hex 5 7) 16)]
-    (str ESC "[38;2;" r ";" g ";" b "m")))
 
 (defn- wrap+split
   "Wrap plain-text ANSI string to width, return string[]."
@@ -160,7 +156,7 @@
         cy      (fg "#7dcfff")]
     (case role
       "user"
-      (wrap+split (str pc BOLD "❯ " RESET content) w)
+      (wrap+split (str pc BOLD (icon theme :user) " " RESET content) w)
 
       "assistant"
       (let [{:keys [text reasoning]} (split-think-blocks content)
@@ -194,7 +190,7 @@
         (let [lines (if (seq safe)
                       (vec (.split safe "\n"))
                       [(str mc DIM "…" RESET)])
-              body  (into [(str sc "● " RESET (first lines))]
+              body  (into [(str sc (icon theme :assistant) " " RESET (first lines))]
                           (map #(str "  " %) (rest lines)))]
           (if (seq reasoning-lines)
             (into reasoning-lines body)
@@ -218,10 +214,10 @@
             ;; thing a transcript must never say about a call that threw.
             is-error (and is-end (boolean (:is-error msg)))
             icon     (cond
-                       is-error           "✗"
+                       is-error           (icon theme :error)
                        (:custom-icon msg) (:custom-icon msg)
-                       is-end             "✓"
-                       :else              "⚙")
+                       is-end             (icon theme :tool-done)
+                       :else              (icon theme :tool))
             arg-str  (or (:custom-one-line-args msg)
                          (format-one-line-args tname args))
             ;; In-flight status line, written by tool_execution_update. Only
@@ -260,13 +256,13 @@
         [])
 
       "error"
-      (wrap+split (str ec "✗ " RESET content) w)
+      (wrap+split (str ec (icon theme :error) " " RESET content) w)
 
       "thinking"
       (wrap+split (str mc DIM "│ " RESET content) w)
 
       "plan"
-      (wrap+split (str (fg "#7dcfff") "📋 " RESET content) w)
+      (wrap+split (str (fg "#7dcfff") (icon theme :widget) " " RESET content) w)
 
       ;; One line per ACP tool call, rewritten in place as its status changes.
       ;; Dim like "shell": this is activity, not output, and a turn can carry
@@ -278,13 +274,13 @@
       ;; away and file everything as "info", so a warning and a failure read
       ;; exactly like a status line.
       "info"
-      (wrap+split (str cy "ℹ " RESET mc content RESET) w)
+      (wrap+split (str cy (icon theme :info) " " RESET mc content RESET) w)
 
       "warn"
-      (wrap+split (str wc "⚠ " RESET mc content RESET) w)
+      (wrap+split (str wc (icon theme :warn) " " RESET mc content RESET) w)
 
       "success"
-      (wrap+split (str gc "✓ " RESET mc content RESET) w)
+      (wrap+split (str gc (icon theme :success) " " RESET mc content RESET) w)
 
       "widget"
       (split-lines (or content ""))

@@ -453,3 +453,20 @@
           ((:emit (:events agent)) "agent_start" #js {})
           ((:emit (:events agent)) "agent_start" #js {})
           (-> (expect (get @handler-errors "cnt")) (.toBe (+ before 2))))))))
+
+(describe "handler error reaches the transcript" (fn []
+  (it "notifies once per extension, then only counts"
+      (fn []
+        (let [agent    (make-test-agent)
+              base-api (create-extension-api agent)
+              notes    (atom [])
+              _        (set! (.-ui base-api) #js {:available true
+                                                  :notify (fn [m lvl] (swap! notes conj [m lvl]))})
+              scoped   (create-scoped-api base-api "shouty" #{:all})]
+          (.on scoped "agent_start" (fn [_] (throw (js/Error. "kaboom"))))
+          ((:emit (:events agent)) "agent_start" #js {})
+          ((:emit (:events agent)) "agent_start" #js {})
+          (-> (expect (count @notes)) (.toBe 1))
+          (-> (expect (first (first @notes))) (.toContain "shouty"))
+          (-> (expect (first (first @notes))) (.toContain "kaboom"))
+          (-> (expect (second (first @notes))) (.toBe "error")))))))
