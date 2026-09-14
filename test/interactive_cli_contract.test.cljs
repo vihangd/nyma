@@ -2,7 +2,7 @@
   "The contract between agent.cli and interactive mode, plus the provider-error
    classifier. All pure, so none of it needs a terminal."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.modes.interactive :refer [seed-prompt-of
+            [agent.modes.interactive :refer [command-name seed-prompt-of
                                              submit-seed-prompt!
                                              mark-streaming!
                                              notify-role
@@ -161,3 +161,9 @@
             (it "does not throw on nil"
                 (fn []
                   (-> (expect (string? (classify-error-message nil))) (.toBe true))))))
+
+(describe "interactive/command-name" (fn []
+  (it "is the word after the slash, without its arguments"
+      (fn []
+        (-> (expect (command-name "/spec import x --run")) (.toBe "spec"))
+        (-> (expect (command-name "/help")) (.toBe "help"))))))

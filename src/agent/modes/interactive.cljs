@@ -1,6 +1,7 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
-  (:require ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
+  (:require [agent.model-info :as model-info]
+            ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
                                               matchesKey]]
             [agent.loop :refer [run steer run-turn-with-update-handler]]
@@ -126,6 +127,12 @@
     (when submit (submit seed))
     (when set-text (set-text ""))
     seed))
+
+(defn command-name
+  "`/spec import x --run` → \"spec\". The label the status line shows while a
+   slash command runs, and the name a failure is reported under."
+  [trimmed]
+  (first (str/split (subs (str trimmed) 1) #"\s+")))
 
 (defn mark-streaming!
   "Mirror the streaming flag into the agent's state atom.
@@ -279,6 +286,8 @@
     (if-let [entry (resolve-command commands cmd)]
       (let [h (:handler entry)]
         (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
+                     ;; Aborted by Escape while the command runs.
+                     :signal         (when-let [c (:abort-controller agent)] (.-signal @c))
                      :agent          agent
                      :set-messages   update-messages!
                      :append-message (fn [msg]
@@ -324,6 +333,13 @@
         messages     (atom [])
         widgets      (atom {})   ;; widget-name → message-id
         streaming    (atom false)
+        ;; When the current turn or slash command started; the status line's
+        ;; elapsed clock derives from it at render, so the 100 ms tick moves it.
+        stream-start (atom nil)
+        ;; A slash command in flight: shows `<cmd>…` with the clock, without
+        ;; setting `streaming` (which would change steer routing).
+        busy         (atom false)
+        cmd-label    (atom nil)
         turn-count   (atom 0)
         submit-lock  (atom false)
 
@@ -331,13 +347,31 @@
         status-bar   (create-status-bar theme)
 
         sync-status! (fn []
-                       (.setState status-bar
-                                  #js {:model      (model-id agent)
-                                       :provider   (provider-name agent)
-                                       :role       (let [r (str (or (:active-role @(:state agent)) ":default"))]
-                                                     (if (.startsWith r ":") (.slice r 1) r))
-                                       :streaming  @streaming
-                                       :turn-count @turn-count}))
+                       (let [st @(:state agent)]
+                         (.setState status-bar
+                                    #js {:model      (model-id agent)
+                                         :provider   (provider-name agent)
+                                         :role       (let [r (str (or (:active-role st) ":default"))]
+                                                       (if (.startsWith r ":") (.slice r 1) r))
+                                         :streaming  @streaming
+                                         :busy       @busy
+                                         :verb       @cmd-label
+                                         :streaming-since @stream-start
+                                         :turn-count @turn-count
+                                         ;; Once per turn (the store's :usage-updated
+                                         ;; is per run); the provider's own input
+                                         ;; count is the context fill, not the
+                                         ;; tree-walking estimate.
+                                         :cost-usd   (:total-cost st)
+                                         :token-in   (:total-input-tokens st)
+                                         :token-out  (:total-output-tokens st)
+                                         :ctx-used   (:last-input-tokens st)
+                                         :ctx-window (try ((:context-window (:model-registry agent))
+                                                           (model-info/config-model-key (:config agent)))
+                                                          (catch :default _ nil))
+                                         :session-id (when-let [sess @(:session agent)]
+                                                       (when (fn? (:session-file sess))
+                                                         (last (.split (str ((:session-file sess))) "/"))))})))
 
         sync-pane!   (fn []
                        (.setMessages chat-pane @messages)
@@ -351,19 +385,29 @@
         ;; from. Tick only while working: at idle the status line must stop
         ;; re-rendering so the terminal scroll position holds.
         tick-timer   (atom nil)
+        set-tick!    (fn [on?]
+                       (if on?
+                         (when-not @tick-timer
+                           (reset! tick-timer
+                                   (js/setInterval (fn [] (sync-status!) (.requestRender tui)) 100)))
+                         (when-let [t @tick-timer]
+                           (js/clearInterval t)
+                           (reset! tick-timer nil))))
         set-streaming!
         (fn [on?]
           (reset! streaming (boolean on?))
+          (reset! stream-start (when on? (js/Date.now)))
           ;; Also into the agent's state atom — cli's SIGINT handler reads it
           ;; there to tell an in-flight turn from an idle prompt.
           (mark-streaming! agent on?)
-          (if on?
-            (when-not @tick-timer
-              (reset! tick-timer
-                      (js/setInterval (fn [] (sync-status!) (.requestRender tui)) 100)))
-            (when-let [t @tick-timer]
-              (js/clearInterval t)
-              (reset! tick-timer nil)))
+          (set-tick! (or on? @busy))
+          (sync-status!))
+        set-busy!
+        (fn [label]
+          (reset! cmd-label label)
+          (reset! busy (boolean label))
+          (reset! stream-start (when label (js/Date.now)))
+          (set-tick! (or @streaming (boolean label)))
           (sync-status!))
 
         ;; ── Message mutations ──────────────────────────────────────────────
@@ -466,6 +510,12 @@
             (and (.startsWith trimmed "/") (not @submit-lock))
             (do (reset! submit-lock true)
                 (.addToHistory editor trimmed)
+                ;; Fresh controller: Escape aborts it while the lock is held
+                ;; (a handler reads it as ctx.signal), and the loop only mints
+                ;; one per run, so a previously-aborted one would arrive dead.
+                (when-let [c (:abort-controller agent)]
+                  (reset! c (js/AbortController.)))
+                (set-busy! (command-name trimmed))
                 ;; Echo the command. Every other branch does; this one did not,
                 ;; so a command's output — a notification, an import summary —
                 ;; appeared with no visible cause, and a session in which
@@ -479,8 +529,12 @@
                     ;; one .catch/.finally, one lock reset, nothing to drift.
                 (-> (.then (js/Promise.resolve)
                            (fn [] (run-command! agent trimmed update-messages!)))
-                    (.catch (fn [e] (add-error! e)))
-                    (.finally (fn [] (reset! submit-lock false)))))
+                    (.catch (fn [e]
+                              (add-error! (js/Error. (str "/" (command-name trimmed) " failed: "
+                                                          (or (.-message e) (str e)))))))
+                    (.finally (fn []
+                                (set-busy! nil)
+                                (reset! submit-lock false)))))
 
                 ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
             (and (not @submit-lock)

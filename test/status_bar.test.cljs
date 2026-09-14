@@ -385,3 +385,35 @@
                       (.render bar 200))
                     (segs/unregister-segment "test.frameprobe")
                     (-> (expect (> (count (distinct @frames)) 1)) (.toBe true)))))))
+
+(describe "status-bar usage segments" (fn []
+  (it "renders cost and context fill when the bar has usage state"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :cost-usd 0.0421 :ctx-used 30000 :ctx-window 200000})
+          (let [line (render-bar bar 120)]
+            (-> (expect line) (.toContain "$0.04"))
+            (-> (expect line) (.toContain "ctx:15%"))))))
+  (it "hides cost at zero"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :cost-usd 0})
+          (-> (expect (render-bar bar 120)) (.not.toContain "$")))))
+  (it "drops usage segments on a narrow terminal so the model survives"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "claude-sonnet" :cost-usd 1.5 :ctx-used 50000 :ctx-window 200000})
+          (let [line (render-bar bar 60)]
+            (-> (expect line) (.toContain "claude-sonnet"))
+            (-> (expect line) (.not.toContain "ctx:"))))))
+  (it "shows the elapsed clock while streaming-since is set, nothing at idle"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :streaming true :streaming-since (- (js/Date.now) 65000)})
+          (-> (expect (render-bar bar 120)) (.toContain "1m"))
+          (.setState bar #js {:streaming false :streaming-since nil})
+          (-> (expect (render-bar bar 120)) (.not.toContain "1m")))))))

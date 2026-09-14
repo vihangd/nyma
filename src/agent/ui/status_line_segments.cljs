@@ -259,8 +259,12 @@
       (hidden))))
 
 (defn- cost-seg [{:keys [cost-usd theme]}]
-  (visible (format-cost (or cost-usd 0))
-           (get-in theme [:colors :secondary] "#9ece6a")))
+  ;; Hidden at zero: auto-appended, a permanent `$0.00` on a fresh session
+  ;; is noise.
+  (if (pos? (or cost-usd 0))
+    (visible (format-cost cost-usd)
+             (get-in theme [:colors :secondary] "#9ece6a"))
+    (hidden)))
 
 (defn- context-pct-seg [{:keys [ctx-used ctx-window theme]}]
   (if (and ctx-window (pos? ctx-window))
@@ -396,8 +400,14 @@
 ;; without having to edit their preset. Position :left places it
 ;; alongside model / path / git on the left of the status line.
 (def ^:private auto-append-spec
-  {"activity" :left
-   "role"     :left})
+  ;; cost / context-pct / time-spent were implemented and unreachable: not
+  ;; auto-appended, and the bar never fed them state. "role" is gone from
+  ;; here — model_roles' own segment (role + mode + escalation) auto-appends
+  ;; and the two rendered side by side.
+  {"activity"    :left
+   "cost"        :right
+   "context-pct" :right
+   "time-spent"  :right})
 
 (defn install-builtins!
   "Install every built-in into the module-level registry. Safe to call

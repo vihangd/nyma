@@ -32,11 +32,16 @@
    {:content :color :id} entries that the bar prepends/appends.
    Errors in a render fn are isolated — a misbehaving segment can't
    blank the whole status bar."
-  [theme position seg-ctx]
+  [theme position seg-ctx & [width]]
   (let [reg (segs/segment-registry)]
     (->> (vals reg)
          (filter #(and (:auto-append? %)
-                       (= (:position %) position)))
+                       (= (:position %) position)
+                       ;; Narrow terminal: the model name is worth more than
+                       ;; the usage numbers. The right half is clamped first,
+                       ;; so without this gate usage segments push the model
+                       ;; off the left edge at ~70 columns.
+                       (not (and width (< width 70) (= :usage (:category %))))))
          (sort-by :id)
          (keep (fn [seg]
                  (try
@@ -142,13 +147,28 @@
                                                 (fg muted) DIM " " turn-count " turns" RESET))
                                          " ")
                          ;; Extension auto-append segments.
-                         seg-ctx    {:activity      streaming
-                                     :spinner-frame (swap! frame inc)
-                                     :active-role   role
-                                     :model         model
-                                     :turn-count    turn-count}
-                         left-segs  (render-extension-segments theme :left seg-ctx)
-                         right-segs (render-extension-segments theme :right seg-ctx)
+                         ;; Usage/context numbers refresh once per turn (the
+                         ;; store dispatches :usage-updated per run); only the
+                         ;; elapsed clock is per-tick, derived from
+                         ;; :streaming-since at render so the 100 ms tick moves it.
+                         st         @state
+                         since      (:streaming-since st)
+                         seg-ctx    {:activity        (or streaming (:busy st))
+                                     :verb            (:verb st)
+                                     :spinner-frame   (swap! frame inc)
+                                     :active-role     role
+                                     :model           model
+                                     :turn-count      turn-count
+                                     :cost-usd        (:cost-usd st)
+                                     :ctx-used        (:ctx-used st)
+                                     :ctx-window      (:ctx-window st)
+                                     :token-in        (:token-in st)
+                                     :token-out       (:token-out st)
+                                     :session-id      (:session-id st)
+                                     :time-spent-ms   (when (and since (pos? since))
+                                                        (- (js/Date.now) since))}
+                         left-segs  (render-extension-segments theme :left seg-ctx width)
+                         right-segs (render-extension-segments theme :right seg-ctx width)
                          left  (str core-left
                                     (apply str (map #(format-segment % border) left-segs)))
                          right (str (apply str (map #(format-segment % border) right-segs))
