@@ -21,7 +21,6 @@
 (def ^:private BOLD  (str ESC "[1m"))
 (def ^:private DIM   (str ESC "[2m"))
 
-
 (defn- render-extension-segments
   "Walk the segment registry, call each auto-append segment's render
    for the given `position` (:left or :right). Returns a vector of
@@ -78,9 +77,13 @@
 
    Auto-appends every registered status-line segment with
    :auto-append? true; segments hide themselves via :visible? false
-   when not relevant."
+   when not relevant.
+
+   `theme` is a map or a thunk returning one; colours are read per render so
+   a live `/theme` switch shows on the next frame."
   [theme]
-  (let [;; Advances once per frame so the spinner animates; renders are
+  (let [theme-now (if (fn? theme) theme (fn [] theme))
+        ;; Advances once per frame so the spinner animates; renders are
         ;; frequent while streaming, which is exactly when it is shown.
         frame (atom 0)
         state (atom {:model      "–"
@@ -89,15 +92,14 @@
                      :streaming  false
                      :turn-count 0})
 
-        primary   (get-in theme [:colors :primary]   "#7aa2f7")
-        secondary (get-in theme [:colors :secondary] "#9ece6a")
-        muted     (get-in theme [:colors :muted]     "#565f89")
-        border    (get-in theme [:colors :border]    "#3b4261")
-        warning   (get-in theme [:colors :warning]   "#e0af68")
-
         bar #js {:render
                  (fn [width]
                    (let [{:keys [model provider streaming turn-count role]} @state
+                         theme     (theme-now)
+                         primary   (get-in theme [:colors :primary]   "#7aa2f7")
+                         secondary (get-in theme [:colors :secondary] "#9ece6a")
+                         muted     (get-in theme [:colors :muted]     "#565f89")
+                         border    (get-in theme [:colors :border]    "#3b4261")
                          ;; Role/mode is shown by the model_roles status SEGMENT
                          ;; (color-coded), not inline here — see
                          ;; model_roles/status_segment.cljs.

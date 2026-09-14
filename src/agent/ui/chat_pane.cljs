@@ -17,9 +17,14 @@
   cr/clamp-line)
 
 (defn create-chat-pane
-  "Create and return a pi-tui Component that renders the chat history."
+  "Create and return a pi-tui Component that renders the chat history.
+
+   `theme` is a theme map or a thunk returning one. Interactive mode passes
+   the thunk so `/theme` applies to the next frame; a closed-over map would
+   have pinned the colours at construction."
   [theme]
-  (let [messages  (atom [])
+  (let [theme-now (if (fn? theme) theme (fn [] theme))
+        messages  (atom [])
         md-caches (atom {})   ;; msg-id → atom holding incremental-render cache
 
         ensure-cache!
@@ -63,7 +68,7 @@
               (.-lines hit)
               (let [lines (cr/render-message {:msg      msg
                                               :width    width
-                                              :theme    theme
+                                              :theme    (theme-now)
                                               :md-cache (get-cache msg)})]
                 ;; Width is part of the key: a resize must re-wrap, not serve
                 ;; lines measured for the old terminal.

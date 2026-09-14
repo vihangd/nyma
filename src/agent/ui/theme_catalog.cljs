@@ -20,6 +20,8 @@
               :success   (c "base0B")
               :muted     (c "base03")   ; comments
               :border    (c "base02")   ; selection bg
+              :info      (c "base0C")   ; cyan
+              :plan      (c "base0C")
               :editor-border {:off    (c "base02")
                               :low    (c "base0B")
                               :medium (c "base0A")
@@ -132,3 +134,37 @@
     (fs/mkdirSync dir #js {:recursive true})
     (fs/writeFileSync f (js/JSON.stringify cur nil 2))
     name))
+
+;; ── Live switching ─────────────────────────────────────────────────
+
+(def current
+  "The theme in effect. The TUI reads its colours through this (per render)
+   rather than from the map it was constructed with, so `/theme` no longer
+   needs a restart."
+  (atom nil))
+
+(def ^:private on-apply
+  "What the TUI does after `current` changes: swap its atom, re-theme the
+   pickers, drop the chat pane's line cache, request a frame. Set by
+   interactive mode; nil elsewhere (print, rpc, tests)."
+  (atom nil))
+
+(defn on-apply!
+  "Register the TUI's post-switch hook. One host per process."
+  [f]
+  (reset! on-apply f))
+
+(defn activate!
+  "Make `theme` the current one and run the host hook. Returns the theme."
+  [theme]
+  (reset! current theme)
+  (when-let [f @on-apply] (f theme))
+  theme)
+
+(defn apply-theme!
+  "Persist `name` to `.nyma/settings.json#theme` and switch to it now.
+   Resolution is the same as at startup (bundled catalog, then user themes,
+   else `default`)."
+  [name user-themes default]
+  (set-theme-name! name)
+  (activate! (pick-theme name user-themes default)))

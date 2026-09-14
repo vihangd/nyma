@@ -4,6 +4,7 @@
             [agent.sessions.compaction :refer [compact]]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
+            [agent.ui.themes :refer [default-dark]]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.commands.parser :as cmd-parser]
@@ -308,6 +309,10 @@
     ;; 4. Rebuild system prompt
     (when-let [build-fn (:build-system-prompt new-resources)]
       (aset (:config agent) "system-prompt" (build-fn)))
+    ;; Theme too: a user theme file edited or added under .nyma/themes is
+    ;; part of what was just rediscovered.
+    (theme-catalog/activate!
+     (theme-catalog/active-theme (:themes new-resources) default-dark))
     ;; 5. Reload extensions
     (when (and extensions-atom (.-extension-api agent))
       (let [loaded (js-await (discover-and-load
@@ -697,14 +702,15 @@
                               (js/process.exit 0)))))}
 
           "theme"
-          {:description "Switch the color theme (applies on next launch). Usage: /theme [name]"
+          {:description "Switch the color theme, effective immediately. Usage: /theme [name]"
            :handler
            (fn [args ctx]
-             (let [names  (theme-catalog/all-theme-names nil)
+             (let [themes (:themes resources)
+                   names  (theme-catalog/all-theme-names themes)
                    notify (fn [m l] (when-let [ui (.-ui ctx)] (when (.-notify ui) (.notify ui m l))))
                    apply! (fn [name]
-                            (theme-catalog/set-theme-name! name)
-                            (notify (str "Theme set to '" name "' — restart nyma to apply.") "info"))]
+                            (theme-catalog/apply-theme! name themes default-dark)
+                            (notify (str "Theme: " name) "info"))]
                (cond
                  (seq args)
                  (let [name (str (first args))]
@@ -713,7 +719,7 @@
                      (notify (str "Unknown theme '" name "'. Available: " (clojure.string/join ", " names)) "error")))
 
                  (and (.-ui ctx) (.-select (.-ui ctx)))
-                 (-> (.select (.-ui ctx) "Theme (applies next launch):" (clj->js (vec names)))
+                 (-> (.select (.-ui ctx) "Theme:" (clj->js (vec names)))
                      (.then (fn [choice] (when choice (apply! (str choice))))))
 
                  :else
@@ -1038,7 +1044,7 @@
                                              (finally
                                                (swap! (:state agent) assoc :replaying-session? false)))
                                            ((:emit (:events agent)) "session_start"
-                                            {:reason "resume" :previousSessionFile (:path sess)})
+                                                                    {:reason "resume" :previousSessionFile (:path sess)})
                                            (notify ctx (str "Resumed: " (:name sess))))))))))))}
 
           "import"
@@ -1067,7 +1073,7 @@
                               (finally
                                 (swap! (:state agent) assoc :replaying-session? false)))
                             ((:emit (:events agent)) "session_start"
-                             {:reason "resume" :previousSessionFile file-path})
+                                                     {:reason "resume" :previousSessionFile file-path})
                             (notify ctx (str "Imported session from " file-path))))))}
 
      ;; ── Session, export, credentials ───────────────────────

@@ -942,7 +942,14 @@ A template never shadows an existing command — a name collision is skipped wit
 
 ### Themes
 
-JSON theme files in `~/.nyma/themes/` or `.nyma/themes/`. Built-in themes: `dark` and `light`.
+JSON theme files in `~/.nyma/themes/` or `.nyma/themes/`, plus a bundled base16
+pack (`nord`, `dracula`, `gruvbox-dark`, `tokyo-night`, …). `/theme` lists them
+and `/theme <name>` switches immediately — transcript, status bar, editor and
+pickers repaint in place, and the choice is saved to `.nyma/settings.json`.
+`/reload` re-resolves the theme too, so an edited theme file takes effect
+without a restart. Colour slots: `primary`, `secondary`, `error`, `warning`,
+`success`, `muted`, `border`, `info`, `plan`, `editor-border` and the
+`context-*` ramp.
 
 ### System Prompt
 

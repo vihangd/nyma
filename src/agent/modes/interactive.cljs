@@ -9,6 +9,7 @@
             [agent.commands.parser :as parser]
             [agent.ui.themes :refer [default-dark]]
             [agent.ui.theme-catalog :as theme-catalog]
+            [agent.ui.picker-frame :as picker-frame]
             [agent.ui.chat-pane :refer [create-chat-pane]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.app-reducers :as reducers]
@@ -266,8 +267,13 @@
 (defn- make-editor-theme
   "`border-atom` holds the current border colour so the prefix mode can
    change it live: `!` and `!!` (shell), `$` and `$$` (eval) used to look
-   exactly like a prompt until Enter."
-  [theme & [border-atom]]
+   exactly like a prompt until Enter.
+
+   `theme-fn` is a thunk: pi-tui's Editor takes its theme once at
+   construction and has no setter, but every field is a function it calls at
+   render, so reading the colour inside each one is what makes `/theme` reach
+   the editor without a restart."
+  [theme-fn & [border-atom]]
   (let [ESC   (js/String.fromCharCode 27)
         RESET (str ESC "[0m")
         BOLD  (str ESC "[1m")
@@ -278,17 +284,18 @@
                       b (js/parseInt (.slice hex 5 7) 16)]
                   (str ESC "[38;2;" r ";" g ";" b "m")))
 
-        primary   (get-in theme [:colors :primary]   "#7aa2f7")
-        muted     (get-in theme [:colors :muted]     "#565f89")
-        error-c   (get-in theme [:colors :error]     "#f7768e")
-        border    (get-in theme [:colors :border]    "#3b4261")]
+        colour  (fn [k default] (get-in (theme-fn) [:colors k] default))
+        primary (fn [] (colour :primary "#7aa2f7"))
+        muted   (fn [] (colour :muted   "#565f89"))
+        error-c (fn [] (colour :error   "#f7768e"))
+        border  (fn [] (colour :border  "#3b4261"))]
 
-    #js {:borderColor (fn [s] (str (fg (or (some-> border-atom deref) border)) s RESET))
-         :selectList  #js {:selectedPrefix (fn [s] (str (fg primary) BOLD s RESET))
-                           :selectedText   (fn [s] (str (fg primary) BOLD s RESET))
-                           :description    (fn [s] (str (fg muted) DIM s RESET))
-                           :scrollInfo     (fn [s] (str (fg muted) DIM s RESET))
-                           :noMatch        (fn [s] (str (fg error-c) s RESET))}}))
+    #js {:borderColor (fn [s] (str (fg (or (some-> border-atom deref) (border))) s RESET))
+         :selectList  #js {:selectedPrefix (fn [s] (str (fg (primary)) BOLD s RESET))
+                           :selectedText   (fn [s] (str (fg (primary)) BOLD s RESET))
+                           :description    (fn [s] (str (fg (muted)) DIM s RESET))
+                           :scrollInfo     (fn [s] (str (fg (muted)) DIM s RESET))
+                           :noMatch        (fn [s] (str (fg (error-c)) s RESET))}}))
 
 (defn slash-command-items
   "The entries the editor's slash picker shows, from a commands map.
@@ -389,6 +396,12 @@
 (defn ^:async start [agent session resources]
   (let [theme     (or (.-theme resources)
                       (theme-catalog/active-theme (.-themes resources) default-dark))
+        ;; Every consumer reads through this thunk rather than the map above,
+        ;; so `/theme` can swap it under them. theme-catalog/current is the
+        ;; process-wide view of the same thing (/theme and /reload write it).
+        theme-atom (atom theme)
+        theme-fn   (fn [] @theme-atom)
+        _          (reset! theme-catalog/current theme)
         terminal  (new ProcessTerminal)
         ;; pi-tui 0.85 split the concrete TUI class in two — `TUI` is now a
         ;; type-only export, with TuiMainScreen (scrollback, what nyma uses) and
@@ -409,8 +422,8 @@
         turn-count   (atom 0)
         submit-lock  (atom false)
 
-        chat-pane    (create-chat-pane theme)
-        status-bar   (create-status-bar theme)
+        chat-pane    (create-chat-pane theme-fn)
+        status-bar   (create-status-bar theme-fn)
 
         sync-status! (fn []
                        (let [st @(:state agent)]
@@ -543,7 +556,7 @@
 
         ;; ── Submit / steer ────────────────────────────────────────────────
         border-atom    (atom nil)
-        editor-theme   (make-editor-theme theme border-atom)
+        editor-theme   (make-editor-theme theme-fn border-atom)
         editor         (new Editor tui editor-theme #js {:paddingX 1})
 
         do-run!
@@ -784,6 +797,17 @@
                                     (overlay-host/settings->overlay-options
                                      ((:get settings)))))})))
 
+    ;; `/theme <name>` and `/reload` call theme-catalog/activate!; this is the
+    ;; TUI's half: swap the thunk's source, re-theme the pickers (they share
+    ;; one process-wide theme), drop the chat pane's cached lines (they were
+    ;; rendered in the old colours) and paint.
+    (theme-catalog/on-apply!
+     (fn [new-theme]
+       (reset! theme-atom new-theme)
+       (picker-frame/set-theme! new-theme)
+       (.invalidate chat-pane)
+       (.requestRender tui)))
+
     ;; Wire editor
     (set! (.-onSubmit editor) on-submit)
 
@@ -801,7 +825,7 @@
             (fn [text]
               ;; Border colour by prefix: the theme's editor-border ramp was
               ;; defined and never read.
-              (let [ramp (get-in theme [:colors :editor-border] {})
+              (let [ramp (get-in (theme-fn) [:colors :editor-border] {})
                     t    (str text)]
                 (reset! border-atom
                         (cond (.startsWith t "!!") (:high ramp)
