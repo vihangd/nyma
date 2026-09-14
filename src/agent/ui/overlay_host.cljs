@@ -376,7 +376,8 @@
                ;; away the trailing rows — i.e. the selected one. No constant cap:
                ;; `h` already bounds it, and capping at 12 wasted a tall terminal
                ;; on a ~95-entry catalogue.
-               :max-visible   (max 1 (- (or h 24) 2))
+               ;; A multi-line title (the permission prompt) takes rows too.
+               :max-visible   (max 1 (- (or h 24) (inc (count (.split (str prompt) "\n")))))
                :max-width     cap
                ;; Two fields with separate budgets, metadata flush right, so the
                ;; `ctx · price` column is not the first thing truncated away.

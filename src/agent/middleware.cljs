@@ -5,7 +5,8 @@
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
             [agent.utils.ui :refer [ui-prompt-ready?]]
-            [agent.debug :as d]))
+            [agent.debug :as d]
+            [clojure.string :as str]))
 
 (defn normalize-tool-result
   "Normalize tool results to a STRING (transcript/UI value). Supports plain
@@ -343,21 +344,82 @@
   (when agent
     (when-let [api (.-extension-api agent)] (.-ui api))))
 
+(defonce ^:private session-allowed
+  ;; "Allow for this session": per process, never written to settings. Checked
+  ;; in the same fast path as the project allow-list. Module-level so a test
+  ;; can reset it.
+  (atom #{}))
+
+(defn session-allowed? [tool-name] (contains? @session-allowed tool-name))
+(defn allow-for-session! [tool-name] (swap! session-allowed conj tool-name))
+(defn reset-session-allows! [] (reset! session-allowed #{}))
+
+(defn- arg-get
+  "`:args` is a CLJS map, or a JS object when a tool's prepareArguments ran
+   first (that interceptor precedes this one). Read both."
+  [args k]
+  (when args
+    (let [v (get args (keyword k))]
+      (if (some? v) v (aget args k)))))
+
+(defn- one-line [s n]
+  (let [t (first (str/split-lines (str s)))]
+    (if (> (count t) n) (str (subs t 0 (dec n)) "…") t)))
+
+(defn permission-prompt-text
+  "What the user is approving, in ≤5 lines: the tool and its category, then
+   the bash command or the file path, then for an edit the first line that
+   changes as `- old` / `+ new`, then the policy's reason when it gave one.
+   The old prompt was `Allow 'bash'?` and nothing else — approving a command
+   you cannot see. Pure."
+  [tool-name category args reason]
+  (let [command (arg-get args "command")
+        path    (arg-get args "path")
+        old-s   (arg-get args "old_string")
+        new-s   (arg-get args "new_string")
+        content (arg-get args "content")
+        diff    (when (or old-s new-s)
+                  (let [o (str/split-lines (str (or old-s "")))
+                        n (str/split-lines (str (or new-s "")))
+                        [o1 n1] (or (first (drop-while (fn [[a b]] (= a b)) (map vector o n)))
+                                    [(first o) (first n)])
+                        more (- (max (count o) (count n)) 1)]
+                    (cond-> []
+                      (some? o1) (conj (str "- " (one-line o1 100)))
+                      (some? n1) (conj (str "+ " (one-line n1 100)))
+                      (pos? more) (conj (str "  … " more " more line" (when (> more 1) "s"))))))]
+    (str/join "\n"
+              (cond-> [(str "Allow '" tool-name "'?  (" category ")")]
+                command (conj (str "$ " (one-line command 110)))
+                (and path (not command)) (conj (str (one-line path 110)
+                                                    (when (and content (not diff))
+                                                      (str "  (" (count (str/split-lines (str content))) " lines)"))))
+                diff    (into diff)
+                (seq (str reason)) (conj (str "Reason: " (one-line reason 110)))))))
+
 (defn ^:async resolve-ask
-  "An 'ask' decision: prompt the user ONCE (Allow / Allow always / Deny).
-   With no interactive UI (e.g. headless -p) an 'ask' resolves to DENY — never
-   a silent allow. Returns the updated ctx. Exposed for tests."
+  "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
+   this session / Allow always (this tool, this project) / Deny. With no
+   interactive UI (e.g. headless -p) an 'ask' resolves to DENY — never a
+   silent allow. Returns the updated ctx. Exposed for tests."
   [settings ctx ui tool-name reason]
   (if-not (ui-prompt-ready? ui)
     (assoc ctx :cancelled true
            :cancel-reason (or reason (str "Permission required for '" tool-name
                                           "' but no interactive approval is available")))
-    (let [choice (js-await
-                  (.select ui (str "Allow '" tool-name "'?")
-                           (clj->js ["Allow once" "Allow always (this project)" "Deny"])))]
+    (let [prompt (permission-prompt-text tool-name (categorize-tool tool-name) (:args ctx) reason)
+          choice (js-await
+                  (.select ui prompt
+                           (clj->js ["Allow once"
+                                     "Allow for this session"
+                                     "Allow always (this tool, this project)"
+                                     "Deny"])))]
       (cond
         (and choice (.startsWith choice "Allow always"))
         (do (when settings ((:append-allow-tool! settings) tool-name)) ctx)
+
+        (and choice (.startsWith choice "Allow for this session"))
+        (do (allow-for-session! tool-name) ctx)
 
         (and choice (.startsWith choice "Allow")) ctx
 
@@ -386,6 +448,7 @@
     ;; to ask, and a deny here would clobber the hook's reason/result.
     ;; Fast-path: tool is in the persistent allow-list — skip the prompt.
     (if (or (:cancelled ctx) (:skip? ctx)
+            (session-allowed? tool-name)
             (and settings ((:tool-allowed? settings) tool-name)))
       ctx
       (let [result   (js-await

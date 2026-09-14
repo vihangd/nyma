@@ -5,7 +5,8 @@
             [agent.middleware :refer [create-pipeline tool-execution-interceptor
                                       before-hook-compat wrap-tools-with-middleware
                                       normalize-tool-result tool-persistence-interceptor
-                                      resolve-ask permission-check-enter]]
+                                      resolve-ask permission-check-enter
+                                      permission-prompt-text session-allowed? reset-session-allows!]]
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
             [agent.state :refer [create-agent-store]]
@@ -794,3 +795,56 @@
             (it "gate: deny beats allow regardless of order" test-gate-precedence-deny-beats-allow)
             (it "gate: explicit allow pre-empts policy ask" test-gate-precedence-allow-preempts-ask)
             (it "gate: ask reaches the real agent→extension-api→ui→select chain" test-gate-ask-reaches-real-agent-ui)))
+
+;; ── The prompt says what is being approved ──
+
+(defn- ask-ui [choice seen]
+  #js {:available true
+       :select    (fn [q _opts] (reset! seen q) (js/Promise.resolve choice))})
+
+(defn ^:async test-ask-for-session-skips-next-prompt []
+  (reset-session-allows!)
+  (let [persisted (atom [])
+        seen      (atom nil)
+        ctx       (js-await (resolve-ask (ask-settings persisted) {:tool-name "bash" :args {:command "ls"} :cancelled false}
+                                         (ask-ui "Allow for this session" seen) "bash" nil))
+        events    (create-event-bus)
+        fired     (atom 0)
+        _         ((:on events) "permission_request" (fn [_] (swap! fired inc) #js {"decision" "ask"}))
+        ctx2      (js-await (permission-check-enter events nil {:tool-name "bash" :args {:command "ls"} :cancelled false}))]
+    (-> (expect (:cancelled ctx)) (.toBeFalsy))
+    (-> (expect (session-allowed? "bash")) (.toBe true))
+    ;; nothing persisted to settings …
+    (-> (expect (count @persisted)) (.toBe 0))
+    ;; … and the next call never even emits permission_request
+    (-> (expect @fired) (.toBe 0))
+    (-> (expect (:cancelled ctx2)) (.toBeFalsy))
+    (reset-session-allows!)))
+
+(describe "permission prompt text" (fn []
+  (it "shows the bash command"
+      (fn []
+        (let [t (permission-prompt-text "bash" "exec" {:command "rm -rf /tmp/build && make"} nil)]
+          (-> (expect t) (.toContain "Allow 'bash'?  (exec)"))
+          (-> (expect t) (.toContain "$ rm -rf /tmp/build && make")))))
+  (it "shows the path and the first changed line for an edit"
+      (fn []
+        (let [t (permission-prompt-text "edit" "write"
+                                        {:path "src/a.cljs" :old_string "(def x 1)\n(def y 2)" :new_string "(def x 1)\n(def y 3)\n(def z 4)"}
+                                        nil)]
+          (-> (expect t) (.toContain "src/a.cljs"))
+          (-> (expect t) (.toContain "- (def y 2)"))
+          (-> (expect t) (.toContain "+ (def y 3)"))
+          (-> (expect t) (.toContain "more line")))))
+  (it "shows the policy reason only when there is one"
+      (fn []
+        (-> (expect (permission-prompt-text "bash" "exec" {:command "ls"} "mode 'plan' blocks exec"))
+            (.toContain "Reason: mode 'plan' blocks exec"))
+        (-> (expect (permission-prompt-text "bash" "exec" {:command "ls"} nil))
+            (.not.toContain "Reason:"))))
+  (it "reads JS-object args too (prepareArguments ran first)"
+      (fn []
+        (-> (expect (permission-prompt-text "bash" "exec" #js {:command "pwd"} nil))
+            (.toContain "$ pwd"))))
+  (it "Allow for this session skips the next prompt and writes nothing"
+      test-ask-for-session-skips-next-prompt)))
