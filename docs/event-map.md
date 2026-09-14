@@ -53,6 +53,7 @@ The listeners column is reported only.
 | `reasoning_start` | src/agent/loop.cljs (stream-event-types) | src/agent/modes/pi_rpc.cljs |
 | `reload` | src/agent/commands/builtins.cljs, src/agent/extension_context.cljs | - |
 | `resources_discover` | src/agent/resources/loader.cljs | - |
+| `role_change` | src/agent/extensions/agent_shell/features/plan_capture.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/extensions/model_roles/index.cljs |
 | `session_before_fork` | src/agent/commands/builtins.cljs | - |
 | `session_before_switch` | src/agent/sessions/manager.cljs | - |
 | `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs |

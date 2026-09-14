@@ -1001,8 +1001,8 @@
                             r   (phases/resolve-role cfg (get-profile) phase (known-roles))]
                         ;; model_roles owns :active-role: it switches the
                         ;; model too, and knows what "default" means.
-                        (when-let [emit (.-emitGlobal api)]
-                          (emit "role_change" #js {:role (:role r) :source "spec-driven"}))
+                        (when-let [emit-global (.-emitGlobal api)]
+                          (emit-global "role_change" #js {:role (:role r) :source "spec-driven"}))
                         (when (and (:fell-back? r) notify-fn)
                           (notify-fn (str "spec: " (:reason r))))
                         r))

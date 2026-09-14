@@ -62,36 +62,30 @@ For extensions with multiple files, create a directory with an `extension.json` 
 
 > **Important**: Multi-file suites must be pre-compiled with `squint compile` before they can be loaded as `.mjs` files. The extension loader's Squint compilation only handles single-file extensions. Built-in suites in `src/agent/extensions/` are pre-compiled to `dist/agent/extensions/` by `bun run build`.
 
-## Using Macros
+## The activation function
+
+There is no macro layer: an extension is a module whose default export takes the scoped `api`
+and returns a cleanup fn. Tools take a data schema directly (see `docs/schema-reference.md`).
 
 ```clojure
-(ns my-extension
-  (:require-macros [macros.tool-dsl :refer [deftool defcommand defextension defevent defwidget]]))
+(ns my-extension)
 
-;; Define a tool with data-driven schema (no Zod imports needed)
-(deftool my-search "Search my database"
-  {:query [:string "The search query"]
-   :limit [:number "Max results" {:optional true}]}
-  [{:keys [query limit]}]
-  (str "Found " (or limit 10) " results for: " query))
-
-;; Define an event handler
-(defevent bash-guard "tool_call" [event ctx]
-  (when (= (.-toolName event) "bash")
-    (when (.includes (.. event -input -command) "rm -rf")
-      #js {:block true :reason "Dangerous command blocked"})))
-
-;; Define a widget
-(defwidget token-counter {:position "below"} [agent]
-  (let [s @(:state agent)]
-    [(str "Tokens: " (:total-input-tokens s) " in / " (:total-output-tokens s) " out")]))
-
-;; Wire everything together
-(defextension my-ext
-  {:capabilities #{:tools :events :ui}}
-  [api]
-  (.registerTool api "my-search" my-search)
-  (.on api "tool_call" (:handler bash-guard)))
+(defn ^:export default [api]
+  (.registerTool api "my-search"
+    #js {:description "Search my database"
+         :parameters  #js {:type "object"
+                           :properties #js {:query #js {:type "string"}
+                                            :limit #js {:type "number"}}
+                           :required   #js ["query"]}
+         :execute     (fn [args] (str "Found " (or (.-limit args) 10) " results for: " (.-query args)))})
+  (.on api "before_tool_call"
+       (fn [event _ctx]
+         (when (and (= (.-name event) "bash")
+                    (.includes (str (.. event -args -command)) "rm -rf"))
+           #js {:block true :reason "Dangerous command blocked"})))
+  ;; Cleanup. Anything you forget is swept by the loader — the scoped api
+  ;; records every registration it performed — but say what you mean.
+  (fn [] (.unregisterTool api "my-search")))
 ```
 
 ## Nyma-Only Features
@@ -102,7 +96,7 @@ Pi-mono has simple before/after hooks. Nyma has a full Pedestal-style
 interceptor chain with `:enter`, `:leave`, and `:error` stages.
 
 ```clojure
-(definterceptor audit-log
+(def audit-log
   {:enter (fn [ctx]
             (js/console.log (str "ENTER: " (:tool-name ctx) " " (pr-str (:args ctx))))
             ctx)
@@ -151,7 +145,7 @@ Declare what your extension needs in `extension.json`:
 ```
 
 Trying to call `api.exec()` without `:exec` capability throws.
-Use `"all"` to get everything (default when no manifest).
+Use `"all"` to get everything. With no manifest an extension gets everything except `exec`, `spawn`, `tools-override` and `middleware`.
 
 ### 4. Namespace Isolation
 

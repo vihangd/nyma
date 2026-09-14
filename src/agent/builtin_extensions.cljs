@@ -72,7 +72,7 @@
     :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js ["model-roles"]}}
+    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js []}}
    {:namespace "agent-state"
     :module    ext-agent-state
     :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js []}}

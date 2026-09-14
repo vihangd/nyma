@@ -21,6 +21,7 @@
             [agent.extension-scope :refer [create-scoped-api dispose-scope!]]
             [agent.ui.status-line-segments :as status-segments]
             [agent.pricing :as pricing]
+            [agent.commands.resolver :refer [resolve-command]]
             [agent.builtin-extensions :refer [registry]]))
 
 ;; The full set of built-in extension namespaces shipped under
@@ -161,8 +162,23 @@
             (it "two scopes overriding one native tool restore the original"
                 test-two-scopes-overriding-one-native-tool)))
 
+(defn ^:async test-plan-resolves-after-full-load []
+  ;; agent_shell and model_roles both want /plan; whoever activates second
+  ;; must skip, or the resolver sees two `__plan` keys and returns nil —
+  ;; "unknown command" for a command two extensions registered. Declaring
+  ;; agent_shell dependsOn model-roles flipped the order and did exactly that.
+  (let [agent  (create-agent {:model "test" :system-prompt "smoke"})
+        api    (create-extension-api agent)
+        loaded (js-await (discover-and-load [] api registry))]
+    (try
+      (-> (expect (some? (resolve-command @(:commands agent) "plan"))) (.toBe true))
+      (finally
+        (js-await (deactivate-all loaded))))))
+
 (describe "loader smoke — built-in extensions"
           (fn []
+            (it "/plan resolves to exactly one command after a full load"
+                test-plan-resolves-after-full-load)
             (it "all 30 expected namespaces load and none collide on 'index'"
                 test-all-builtins-load-with-correct-namespaces)
             (it "no duplicate namespaces in the loaded list"

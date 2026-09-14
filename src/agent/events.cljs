@@ -33,6 +33,9 @@
    ;; emitter lint, the event map, and rpc mode's advertised channel list.
    "model_resolve" "before_message_send" "provider_error" "stream_filter"
    "message_before_store"
+   ;; Another extension asking model_roles (the owner of :active-role) to
+   ;; switch: spec_driven's phase binding, agent_shell's plan handoff.
+   "role_change"
    "before_agent_start" "input"
    "compact" "before_compact"
    "before_branch_switch"
@@ -69,10 +72,21 @@
    ;; wiring), so it subscribes and dispatches; nothing else can.
    "turn_request"])
 
+(def collect-hook-event-types
+  "emit-collect hooks whose RETURN is the point. A JSON line on stdout cannot
+   answer, and two of them carry the whole context (`before_message_send`:
+   every message; `stream_filter`: the full accumulated text per chunk)."
+  ["model_resolve" "before_message_send" "provider_error" "stream_filter"
+   "message_before_store"])
+
 (def all-event-types
   "Everything an extension may subscribe to: the events nyma produces, plus the
    pi-compat names it does not."
   (into core-event-types pi-compat-event-types))
+
+(def wire-event-types
+  "What rpc mode forwards: everything except the collect hooks."
+  (vec (remove (set collect-hook-event-types) all-event-types)))
 
 ;; ── Boolean keys are merged with OR (any true wins) ──────────────
 (def ^:private boolean-keys

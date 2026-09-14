@@ -79,20 +79,6 @@ Creates an AI SDK tool from a data-driven definition:
    :execute (fn [args] (str "Results for: " (:query args)))})
 ```
 
-### deftool Macro
-
-Compile-time macro that generates tools with Zod schemas:
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [deftool]])
-
-(deftool web-search "Search the web"
-  {:query [:string "Search query"]
-   :limit [:number "Max results" {:optional true}]}
-  [{:keys [query limit]}]
-  (str "Found " (or limit 10) " results for: " query))
-```
-
 ## TypeBox Adapter (Pi-Mono Compat)
 
 For porting pi-mono extensions that use TypeBox schemas.

@@ -2,6 +2,7 @@
   "Model roles: named presets (default, fast, deep, plan, commit) that map
    to provider/model pairs. Switch with /role <name>."
   (:require [clojure.string :as str]
+            [agent.debug :as d]
             [agent.events :as events]
             [agent.extensions.model-roles.policy :as policy]
             [agent.extensions.model-roles.status-segment :as status-seg]
@@ -196,7 +197,7 @@
         ;; :active-role — this extension owns the key. Returns true when the
         ;; role was known.
         activate-role!
-        (fn [role-name notify]
+        (fn [role-name notify & [{:keys [keep-model?]}]]
           (let [roles (get-roles api)
                 name  (str role-name)]
             (cond
@@ -206,8 +207,11 @@
               (let [spec (plan-mode/default-model-spec api)]
                 (.dispatch api "role-changed" {:role :default})
                 (swap! (.-__state-atom api) assoc :active-role :default :escalated-to nil)
-                (when spec (.setModel api spec))
-                (notify (str "Role: default → " (or spec "default model")) "info")
+                ;; /role reset reverts to the configured model. A phase that
+                ;; merely maps to "default" (spec_driven via role_change)
+                ;; must not undo a mid-session /model choice.
+                (when (and spec (not keep-model?)) (.setModel api spec))
+                (notify (str "Role: default" (when-not keep-model? (str " → " (or spec "default model")))) "info")
                 true)
 
               (get roles name)
@@ -223,12 +227,19 @@
                 true)
 
               :else false)))
-        ui-notify (fn [m lvl] (when (.-ui api) (.notify (.-ui api) m lvl)))
+        ;; The scoped ui getter always returns an object; only the TUI fills
+        ;; in :notify. Headless hosts (-p, rpc) get the stub.
+        ui-notify (fn [m lvl] (let [ui (.-ui api)]
+                                (when (and ui (.-notify ui)) (.notify ui m lvl))))
         on-role-change
         (fn [data]
           (let [r (and data (or (.-role data) (aget data "role")))]
-            (when (and r (not (activate-role! r ui-notify)))
-              (d/warn "model-roles" (str "role_change for unknown role \"" r "\"")))))
+            (when (and r (not (activate-role! r ui-notify {:keep-model? true})))
+              ;; A role with no config (spec_driven's "advisor" when the
+              ;; user's :roles map replaced the defaults): still bind the
+              ;; name so the status line and policy see it; no model switch.
+              (swap! (.-__state-atom api) assoc :active-role (str r) :escalated-to nil)
+              (d/warn "model-roles" (str "role_change: no model configured for role \"" r "\"")))))
 
         ;; Subscribe to model_resolve — ensure config.model reflects the active role.
         ;; /role already calls .setModel which updates config.model; we return nil

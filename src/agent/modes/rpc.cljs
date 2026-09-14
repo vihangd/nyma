@@ -1,7 +1,7 @@
 (ns agent.modes.rpc
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
-            [agent.events :refer [all-event-types]]))
+            [agent.events :refer [wire-event-types]]))
 
 (defn ^:async handle-line [agent line]
   (try
@@ -28,7 +28,7 @@
                                       (clj->js {:type event-type :data data}))))]
                     ((:on (:events agent)) event-type h)
                     [event-type h]))
-                all-event-types)]
+                wire-event-types)]
 
       ;; Read commands from stdin as JSONL. Not node:readline — it also splits
       ;; on U+2028/U+2029, which are legal inside a JSON string.

@@ -347,12 +347,13 @@
       ((:emit (:events agent)) "role_change" #js {:role "fast" :source "test"})
       (-> (expect (str (:active-role @(:state agent)))) (.toBe "fast"))
       (-> (expect (:escalated-to @(:state agent))) (.toBeNil))
-      ;; Unknown role: refused, state untouched.
+      ;; A role with no config still binds by name (spec_driven's "advisor"
+      ;; when a user :roles map replaced the defaults) — just no model switch.
       ((:emit (:events agent)) "role_change" #js {:role "no-such-role"})
-      (-> (expect (str (:active-role @(:state agent)))) (.toBe "fast"))
+      (-> (expect (str (:active-role @(:state agent)))) (.toBe "no-such-role"))
       (finally
         (js-await (deactivate-all [{:deactivate deact :scope scoped :path "model-roles"}]))))))
 
 (describe "model-roles:role_change event" (fn []
-  (it "switches the role for another extension and refuses unknown names"
+  (it "switches the role for another extension; binds unknown names without a model"
       test-role-change-event-switches-role)))

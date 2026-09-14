@@ -2,5 +2,5 @@
   "namespace": "agent-shell",
   "capabilities": ["spawn", "commands", "events", "ui", "messages",
                     "flags", "state"],
-  "dependsOn": ["model-roles"]
+  "dependsOn": []
 }

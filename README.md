@@ -16,12 +16,10 @@ Nyma is a spiritual successor to [pi-mono](https://github.com/badlogic/pi-mono) 
 | **State model** | Mutable atom | Event-sourced store with full history |
 | **Tool pipeline** | Linear | Pedestal-style interceptor chain (composable middleware) |
 | **Extension isolation** | Shared namespace | Capability-gated, namespaced sandbox |
-| **Macros** | None | `deftool`, `defcommand`, `definterceptor`, `defreducer`, `defextension` |
 | **Session storage** | JSONL | JSONL tree + optional SQLite with usage tracking |
 
 **Why Nyma over pi-mono:**
 
-- **Macros eliminate boilerplate.** `deftool` generates schema + handler in one form. `defextension` wires up activation/deactivation automatically.
 - **Interceptors compose cleanly.** Adding logging, rate-limiting, or permission checks is a chain entry — not a wrapper function.
 - **Extensions are safer.** Each plugin gets a scoped API with explicit capability declarations (`tools`, `commands`, `middleware`, `state`, `ui`). No extension can reach outside its declared scope.
 - **ClojureScript extensions** get the full macro DSL, threading (`->`), and data-oriented idioms — a significant ergonomic win over imperative TS for complex agent logic.
@@ -252,7 +250,6 @@ src/
     settings/      Configuration system
     resources/     Resource discovery (prompts, skills, themes)
     packages/      Package management
-  macros/          Compile-time macros (deftool, defcommand, definterceptor, ...)
 test/              Test files (.cljs and .ts)
   integration/     Integration tests (tool pipeline, extension lifecycle, state+events)
 built-in/themes/   Default dark/light themes
@@ -801,66 +798,6 @@ export default function(api) {
 - `api.ui.available` — `false` in print/json/rpc mode, `true` in interactive mode; always check before calling UI methods
 - `api.ui.showOverlay(content)` — display modal content
 - `api.ui.confirm(msg)` — show Yes/No dialog, returns `Promise<boolean>`
-
-### Using the `defextension` Macro
-
-```clojure
-(require-macros '[macros.tool-dsl :refer [defextension]])
-
-(defextension git-tools
-  {:capabilities #{:tools :events :commands}}
-  [api]
-  (.registerTool api "status"
-    #js {:description "Git status"
-         :execute     (fn [_] (js-await (run-bash "git status")))})
-  ;; Return cleanup fn
-  (fn [] (.unregisterTool api "status")))
-```
-
-## Tool DSL (Compile-Time Macros)
-
-All macros live in `macros.tool-dsl`:
-
-### `deftool` — Define LLM-callable tools
-
-```clojure
-(deftool web-search
-  "Search the web"
-  {:query {:type :string :description "The search query"}
-   :limit {:type :number :description "Max results" :optional true}}
-  [{:keys [query limit]}]
-  (js-await (js/fetch (str api-url query))))
-```
-
-### `defcommand` — Define slash commands
-
-```clojure
-(defcommand deploy-status
-  "Show current deployment status"
-  [args ctx]
-  (js-await (run-bash "kubectl get pods")))
-```
-
-### `definterceptor` / `defmiddleware` — Define interceptors
-
-```clojure
-(definterceptor audit-log
-  {:enter (fn [ctx] (log "enter" (:tool-name ctx)) ctx)
-   :leave (fn [ctx] (log "leave" (:tool-name ctx)) ctx)})
-
-(defmiddleware rate-limiter
-  {:enter (fn [ctx]
-            (if (too-many-calls?)
-              (assoc ctx :cancelled true)
-              ctx))})
-```
-
-### `defreducer` — Define state reducers
-
-```clojure
-(defreducer handle-approval :tool-approved [state data]
-  (update state :approved-tools conj (:tool-name data)))
-```
 
 ## Events
 

@@ -141,11 +141,14 @@
 
        ;; ── Messaging ───────────────────────────────────────
          :sendMessage       (fn [msg]
-                              ;; Through the store, not a raw swap!: the
-                              ;; session persister and every subscriber see
-                              ;; it, so a hook-injected message survives a
-                              ;; resume instead of vanishing from the JSONL.
-                              ((:dispatch! (:store agent)) :message-added {:message msg}))
+                              ;; Deliberately NOT through the store. Its
+                              ;; subscribers include the session persister,
+                              ;; and a hook-injected message (SessionStart
+                              ;; additionalContext) is re-injected on every
+                              ;; resume — persisting it stacks one copy per
+                              ;; resume and abandons the crash checkpoint.
+                              ;; This is ephemeral context, not transcript.
+                              (swap! (:state agent) update :messages conj msg))
          :sendUserMessage   (fn [text opts]
                               (let [deliver-as (or (and opts (.-deliverAs opts)) "steer")]
                                 (dbg/debug "sendUserMessage"

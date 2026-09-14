@@ -384,8 +384,11 @@
   [events settings ctx]
   (let [tool-name (:tool-name ctx)
         args      (:args ctx)]
-    ;; Fast-path: tool is in the persistent allow-list — skip the prompt
-    (if (and settings ((:tool-allowed? settings) tool-name))
+    ;; Already blocked or short-circuited by a before_tool_call hook: nothing
+    ;; to ask, and a deny here would clobber the hook's reason/result.
+    ;; Fast-path: tool is in the persistent allow-list — skip the prompt.
+    (if (or (:cancelled ctx) (:skip? ctx)
+            (and settings ((:tool-allowed? settings) tool-name)))
       ctx
       (let [result   (js-await
                       ((:emit-collect events) "permission_request"

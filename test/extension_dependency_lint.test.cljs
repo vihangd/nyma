@@ -39,10 +39,19 @@
        (remove #(= % self))
        set))
 
+(def allowed-undeclared
+  "Requires that are deliberately NOT in dependsOn, each with the reason.
+   A dependsOn entry moves the dependency's ACTIVATION before ours; when the
+   require is of pure functions only, that reordering is all it does — and
+   here it broke something: agent_shell must activate BEFORE model_roles so
+   model_roles' guarded /plan sees agent_shell's and skips (otherwise both
+   register and /plan resolves to nothing)."
+  {"agent_shell" #{"model-roles"}})
+
 (defn undeclared
   "Required extensions absent from `depends-on`. Pure, for the self-test."
-  [required depends-on]
-  (vec (sort (remove (set depends-on) required))))
+  [required depends-on & [allowed]]
+  (vec (sort (remove (into (set depends-on) (or allowed #{})) required))))
 
 (defn- extensions []
   (->> (vec (fs/readdirSync ext-root #js {:withFileTypes true}))
@@ -72,7 +81,8 @@
                   (let [bad (->> (extensions)
                                  (keep (fn [e]
                                          (let [req (required-extensions (:source e) (:self e))
-                                               u   (undeclared req (:depends-on e))]
+                                               u   (undeclared req (:depends-on e)
+                                                               (get allowed-undeclared (:name e)))]
                                            (when (seq u)
                                              (str (:name e) " requires " (str/join ", " u)
                                                   " but dependsOn is [" (str/join ", " (sort (:depends-on e))) "]")))))

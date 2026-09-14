@@ -43,9 +43,19 @@
                   ["approve"   :approve   "Switch to approval mode (default)"]
                   ["auto-edit" :auto-edit "Switch to auto-edit mode (edits approved, shell prompts)"]]]
     (doseq [[cmd-name mode-key description] commands]
-      (.registerCommand api cmd-name
-                        #js {:description description
-                             :handler (fn [_args _ctx] (switch-mode! api mode-key))}))
+      ;; /plan is shared with model_roles' native plan mode, which registers
+      ;; its own only when nobody owns a *__plan yet. Mirror that guard: if
+      ;; we come second, skip rather than register a duplicate that makes
+      ;; the resolver see two matches and /plan resolve to nothing.
+      (let [taken? (and (= cmd-name "plan")
+                        (when-let [gc (.-getCommands api)]
+                          (some (fn [k] (.endsWith (str k) "__plan"))
+                                (try (vec (keys (gc))) (catch :default _ [])))))]
+        (if taken?
+          (notify api "/plan is owned by another extension; ACP plan mode unavailable as /plan" "warn")
+          (.registerCommand api cmd-name
+                            #js {:description description
+                                 :handler (fn [_args _ctx] (switch-mode! api mode-key))}))))
 
     ;; Return deactivator
     (fn []
