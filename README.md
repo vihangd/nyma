@@ -373,6 +373,21 @@ bun run start -- -p "Explain this codebase"
 
 Runs once with the given prompt, prints the response, and exits. Useful for scripting. The first positional arg after `-p` becomes the prompt.
 
+`--output-format json` prints a single claude-style result object instead (`{type, is_error, result, session_id, total_cost_usd, usage, duration_ms}`). `--output-format stream-json` prints one JSON object per line while the run is in flight, then that same result object as the last line:
+
+```
+{"type":"message_start"}
+{"type":"message_update","text":"The "}
+{"type":"tool_execution_start","toolName":"read","execId":"…","args":{"path":"src/"}}
+{"type":"tool_execution_end","toolName":"read","execId":"…","result":"…","isError":false}
+{"type":"usage","inputTokens":120,"outputTokens":34}
+{"type":"message_end"}
+{"type":"agent_end"}
+{"type":"result","is_error":false,"result":"…",…}
+```
+
+All three exit 1 when the run fails (`is_error: true`), and 2 on an unknown format.
+
 ### JSON Mode
 
 ```bash
@@ -499,7 +514,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--provider` | Provider id (`anthropic`, `openai`, `google`, or any extension-registered one) | `anthropic` |
 | `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc` | `interactive` |
 | `-p, --print` | Print mode shorthand | — |
-| `--output-format` | With `-p`: `text` or `json`. Either exits 1 when the run fails | `text` |
+| `--output-format` | With `-p`: `text`, `json` (one claude-style result object) or `stream-json` (JSONL progress events, then that object). Every format exits 1 when the run fails; an unknown format exits 2 | `text` |
 | `--permission-mode` | `default` \| `accept-edits` \| `plan` \| `full-auto` | `default` (headless: `full-auto`) |
 | `-c, --continue` | Continue last session | — |
 | `-r, --resume` | Resume a session (numbered picker) | — |

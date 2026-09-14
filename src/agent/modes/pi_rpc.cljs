@@ -16,6 +16,7 @@
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run steer follow-up]]
             [agent.model-info :as model-info]
+            [agent.utils.event-json :refer [step-usage tool-results]]
             [clojure.string :as str]))
 
 ;; ── stdout: the one and only protocol writer ───────────────────
@@ -111,35 +112,6 @@
 
 (defn- assistant-msg [text]
   {:role "assistant" :content [{:type "text" :text text}] :timestamp (js/Date.now)})
-
-(defn step-usage
-  "AI SDK StepResult usage → pi's `{inputTokens, outputTokens}`.
-
-   Pi carries usage on the turn's message, and `@agentproto/adapter-pi` derives
-   its own `usage_update` from it rather than from a separate event — so
-   dropping this field silently costs a consumer its token accounting."
-  [step]
-  (when-let [u (and step (.-usage step))]
-    {:inputTokens  (or (.-inputTokens u) 0)
-     :outputTokens (or (.-outputTokens u) 0)}))
-
-(defn tool-results
-  "StepResult toolResults → pi's wire shape, one entry per result."
-  [step]
-  (let [rs (and step (.-toolResults step))]
-    (vec (for [r (vec (or rs #js []))]
-           {:toolCallId (or (.-toolCallId r) "")
-            :toolName   (or (.-toolName r) "")
-            :result     {:content [{:type "text"
-                                    ;; `(or o nil)` would turn a literal false
-                                    ;; into the text "null". Squint's `or` uses
-                                    ;; CLJS truthiness so 0 and "" survive it,
-                                    ;; but false does not.
-                                    :text (let [o (.-output r)]
-                                            (cond (string? o)    o
-                                                  (undefined? o) ""
-                                                  :else          (js/JSON.stringify o)))}]
-                         :details {}}}))))
 
 (defn drain-queues!
   "Empty both message queues and return what was in them, as pi's

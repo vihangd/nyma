@@ -227,11 +227,14 @@
 Modes (default: interactive):
   -p, --print            Run a single prompt and print the result, then exit.
                          The prompt is the first positional argument.
-      --output-format <f> With -p: 'text' (default) or 'json' — a single
+      --output-format <f> With -p: 'text' (default), 'json' — a single
                          claude-style result object {result, is_error,
                          session_id, total_cost_usd, usage, duration_ms} for
-                         headless orchestrators (e.g. cw). Either format exits
-                         1 when the run fails (is_error true).
+                         headless orchestrators (e.g. cw) — or 'stream-json':
+                         one JSON object per line as the run progresses
+                         (message_update text, tool_execution_*, usage), then
+                         the same result object as the last line. Every format
+                         exits 1 when the run fails (is_error true).
       --mode <mode>      Explicit mode: interactive | print | json | rpc |
                          pi-rpc (JSONL protocol for the pi Emacs frontend).
       --approve, --no-approve
@@ -339,6 +342,16 @@ Examples:
       has-pos?             pos
       stdin            stdin
       :else            nil)))
+
+(def output-formats #{"text" "json" "stream-json"})
+
+(defn output-format-error
+  "The stderr line for an unaccepted `--output-format`, nil when it is fine
+   (absent means text). A typo used to fall through to text silently, so
+   `--output-format josn` handed a JSON parser plain prose."
+  [f]
+  (when (and (some? f) (not (contains? output-formats f)))
+    "nyma: --output-format must be text, json or stream-json"))
 
 (defn- die-no-prompt! [mode-label]
   (.write (.-stderr js/process)
@@ -599,6 +612,10 @@ Examples:
 
         ;; Same gate NYMA_DEBUG=1 opens; the flag is for the one-off run.
         _ (when (:debug values) (d/set-enabled! true))
+
+        _ (when-let [msg (output-format-error (:output-format values))]
+            (.write (.-stderr js/process) (str msg "\n"))
+            (js/process.exit 2))
 
         mode      (or (:mode values)
                       (when (:print values) "print")
@@ -942,9 +959,11 @@ Examples:
           "print"       (let [p (js-await (resolve-one-shot-prompt positionals))]
                           (when-not p (die-no-prompt! "-p"))
                         ;; `-p --output-format json` → single claude-style result
-                        ;; object (for headless orchestrators); default → text.
-                          (if (= (:output-format values) "json")
-                            (js-await (print-mode/start-result agent p))
+                        ;; object (for headless orchestrators); stream-json →
+                        ;; JSONL progress then that object; default → text.
+                          (case (:output-format values)
+                            "json"        (js-await (print-mode/start-result agent p))
+                            "stream-json" (js-await (print-mode/start-stream-json agent p))
                             (js-await (print-mode/start agent p)))
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?
                                                       emit-session-shutdown-async! deactivate-all)))
