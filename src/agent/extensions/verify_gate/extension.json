@@ -1,5 +1,15 @@
 {
   "namespace": "verify-gate",
-  "capabilities": ["events", "messages"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "messages"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "verify": {
+      "cmd": null,
+      "max-attempts": 2,
+      "timeout-ms": 120000
+    }
+  }
 }

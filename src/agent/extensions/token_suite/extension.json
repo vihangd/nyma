@@ -8,5 +8,16 @@
     "commands",
     "ui"
   ],
-  "dependsOn": []
+  "dependsOn": [],
+  "settings": {
+    "token-suite": {
+      "kv-cache": null,
+      "repo-map": null,
+      "priority-assembly": null,
+      "diff-edit": null,
+      "structured-context": null,
+      "smart-compaction": null,
+      "anthropic-compaction": null
+    }
+  }
 }

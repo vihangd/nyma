@@ -1,8 +1,24 @@
 {
   "namespace": "bash-suite",
-  "capabilities": ["events", "tools", "middleware", "commands"],
+  "capabilities": [
+    "events",
+    "tools",
+    "middleware",
+    "commands"
+  ],
   "dependsOn": [],
   "dependencies": {
     "shell-quote": "^1.9.0"
+  },
+  "settings": {
+    "bash-suite": {
+      "security-analysis": null,
+      "permissions": null,
+      "output-handling": null,
+      "env-filter": null,
+      "cwd-manager": null,
+      "background-jobs": null,
+      "timeout-classifier": null
+    }
   }
 }

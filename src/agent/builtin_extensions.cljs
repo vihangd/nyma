@@ -72,19 +72,19 @@
     :manifest  #js {"namespace" "agent-runner-claude-sdk" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "agent-shell" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js [] "settings" #js {"agent-shell" #js {"default-agent" nil "auto-approve" false "auto-connect" false "agents" #js {}}}}}
    {:namespace "agent-state"
     :module    ext-agent-state
-    :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "agent-state" "capabilities" #js ["events" "spawn"] "dependsOn" #js [] "settings" #js {"agent-state" #js {"enabled" nil "agent" "nyma" "command" nil}}}}
    {:namespace "ast-tools"
     :module    ext-ast-tools
     :manifest  #js {"namespace" "ast-tools" "capabilities" #js ["tools" "exec"]}}
    {:namespace "bash-suite"
     :module    ext-bash-suite
-    :manifest  #js {"namespace" "bash-suite" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"}}}
+    :manifest  #js {"namespace" "bash-suite" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
    {:namespace "budget"
     :module    ext-budget
-    :manifest  #js {"namespace" "budget" "capabilities" #js ["events"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "budget" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
    {:namespace "checkpoints"
     :module    ext-checkpoints
     :manifest  #js {"namespace" "checkpoints" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
@@ -111,10 +111,10 @@
     :manifest  #js {"namespace" "custom-provider-minimax" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-opencode-zen"
     :module    ext-custom-provider-opencode-zen
-    :manifest  #js {"namespace" "custom-provider-opencode-zen" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-opencode-zen" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"opencode-zen" #js {"rescue-parsing" false}}}}
    {:namespace "custom-provider-openrouter"
     :module    ext-custom-provider-openrouter
-    :manifest  #js {"namespace" "custom-provider-openrouter" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-openrouter" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"openrouter" #js {"provider" nil}}}}
    {:namespace "custom-provider-qwen-cli"
     :module    ext-custom-provider-qwen-cli
     :manifest  #js {"namespace" "custom-provider-qwen-cli" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
@@ -123,13 +123,13 @@
     :manifest  #js {"namespace" "custom-provider-relay" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "desktop-notify"
     :module    ext-desktop-notify
-    :manifest  #js {"namespace" "desktop-notify" "capabilities" #js ["events" "flags"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "desktop-notify" "capabilities" #js ["events" "flags"] "dependsOn" #js [] "settings" #js {"desktop-notify" #js {"enabled" true "threshold-ms" 3000}}}}
    {:namespace "handoff"
     :module    ext-handoff
     :manifest  #js {"namespace" "handoff" "capabilities" #js ["events" "commands" "state"] "dependsOn" #js []}}
    {:namespace "headroom"
     :module    ext-headroom
-    :manifest  #js {"namespace" "headroom" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"}}}
+    :manifest  #js {"namespace" "headroom" "capabilities" #js ["events" "commands"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
     :manifest  #js {"namespace" "lsp-suite" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
@@ -138,13 +138,13 @@
     :manifest  #js {"namespace" "mcp-client" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
    {:namespace "memory"
     :module    ext-memory
-    :manifest  #js {"namespace" "memory" "capabilities" #js ["events" "tools"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "memory" "capabilities" #js ["events" "tools"] "dependsOn" #js [] "settings" #js {"memory" #js {"dir" "memory" "max-lines" 200}}}}
    {:namespace "model-roles"
     :module    ext-model-roles
-    :manifest  #js {"namespace" "model-roles" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "model-roles" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
    {:namespace "openwiki"
     :module    ext-openwiki
-    :manifest  #js {"namespace" "openwiki" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "openwiki" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js [] "settings" #js {"openwiki" #js {"enabled" false "dir" "openwiki" "sections" #js ["architecture" "workflows" "domain" "operations" "testing"]}}}}
    {:namespace "prompt-history"
     :module    ext-prompt-history
     :manifest  #js {"namespace" "prompt-history" "capabilities" #js ["commands" "events" "shortcuts" "ui"] "dependsOn" #js []}}
@@ -156,10 +156,10 @@
     :manifest  #js {"namespace" "refine" "capabilities" #js ["commands" "ui"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "small-model"
     :module    ext-small-model
-    :manifest  #js {"namespace" "small-model" "capabilities" #js ["events" "model" "middleware" "tools" "tools-override" "flags" "state" "messages"] "dependsOn" #js ["advisor"]}}
+    :manifest  #js {"namespace" "small-model" "capabilities" #js ["events" "model" "middleware" "tools" "tools-override" "flags" "state" "messages"] "dependsOn" #js ["advisor"] "settings" #js {"small-model" #js {"enabled" false "quality-monitor" #js {"enabled" true "max-turns" 40 "no-progress-streak" 3 "adaptive-temperature" true} "profiles" #js {"enabled" true} "evidence" #js {"enabled" true "max-snippets" 20 "max-snippet-chars" 1024} "read-guard" #js {"enabled" false "max-lines" 60} "thinking-budget" #js {"enabled" false "max-tokens" 8000 "retry-without-thinking" true} "supervisor" #js {"enabled" false "every-n-turns" 8 "max-interventions" 3 "pre-commit" true} "respond-tool" #js {"enabled" false} "self-tune" #js {"enabled" false "max-lessons" 20 "min-failures" 2 "max-reflections" 3 "reflect-on" #js ["quality-signal" "verify-fail"]} "knowledge-inject" #js {"enabled" false "dir" "knowledge" "top-k" 1 "threshold" 2 "token-budget" 800} "finalize-warn" #js {"enabled" false "max-nudges" 2}}}}}
    {:namespace "spec-driven"
     :module    ext-spec-driven
-    :manifest  #js {"namespace" "spec-driven" "capabilities" #js ["events" "commands" "state" "ui" "messages"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "spec-driven" "capabilities" #js ["events" "commands" "state" "ui" "messages"] "dependsOn" #js [] "settings" #js {"spec" #js {"profiles" nil "loop" nil "default-shape" "spec-kit" "shape-precedence" nil}}}}
    {:namespace "stats-dashboard"
     :module    ext-stats-dashboard
     :manifest  #js {"namespace" "stats-dashboard" "capabilities" #js ["commands" "events" "state" "ui"] "dependsOn" #js []}}
@@ -171,13 +171,13 @@
     :manifest  #js {"namespace" "thinking-renderer" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
    {:namespace "todos"
     :module    ext-todos
-    :manifest  #js {"namespace" "todos" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "todos" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js [] "settings" #js {"todos" #js {"reminder-every-n-turns" 5}}}}
    {:namespace "token-suite"
     :module    ext-token-suite
-    :manifest  #js {"namespace" "token-suite" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "token-suite" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil}}}}
    {:namespace "verify-gate"
     :module    ext-verify-gate
-    :manifest  #js {"namespace" "verify-gate" "capabilities" #js ["events" "messages"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "verify-gate" "capabilities" #js ["events" "messages"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "max-attempts" 2 "timeout-ms" 120000}}}}
    {:namespace "workspace-config"
     :module    ext-workspace-config
     :manifest  #js {"namespace" "workspace-config" "capabilities" #js ["commands" "ui"] "dependsOn" #js []}}])

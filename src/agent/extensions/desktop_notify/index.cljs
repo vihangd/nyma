@@ -6,27 +6,28 @@
    Config in .nyma/settings.json:
    {\"desktop-notify\": {\"enabled\": true, \"threshold-ms\": 3000}}
 
-   Also controllable via /flag desktop-notify__enabled true"
-  (:require ["node:fs" :as fs]
-            ["node:path" :as path]))
+   Also controllable via /flag desktop-notify__enabled true")
 
 ;;; ─── Config ────────────────────────────────────────────────
+;;; Read through the settings manager, not by opening settings.json here: the
+;;; hand-rolled reader saw the PROJECT file only, so a `~/.nyma/settings.json`
+;;; that disabled notifications was ignored, and the defaults below now live in
+;;; extension.json where /settings can show them.
 
-(def default-threshold 3000) ;; 3 seconds
-
-(defn- load-config []
-  (let [settings-path (path/join (js/process.cwd) ".nyma" "settings.json")]
-    (if (fs/existsSync settings-path)
-      (try
-        (let [raw    (fs/readFileSync settings-path "utf8")
-              parsed (js/JSON.parse raw)
-              section (aget parsed "desktop-notify")]
-          (if section
-            {:enabled      (if (some? (.-enabled section)) (.-enabled section) true)
-             :threshold-ms (or (aget section "threshold-ms") default-threshold)}
-            {:enabled true :threshold-ms default-threshold}))
-        (catch :default _ {:enabled true :threshold-ms default-threshold}))
-      {:enabled true :threshold-ms default-threshold})))
+(defn- load-config [api]
+  (let [section (.settings api "desktop-notify")
+        enabled (:enabled section)
+        ms      (:threshold-ms section)]
+    ;; The guards survive the migration: an api without a settings manager
+    ;; (loader smoke, test stubs) hands back an empty section.
+    ;;
+    ;; The 3000 is DELIBERATELY mirrored from extension.json rather than moved
+    ;; out the way todos' 5 was. This branch is reached only when the value is
+    ;; not a number, and a threshold of 0 there would fire a notification on
+    ;; every turn — punishing a typo with spam. A wrong threshold should behave
+    ;; like the default, not like an alarm.
+    {:enabled      (if (some? enabled) enabled true)
+     :threshold-ms (if (number? ms) ms 3000)}))
 
 ;;; ─── OSC 777 notification ──────────────────────────────────
 
@@ -41,7 +42,7 @@
 ;;; ─── Extension activation ──────────────────────────────────
 
 (defn ^:export default [api]
-  (let [config       (load-config)
+  (let [config       (load-config api)
         turn-start   (atom nil)
         threshold-ms (:threshold-ms config)
 

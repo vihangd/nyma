@@ -9,7 +9,13 @@
   (let [flags          (atom {})
         event-handlers (atom {})
         global-emits   (atom [])]
-    #js {:registerFlag  (fn [name opts]
+    #js {;; Stands in for the settings manager, which merges extension.json's
+         ;; declared `desktop-notify` defaults under the user's values — the
+         ;; extension no longer opens .nyma/settings.json itself.
+         :settings      (fn [& [section]]
+                          (let [all {:desktop-notify {:enabled true :threshold-ms 3000}}]
+                            (if section (or (get all section) {}) all)))
+         :registerFlag  (fn [name opts]
                           (swap! flags assoc name opts))
          :getFlag       (fn [name]
                           (when-let [opts (get @flags name)]
@@ -173,53 +179,53 @@
                                                             (-> (expect (count (filterv #(str/includes? % "777") @writes))) (.toBe 0)))))))
 
 (describe "desktop-notify:notification-event"
-  (fn []
-    (it "emits notification event via emitGlobal when elapsed exceeds threshold"
-      (fn []
-        (let [api      (make-mock-api)
-              _        (activate api)
-              orig-now (.-now js/Date)
-              orig-w   (.-write (.-stdout js/process))
-              call-n   (atom 0)]
-          (set! (.-now js/Date) (fn []
-                                  (let [n @call-n]
-                                    (swap! call-n inc)
-                                    (if (= n 0) 0 5000))))
-          (set! (.-write (.-stdout js/process)) (fn [_] nil))
-          (.emit api "turn_start" nil)
-          (.emit api "turn_end" nil)
-          (set! (.-now js/Date) orig-now)
-          (set! (.-write (.-stdout js/process)) orig-w)
-          (let [emits @(.-_global_emits api)]
-            (-> (expect (pos? (count emits))) (.toBe true))
-            (-> (expect (:event (first emits))) (.toBe "notification"))))))
+          (fn []
+            (it "emits notification event via emitGlobal when elapsed exceeds threshold"
+                (fn []
+                  (let [api      (make-mock-api)
+                        _        (activate api)
+                        orig-now (.-now js/Date)
+                        orig-w   (.-write (.-stdout js/process))
+                        call-n   (atom 0)]
+                    (set! (.-now js/Date) (fn []
+                                            (let [n @call-n]
+                                              (swap! call-n inc)
+                                              (if (= n 0) 0 5000))))
+                    (set! (.-write (.-stdout js/process)) (fn [_] nil))
+                    (.emit api "turn_start" nil)
+                    (.emit api "turn_end" nil)
+                    (set! (.-now js/Date) orig-now)
+                    (set! (.-write (.-stdout js/process)) orig-w)
+                    (let [emits @(.-_global_emits api)]
+                      (-> (expect (pos? (count emits))) (.toBe true))
+                      (-> (expect (:event (first emits))) (.toBe "notification"))))))
 
-    (it "notification event payload has :title :body :source keys"
-      (fn []
-        (let [api      (make-mock-api)
-              _        (activate api)
-              orig-now (.-now js/Date)
-              orig-w   (.-write (.-stdout js/process))
-              call-n   (atom 0)]
-          (set! (.-now js/Date) (fn []
-                                  (let [n @call-n]
-                                    (swap! call-n inc)
-                                    (if (= n 0) 0 5000))))
-          (set! (.-write (.-stdout js/process)) (fn [_] nil))
-          (.emit api "turn_start" nil)
-          (.emit api "turn_end" nil)
-          (set! (.-now js/Date) orig-now)
-          (set! (.-write (.-stdout js/process)) orig-w)
-          (let [payload (:data (first @(.-_global_emits api)))]
-            (-> (expect (contains? payload :title))  (.toBe true))
-            (-> (expect (contains? payload :body))   (.toBe true))
-            (-> (expect (contains? payload :source)) (.toBe true))
-            (-> (expect (:source payload)) (.toBe "desktop-notify"))))))
+            (it "notification event payload has :title :body :source keys"
+                (fn []
+                  (let [api      (make-mock-api)
+                        _        (activate api)
+                        orig-now (.-now js/Date)
+                        orig-w   (.-write (.-stdout js/process))
+                        call-n   (atom 0)]
+                    (set! (.-now js/Date) (fn []
+                                            (let [n @call-n]
+                                              (swap! call-n inc)
+                                              (if (= n 0) 0 5000))))
+                    (set! (.-write (.-stdout js/process)) (fn [_] nil))
+                    (.emit api "turn_start" nil)
+                    (.emit api "turn_end" nil)
+                    (set! (.-now js/Date) orig-now)
+                    (set! (.-write (.-stdout js/process)) orig-w)
+                    (let [payload (:data (first @(.-_global_emits api)))]
+                      (-> (expect (contains? payload :title))  (.toBe true))
+                      (-> (expect (contains? payload :body))   (.toBe true))
+                      (-> (expect (contains? payload :source)) (.toBe true))
+                      (-> (expect (:source payload)) (.toBe "desktop-notify"))))))
 
-    (it "does NOT emit notification event when elapsed is below threshold"
-      (fn []
-        (let [api (make-mock-api)
-              _   (activate api)]
-          (.emit api "turn_start" nil)
-          (.emit api "turn_end" nil)  ;; elapsed ~ 0ms
-          (-> (expect (count @(.-_global_emits api))) (.toBe 0)))))))
+            (it "does NOT emit notification event when elapsed is below threshold"
+                (fn []
+                  (let [api (make-mock-api)
+                        _   (activate api)]
+                    (.emit api "turn_start" nil)
+                    (.emit api "turn_end" nil)  ;; elapsed ~ 0ms
+                    (-> (expect (count @(.-_global_emits api))) (.toBe 0)))))))

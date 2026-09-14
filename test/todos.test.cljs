@@ -57,7 +57,13 @@
   (let [handlers (atom {})
         segments (atom {})
         tools    (atom {})]
-    {:api #js {:settings              (fn [sec] (if sec {} {}))
+    ;; `settings` stands in for the real manager, which merges extension.json's
+    ;; declared defaults under the user's values — so the "todos" section
+    ;; arrives carrying reminder-every-n-turns, exactly as it does in a
+    ;; running agent. A stub returning {} tested a path that no longer exists.
+    {:api #js {:settings              (fn [sec]
+                                        (let [all {:todos {:reminder-every-n-turns 5}}]
+                                          (if sec (or (get all sec) {}) all)))
                :getState              (fn [] state)
                :on                    (fn [evt f & _] (swap! handlers update evt (fnil conj []) f))
                :off                   (fn [_ _] nil)

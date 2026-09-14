@@ -1,5 +1,14 @@
 {
   "namespace": "memory",
-  "capabilities": ["events", "tools"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "tools"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "memory": {
+      "dir": "memory",
+      "max-lines": 200
+    }
+  }
 }

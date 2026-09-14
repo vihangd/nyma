@@ -1,5 +1,14 @@
 {
   "namespace": "desktop-notify",
-  "capabilities": ["events", "flags"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "flags"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "desktop-notify": {
+      "enabled": true,
+      "threshold-ms": 3000
+    }
+  }
 }

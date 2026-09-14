@@ -1,5 +1,14 @@
 {
   "namespace": "budget",
-  "capabilities": ["events"],
-  "dependsOn": []
+  "capabilities": [
+    "events"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "budget": {
+      "turn-tokens": null,
+      "session-tokens": null,
+      "wall-seconds": null
+    }
+  }
 }

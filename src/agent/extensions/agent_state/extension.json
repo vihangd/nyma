@@ -1,5 +1,15 @@
 {
   "namespace": "agent-state",
-  "capabilities": ["events", "spawn"],
-  "dependsOn": []
+  "capabilities": [
+    "events",
+    "spawn"
+  ],
+  "dependsOn": [],
+  "settings": {
+    "agent-state": {
+      "enabled": null,
+      "agent": "nyma",
+      "command": null
+    }
+  }
 }

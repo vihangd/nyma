@@ -1,6 +1,13 @@
 {
   "namespace": "custom-provider-opencode-zen",
-  "capabilities": ["providers"],
+  "capabilities": [
+    "providers"
+  ],
   "dependsOn": [],
-  "dependencies": {}
+  "dependencies": {},
+  "settings": {
+    "opencode-zen": {
+      "rescue-parsing": false
+    }
+  }
 }
