@@ -50,6 +50,9 @@
   "Default reducers for agent state transitions."
   {:message-added    (fn [state data] (update state :messages conj (:message data)))
    :messages-cleared (fn [state _data] (assoc state :messages []))
+   ;; Wholesale replacement (context relief pruning). Goes through the store
+   ;; so subscribers see it, instead of a raw swap! on the shared atom.
+   :messages-replaced (fn [state data] (assoc state :messages (vec (:messages data))))
    :tools-changed    (fn [state data] (assoc state :active-tools (:active-tools data)))
    :model-changed    (fn [state data] (assoc state :model (:model data)))
    ;; Cache tokens are accumulated alongside the rest because they are the

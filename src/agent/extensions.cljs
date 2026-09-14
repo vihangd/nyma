@@ -141,7 +141,11 @@
 
        ;; ── Messaging ───────────────────────────────────────
          :sendMessage       (fn [msg]
-                              (swap! (:state agent) update :messages conj msg))
+                              ;; Through the store, not a raw swap!: the
+                              ;; session persister and every subscriber see
+                              ;; it, so a hook-injected message survives a
+                              ;; resume instead of vanishing from the JSONL.
+                              ((:dispatch! (:store agent)) :message-added {:message msg}))
          :sendUserMessage   (fn [text opts]
                               (let [deliver-as (or (and opts (.-deliverAs opts)) "steer")]
                                 (dbg/debug "sendUserMessage"
@@ -160,6 +164,11 @@
                               ((:emit (:events agent))
                                (str event-type)
                                (clj->js data)))
+         ;; The store path `dispatch` never was: runs the registered reducers
+         ;; (`state.cljs` core-reducers) so an extension can clear or replace
+         ;; messages without reaching into `__state_atom`.
+         :dispatchState     (fn [event-type data]
+                              ((:dispatch! (:store agent)) (str event-type) (or data {})))
          :onStateChange     (fn [listener]
                               ;; Returns an unsubscribe fn. Keyed by a counter
                               ;; token: squint stores watches in a plain object,

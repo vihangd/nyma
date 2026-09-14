@@ -189,6 +189,47 @@
         esc-deactivate  (atom nil)
         seg-deactivate  (atom nil)
 
+        ;; THE role switch. /role, the cycle shortcut and the `role_change`
+        ;; event all come here, so every path sets the model and clears the
+        ;; escalation together. Other extensions (spec_driven's phase binding,
+        ;; agent_shell's plan handoff) emit `role_change` instead of writing
+        ;; :active-role — this extension owns the key. Returns true when the
+        ;; role was known.
+        activate-role!
+        (fn [role-name notify]
+          (let [roles (get-roles api)
+                name  (str role-name)]
+            (cond
+              ;; "reset" / "default" — revert to the CONFIGURED default model
+              ;; (-m / settings :model), not the role's hardcoded model.
+              (or (= name "reset") (= name "default"))
+              (let [spec (plan-mode/default-model-spec api)]
+                (.dispatch api "role-changed" {:role :default})
+                (swap! (.-__state-atom api) assoc :active-role :default :escalated-to nil)
+                (when spec (.setModel api spec))
+                (notify (str "Role: default → " (or spec "default model")) "info")
+                true)
+
+              (get roles name)
+              (let [role-cfg (get roles name)
+                    model-id (or (:model role-cfg) (get role-cfg "model"))
+                    provider (or (:provider role-cfg) (get role-cfg "provider"))]
+                (swap! (.-__state-atom api) assoc :active-role name :escalated-to nil)
+                (when (and provider model-id)
+                  (.setModel api (str provider "/" model-id)))
+                (notify (str "Role: " name
+                             (when (and provider model-id) (str " → " provider "/" model-id)))
+                        "info")
+                true)
+
+              :else false)))
+        ui-notify (fn [m lvl] (when (.-ui api) (.notify (.-ui api) m lvl)))
+        on-role-change
+        (fn [data]
+          (let [r (and data (or (.-role data) (aget data "role")))]
+            (when (and r (not (activate-role! r ui-notify)))
+              (d/warn "model-roles" (str "role_change for unknown role \"" r "\"")))))
+
         ;; Subscribe to model_resolve — ensure config.model reflects the active role.
         ;; /role already calls .setModel which updates config.model; we return nil
         ;; so the loop uses config.model rather than accidentally overriding it with
@@ -256,6 +297,8 @@
 
     (.on api "permission_request" on-permission)
     (swap! handlers conj ["permission_request" on-permission])
+    (.on api "role_change" on-role-change)
+    (swap! handlers conj ["role_change" on-role-change])
 
     ;; /role command
     (.registerCommand api "role"
@@ -276,25 +319,9 @@
                                                 "\n\nUsage: /role <name>")]
                                    (.notify (.-ui ctx) msg "info"))
 
-                 ;; "reset" / "default" — revert to the CONFIGURED default model
-                 ;; (-m / settings :model), not the role's hardcoded model.
-                                 (or (= role-name "reset") (= role-name "default"))
-                                 (let [spec (plan-mode/default-model-spec api)]
-                                   (.dispatch api "role-changed" {:role :default})
-                                   (swap! (.-__state-atom api) assoc :active-role :default :escalated-to nil)
-                                   (when spec (.setModel api spec))
-                                   (.notify (.-ui ctx) (str "Role: default → " (or spec "default model")) "info"))
-
-                 ;; Known role — switch (keywords are strings in squint, so
-                 ;; role-name is already the lookup key).
-                                 (get roles role-name)
-                                 (let [role-cfg (get roles role-name)
-                                       model-id (or (:model role-cfg) (get role-cfg "model"))
-                                       provider (or (:provider role-cfg) (get role-cfg "provider"))]
-                                   (swap! (.-__state-atom api) assoc :active-role role-name :escalated-to nil)
-                                   (when (and provider model-id)
-                                     (.setModel api (str provider "/" model-id)))
-                                   (.notify (.-ui ctx) (str "Role: " role-name " → " provider "/" model-id)))
+                 ;; reset/default or a known role — the one switch path.
+                                 (activate-role! role-name (fn [m lvl] (.notify (.-ui ctx) m lvl)))
+                                 nil
 
                  ;; Unknown role
                                  :else
@@ -321,18 +348,7 @@
                  next-r  (when (seq names)
                            (nth names (mod (inc idx) (count names))))]
              (when next-r
-               (let [role-cfg (get roles next-r)
-                     model-id (or (:model role-cfg) (get role-cfg "model"))
-                     provider (or (:provider role-cfg) (get role-cfg "provider"))]
-                 (swap! (.-__state-atom api) assoc :active-role next-r :escalated-to nil)
-                 (when (and provider model-id)
-                   (.setModel api (str provider "/" model-id)))
-                 (when (.-ui api)
-                   (.notify (.-ui api)
-                            (str "Role: " next-r
-                                 (when (and provider model-id)
-                                   (str " → " provider "/" model-id)))
-                            "info")))))))))
+               (activate-role! next-r ui-notify)))))))
 
     ;; /roles command — list all
     (.registerCommand api "roles"

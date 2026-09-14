@@ -893,6 +893,11 @@
 (defn- fake-api [state-atom sink handlers cwd]
   #js {:getState      (fn [] @state-atom)
        :__state_atom  state-atom
+       ;; Stand-ins for model_roles (owns :active-role) and the store.
+       :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
+                                   (swap! state-atom assoc :active-role (str (.-role d)))))
+       :dispatchState (fn [t _] (when (= "messages-cleared" (str t))
+                                  (swap! state-atom assoc :messages [])))
        :state         (let [store (atom {})]
                         #js {:get    (fn [k] (get @store k))
                              :set    (fn [k v] (swap! store assoc k v))
@@ -1021,6 +1026,11 @@
                  :__state_atom st
                  :getSettings  (fn [] #js {:roles #js {:fast #js {} :deep #js {}
                                                         :advisor #js {} :commit #js {}}})
+                 ;; Stand-ins for model_roles (owns :active-role) and the store.
+                 :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
+                                             (swap! st assoc :active-role (str (.-role d)))))
+                 :dispatchState (fn [t _] (when (= "messages-cleared" (str t))
+                                            (swap! st assoc :messages [])))
                  :state        #js {:get    (fn [k] (get @shared k))
                                     :set    (fn [k v] (swap! shared assoc k v))
                                     :delete (fn [k] (swap! shared dissoc k))
@@ -1119,6 +1129,11 @@
                  :getSettings  (fn [] (or settings
                                           #js {:roles #js {:fast #js {} :deep #js {}
                                                            :advisor #js {} :commit #js {}}}))
+                 ;; Stand-ins for model_roles (owns :active-role) and the store.
+                 :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
+                                             (swap! st assoc :active-role (str (.-role d)))))
+                 :dispatchState (fn [t _] (when (= "messages-cleared" (str t))
+                                            (swap! st assoc :messages [])))
                  :state        #js {:get    (fn [k] (get @shared k))
                                     :set    (fn [k v] (swap! shared assoc k v))
                                     :delete (fn [k] (swap! shared dissoc k))

@@ -41,7 +41,8 @@
    "setLabel" "session"
    "registerStatusSegment" "ui" "unregisterStatusSegment" "ui"
    "registerProvider" "providers" "unregisterProvider" "providers"
-   "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"})
+   "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"
+   "dispatchState" "state"})
 
 (def ui-property-capability
   "`api.ui` is NOT a gated method — extension_scope defines it as a getter that
@@ -108,7 +109,7 @@
    "shortcuts"      ["registerShortcut" "unregisterShortcut"]
    "events"         ["on" "off" "emitGlobal" "events"]
    "messages"       ["sendMessage" "sendUserMessage"]
-   "state"          ["getState" "dispatch" "onStateChange" "state" "__state_atom"]
+   "state"          ["getState" "dispatch" "dispatchState" "onStateChange" "state" "__state_atom"]
    "ui"             ["ui" "registerStatusSegment" "unregisterStatusSegment"]
    "middleware"     ["addMiddleware" "removeMiddleware"]
    "exec"           ["exec"]

@@ -236,6 +236,7 @@
                     ;; below: these touch the running agent's live state.
                     :getState         (gate capabilities :state (.-getState base-api))
                     :dispatch         (gate capabilities :state (.-dispatch base-api))
+                    :dispatchState    (gate capabilities :state (.-dispatchState base-api))
                     :onStateChange    (gate capabilities :state
                                             (fn [listener]
                                               (let [unsub (.onStateChange base-api listener)]

@@ -53,9 +53,14 @@
                  :off          (fn [_e _h] nil)
                  ;; The channel interactive mode actually listens on.
                  :emitGlobal   (fn [ev data]
-                                 (when (= "turn_request" (str ev))
-                                   (swap! reqs conj (str (.-text data))))
+                                 (case (str ev)
+                                   "turn_request" (swap! reqs conj (str (.-text data)))
+                                   ;; stands in for model_roles, which owns :active-role
+                                   "role_change"  (swap! st assoc :active-role (str (.-role data)))
+                                   nil)
                                  nil)
+                 :dispatchState (fn [t _] (when (= "messages-cleared" (str t))
+                                            (swap! st assoc :messages [])))
                  :registerCommand   (fn [_n c] (reset! cmd (.-handler c)))
                  :unregisterCommand (fn [_n] nil)
                  :sendUserMessage   (fn [m _o] (swap! sent conj m))

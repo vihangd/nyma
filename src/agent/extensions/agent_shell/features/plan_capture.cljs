@@ -343,7 +343,8 @@
                              (when-not execute?
                                (str "\n  next: /spec import " spec-name " --run"))))
             (when execute?
-              (swap! (aget api "__state_atom") assoc :active-role role)
+              ;; model_roles owns :active-role; ask it to switch.
+              ((.-emitGlobal api) "role_change" #js {:role role :source "plan-capture"})
               (notify api (str "▸ role: " role " · executing"))
               ((.-sendUserMessage api)
                (str "Execute the plan in `" rel "`. Read it first, then work "

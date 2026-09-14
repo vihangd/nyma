@@ -203,6 +203,9 @@
   (let [notes (atom []) sent (atom []) st (atom {})]
     {:api #js {:ui #js {:notify (fn [m & _] (swap! notes conj m)) :available true}
                :__state_atom st
+               ;; Stands in for model_roles, which owns :active-role.
+               :emitGlobal (fn [ev d] (when (= "role_change" (str ev))
+                                        (swap! st assoc :active-role (str (.-role d)))))
                :sendUserMessage (fn [m _o] (swap! sent conj m))
                :registerCommand (fn [_n _c] nil)
                :unregisterCommand (fn [_n] nil)}

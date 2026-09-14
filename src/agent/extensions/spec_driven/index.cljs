@@ -999,7 +999,10 @@
         bind-role!  (fn [phase notify-fn]
                       (let [cfg (phases/config (safe-settings))
                             r   (phases/resolve-role cfg (get-profile) phase (known-roles))]
-                        (swap! (.-__state-atom api) assoc :active-role (:role r))
+                        ;; model_roles owns :active-role: it switches the
+                        ;; model too, and knows what "default" means.
+                        (when-let [emit (.-emitGlobal api)]
+                          (emit "role_change" #js {:role (:role r) :source "spec-driven"}))
                         (when (and (:fell-back? r) notify-fn)
                           (notify-fn (str "spec: " (:reason r))))
                         r))
@@ -1509,8 +1512,8 @@
                         (if append!
                           (append! #js {:role "system" :content seed})
                           (when-let [a (aget ctx "agent")]
-                            (swap! (:state a) update :messages
-                                   conj {:role "system" :content seed})))
+                            ((:dispatch! (:store a)) :message-added
+                                                     {:message {:role "system" :content seed}})))
                         (.notify (.-ui ctx)
                                  (str "✓ Clarify session seeded for " target ".\n"
                                       "Send any message to begin "
@@ -1992,17 +1995,15 @@
                                  ov (or (:spec-loop-fresh st) (get st "spec-loop-fresh"))]
                              (if (some? ov) (boolean ov)
                                  (boolean (:fresh-context (:loop cfg))))))
-          ;; Ralph's reset. The store shares this atom (core.cljs:110 passes it
-          ;; to create-agent-store), and compaction.cljs does the same surgery
-          ;; the same way, so a direct swap! is the established path — note
-          ;; api.dispatch only EMITS an event, it does not run store reducers.
+          ;; Ralph's reset, through the store's `messages-cleared` reducer
+          ;; (api.dispatch only EMITS an event; dispatchState runs reducers).
           ;;
           ;; Fires BEFORE the follow-up is enqueued, and agent_end runs before
           ;; the follow-queue drain (loop.cljs:586), so the next turn starts
           ;; with just the reset message. Spec docs are re-read from disk by
           ;; context_assembly every turn, which is what carries state across.
           reset-context! (fn []
-                           (swap! (.-__state-atom api) assoc :messages []))
+                           ((.-dispatchState api) "messages-cleared" #js {}))
           ;; `/spec import --run` cannot arm immediately: import scaffolds
           ;; tasks.md from a TEMPLATE (with placeholder "First task" /
           ;; "Second task" checkboxes) and queues an LLM turn to decompose the

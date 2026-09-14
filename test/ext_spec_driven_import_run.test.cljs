@@ -82,6 +82,11 @@
                                        :notify (fn [m & _] (swap! notes conj m))}
                :__state_atom      st
                :getState          (fn [] @st)
+               ;; Stand-ins for model_roles (owns :active-role) and the store.
+               :emitGlobal    (fn [ev d] (when (= "role_change" (str ev))
+                                           (swap! st assoc :active-role (str (.-role d)))))
+               :dispatchState (fn [t _] (when (= "messages-cleared" (str t))
+                                          (swap! st assoc :messages [])))
                :registerCommand   (fn [n c] (swap! cmds assoc n c))
                :unregisterCommand (fn [n] (swap! cmds dissoc n))
                :registerStatusSegment (fn [_ _] nil)

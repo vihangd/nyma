@@ -68,12 +68,13 @@
           (let [msg (str (or (.-message data) ""))]
             (when (and (context-length-error? msg) (not @fired))
               (reset! fired true)
-              ;; Read messages directly from state atom
-              (when-let [state-atom (.-__state_atom api)]
-                (let [msgs    (:messages @state-atom)
+              ;; Through the store (`messages-replaced` reducer), not a raw
+              ;; swap! on the shared atom.
+              (when (.-dispatchState api)
+                (let [msgs    (:messages (.getState api))
                       pruned  (prune-messages (vec msgs) 2 20)]
                   (when (< (count pruned) (count msgs))
-                    (swap! state-atom assoc :messages pruned)
+                    ((.-dispatchState api) "messages-replaced" {:messages pruned})
                     (d/warn
                      (str "[small-model/context-relief] Pruned "
                           (- (count msgs) (count pruned))
