@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 — unreleased
+## 0.9.0 — 2026-09-15
 
 A peer-comparison sweep against Claude Code and pi, then a correctness review of everything
 it added.
@@ -42,6 +42,18 @@ it added.
 - `home/dir`: one place that resolves the home directory, from `HOME` first.
 
 ### Fixed
+- `/compact` reports what actually happened: which summariser ran and why the extension
+  summary was rejected, instead of "Nothing to compact" after compacting.
+- Escape and Ctrl-C mid-stream show `ℹ aborted`, not `✗ unknown error`.
+- Session files are `<ms>-<random>.jsonl`; two instances started in the same millisecond no
+  longer write to one file.
+- Warnings and errors go to `~/.nyma/debug.log` while the TUI is up instead of painting raw
+  log lines over the transcript.
+- The permission prompt shows the command you typed, not bash-suite's `unset LD_PRELOAD …`
+  wrapper; a denied call runs no PostToolUse hook, so the denial reaches the model clean.
+- `/planmode cancel` says what to do next; `/mcp-status` lists each candidate config file on
+  one line; the "no tools for two turns" stall warning waits for three and for a tool to have
+  run at all.
 - A turn requested from inside a slash command (a prompt template, `/spec import --run`) no
   longer vanishes under the submit lock; if the lock never clears it is queued as a follow-up.
 - `/review` with no arguments sends an empty `$ARGUMENTS`, not the literal text; a skill body
