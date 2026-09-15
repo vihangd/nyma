@@ -32,8 +32,11 @@
 
       ;; Read commands from stdin as JSONL. Not node:readline — it also splits
       ;; on U+2028/U+2029, which are legal inside a JSON string.
+      ;; EOF on stdin means the host is gone; without this the process sat
+      ;; forever on an idle event loop (`nyma --mode rpc </dev/null` hung).
       (reset! stop-reading
-              (read-lines! js/process.stdin (partial handle-line agent)))
+              (read-lines! js/process.stdin (partial handle-line agent)
+                           (fn [] (js/process.exit 0))))
 
       ;; Return a cleanup thunk — call it to deregister all handlers
       (fn []

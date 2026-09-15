@@ -175,14 +175,15 @@
                           :execId (:execId d)
                           :result (str (or (:result d) ""))
                           :isError (boolean (:isError d))}))]
+         ;; No agent_end line: the bus carries it twice per run (the AI SDK
+         ;; finish chunk and the loop's own emit) and `result` is the terminal
+         ;; line a reader should wait for.
          ["turn_end"
           ;; Usage lives on the StepResult; absent stays absent so "no usage
           ;; reported" is not mistaken for a free turn.
           (fn [step]
             (when-let [u (step-usage step)]
-              (write-line! (assoc u :type "usage"))))]
-         ["agent_end"
-          (fn [_] (write-line! {:type "agent_end"}))]]]
+              (write-line! (assoc u :type "usage"))))]]]
     (doseq [[ev h] handlers] (on ev h))
     (fn [] (doseq [[ev h] handlers] (off ev h)))))
 

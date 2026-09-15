@@ -11,6 +11,7 @@
    `interactive.cljs` is UI code and not directly loadable here, so the tests
    mirror its decision function exactly — see `submit!` below."
   (:require ["bun:test" :refer [describe it expect]]
+            [agent.modes.interactive :as interactive]
             [clojure.string :as str]
             [agent.events :refer [create-event-bus]]))
 
@@ -188,49 +189,59 @@
 ;;; ─── turn_request ──────────────────────────────────────────────────────────
 ;;
 ;; `sendUserMessage` only queues: `steer` needs a run already in flight,
-;; `followUp` drains at a turn boundary. Neither BEGINS a turn, so an extension
-;; that wanted to start work could do nothing but print "send any message to
-;; start" — which /spec import --run, /spec analyze and /spec run all did, and
-;; which reads as the feature not working. `turn_request` is the missing verb.
-;;
-;; Routed through the same submit path a typed message takes, so a requested
-;; turn gets the lock, the streaming state and the pane wiring. Mirrors the
-;; handler in interactive.cljs.
-
-(defn- turn-request!
-  "Mirrors interactive.cljs on-turn-request."
-  [{:keys [locked? dispatched echoed]} data]
-  (let [text (str (or (and data (.-text data)) ""))]
-    (when (and (seq (.trim text)) (not @locked?))
-      (when (and data (.-echo data)) (swap! echoed conj text))
-      (swap! dispatched conj text))
-    nil))
+;; `followUp` drains at a turn boundary. Neither BEGINS a turn. `turn_request`
+;; is the missing verb, and this exercises the REAL handler factory — not a
+;; copy of it. The copy this replaced pinned "declines while locked", which is
+;; exactly the behaviour that made prompt-template commands and
+;; `/spec import --run` vanish: they emit from inside a slash handler, while
+;; the dispatcher still holds the lock.
 
 (defn- req-state [locked]
-  {:locked? (atom locked) :dispatched (atom []) :echoed (atom [])})
+  (let [st {:locked? (atom locked) :dispatched (atom []) :echoed (atom []) :queue (atom [])}]
+    (assoc st :handler
+           (interactive/make-turn-request-handler
+            {:locked?     (:locked? st)
+             :dispatch!   (fn [t] (swap! (:dispatched st) conj t))
+             :echo!       (fn [t] (swap! (:echoed st) conj t))
+             :schedule    (fn [f] (swap! (:queue st) conj f))
+             :max-retries 3}))))
+
+(defn- run-queue! [st]
+  (let [fs @(:queue st)] (reset! (:queue st) []) (doseq [f fs] (f))))
 
 (describe "turn_request" (fn []
 
   (it "dispatches the requested text"
       (fn []
         (let [st (req-state false)]
-          (turn-request! st #js {:text "do the next task"})
+          ((:handler st) #js {:text "do the next task"})
           (-> (expect @(:dispatched st)) (.toEqual #js ["do the next task"])))))
 
-  (it "declines while a turn is already in flight"
+  (it "waits out a held lock and dispatches once it is released"
       (fn []
-        ;; The follow-up queue is the right mechanism then — starting a second
-        ;; turn on top of a running one is how you get two loops.
         (let [st (req-state true)]
-          (turn-request! st #js {:text "go"})
-          (-> (expect (count @(:dispatched st))) (.toBe 0)))))
+          ((:handler st) #js {:text "go" :echo true})
+          (-> (expect (count @(:dispatched st))) (.toBe 0))
+          (-> (expect (count @(:queue st))) (.toBe 1))
+          (reset! (:locked? st) false)
+          (run-queue! st)
+          (-> (expect @(:dispatched st)) (.toEqual #js ["go"]))
+          (-> (expect @(:echoed st)) (.toEqual #js ["go"])))))
+
+  (it "gives up after max-retries instead of spinning on a stuck lock"
+      (fn []
+        (let [st (req-state true)]
+          ((:handler st) #js {:text "go"})
+          (dotimes [_ 5] (run-queue! st))
+          (-> (expect (count @(:dispatched st))) (.toBe 0))
+          (-> (expect (count @(:queue st))) (.toBe 0)))))
 
   (it "ignores empty and whitespace-only requests"
       (fn []
         (let [st (req-state false)]
-          (turn-request! st #js {:text "   "})
-          (turn-request! st #js {:text ""})
-          (turn-request! st #js {})
+          ((:handler st) #js {:text "   "})
+          ((:handler st) #js {:text ""})
+          ((:handler st) #js {})
           (-> (expect (count @(:dispatched st))) (.toBe 0)))))
 
   (it "echoes only when asked"
@@ -238,8 +249,8 @@
         ;; The loop's continue-prompt is machinery, not something the user
         ;; typed; echoing it every turn would bury the actual work.
         (let [st (req-state false)]
-          (turn-request! st #js {:text "internal prompt"})
+          ((:handler st) #js {:text "internal prompt"})
           (-> (expect (count @(:echoed st))) (.toBe 0)))
         (let [st (req-state false)]
-          (turn-request! st #js {:text "visible" :echo true})
+          ((:handler st) #js {:text "visible" :echo true})
           (-> (expect @(:echoed st)) (.toEqual #js ["visible"])))))))

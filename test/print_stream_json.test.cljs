@@ -55,10 +55,12 @@
                         evs   (parsed lines)]
                     (off)
                     ;; every line parses — `parsed` would have thrown otherwise
-                    (-> (expect (count evs)) (.toBe 6))
+                    ;; agent_end is deliberately absent: the bus emits it twice per
+                    ;; run and `result` is the line a reader waits for.
+                    (-> (expect (count evs)) (.toBe 5))
                     (-> (expect (mapv #(.-type %) evs))
                         (.toEqual #js ["message_start" "message_update" "message_update"
-                                       "message_end" "usage" "agent_end"]))
+                                       "message_end" "usage"]))
                     (-> (expect (.-text (nth evs 1))) (.toBe "hel"))
                     (-> (expect (.-text (nth evs 2))) (.toBe "lo"))
                     (-> (expect (.-inputTokens (nth evs 4))) (.toBe 12))

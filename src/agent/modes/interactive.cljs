@@ -138,6 +138,32 @@
   [trimmed]
   (first (str/split (subs (str trimmed) 1) #"\s+")))
 
+(defn make-turn-request-handler
+  "Handler for `turn_request`: an extension (or a prompt-template command)
+   asking to START a turn. Goes through `dispatch!` so the turn gets the same
+   lock, streaming state and pane wiring a typed message does.
+
+   The lock is the subtle part. A slash command runs with `locked?` held and
+   releases it in its .finally, and a prompt template or `/spec import --run`
+   emits the request FROM INSIDE that handler — so checking the lock once and
+   dropping the request meant every such turn vanished with no message. While
+   locked, `schedule` retries (50 ms in production; the test passes a queue),
+   giving up after `max-retries` so a stuck lock cannot spin forever."
+  [{:keys [locked? dispatch! echo! schedule max-retries]
+    :or   {max-retries 600}}]
+  (fn handle
+    ([data] (handle data 0))
+    ([data attempt]
+     (let [text  (str (or (and data (.-text data)) ""))
+           echo? (boolean (and data (.-echo data)))]
+       (when (seq (.trim text))
+         (cond
+           (not @locked?)          (do (when echo? (echo! text))
+                                       (dispatch! text))
+           (< attempt max-retries) (schedule (fn [] (handle data (inc attempt))))
+           :else                   nil))
+       nil))))
+
 (defn mark-streaming!
   "Mirror the streaming flag into the agent's state atom.
 
@@ -895,25 +921,14 @@
               (h data)
               (sync-status!)))
 
-          ;; An extension asking to START a turn. `sendUserMessage` only
-          ;; queues — steer needs a run in flight, follow-up drains at a turn
-          ;; boundary — so anything wanting to begin work could do nothing but
-          ;; print "send any message to start". Three separate features shipped
-          ;; with that instruction before it was worth fixing properly.
-          ;;
-          ;; Routed through `dispatch-submit!` rather than `run` directly, so a
-          ;; requested turn gets the same lock, streaming state and pane wiring
-          ;; a typed one does. Declined while a turn is already in flight: the
-          ;; follow-up queue is the right mechanism then, and it is what the
-          ;; caller falls back to.
+          ;; An extension asking to START a turn — see make-turn-request-handler
+          ;; for why it waits out the lock instead of declining.
           on-turn-request
-          (fn [data]
-            (let [text (str (or (and data (.-text data)) ""))]
-              (when (and (seq (.trim text)) (not @submit-lock))
-                (when-let [echo (and data (.-echo data))]
-                  (when echo (add-user-msg! text)))
-                (dispatch-submit! text))
-              nil))]
+          (make-turn-request-handler
+           {:locked?   submit-lock
+            :dispatch! dispatch-submit!
+            :echo!     add-user-msg!
+            :schedule  (fn [f] (js/setTimeout f 50))})]
 
       ;; Subscribe to tool lifecycle events
       ((:on events) "tool_execution_start"  on-tool-start)

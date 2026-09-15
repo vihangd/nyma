@@ -389,7 +389,6 @@ Runs once with the given prompt, prints the response, and exits. Useful for scri
 {"type":"tool_execution_end","toolName":"read","execId":"…","result":"…","isError":false}
 {"type":"usage","inputTokens":120,"outputTokens":34}
 {"type":"message_end"}
-{"type":"agent_end"}
 {"type":"result","is_error":false,"result":"…",…}
 ```
 
