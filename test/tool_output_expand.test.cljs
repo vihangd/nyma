@@ -70,6 +70,32 @@
                                              (-> (expect (nth text 1)) (.toBe "  hello"))
                                              (-> (expect (nth text 2)) (.toBe "  world")))))
 
+                                     (it "an expanded bash shows stdout lines, not the JSON envelope"
+                                         (fn []
+                                           (let [env  (js/JSON.stringify #js {:stdout "l1\nl2\n" :stderr "" :exitCode 0
+                                                                              :timedOut false :signal nil :aborted false})
+                                                 text (mapv strip-ansi (render (end-msg {:expanded true :result env})))]
+                                             (-> (expect (count text)) (.toBe 3))
+                                             (-> (expect (nth text 1)) (.toBe "  l1"))
+                                             (-> (expect (nth text 2)) (.toBe "  l2"))
+                                             (-> (expect (.includes (.join (to-array text) "\n") "{")) (.toBe false)))))
+
+                                     (it "an expanded bash prefixes stderr with ! and shows a non-zero exit"
+                                         (fn []
+                                           (let [env   (js/JSON.stringify #js {:stdout "ok" :stderr "boom\n" :exitCode 2})
+                                                 lines (render (end-msg {:expanded true :result env}))
+                                                 text  (mapv strip-ansi lines)]
+                                             (-> (expect (nth text 1)) (.toBe "  ok"))
+                                             (-> (expect (nth text 2)) (.toBe "  !boom"))
+                                             (-> (expect (nth text 3)) (.toBe "  exit 2"))
+                                             (-> (expect (.includes (nth lines 2) (fg "#f7768e"))) (.toBe true)))))
+
+                                     (it "a bash result that is not an envelope still renders as-is"
+                                         (fn []
+                                           (let [text (mapv strip-ansi (render (end-msg {:expanded true :result "plain\ntext"})))]
+                                             (-> (expect (nth text 1)) (.toBe "  plain"))
+                                             (-> (expect (nth text 2)) (.toBe "  text")))))
+
                                      (it "a failed call previews its error even when collapsed"
                                          (fn []
                                            (let [lines (render (end-msg {:expanded false :is-error true

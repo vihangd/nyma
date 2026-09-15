@@ -136,16 +136,41 @@
 (defn- plain-rows [prefix s]
   (mapv (fn [l] [prefix l]) (split-lines (str (or s "")))))
 
+(defn- bash-envelope
+  "The `{stdout, stderr, exitCode}` JSON string `bash-execute` returns, parsed —
+   nil for anything else (an older plain-text result, a tool that borrowed the
+   `bash` name) so the caller falls back to showing the raw result."
+  [result]
+  (let [obj (try (js/JSON.parse (str result)) (catch :default _ nil))]
+    (when (and obj (object? obj) (or (js-in "stdout" obj) (js-in "stderr" obj)))
+      obj)))
+
+(defn- bash-rows
+  "stdout as-is, stderr prefixed `!`, then `exit N` when non-zero. The model
+   reads the envelope; the user wants the command's output."
+  [obj {:keys [ec mc]}]
+  (let [dim-mc (str mc DIM)
+        out    (str (or (aget obj "stdout") ""))
+        err    (str (or (aget obj "stderr") ""))
+        code   (aget obj "exitCode")]
+    (cond-> []
+      (seq out)  (into (plain-rows dim-mc out))
+      (seq err)  (into (mapv (fn [[p l]] [p (str "!" l)]) (plain-rows ec err)))
+      (and (number? code) (not (zero? code))) (conj [ec (str "exit " code)]))))
+
 (defn- tool-body-rows
   "`[style-prefix text]` rows for a finished tool's expanded view.
    `edit` shows a line diff of old_string → new_string (the tool's own result
-   is only \"Edit applied\"), `write` the content it wrote, everything else its
-   result. A failure shows the result whatever the tool: the error is the
-   information, not the diff that never applied."
+   is only \"Edit applied\"), `write` the content it wrote, `bash` the stdout
+   and stderr out of its JSON envelope, everything else its result. A failure
+   shows the result whatever the tool: the error is the information, not the
+   diff that never applied."
   [tname msg is-error {:keys [ec gc mc]}]
-  (let [dim-mc (str mc DIM)]
+  (let [dim-mc (str mc DIM)
+        bash   (when (= tname "bash") (bash-envelope (:result msg)))]
     (cond
       is-error         (plain-rows dim-mc (:result msg))
+      bash             (bash-rows bash {:ec ec :mc mc})
       (= tname "edit") (mapv (fn [[op s]]
                                (case op
                                  :- [ec (str "-" s)]
