@@ -1,6 +1,7 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require [agent.ui.themes :refer [icon]]
+  (:require [clojure.string :as str]
+            [agent.ui.themes :refer [icon]]
             ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [agent.utils.ansi :as ansi :refer [fg]]
             [agent.utils.markdown-blocks :as mb]
@@ -136,19 +137,50 @@
 (defn- plain-rows [prefix s]
   (mapv (fn [l] [prefix l]) (split-lines (str (or s "")))))
 
+(defn- leading-json-object
+  "[object-text rest] — the first top-level `{…}` in `s` (string-aware, so a
+   `}` inside a JSON string does not end it) and whatever follows. nil when
+   `s` does not start with an object."
+  [s]
+  (let [s (str/triml (str s)) n (count s)]
+    (when (str/starts-with? s "{")
+      (loop [i 0 depth 0 in-str? false esc? false]
+        (when (< i n)
+          (let [c (nth s i)]
+            (cond
+              esc?          (recur (inc i) depth in-str? false)
+              (and in-str? (= c "\\")) (recur (inc i) depth true true)
+              (= c "\"")   (recur (inc i) depth (not in-str?) false)
+              in-str?       (recur (inc i) depth true false)
+              (= c "{")     (recur (inc i) (inc depth) false false)
+              (= c "}")     (if (= depth 1)
+                              [(subs s 0 (inc i)) (subs s (inc i))]
+                              (recur (inc i) (dec depth) false false))
+              :else         (recur (inc i) depth false false))))))))
+
 (defn- bash-envelope
-  "The `{stdout, stderr, exitCode}` JSON string `bash-execute` returns, parsed —
-   nil for anything else (an older plain-text result, a tool that borrowed the
-   `bash` name) so the caller falls back to showing the raw result."
+  "The `{stdout, stderr, exitCode}` JSON string `bash-execute` returns, parsed
+   as `{:obj … :rest \"…\"}` — nil for anything else (an older plain-text
+   result, a tool that borrowed the `bash` name) so the caller falls back to
+   showing the raw result.
+
+   Two things sit between the tool and this string. The middleware hard-wraps
+   the result to terminal width (`truncate-text`), so a long envelope arrives
+   with raw newlines inside the JSON — JSON.stringify never emits one, so they
+   are dropped. And a PostToolUse hook's stdout is appended after the
+   envelope (\"Session status updated.\"), so only the leading object is
+   parsed and the rest is kept for display."
   [result]
-  (let [obj (try (js/JSON.parse (str result)) (catch :default _ nil))]
-    (when (and obj (object? obj) (or (js-in "stdout" obj) (js-in "stderr" obj)))
-      obj)))
+  (let [flat (str/replace (str result) "\n" "")]
+    (when-let [[obj-text rest] (leading-json-object flat)]
+      (let [obj (try (js/JSON.parse obj-text) (catch :default _ nil))]
+        (when (and obj (object? obj) (or (js-in "stdout" obj) (js-in "stderr" obj)))
+          {:obj obj :rest (str/trim rest)})))))
 
 (defn- bash-rows
   "stdout as-is, stderr prefixed `!`, then `exit N` when non-zero. The model
    reads the envelope; the user wants the command's output."
-  [obj {:keys [ec mc]}]
+  [{:keys [obj rest]} {:keys [ec mc]}]
   (let [dim-mc (str mc DIM)
         out    (str (or (aget obj "stdout") ""))
         err    (str (or (aget obj "stderr") ""))
@@ -156,7 +188,10 @@
     (cond-> []
       (seq out)  (into (plain-rows dim-mc out))
       (seq err)  (into (mapv (fn [[p l]] [p (str "!" l)]) (plain-rows ec err)))
-      (and (number? code) (not (zero? code))) (conj [ec (str "exit " code)]))))
+      (and (number? code) (not (zero? code))) (conj [ec (str "exit " code)])
+      ;; Hook stdout appended after the envelope — a PostToolUse hook's
+      ;; "Session status updated." — is information too, just not the command's.
+      (seq rest) (into (plain-rows dim-mc rest)))))
 
 (defn- tool-body-rows
   "`[style-prefix text]` rows for a finished tool's expanded view.

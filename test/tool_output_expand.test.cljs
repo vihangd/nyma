@@ -80,6 +80,27 @@
                                              (-> (expect (nth text 2)) (.toBe "  l2"))
                                              (-> (expect (.includes (.join (to-array text) "\n") "{")) (.toBe false)))))
 
+                                     (it "an expanded bash still shows stdout lines when the envelope was hard-wrapped to terminal width"
+                                         (fn []
+                                           (let [env  (js/Bun.wrapAnsi (js/JSON.stringify #js {:stdout "l1\nl2\n" :stderr "" :exitCode 0
+                                                                              :timedOut false :signal nil :aborted false}) 40 #js {:hard true})
+                                                 text (mapv strip-ansi (render (end-msg {:expanded true :result env})))]
+                                             (-> (expect (count text)) (.toBe 3))
+                                             (-> (expect (nth text 1)) (.toBe "  l1"))
+                                             (-> (expect (nth text 2)) (.toBe "  l2"))
+                                             (-> (expect (.includes (.join (to-array text) "\n") "{")) (.toBe false)))))
+
+                                     (it "an expanded bash still parses the envelope when a hook appended text after it"
+                                         (fn []
+                                           ;; PostToolUse hook stdout lands after the JSON; a `}` inside
+                                           ;; stdout must not end the object early.
+                                           (let [env  (str (js/JSON.stringify #js {:stdout "a } b\n" :stderr "" :exitCode 0})
+                                                           "\nSession status updated.\n")
+                                                 text (mapv strip-ansi (render (end-msg {:expanded true :result env})))]
+                                             (-> (expect (nth text 1)) (.toBe "  a } b"))
+                                             (-> (expect (nth text 2)) (.toBe "  Session status updated."))
+                                             (-> (expect (.includes (.join (to-array text) "\n") "{")) (.toBe false)))))
+
                                      (it "an expanded bash prefixes stderr with ! and shows a non-zero exit"
                                          (fn []
                                            (let [env   (js/JSON.stringify #js {:stdout "ok" :stderr "boom\n" :exitCode 2})
