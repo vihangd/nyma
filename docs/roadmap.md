@@ -1641,3 +1641,34 @@ Deliberately left:
 - Provider helper duplication (`resolve-api-key` ×7, `->js-model` ×9, `load-config` ×8)
   is the existing provider-factory item above, not a new finding.
 
+### 2026-09-15 — live smoke + test-gap sweep
+
+A live drive of the binary (expect-scripted TUI, print mode against the real default model)
+found what the suite could not: prompt-template commands and `/spec import --run` emitted
+`turn_request` while the slash dispatcher held the submit lock, and the listener dropped it
+(tests exercised a copy of the handler). Fixed; the handler is now a real, tested function.
+A test-gap audit then drove: `agent_end` emitted twice per run (AI SDK `finish` chunk +
+explicit emit) — fixed at the source; the submit dispatcher, Ctrl-C and side channels
+extracted into factories tested with fakes; a CLI end-to-end harness against a scripted
+fake model server (`test/test_util/fake_model_server.cljs`, `test/cli_e2e.test.cljs`);
+permission mode × category matrix through the real gate; activation tests for the ten
+extensions whose `index` no test required; gateway channel/pool, SDK and hook-bridge
+payload tests. Real bugs those tests surfaced and fixed: Slack channel constructed its
+SDK classes without `new` (never worked); HTTP webhook replied with empty text; email
+conversation id regex non-global; gateway batch-on-end delivered twice; SDK sessions had
+no system prompt; `/history` and `/stats` never found the SQLite store (scoped api did
+not forward it, and the reader used a munged property); rpc mode idled forever on stdin
+EOF; a `process.exit` inside a test ended the run green with no summary (preload now
+makes it throw).
+
+Known, deliberately left:
+- A model with no pricing entry (e.g. the default `glm-5.3-flash`) reports `total_cost_usd: 0`
+  and hides the cost segment. Honest would be `null` / "n/a"; needs a pricing-unknown
+  flag through `calculate-turn-cost` and the status line.
+- Hook-bridge payload field names diverged from Claude Code's (`tool_result` vs
+  `tool_response`, hardcoded `session_id` outside PreToolUse) — fix in flight.
+- "other"/"mcp" tool categories are `allow` in every permission mode (no metadata → no
+  policy); MCP hardening item above.
+- `~/.nyma/debug.log` accumulates test-fixture compaction warnings (13 MB) — some test
+  writes past the scratch HOME; find the writer.
+
