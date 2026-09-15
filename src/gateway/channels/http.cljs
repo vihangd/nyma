@@ -153,11 +153,14 @@
               tms      (or timeout-ms 120000)
               timer    (js/setTimeout
                         (fn [] (when @rej-atom
-                                 ((@rej-atom) (js/Error. "timeout"))))
+                                 (@rej-atom (js/Error. "timeout"))))
                         tms)
               resolve-fn (fn [text]
                            (js/clearTimeout timer)
-                           (when @res-atom ((@res-atom) text)))
+                           ;; `(@res-atom)` called the resolver with no
+                           ;; value and then tried to call its result, so
+                           ;; every sync reply was `{text: ""}`.
+                           (when @res-atom (@res-atom text)))
               resp-ctx (make-response-ctx cid channel-name resolve-fn)]
           (on-message-fn msg resp-ctx)
           (try
@@ -180,6 +183,10 @@
               cid     (:conversation-id msg)
               job-id  (str (js/Date.now) "-" (.toString (js/Math.random) 36))
               resolve (fn [text] ((:put! job-store) job-id {:status "done" :text (or text "")}))]
+          ;; Record the job before the agent runs: a client polling in the
+          ;; window before :done otherwise got 404 not_found for a job it had
+          ;; just been handed, instead of the 202 pending the header promises.
+          ((:put! job-store) job-id {:status "pending"})
           (let [resp-ctx (make-response-ctx cid channel-name resolve)]
             (on-message-fn msg resp-ctx))
           (json-response 202 {:job_id job-id}))))))

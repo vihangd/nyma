@@ -123,8 +123,12 @@
      (fn [on-message-fn]
        (.. (load-slack-sdk)
            (then (fn [sdk]
-                   (let [web-client ((:WebClient sdk) bot-token)
-                         smc        ((:SocketModeClient sdk) #js {:appToken app-token})]
+                   ;; Both SDK exports are ES classes: calling them without
+                   ;; `new` throws, so start! never got past this line.
+                   (let [WebClient       (:WebClient sdk)
+                         SocketModeClient (:SocketModeClient sdk)
+                         web-client (new WebClient bot-token)
+                         smc        (new SocketModeClient #js {:appToken app-token})]
                      (reset! client-atom web-client)
                      (reset! smc-atom smc)
 
@@ -133,7 +137,10 @@
                      (.on smc "slack_event"
                           (fn [data]
                             ;; ACK first, then handle
-                            (when (.-ack data) ((.ack data)))
+                            ;; `((.ack data))` acked and then called the
+                            ;; returned promise, throwing before any
+                            ;; message was handled.
+                            (when (.-ack data) (.ack data))
                             (let [body  (.-body data)
                                   event (when body (.-event body))]
                               (when (and event
@@ -173,7 +180,8 @@
        (js/console.log (str "\nSlack channel: " channel-name))
        (.. (load-slack-sdk)
            (then (fn [sdk]
-                   (let [web-client ((:WebClient sdk) bot-token)]
+                   (let [WebClient  (:WebClient sdk)
+                         web-client (new WebClient bot-token)]
                      (.. (.test (.-auth web-client) #js {})
                          (then (fn [resp]
                                  (js/console.log

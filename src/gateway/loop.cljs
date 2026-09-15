@@ -105,15 +105,23 @@
                          :tool-end
                          {:name (.-toolName data) :id (.-execId data)
                           :error (.-isError data)}))
+        ended?        (atom false)
         on-agent-end  (fn [data]
                         ;; Flush the streaming buffer, then signal done.
-                        ;; agent_end has two producers: the explicit emits, which
-                        ;; carry :text, and the stream-chunk mapping
+                        ;; agent_end has two producers: the stream-chunk mapping
                         ;; "finish" -> "agent_end", which hands over the raw
-                        ;; finish part with no text at all. Coerce so the second
-                        ;; arm flushes "" rather than the string "undefined".
-                        ((:on-end sp-handler) (or (.-text data) ""))
-                        ((:meta! response-ctx) :done {}))]
+                        ;; finish part with no text, and then the explicit emit
+                        ;; carrying :text. Both fire on every normal run, so
+                        ;; without the guard :batch-on-end flushed the buffer on
+                        ;; the first and re-sent the full text on the second —
+                        ;; a duplicate reply on any channel whose stream! posts
+                        ;; rather than edits — and :done reached the channel
+                        ;; twice. Coerce the text so the raw arm flushes ""
+                        ;; rather than the string "undefined".
+                        (when-not @ended?
+                          (reset! ended? true)
+                          ((:on-end sp-handler) (or (.-text data) ""))
+                          ((:meta! response-ctx) :done {})))]
 
     (on-evt "message_update"       on-update)
     (on-evt "tool_execution_start" on-tool-start)

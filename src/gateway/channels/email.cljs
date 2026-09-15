@@ -178,7 +178,9 @@
                     thread-root (or in-reply-to msg-id)
                     conv-id     (str "email:"
                                      (-> (or thread-root "unknown")
-                                         (.replace #"[<> ]" "-")))
+                                         ;; A global regex — without the flag only
+                                         ;; the opening `<` was rewritten.
+                                         (.replace (js/RegExp. "[<> ]" "g") "-")))
                     reply-opts  {:from        from-addr
                                  :to          from
                                  :subject     (reply-subject subject)

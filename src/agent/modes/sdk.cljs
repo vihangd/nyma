@@ -5,7 +5,7 @@
             [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.extension-loader :refer [discover-and-load]]
+            [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [clojure.string :as str]))
 
 (defn- temp-session-path []
@@ -31,7 +31,11 @@
      :session-path          — path to JSONL session file (default: temp file)
      :require-capabilities  — #{kw} filter builtin tools by capability
      :exclude-capabilities  — #{kw} exclude tools with any of these capabilities
-     :modes                 — #{kw} filter tools by allowed runtime mode"
+     :modes                 — #{kw} filter tools by allowed runtime mode
+
+   Returned map: :send :send-and-wait :steer :follow-up :on :on-many
+   :interrupt! :agent-state :state :agent :session, and :close — deactivates
+   the extensions this session loaded; call it when the session is done."
   [opts]
   (let [settings  (create-settings-manager)
         resources (js-await (discover {:context-files (:context-files ((:get settings)))}))
@@ -42,7 +46,14 @@
                           (select-keys opts [:model :tools :system-prompt
                                              :require-capabilities
                                              :exclude-capabilities
-                                             :modes])))]
+                                             :modes])
+                          ;; `discover` was called for its context files and
+                          ;; then only read for extension dirs, so an embedder
+                          ;; or gateway with no explicit prompt ran with a nil
+                          ;; system prompt and never saw AGENTS.md / CLAUDE.md.
+                          ;; Same default the CLI builds.
+                          (when-not (:system-prompt opts)
+                            {:system-prompt ((:build-system-prompt resources))})))]
 
     ;; Attach the session so extensions/commands (@(:session agent)) see it,
     ;; and mirror turns to the JSONL — without this, embedder and gateway
@@ -51,52 +62,56 @@
     (attach-session-persistence! agent session)
 
     ;; Load extensions
-    (js-await (discover-and-load
-               (:extension-dirs resources)
-               (create-extension-api agent)
-               (:builtin-extensions resources)))
+    (let [loaded (js-await (discover-and-load
+                            (:extension-dirs resources)
+                            (create-extension-api agent)
+                            (:builtin-extensions resources)))]
 
-    {:agent     agent
-     :session   session
-     :send      (partial run agent)
-     :steer     (partial steer agent)
-     :follow-up (partial follow-up agent)
+      {:agent     agent
+       :session   session
+       ;; Deactivate every extension this session loaded. A gateway that
+       ;; replaces sessions (ephemeral policy) otherwise accumulates one full
+       ;; set of extension handlers per message for the life of the process.
+       :close     (fn [] (deactivate-all loaded))
+       :send      (partial run agent)
+       :steer     (partial steer agent)
+       :follow-up (partial follow-up agent)
 
-     ;; Wait for the run to finish and return the final assistant text.
-     :send-and-wait
-     (fn [text & args]
-       (.. (apply run agent text args)
-           (then (fn [_] (extract-last-assistant-text agent)))))
+       ;; Wait for the run to finish and return the final assistant text.
+       :send-and-wait
+       (fn [text & args]
+         (.. (apply run agent text args)
+             (then (fn [_] (extract-last-assistant-text agent)))))
 
-     ;; Subscribe to multiple events at once. Returns an unsubscribe-all fn.
-     :on-many
-     (fn [handlers-map]
-       (let [unsub-fns (mapv (fn [[event handler]]
-                               (let [ev (name event)]
-                                 ((:on (:events agent)) ev handler)
-                                 (fn [] ((:off (:events agent)) ev handler))))
-                             handlers-map)]
-         (fn [] (doseq [f unsub-fns] (f)))))
+       ;; Subscribe to multiple events at once. Returns an unsubscribe-all fn.
+       :on-many
+       (fn [handlers-map]
+         (let [unsub-fns (mapv (fn [[event handler]]
+                                 (let [ev (name event)]
+                                   ((:on (:events agent)) ev handler)
+                                   (fn [] ((:off (:events agent)) ev handler))))
+                               handlers-map)]
+           (fn [] (doseq [f unsub-fns] (f)))))
 
-     ;; Abort the current run. reason is informational only.
-     :interrupt!
-     (fn [& [_reason]]
-       (.abort @(:abort-controller agent))
-       nil)
+       ;; Abort the current run. reason is informational only.
+       :interrupt!
+       (fn [& [_reason]]
+         (.abort @(:abort-controller agent))
+         nil)
 
-     ;; Derive a coarse agent state keyword from live state.
-     ;; :tool-running — one or more tool calls in flight
-     ;; :idle         — nothing running
-     ;; Not yet reported: :thinking :streaming :awaiting-approval :error.
-     :agent-state
-     (fn []
-       (let [s @(:state agent)]
-         (if (seq (:active-executions s)) :tool-running :idle)))
+       ;; Derive a coarse agent state keyword from live state.
+       ;; :tool-running — one or more tool calls in flight
+       ;; :idle         — nothing running
+       ;; Not yet reported: :thinking :streaming :awaiting-approval :error.
+       :agent-state
+       (fn []
+         (let [s @(:state agent)]
+           (if (seq (:active-executions s)) :tool-running :idle)))
 
-     ;; (name event) like :on-many — core emits string event names, so a
-     ;; keyword subscriber would otherwise silently never fire.
-     :on    (fn [event handler]
-              (let [ev (name event)]
-                ((:on (:events agent)) ev handler)
-                (fn [] ((:off (:events agent)) ev handler))))
-     :state (fn [] @(:state agent))}))
+       ;; (name event) like :on-many — core emits string event names, so a
+       ;; keyword subscriber would otherwise silently never fire.
+       :on    (fn [event handler]
+                (let [ev (name event)]
+                  ((:on (:events agent)) ev handler)
+                  (fn [] ((:off (:events agent)) ev handler))))
+       :state (fn [] @(:state agent))})))

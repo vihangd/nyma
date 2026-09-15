@@ -324,8 +324,10 @@ Request body for `/message` and `/message/async`:
 
 Missing required fields return `400`. `/message/async` answers `202`; a sync
 request that outlives `timeout-ms` answers `504`. `GET /result/<job>` answers
-`404 {status:"not_found"}` for an unknown or expired job — the async job store
-keeps results for 5 minutes.
+`202 {status:"pending"}` while the agent is still running, `200
+{status:"done", text}` once it has finished, and `404 {status:"not_found"}`
+for an unknown or expired job — the async job store keeps results for 5
+minutes.
 
 When `secret` is set, `POST /message` and `POST /message/async` must carry
 `Authorization: Bearer <secret>` or the server returns `401`. `GET /health`
