@@ -2,8 +2,8 @@
   "Every permission mode × every tool category, through the REAL gate:
    model_roles activated by the loader answers `permission_request`, and
    `permission-check-enter` turns that into allow / a prompt / a cancel.
-   model_roles_modes.test used to re-implement the combination step and
-   test the copy; a copy cannot drift-test the original.
+   The real gate, not a re-implementation: a copy cannot drift-test the
+   original.
 
    Also: an active skill's `allowed-tools` answers the ASK for the user and
    nothing more — an explicit deny, from a handler or from a settings role,

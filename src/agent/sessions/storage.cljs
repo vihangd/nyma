@@ -76,19 +76,13 @@
   (let [db (new Database db-path)]
     ;; Enable WAL mode for better concurrent read performance
     (.run (.prepare db "PRAGMA journal_mode=WAL"))
-    ;; Tables exist from the moment the store opens. `:init-schema` used to be
-    ;; a separate step that only tests called — cli never did, so a user's
-    ;; ~/.nyma/nyma.db had no tables and every usage row and prompt-history
-    ;; write failed ("no such table") from the first launch on.
+    ;; Tables exist from the moment the store opens; a separate init step is
+    ;; one more thing a caller can forget (cli did, and a real install had no
+    ;; tables at all).
     (doseq [sql schema-sql]
       (.run (.prepare db sql)))
 
-    {:init-schema
-     ;; Kept for callers that still run it; every statement is IF NOT EXISTS.
-     (fn []
-       (doseq [sql schema-sql]
-         (.run (.prepare db sql))))
-
+    {
      :upsert-entry
      (fn [entry]
        (let [stmt (.prepare db

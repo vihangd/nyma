@@ -1,5 +1,6 @@
 (ns reasoning-stream.test
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require [test-util.sse :refer [sse-response]]
+             ["bun:test" :refer [describe it expect]]
             ["./agent/utils/reasoning_stream.mjs"
              :refer [extract-think-blocks rewrite-assistant-msg wrap-response]]))
 
@@ -80,15 +81,6 @@
                         out (rewrite-assistant-msg msg false)]
                     (-> (expect (.-content out)) (.toBe "no tags here"))
                     (-> (expect (.-reasoning_content out)) (.toBeUndefined)))))))
-
-(defn- sse-response [chunks]
-  (let [encoder (js/TextEncoder.)
-        body (js/ReadableStream.
-              #js {:start (fn [controller]
-                            (doseq [c chunks]
-                              (.enqueue controller (.encode encoder c)))
-                            (.close controller))})]
-    (js/Response. body #js {:headers #js {"content-type" "text/event-stream"}})))
 
 (def ^:private prefill-chunks
   #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"index\":0}]}\n\n"

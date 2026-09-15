@@ -169,9 +169,8 @@
  (fn []
    (it "prints a Conflicts section when keybindings.json puts two actions on one key"
        (fn []
-         ;; ctrl+r is app.history.search by default; binding it to app.help too
-         ;; used to warn only under NYMA_DEBUG, so the user never learned why
-         ;; the key did something other than what they bound.
+         ;; ctrl+r is app.history.search by default; binding it to app.help
+         ;; too must be visible here, not only under NYMA_DEBUG.
          (let [text (kbr/hotkeys-text (kbr/create-registry {"ctrl+r" "app.help"}) {})]
            (-> (expect (.includes text "Conflicts")) (.toBe true))
            (-> (expect (.includes text "app.help, app.history.search")) (.toBe true)))))

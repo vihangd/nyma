@@ -9,7 +9,8 @@
    The identical mistake was live in small_model/quality_monitor at the same
    time, where it destroyed every tool result instead. Two independent
    consumers, one ambiguous return shape; these tests pin both shapes."
-  (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+  (:require [test-util.sse :refer [sse-response]]
+             ["@ai-sdk/openai" :refer [createOpenAI]]
             ["bun:test" :refer [describe it expect]]
             [agent.extensions.custom-provider-local.index :as local]
             [agent.utils.toolcall-rescue :as adapter]))
@@ -45,15 +46,6 @@
 ;;; original, unmodified SSE line — so every rescued tool call was silently
 ;;; dropped and the turn arrived as plain text. The rescue ran, matched, and
 ;;; changed nothing.
-
-(defn- sse-response [chunks]
-  (let [encoder (js/TextEncoder.)
-        body (js/ReadableStream.
-              #js {:start (fn [controller]
-                            (doseq [c chunks]
-                              (.enqueue controller (.encode encoder c)))
-                            (.close controller))})]
-    (js/Response. body #js {:headers #js {"content-type" "text/event-stream"}})))
 
 (def ^:private qwen-xml-chunks
   #js ["data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"<function=read><parameter=path>main.go</parameter></function>\"},\"index\":0}]}\n\n"

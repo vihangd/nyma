@@ -2,7 +2,8 @@
   "Tests for render-message — every role path must produce non-empty
    string[] output and must not throw (catches scope/variable bugs like
    the 'muted is not defined' regression in the info role)."
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require [test-util.text :refer [strip-ansi]]
+             ["bun:test" :refer [describe it expect]]
             [agent.ui.chat-renderer :refer [render-message]]))
 
 ;;; ─── helpers ──────────────────────────────────────────────────────────────
@@ -15,9 +16,6 @@
             :error     "#f7768e"
             :warning   "#e0af68"
             :success   "#9ece6a"}})
-
-(defn- strip-ansi [s]
-  (.replace s (js/RegExp. "\u001b\\[[0-9;]*m" "g") ""))
 
 (defn- render [msg]
   (render-message {:msg msg :width 80 :theme theme :md-cache nil}))

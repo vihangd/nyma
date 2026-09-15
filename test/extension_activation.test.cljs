@@ -1,9 +1,8 @@
 (ns extension-activation.test
   "Each thin extension activated ALONE through the real loader, then one
    handler driven end to end — the command or tool a user would actually hit.
-   The helpers behind these extensions have unit tests; nothing exercised the
-   wiring (scoped api, manifest, registry entry) until here. That gap is how
-   /history and /stats shipped reading a store the scoped api never forwarded."
+   The helpers behind these extensions have unit tests; this covers the wiring
+   (scoped api, manifest, registry entry) a unit test cannot see."
   (:require ["bun:test" :refer [describe it expect]]
             ["node:fs" :as fs]
             ["node:os" :as os]
@@ -61,7 +60,6 @@
 
 (defn- memory-store []
   (let [s (create-sqlite-store ":memory:")]
-    ((:init-schema s))
     s))
 
 ;;; ─── the extensions ──────────────────────────────────────────────────────

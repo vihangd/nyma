@@ -13,7 +13,8 @@
      {:fail-after n}                     n SSE chunks, then an in-stream error
                                          object and the connection ends
                                          (n = 0 → a plain HTTP 500 response)"
-  (:require ["node:fs" :as fs]
+  (:require [test-util.sse :refer [sse-response]]
+             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]))
 
@@ -48,10 +49,6 @@
                 nil)
    (final-chunk "tool_calls")
    "data: [DONE]\n\n"])
-
-(defn- sse-response [chunks]
-  (js/Response. (apply str chunks)
-                #js {:headers #js {"content-type" "text/event-stream"}}))
 
 (defn- failing-stream-response
   "The first n text chunks, then the error object OpenAI-compatible servers

@@ -2,7 +2,8 @@
   "Tests for create-status-bar — covers role display (regression: name-not-defined),
    basic render contract, AND extension auto-append segment integration
    (regression: register-segment used to write to a registry no consumer read)."
-  (:require ["bun:test" :refer [describe it expect afterEach]]
+  (:require [test-util.text :refer [strip-ansi]]
+             ["bun:test" :refer [describe it expect afterEach]]
             ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.status-line-segments :as segs]))
@@ -13,9 +14,6 @@
             :muted     "#565f89"
             :border    "#3b4261"
             :warning   "#e0af68"}})
-
-(defn- strip-ansi [s]
-  (.replace s (js/RegExp. "\u001b\\[[0-9;]*m" "g") ""))
 
 (defn- render-bar [bar width]
   (let [lines (.render bar width)]

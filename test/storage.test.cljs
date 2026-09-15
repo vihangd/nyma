@@ -5,16 +5,12 @@
 (def ^:private test-db-path ":memory:")
 
 (defn make-store []
-  (let [store (create-sqlite-store test-db-path)]
-    ((:init-schema store))
-    store))
+  (create-sqlite-store test-db-path))
 
 (describe "create-sqlite-store" (fn []
 
-  (it "a freshly opened store already has its tables — no init-schema call needed"
+  (it "a freshly opened store already has its tables"
     (fn []
-      ;; cli never called :init-schema, so the real ~/.nyma/nyma.db had no
-      ;; tables and prompt history / usage rows failed on every launch.
       (let [store (create-sqlite-store test-db-path)]
         ((:insert-prompt store) "hello" "sess.jsonl" 1)
         (-> (expect (count ((:recent-prompts store) 5))) (.toBe 1))

@@ -11,7 +11,6 @@
                                     (let [store (atom nil)]
                                       (beforeEach (fn []
                                                     (let [s (create-sqlite-store test-db-path)]
-                                                      ((:init-schema s))
                                                       (reset! store s))))
                                       (afterEach (fn []
                                                    (when @store ((:close @store)))))

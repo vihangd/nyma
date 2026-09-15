@@ -4,11 +4,9 @@
 
      session_id, transcript_path, cwd, permission_mode, hook_event_name
 
-   Read live from the agent on every fire. Until this existed only
-   PreToolUse tried to — and it read camelCase keys off a state map that
-   only ever held `:permission-mode`, so every event shipped
-   \"session\" / \"\" / \"default\" and a hook grouping by session_id saw one
-   session forever."
+   Read live from the agent on every fire, never cached: a hook that groups
+   by session_id needs the id of THIS session, and permission_mode changes
+   mid-session."
   (:require ["node:path" :as path]))
 
 (defn- session-file [api]

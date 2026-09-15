@@ -32,10 +32,9 @@
    loop fails at model resolution with \"No model configured\". Returns a
    thunk that puts the model back.
 
-   This used to install a before_agent_start handler that threw. The event bus
-   catches and logs handler errors, so the turn carried on to the real
-   provider and failed there instead — on the network, with whatever error the
-   ambient environment produced. The tests only saw \"it threw\"."
+   Not a throwing event handler: the bus catches and logs handler errors, so
+   the turn would carry on to the real provider and fail there — on the
+   network, with whatever error the ambient environment produced."
   [agent]
   (let [cfg  (:config agent)
         prev (aget cfg "model")]

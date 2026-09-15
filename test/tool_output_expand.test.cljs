@@ -1,7 +1,8 @@
 (ns tool-output-expand.test
   "ctrl+o expands the last tool's output; `edit` expands to a diff; a failed
    call previews its error without being asked."
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require [test-util.text :refer [strip-ansi]]
+             ["bun:test" :refer [describe it expect]]
             [agent.ui.chat-renderer :refer [render-message error-preview-lines]]
             [agent.ui.app-reducers :as r]
             [agent.keybinding-registry :as kbr]
@@ -11,9 +12,6 @@
   {:colors {:primary "#7aa2f7" :secondary "#9ece6a" :muted "#565f89"
             :border "#3b4261" :error "#f7768e" :warning "#e0af68"
             :success "#9ece6a"}})
-
-(defn- strip-ansi [s]
-  (.replace s (js/RegExp. (str (js/String.fromCharCode 27) "\\[[0-9;]*m") "g") ""))
 
 (defn- render [msg]
   (render-message {:msg msg :width 80 :theme theme :md-cache nil}))

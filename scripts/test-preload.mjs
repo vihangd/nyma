@@ -1,13 +1,13 @@
 // Loaded before every test file (see bunfig.toml [test] preload).
 //
-// 1. No live network. Several tests load every built-in extension;
+// 2. No live network. Several tests load every built-in extension;
 //    custom-provider-relay discovers its model list over the network and reads
 //    the key from the ambient environment, so a plain `bun test` on a machine
 //    that exports a gateway key would call a third party. Tests that exercise
 //    discovery stub `fetch` and opt back in explicitly.
 process.env.NYMA_NO_MODEL_DISCOVERY ??= "1";
 
-// 0. process.exit inside a test is a silent green: bun stops mid-run, prints
+// 1. process.exit inside a test is a silent green: bun stops mid-run, prints
 //    no summary, and returns 0. (rpc-mode's stdin-EOF exit did exactly that.)
 //    Make it loud. A test that needs to observe an exit stubs process.exit
 //    itself, which still works because this only replaces the default.
@@ -15,7 +15,7 @@ process.exit = (code) => {
   throw new Error(`process.exit(${code ?? 0}) called inside a test`);
 };
 
-// 2. HOME is a scratch directory. credentials.json, debug.log, the extension
+// 3. HOME is a scratch directory. credentials.json, debug.log, the extension
 //    cache and the sessions dir all resolve under ~/.nyma at call time; with the
 //    real HOME a test run read the developer's credentials, appended to their
 //    debug log and could list their sessions. Tests that set HOME themselves
@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 process.env.HOME = mkdtempSync(join(tmpdir(), "nyma-test-home-"));
 
-// 3. Module-global registries are restored after every test FILE. bun runs all
+// 4. Module-global registries are restored after every test FILE. bun runs all
 //    files in one process with a shared module cache, so an extension registered
 //    in file N was still priced, segmented and metadata'd in file N+1 — which is
 //    how a residue test passed in the full run and failed alone, and vice versa.
