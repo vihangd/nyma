@@ -348,7 +348,7 @@
          "\nRun /help to list commands.")))
 
 ;;; ---------------------------------------------------------------------------
-;;; Command execution (mirrors app.cljs handle-command)
+;;; Command execution
 ;;; ---------------------------------------------------------------------------
 
 (defn- run-command! [agent text update-messages!]

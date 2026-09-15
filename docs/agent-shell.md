@@ -240,6 +240,8 @@ Response streaming begins immediately. Text chunks, thinking blocks, and tool-ca
 /agent <name>           → connect to agent (disconnects current)
 /agent detach           → stop routing input to the agent, leave it running
 /agent disconnect       → disconnect current agent (kills the process)
+/agent disconnect <dir> → stop the workers on one project directory only
+/agent pool             → list every live ACP worker (agent, project, session)
 /disconnect             → disconnect current agent
 ```
 

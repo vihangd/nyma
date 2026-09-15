@@ -1,7 +1,7 @@
 (ns agent.ui.app-reducers
-  "Pure helpers extracted from agent.ui.app.
+  "Pure reducers for the interactive TUI state.
 
-   These live here — not inline in App — so they are reachable from tests
+   These live here — not inline in modes/interactive — so they are reachable from tests
    without mounting a TUI: the tool-execution message-list reducers
    (`apply-tool-start`, `apply-tool-end`, `apply-tool-update`), which the
    mode's `on-start`/`on-end`/`on-update` event handlers are thin wrappers
