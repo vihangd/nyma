@@ -5,9 +5,8 @@ Protocol) server. Drop a `.mcp.json` in your project, restart, and
 the server's tools become available as `mcp__<server>__<tool>`
 alongside nyma's built-in tools.
 
-This document is the user-facing reference. For the architecture
-and module layout, see
-[plan-mcp-client.md](./plan-mcp-client.md).
+This document is the user-facing reference; the implementation lives
+in `src/agent/extensions/mcp_client/`.
 
 ---
 
@@ -243,8 +242,6 @@ then debug.
 
 ## See also
 
-- [plan-mcp-client.md](./plan-mcp-client.md) — implementation plan,
-  module architecture, phases.
 - [hooks.md](./hooks.md) — sibling protocol; rtk uses hooks, lean-ctx
   uses MCP, both compose.
 - MCP spec: https://modelcontextprotocol.io

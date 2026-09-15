@@ -6,14 +6,14 @@ NYMA is a minimal, extensible coding agent built with:
 - **Squint** — ClojureScript-to-JS compiler (threading, destructuring, plain ES modules out)
 - **Bun** — runtime, package manager, native TypeScript loader
 - **Vercel AI SDK (`ai`)** — LLM streaming, tool loop, provider abstraction
-- **Ink** — React-based terminal UI via squint's `#jsx` reader tag
+- **@earendil-works/pi-tui** — terminal UI (chat pane, editor, overlays, status bar), plain string-rendering components
 
 ## Architecture
 
 ```
 @agent/cli → @agent/core → ai (Vercel AI SDK)
                         ↓
-              @agent/ui (Ink components)
+              @agent/ui (pi-tui components)
 ```
 
 Tool execution now flows through the **middleware pipeline** (interceptor chain). Extension namespacing and capability gating isolate plugins. Agent state mutations go through the **event-sourced state store**.
@@ -56,13 +56,22 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name) |
 | `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories |
 | `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`) |
-| `src/agent/ui/app.cljs` | `agent.ui.app` | Root Ink component |
-| `src/agent/ui/chat_view.cljs` | `agent.ui.chat-view` | Message rendering |
-| `src/agent/ui/editor.cljs` | `agent.ui.editor` | Text input component |
-| `src/agent/ui/dialogs.cljs` | `agent.ui.dialogs` | `ConfirmDialog` and `PromptDialog` components |
-| `src/agent/ui/notification.cljs` | `agent.ui.notification` | Inline status notification component |
-| `src/agent/ui/tool_status.cljs` | `agent.ui.tool-status` | Tool execution status display with spinner |
-| `src/agent/ui/widget_container.cljs` | `agent.ui.widget-container` | Extension widget rendering (above/below chat) |
+| `src/agent/ui/chat_pane.cljs` | `agent.ui.chat-pane` | pi-tui Component for the chat message list (`appendChunk`, `pushMessage`, `setMessages`) |
+| `src/agent/ui/chat_renderer.cljs` | `agent.ui.chat-renderer` | Pure: message map → `string[]` for pi-tui rendering |
+| `src/agent/ui/app_reducers.cljs` | `agent.ui.app-reducers` | Pure message-list reducers for tool start/end/update, `make-submit-guard` |
+| `src/agent/ui/overlay_host.cljs` | `agent.ui.overlay-host` | Adapts `api.ui` overlays (`select`/`confirm`/`input`/`custom`) onto pi-tui's overlay stack |
+| `src/agent/ui/status_bar.cljs` | `agent.ui.status-bar` | pi-tui Component: bottom status bar, renders registered segments |
+| `src/agent/ui/status_line_segments.cljs` | `agent.ui.status-line-segments` | Segment registry + built-in status-line segments |
+| `src/agent/ui/picker_frame.cljs` / `picker_input.cljs` / `picker_math.cljs` | `agent.ui.picker-*` | Shared rendering, key dispatch and window math for filter pickers |
+| `src/agent/ui/fuzzy_scorer.cljs` | `agent.ui.fuzzy-scorer` | Pure fuzzy-matching used by the pickers and `@path` completion |
+| `src/agent/ui/file_mentions.cljs` | `agent.ui.file-mentions` | `@path` completion listing and `<file>`/`<dir>` expansion on submit |
+| `src/agent/ui/editor_bash.cljs` / `editor_eval.cljs` / `editor_exec_util.cljs` | `agent.ui.editor-*` | `!cmd` and `$expr` typed into the editor; shared subprocess/truncation helpers |
+| `src/agent/ui/diff_lines.cljs` | `agent.ui.diff-lines` | LCS line diff for the expanded `edit` view |
+| `src/agent/ui/think_tag_parser.cljs` | `agent.ui.think-tag-parser` | Splits inline `<think>` blocks out of streamed content at render time |
+| `src/agent/ui/themes.cljs` / `theme_catalog.cljs` | `agent.ui.themes`, `agent.ui.theme-catalog` | Default theme, bundled base16 theme pack, `current` atom |
+| `src/agent/ui/tree_viewer.cljs` | `agent.ui.tree-viewer` | Session tree browser for `ctx.ui.custom()` |
+| `src/agent/ui/width_guard.cljs` | `agent.ui.width-guard` | Clamps rendered lines to the terminal width ahead of pi-tui's strict check |
+| `src/agent/ui/crash_recovery.cljs` | `agent.ui.crash-recovery` | Survives a pi-tui render crash (`uncaughtException`) instead of losing the session |
 | `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage |
 | `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction |
 | `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata |
@@ -81,7 +90,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 bun install
 
 # Development (two terminals)
-npx squint watch          # terminal 1: compile .cljs → .mjs/.jsx
+npx squint watch          # terminal 1: compile .cljs → .mjs
 bun --watch dist/agent/cli.mjs  # terminal 2: run with auto-restart
 
 # Or combined
@@ -239,20 +248,6 @@ Squint resolves ClojureScript namespace requires by converting the namespace to 
 
 **Rule:** The directory structure under `src/` must mirror the namespace prefix. A file declaring `(ns agent.foo.bar ...)` must live at `src/agent/foo/bar.cljs`.
 
-### JSX files must be imported with explicit `.jsx` extension
-
-Squint compiles files that use `#jsx` or declare `{:squint/extension "jsx"}` to `.jsx`. However, namespace-based requires always generate `.mjs` import paths — even from within another `.jsx` file. This causes a "Cannot find module" error at runtime.
-
-```clojure
-;; BROKEN — generates `import { Header } from './header.mjs'` but file is header.jsx
-[agent.ui.header :refer [Header]]
-
-;; CORRECT — explicit string require with .jsx extension
-["./header.jsx" :refer [Header]]
-```
-
-For dynamic imports of JSX modules, use `(js/import "path/to/file.jsx")` directly.
-
 ### `clojure.string` must be required explicitly
 
 `clojure.string/join` without a require compiles to `clojure.string.join(...)` — a `ReferenceError` at runtime.
@@ -282,20 +277,20 @@ Squint compiles `(js/process.env.HOME)` as a function call `process.env.HOME()` 
 
 Squint keywords become string keys. `:on-submit` becomes `"on-submit"`, but `:onSubmit` becomes `"onSubmit"` — these are different keys. If a caller passes `{:onSubmit handler}` and the component destructures `{:keys [on-submit]}`, the prop will be `undefined`.
 
-**Rule:** Use camelCase for JSX component props to match React conventions. Both caller and receiver must use the same casing.
+**Rule:** pick one casing per key and use it on both sides — a component's option map and the destructuring that reads it must agree.
 
 ```clojure
-;; Caller (app.cljs)
-[Editor {:onSubmit handle-submit :streaming streaming}]
+;; Caller
+(make-editor {:onSubmit handle-submit :streaming streaming})
 
-;; Receiver (editor.cljs) — must match the caller's casing
-(defn Editor [{:keys [onSubmit streaming theme]}]
+;; Receiver — must match the caller's casing
+(defn make-editor [{:keys [onSubmit streaming theme]}]
   ...)
 ```
 
-### Paren discipline in JSX
+### Property access takes no default argument
 
-JSX components (using `#jsx` reader tag) mix Hiccup-style brackets with ClojureScript parens. Extra or missing parens are hard to spot and produce confusing "Unmatched delimiter" errors at compile time. Also note:
+`(.-prop x fallback)` compiles to plain property access; the extra argument is silently dropped:
 
 ```clojure
 ;; BROKEN — property access does not take a default argument
@@ -580,7 +575,7 @@ Settings are resolved in priority order:
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| interactive | (default) | Full TUI with Ink |
+| interactive | (default) | Full TUI (pi-tui) |
 | print | `-p` / `--print` | Run once, print result to stdout |
 | json | `--mode json` | Run once, output JSON messages |
 | rpc | `--mode rpc` | JSONL protocol over stdio |
@@ -603,8 +598,7 @@ Settings are resolved in priority order:
 | `(clojure.string/join ...)` | `(:require [clojure.string :as str])` then `(str/join ...)` |
 | `(js/process.env.HOME)` | `(.. js/process -env -HOME)` |
 | `(.-textDelta chunk "")` | `(or (.-textDelta chunk) "")` |
-| `[agent.ui.header :refer [Header]]` | `["./header.jsx" :refer [Header]]` |
-| `:on-submit` prop in JSX | `:onSubmit` (camelCase to match React) |
+| `:on-submit` passed to a fn destructuring `:onSubmit` | one casing on both sides — keyword keys are plain strings |
 | `(js/Bun.spawn ...)` without pipes | Add `#js {:stdout "pipe" :stderr "pipe"}` |
 | `(defn f [& {:keys [a]}] ...)` keyword args | `(defn f [opts] ...)` explicit opts map |
 | `(defmulti ...)` / `(defmethod ...)` | a map of closures or `cond` — multimethods don't compile |

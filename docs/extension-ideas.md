@@ -212,7 +212,7 @@ Phased task list with visual panel above the editor (Ctrl+T toggle). Auto-normal
 
 **Where**: new `extensions/todo_panel/`
 **Capabilities**: `ui`, `events`, `state`, `commands`
-**Effort**: ~3 days — Ink panel component + reminder integration.
+**Effort**: ~3 days — pi-tui panel component (render → `string[]`) + reminder integration.
 
 ---
 
@@ -294,13 +294,13 @@ Content-hash anchors per line — model references anchors instead of reproducin
 
 ## From caveman / dirac prior art
 
-Items identified in the caveman/dirac research pass (`/Users/vihangd/.claude/plans/dynamic-bouncing-aho.md`). The top-five Tier 1 items (structured `/compact`, validator loop, PreCompact dump, long-running bash timeouts, deep bash parser) have a dedicated plan at `plan-borrows-caveman-dirac.md`. Infrastructure-level borrows (hook templates, streaming hook output, SQLite lock manager, etc.) live in `roadmap.md` §5. Everything user-facing lives below — efforts vary from ~2 hours to ~4 days, so these are not all "long-term."
+Items identified in the caveman/dirac research pass. The top-five Tier 1 items (structured `/compact`, validator loop, PreCompact dump, long-running bash timeouts, deep bash parser) are tracked in `roadmap.md`. Infrastructure-level borrows (hook templates, streaming hook output, SQLite lock manager, etc.) live in `roadmap.md` §5. Everything user-facing lives below — efforts vary from ~2 hours to ~4 days, so these are not all "long-term."
 
 ### 27. Plan / Act Mode Toggle
 
 First-class `/mode plan` and `/mode act` commands that gate which tools are allowed. Plan mode uses a dedicated `plan_mode_respond` tool (no real file writes, no bash side effects); Act mode restores the full tool set. CLI flags `-p` (start in plan mode) and `-y` (yolo — auto-approve all in act mode).
 
-Builds on nyma's existing `:plan` role (already has `:allowed-tools` + `:permissions` seeded in `settings/manager.cljs:roles.plan`) and the modes work in `docs/plan-extension-improvements.md`.
+Builds on nyma's existing `:plan` role (already has `:allowed-tools` + `:permissions` seeded in `settings/manager.cljs:roles.plan`) and the permission-modes work in `model_roles/features/plan_mode.cljs`.
 
 **Where**: new `extensions/plan_act_mode/` + small changes to `cli.cljs` for the flags.
 **Capabilities**: `commands`, `middleware` (tool gating), `flags`

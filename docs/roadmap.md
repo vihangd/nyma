@@ -225,9 +225,9 @@ walked from producer to consumer:
 |---|---|---|---|
 | `registerShortcut` + keybindings.json | prompt_history `ctrl+r`, model_roles cycle-key, every user binding | **none** — `interactive.cljs` had listeners for Esc and Ctrl+C only | **FIXED** — `keybindings/dispatch-shortcut!`, pinned by `test/keybindings_dispatch.test.cljs` |
 | `registerStatusSegment` | 4 (spec_driven, model_roles, mcp_client, agent_shell) | `status_bar.cljs:36` | works |
-| `registerCompletionProvider` / `mention-providers` | mention_files only | **none** — `autocomplete_provider/complete-all` has zero callers; the editor uses pi-tui's `CombinedAutocompleteProvider`, which does slash + `@file` natively | dead, no user-visible loss. `ac-builtins/register-all!` fills a registry nobody queries |
-| `registerContextProvider` | none | **none** — `:provide` is never invoked | dead |
-| `registerBlockRenderer` / `registerToolRenderer` | none | none | dead |
+| `registerCompletionProvider` / `mention-providers` | mention_files only | **none** — `autocomplete_provider/complete-all` has zero callers; the editor uses pi-tui's `CombinedAutocompleteProvider`, which does slash + `@file` natively | **DELETED 2026-09-11** (was dead; `ac-builtins/register-all!` filled a registry nobody queried) |
+| `registerContextProvider` | none | **none** — `:provide` is never invoked | **DELETED 2026-09-11** |
+| `registerBlockRenderer` / `registerToolRenderer` | none | none | **DELETED 2026-09-11** |
 
 The last three are dead code, not bugs — do NOT write a test pinning "this has
 no consumer", it locks the deadness in. Deleting the four APIs (and
@@ -716,7 +716,7 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 
 ## 2026-07-22 round-2 audit — deferred
 
-- **Provider factory** — ~700 lines duplicated across 8 OpenAI-compat providers (`read-credentials-file` copied 7×); a shared `openai-compat-provider` factory would collapse each to ~15 lines.
+- **Provider factory** — ~700 lines duplicated across the 10 `custom_provider_*` extensions (`read-credentials-file` copied 7×); a shared `openai-compat-provider` factory would collapse each to ~15 lines.
 - **Session storage** — JSONL grows unbounded (sync append per tool result), JSONL⊕SQLite double-write with no consistency guard, no multi-instance locking (`--fork/--resume` makes races real).
 - **Submit-path dedup** — bash/eval branches in interactive.cljs are ~25 near-identical lines each; extract a side-channel dispatcher.
 - **UX** — streaming token counter; collapsible thinking blocks (think_tag_parser parses, renderer has no fold state).
@@ -1624,4 +1624,20 @@ seven features every peer ships. All seven were wiring of existing seams and lan
 - pi edges not matched: branch summarisation on `/tree` switch, extension custom
   components/editor, fullscreen + transcript search, Mermaid/LaTeX, strict-schema tool
   sampling, `nyma update` self-update.
+
+### 2026-09-15 — wiring/slop sweep
+
+Three audits over the Phase A tree (wiring, slop, docs). Found: four Phase A loose ends
+(fixed); idle keybinding/labels/pricing/interceptor helpers (wired or deleted); tools
+shipped without a `:safety` declaration; 13 GB of core dumps in the tree (dropped with
+the probe scripts); Ink-era claims across AGENTS.md/README/docs (removed — file tables
+now name the real `src/agent/ui/` files, dependency table matches `package.json`,
+`docs/plan-*.md` links gone since that glob is gitignored).
+
+Deliberately left:
+- 23 test files hand-roll an `api` mock instead of using `test/tool_ctx_fixture.cljs`.
+  Mechanical, but each mock encodes what that test cares about; convert on touch.
+- Banner comments in `escalate`, `plan_mode`, `subagent` — house style, not slop.
+- Provider helper duplication (`resolve-api-key` ×7, `->js-model` ×9, `load-config` ×8)
+  is the existing provider-factory item above, not a new finding.
 

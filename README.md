@@ -239,10 +239,13 @@ src/
     utils/         Shared utilities (ANSI text, terminal width)
     modes/         Operational modes (interactive, print, rpc, sdk)
     ui/            pi-tui terminal components
-      dialogs.cljs       ConfirmDialog, PromptDialog
-      notification.cljs  Inline status notifications
-      tool_status.cljs   Tool execution display with spinner
-      widget_container.cljs  Extension widget rendering
+      chat_pane.cljs / chat_renderer.cljs   Message list component + pure renderer
+      overlay_host.cljs   api.ui overlays on pi-tui's overlay stack
+      status_bar.cljs / status_line_segments.cljs   Status bar + segment registry
+      picker_*.cljs / fuzzy_scorer.cljs   Shared picker frame, key dispatch, scoring
+      file_mentions.cljs  @path completion and <file> expansion
+      editor_bash.cljs / editor_eval.cljs   !cmd and $expr editor modes
+      width_guard.cljs / crash_recovery.cljs   Keep pi-tui's width check from killing the session
     sessions/      Session management + compaction
       listing.cljs   Scans .jsonl files, returns sorted metadata
       storage.cljs   SQLite-backed session store with usage tracking
@@ -629,8 +632,8 @@ defaults in the extension that owns it
 change rather than two to keep in sync. See
 [`model_roles`](src/agent/extensions/model_roles/README.md#escalation).
 
-`tool-display` is `"collapsed"` (one line per tool call; `ctrl+o` expands the
-last one) or `"expanded"` (every finished call shows its output).
+`tool-display` is `"collapsed"` (one line per tool call, expandable from the
+keyboard — see Interactive Mode) or `"expanded"` (every finished call shows its output).
 `tool-display-max-lines` caps the expanded body; the rest is summarised as
 `… N more lines`. An `edit` call expands to a `-`/`+` line diff of
 `old_string` against `new_string`, a `write` to the content it wrote, and a
@@ -959,27 +962,42 @@ Create a `SYSTEM.md` in `.nyma/` or `~/.nyma/` to provide a custom system prompt
 Context files are read from `~/`, `~/.nyma/`, every ancestor from the repository root down to
 the working directory, the working directory and its `.nyma/`, lowest precedence first. At each
 of those directories the first name in the `context-files` setting that exists is taken — default
-`["AGENTS.md", "CLAUDE.md"]`, so a repo carrying both injects AGENTS.md only. Change the order,
-or add a name, in settings:
+`["AGENTS.md", "CLAUDE.md"]`, so a repo carrying both injects AGENTS.md only. The home level is
+`~/` itself, so `~/CLAUDE.md` is read exactly like `~/AGENTS.md` (`~/.claude/CLAUDE.md` is not).
+Change the order, or add a name, in settings:
 
 ```json
 { "context-files": ["CLAUDE.md", "AGENTS.md", "CONVENTIONS.md"] }
 ```
 
+## Documentation
+
+- [`docs/extension-guide-cljs.md`](docs/extension-guide-cljs.md) — writing extensions in ClojureScript
+- [`docs/porting-guide-ts.md`](docs/porting-guide-ts.md) — porting pi-mono TypeScript extensions
+- [`docs/hooks.md`](docs/hooks.md) — Claude-Code-shape hooks reference
+- [`docs/mcp.md`](docs/mcp.md) — MCP servers as tool sources
+- [`docs/gateway.md`](docs/gateway.md) — gateway mode: channels, streaming and session policies
+- [`docs/agent-shell.md`](docs/agent-shell.md) — driving other coding agents over ACP
+- [`docs/event-map.md`](docs/event-map.md) — generated map of every event emitter and listener
+- [`docs/extension-ideas.md`](docs/extension-ideas.md) — extension and feature ideas by priority
+- [`docs/roadmap.md`](docs/roadmap.md) — built-but-unwired infrastructure, deferred work, audit ledger
+
 ## Dependencies
 
 | Package | Purpose |
 |---------|---------|
-| `ai` | Vercel AI SDK — LLM integration |
-| `@ai-sdk/anthropic` | Claude provider |
-| `@ai-sdk/openai` | OpenAI provider |
-| `@ai-sdk/google` | Google provider |
-| `ink` | React-based terminal UI |
-| `ink-text-input` | Text input component |
-| `react` | UI framework |
+| `ai` | Vercel AI SDK — streaming, tool loop, provider abstraction |
+| `@ai-sdk/anthropic` / `@ai-sdk/openai` / `@ai-sdk/google` | Built-in LLM providers |
+| `@anthropic-ai/claude-agent-sdk` | Claude Code as a subagent runner (`agent_runner_claude_sdk`) |
+| `@earendil-works/pi-tui` | Terminal UI: editor, overlays, components, `@` autocomplete |
+| `@modelcontextprotocol/sdk` | MCP client for `mcp_client` |
+| `headroom-ai` | Tool-output compression (`headroom` extension) |
+| `marked` / `marked-terminal` | Markdown rendering in the chat pane |
+| `turndown` / `linkedom` | HTML → Markdown for the `fetch` tool |
+| `shell-quote` | Command tokenising for `bash_suite` security analysis |
+| `vscode-jsonrpc` | JSON-RPC transport for `lsp_suite` |
 | `zod` | Schema validation for tool parameters |
 | `squint-cljs` | ClojureScript-to-JS compiler |
-| `nanoid` | ID generation |
 
 ## License
 

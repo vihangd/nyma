@@ -25,7 +25,7 @@
             [clojure.string :as str]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Pure helpers — used by app.cljs / cli.cljs
+;;; Pure helpers — used by `start` below and by test/interactive_helpers.test.cljs
 ;;; ---------------------------------------------------------------------------
 
 (defn alt-screen-enabled?
