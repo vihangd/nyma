@@ -34,31 +34,22 @@
    Priority: subscribes at high priority so a deny short-circuits
    before-hook-compat / permission-check / approval-check."
   (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]
             [agent.extensions.claude-hook-bridge.tool-names :as tool-names]
             [clojure.string :as str]))
 
 (def ^:private bridge-priority 200)
 
-(defn- session-info [api]
-  (let [state (try (.getState api) (catch :default _e nil))]
-    {:session-id      (or (and state (.-sessionId state)) "session")
-     :transcript-path (or (and state (.-transcriptPath state)) "")
-     :permission-mode (or (and state (.-permissionMode state)) "default")}))
-
 (defn- payload-for-hook
   "Translate a nyma before_tool_call event into CC PreToolUse stdin."
   [api event-data nyma-tool-name args]
-  (let [info  (session-info api)]
-    #js {:session_id      (:session-id info)
-         :transcript_path (:transcript-path info)
-         :cwd             (js/process.cwd)
-         :permission_mode (:permission-mode info)
-         :hook_event_name "PreToolUse"
-         :tool_name       (tool-names/cc-name nyma-tool-name)
-         :tool_input      (clj->js args)
-         :tool_use_id     (or (when event-data (.-execId event-data))
-                              (when event-data (aget event-data "exec-id"))
-                              "")}))
+  (js/Object.assign
+   (common/base api "PreToolUse")
+   #js {:tool_name   (tool-names/cc-name nyma-tool-name)
+        :tool_input  (clj->js args)
+        :tool_use_id (or (when event-data (.-execId event-data))
+                         (when event-data (aget event-data "exec-id"))
+                         "")}))
 
 (defn- merged->effects
   "Translate a merged response map into the JS object nyma's
@@ -86,8 +77,7 @@
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-        ;; The actual handler. Returns a JS object that emit-collect
+  (let [        ;; The actual handler. Returns a JS object that emit-collect
         ;; merges with other handlers' returns.
         handler
         (^:async fn [data]

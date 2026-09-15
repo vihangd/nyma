@@ -182,6 +182,21 @@ The 11 events nyma maps to CC's schema today. Other CC events
 (`Setup`, `SubagentStart`/`Stop`, `TaskCreated`/`Completed`,
 `PostToolBatch`, etc.) are unmapped — see "Not mapped" below.
 
+Field names follow Claude Code's hooks reference, so a script written
+for Claude Code reads the same keys unchanged. Every event carries the
+common input fields, read live from the agent on each fire:
+
+| Field | Value in nyma |
+|---|---|
+| `session_id` | the session file's basename (the id `/resume` lists), or `session` before a session exists |
+| `transcript_path` | the session `.jsonl` file, or `""` |
+| `cwd` | `process.cwd()` |
+| `permission_mode` | the current permission mode (`default`, `plan`, `acceptEdits`, …) |
+| `hook_event_name` | the event name |
+
+Event-specific fields follow. Keys marked *(nyma)* are extras Claude
+Code does not send.
+
 ### `PreToolUse`
 
 Fires before a tool runs. Discriminated by tool name (CC TitleCase).
@@ -189,8 +204,8 @@ Fires before a tool runs. Discriminated by tool name (CC TitleCase).
 **stdin payload:**
 ```json
 {
-  "session_id": "...",
-  "transcript_path": "...",
+  "session_id": "1757894400000",
+  "transcript_path": "~/.nyma/sessions/1757894400000.jsonl",
   "cwd": "/abs/path",
   "permission_mode": "default",
   "hook_event_name": "PreToolUse",
@@ -226,6 +241,10 @@ Fires before a tool runs. Discriminated by tool name (CC TitleCase).
 Fires after a tool completes (success / failure path).
 Discriminated by tool name.
 
+**stdin payload:** common fields plus `tool_name`, `tool_input`,
+`tool_use_id`, and `tool_response` (the tool's result, as a string)
+on success or `error` (the failure text) on `PostToolUseFailure`.
+
 **Response:**
 ```json
 {
@@ -241,6 +260,9 @@ Discriminated by tool name.
 ### `PermissionRequest`
 
 Fires when a tool needs user approval. Discriminated by tool name.
+
+**stdin payload:** common fields plus `tool_name` and `tool_input`
+(no `tool_use_id`, as in Claude Code).
 
 **Response:**
 ```json
@@ -266,6 +288,8 @@ Fires when a session begins. Matcher is the source kind.
 | `resume` | session resume / branch switch |
 | `clear` | `/clear` command |
 
+**stdin payload:** common fields plus `source` (the matcher value).
+
 `additionalContext` is injected as a system reminder on the
 next user turn — useful for things like "current branch: main"
 or task-tracker notes.
@@ -273,12 +297,16 @@ or task-tracker notes.
 ### `SessionEnd`
 
 Fires when a session ends. Matcher is the end reason
-(`clear`, `other`).
+(`clear`, `prompt_input_exit` for `/exit`, `other`).
+
+**stdin payload:** common fields plus `reason` (the matcher value).
 
 ### `UserPromptSubmit`
 
 Fires when the user submits a prompt, before nyma sends it to
 the model. No matcher (always fires).
+
+**stdin payload:** common fields plus `prompt`.
 
 `additionalContext` is injected as a system reminder before
 the prompt. `decision: "block"` swallows the prompt and shows
@@ -289,18 +317,33 @@ the reason instead.
 Fires when nyma finishes a turn. Observational in nyma — the
 response has already streamed.
 
+**stdin payload:** common fields plus `stop_hook_active` (always
+`false`: nyma never continues a turn from a hook),
+`last_assistant_message`, `stop_reason` *(nyma)* and
+`output_tokens` *(nyma)*.
+
 ### `StopFailure`
 
 Fires on a provider error. Matcher is the error type.
+
+**stdin payload:** common fields plus `error` (the error type, e.g.
+`rate_limit`) and `error_details` (the provider's message).
 
 ### `PreCompact`
 
 Fires before context compaction. Matcher is `manual` or `auto`.
 `decision: "block"` aborts the compaction.
 
+**stdin payload:** common fields plus `trigger` and
+`custom_instructions` (`null` unless the user passed text to
+`/compact`).
+
 ### `PostCompact`
 
 Fires after context compaction. Observational.
+
+**stdin payload:** common fields plus `trigger`, `compact_summary`
+(the generated summary) and `tokens_removed` *(nyma)*.
 
 ### Not mapped (yet)
 

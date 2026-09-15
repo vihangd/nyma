@@ -12,24 +12,22 @@
    The middleware's permission-check handler will treat a missing
    decision as 'fall through to user prompt' (existing behavior)."
   (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]
             [agent.extensions.claude-hook-bridge.tool-names :as tool-names]))
 
 (def ^:private bridge-priority 200)
 
-(defn- payload [data]
+(defn- payload [api data]
   (let [tool-name (str (or (.-tool data) ""))]
-    #js {:session_id      "session"
-         :transcript_path ""
-         :cwd             (js/process.cwd)
-         :permission_mode "default"
-         :hook_event_name "PermissionRequest"
-         :tool_name       (tool-names/cc-name tool-name)
-         :tool_input      (or (.-args data) #js {})}))
+    ;; CC's PermissionRequest input: tool_name + tool_input, no tool_use_id.
+    (js/Object.assign
+     (common/base api "PermissionRequest")
+     #js {:tool_name  (tool-names/cc-name tool-name)
+          :tool_input (or (.-args data) #js {})})))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-        handler
+  (let [handler
         (^:async fn [data]
           (let [tool-name (str (or (.-tool data) ""))
                 disc      (tool-names/cc-name tool-name)
@@ -38,7 +36,7 @@
                             {:hooks-map     @hooks-atom
                              :event-name    "PermissionRequest"
                              :discriminator disc
-                             :stdin-payload (payload data)
+                             :stdin-payload (payload api data)
                              :abort-signal  (when-let [a (.-abortController api)]
                                               (.-signal a))
                              :cwd           cwd

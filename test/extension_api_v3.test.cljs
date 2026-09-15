@@ -37,6 +37,7 @@
     (-> (expect (fn? (.-appendEntry api))) (.toBe true))
     (-> (expect (fn? (.-setSessionName api))) (.toBe true))
     (-> (expect (fn? (.-getSessionName api))) (.toBe true))
+    (-> (expect (fn? (.-getSessionFile api))) (.toBe true))
     (-> (expect (fn? (.-registerProvider api))) (.toBe true))
     (-> (expect (fn? (.-unregisterProvider api))) (.toBe true))
     (-> (expect (fn? (.-setModel api))) (.toBe true))

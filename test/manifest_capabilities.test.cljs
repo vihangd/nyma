@@ -20,7 +20,7 @@
    "sendMessage" "messages" "sendUserMessage" "messages"
    "addMiddleware" "middleware" "removeMiddleware" "middleware"
    "exec" "exec" "spawn" "spawn"
-   "appendEntry" "session" "setSessionName" "session" "getSessionName" "session"
+   "appendEntry" "session" "setSessionName" "session" "getSessionName" "session" "getSessionFile" "session"
    "registerBlockRenderer" "renderers" "unregisterBlockRenderer" "renderers"
    "registerToolRenderer" "renderers" "unregisterToolRenderer" "renderers"
    "registerStatusSegment" "ui" "unregisterStatusSegment" "ui"

@@ -12,30 +12,31 @@
        nyma's compact() to honor a skip flag — we add it as part of
        this work.
      - PostCompact: observational only."
-  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]))
+  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]))
 
 (def ^:private bridge-priority 200)
 
-(defn- pre-payload [evt-ctx]
-  #js {:session_id      "session"
-       :transcript_path ""
-       :cwd             (js/process.cwd)
-       :hook_event_name "PreCompact"
-       :trigger         (or (.-trigger evt-ctx) "auto")})
+(defn- pre-payload [api evt-ctx]
+  (js/Object.assign
+   (common/base api "PreCompact")
+   ;; CC's PreCompact input: `custom_instructions` is what the user
+   ;; passed to /compact, null when nothing (and always null for auto).
+   #js {:trigger             (or (.-trigger evt-ctx) "auto")
+        :custom_instructions (or (.-customInstructions evt-ctx) nil)}))
 
-(defn- post-payload [data]
-  #js {:session_id      "session"
-       :transcript_path ""
-       :cwd             (js/process.cwd)
-       :hook_event_name "PostCompact"
-       :trigger         (or (.-trigger data) "auto")
-       :tokens_removed  (or (.-tokensRemoved data) 0)})
+(defn- post-payload [api data]
+  (js/Object.assign
+   (common/base api "PostCompact")
+   #js {:trigger         (or (.-trigger data) "auto")
+        ;; CC's PostCompact input; nyma's `compact` event carries :summary.
+        :compact_summary (str (or (.-summary data) ""))
+        ;; nyma extra.
+        :tokens_removed  (or (.-tokensRemoved data) 0)}))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-
-        pre-handler
+  (let [pre-handler
         (^:async fn [evt-ctx]
           (let [trigger (str (or (.-trigger evt-ctx) "auto"))
                 merged  (js-await
@@ -43,7 +44,7 @@
                           {:hooks-map     @hooks-atom
                            :event-name    "PreCompact"
                            :discriminator trigger
-                           :stdin-payload (pre-payload evt-ctx)
+                           :stdin-payload (pre-payload api evt-ctx)
                            :cwd           cwd
                            :api           api}))]
             (when (and merged (:decision-block? merged))
@@ -61,7 +62,7 @@
              {:hooks-map     @hooks-atom
               :event-name    "PostCompact"
               :discriminator trigger
-              :stdin-payload (post-payload data)
+              :stdin-payload (post-payload api data)
               :cwd           cwd
               :api           api})))]
 

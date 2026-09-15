@@ -16,9 +16,15 @@
    For SessionEnd:
      exit       → other
      sigint     → other
-     user-exit  → other
-     clear      → clear"
+     user-exit  → prompt_input_exit  (CC: \"user exited while prompt
+                                       input was visible\")
+     clear      → clear
+
+   The matcher value is also the payload field: `source` on SessionStart,
+   `reason` on SessionEnd (hooks reference, SessionStart input /
+   SessionEnd input)."
   (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]
             [agent.extensions.claude-hook-bridge.diagnostics :as diag]))
 
 (def ^:private bridge-priority 200)
@@ -33,25 +39,19 @@
   {"clear"      "clear"
    "exit"       "other"
    "sigint"     "other"
-   "user-exit"  "other"})
+   "user-exit"  "prompt_input_exit"})
 
-(defn- payload [event-name reason]
-  #js {:session_id      "session"
-       :transcript_path ""
-       :cwd             (js/process.cwd)
-       :hook_event_name event-name
-       :source          (or reason "startup")
-       :reason          (or reason "other")})
+(defn- payload [api event-name field matcher]
+  (doto (common/base api event-name)
+    (aset field matcher)))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-
-        start-handler
+  (let [start-handler
         (fn [data]
           (let [r (str (or (.-reason data) "new"))
                 m (or (get start-reason->matcher r) "startup")
-                stdin (payload "SessionStart" m)]
+                stdin (payload api "SessionStart" "source" m)]
             (-> (dispatch/dispatch
                  {:hooks-map     @hooks-atom
                   :event-name    "SessionStart"
@@ -83,7 +83,7 @@
                (catch :default _e nil))
           (let [r (str (or (.-reason data) "exit"))
                 m (or (get end-reason->matcher r) "other")
-                stdin (payload "SessionEnd" m)]
+                stdin (payload api "SessionEnd" "reason" m)]
             (dispatch/dispatch
              {:hooks-map     @hooks-atom
               :event-name    "SessionEnd"

@@ -73,19 +73,25 @@ When `agents: true`:
 
 Mapped from nyma's native event bus:
 
-| Claude Code event | Fires on nyma | Notes |
-|---|---|---|
-| `PreToolUse` | `before_tool_call` | `permissionDecision` (deny/ask/allow), `updatedInput`, `additionalContext` |
-| `PostToolUse` | `tool_complete` (success) | `decision: block`, `additionalContext` |
-| `PostToolUseFailure` | `tool_complete` (`isError: true`) | as PostToolUse |
-| `PermissionRequest` | `permission_request` | `decision.behavior: allow|deny`, `updatedInput` |
-| `SessionStart` | `session_start` | `additionalContext` injected into next turn |
-| `SessionEnd` | `session_end` / `session_shutdown` | observational |
-| `UserPromptSubmit` | `input_submit` | `decision: block`, `additionalContext` |
-| `Stop` | `agent_end` | observational in nyma (response already streamed) |
-| `StopFailure` | `provider_error` | observational |
-| `PreCompact` | `before_compact` | `decision: block` aborts compaction |
-| `PostCompact` | `compact` | observational |
+Every payload carries Claude Code's common input fields, read live
+on each fire — `session_id` (the session file's basename),
+`transcript_path` (the session `.jsonl`), `cwd`, `permission_mode`,
+`hook_event_name` — plus the event fields below, named as in the
+Claude Code hooks reference. Keys marked *(nyma)* are extras.
+
+| Claude Code event | Fires on nyma | Payload fields | Response handling |
+|---|---|---|---|
+| `PreToolUse` | `before_tool_call` | `tool_name`, `tool_input`, `tool_use_id` | `permissionDecision` (deny/ask/allow), `updatedInput`, `additionalContext` |
+| `PostToolUse` | `tool_complete` (success) | `tool_name`, `tool_input`, `tool_use_id`, `tool_response` | `decision: block`, `additionalContext` |
+| `PostToolUseFailure` | `tool_complete` (`isError: true`) | `tool_name`, `tool_input`, `tool_use_id`, `error` | as PostToolUse |
+| `PermissionRequest` | `permission_request` | `tool_name`, `tool_input` | `decision.behavior: allow|deny`, `updatedInput` |
+| `SessionStart` | `session_start` | `source` | `additionalContext` injected into next turn |
+| `SessionEnd` | `session_end` / `session_shutdown` | `reason` | observational |
+| `UserPromptSubmit` | `input_submit` | `prompt` | `decision: block`, `additionalContext` |
+| `Stop` | `agent_end` | `stop_hook_active`, `last_assistant_message`, `stop_reason` *(nyma)*, `output_tokens` *(nyma)* | observational in nyma (response already streamed) |
+| `StopFailure` | `provider_error` | `error` (type), `error_details` | observational |
+| `PreCompact` | `before_compact` | `trigger`, `custom_instructions` | `decision: block` aborts compaction |
+| `PostCompact` | `compact` | `trigger`, `compact_summary`, `tokens_removed` *(nyma)* | observational |
 
 Not currently mapped: `Setup`, `SubagentStart`/`Stop`,
 `TeammateIdle`, `WorktreeCreate`/`Remove`, `Elicitation*`,

@@ -261,6 +261,13 @@
                               (when-let [session @(:session agent)]
                                 (when-let [f (:get-session-name session)]
                                   (f))))
+         ;; The file this session persists to — the closest thing nyma has
+         ;; to Claude Code's transcript_path, and its basename is the id
+         ;; /resume lists. Hook scripts key on both.
+         :getSessionFile    (fn []
+                              (when-let [session @(:session agent)]
+                                (when-let [f (:get-file-path session)]
+                                  (f))))
 
        ;; ── Status line segments ────────────────────────────
          :registerStatusSegment

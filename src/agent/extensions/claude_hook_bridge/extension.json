@@ -6,7 +6,8 @@
     "events",
     "state",
     "messages",
-    "ui"
+    "ui",
+    "session"
   ],
   "dependsOn": [
     "agent-shell",

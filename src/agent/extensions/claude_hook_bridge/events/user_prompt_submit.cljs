@@ -12,25 +12,21 @@
        before the prompt.
      - additionalContext → injected as a system reminder before the
        prompt, so the model sees it on this turn."
-  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]))
+  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]))
 
 (def ^:private bridge-priority 200)
 
-(defn- payload [prompt]
-  #js {:session_id      "session"
-       :transcript_path ""
-       :cwd             (js/process.cwd)
-       :permission_mode "default"
-       :hook_event_name "UserPromptSubmit"
-       :prompt          (str (or prompt ""))})
+(defn- payload [api prompt]
+  (doto (common/base api "UserPromptSubmit")
+    (aset "prompt" (str (or prompt "")))))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
-  (let [
-        handler
+  (let [handler
         (fn [data]
           (let [text (str (or (.-text data) (.-prompt data) ""))
-                stdin (payload text)]
+                stdin (payload api text)]
             (-> (dispatch/dispatch
                  {:hooks-map     @hooks-atom
                   :event-name    "UserPromptSubmit"

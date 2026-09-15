@@ -37,7 +37,7 @@
    "sendMessage" "messages" "sendUserMessage" "messages"
    "addMiddleware" "middleware" "removeMiddleware" "middleware"
    "exec" "exec" "spawn" "spawn"
-   "appendEntry" "session" "setSessionName" "session" "getSessionName" "session"
+   "appendEntry" "session" "setSessionName" "session" "getSessionName" "session" "getSessionFile" "session"
    "registerStatusSegment" "ui" "unregisterStatusSegment" "ui"
    "registerProvider" "providers" "unregisterProvider" "providers"
    "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"
@@ -115,7 +115,7 @@
    "spawn"          ["spawn"]
    "providers"      ["registerProvider" "unregisterProvider"]
    "model"          ["setModel" "getActiveModelSpec" "getThinkingLevel" "setThinkingLevel" "resolveModel"]
-   "session"        ["appendEntry" "setSessionName" "getSessionName"]
+   "session"        ["appendEntry" "setSessionName" "getSessionName" "getSessionFile"]
    "flags"          ["registerFlag" "getFlag" "unregisterFlag"]
    "context"        ["getTokenBudget"]})
 

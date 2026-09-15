@@ -16,8 +16,8 @@
        \"tool_name\":       string,
        \"tool_input\":      object,
        \"tool_use_id\":     string,
-       \"tool_result\":     string  (success path),
-       \"error_message\":   string  (failure path)
+       \"tool_response\":   string  (success path),
+       \"error\":           string  (failure path)
      }
 
    Outbound → nyma effects:
@@ -27,25 +27,25 @@
                                        react in the next turn)
      - additionalContext            → appended to the result string"
   (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+            [agent.extensions.claude-hook-bridge.events.common :as common]
             [agent.extensions.claude-hook-bridge.tool-names :as tool-names]
             [clojure.string :as str]))
 
 (def ^:private bridge-priority 200)
 
-(defn- payload [event-data is-error?]
-  #js {:session_id      "session"
-       :transcript_path ""
-       :cwd             (js/process.cwd)
-       :permission_mode "default"
-       :hook_event_name (if is-error? "PostToolUseFailure" "PostToolUse")
-       :tool_name       (tool-names/cc-name (or (.-toolName event-data)
-                                                (.-name event-data) ""))
-       :tool_input      (or (.-args event-data) #js {})
-       :tool_use_id     (or (.-toolCallId event-data) "")
-       :tool_result     (when-not is-error? (str (or (.-result event-data) "")))
-       :error_message   (when is-error?
-                          (str (or (.-result event-data)
-                                   (.-errorMessage event-data) "")))})
+(defn- payload [api event-data is-error?]
+  (js/Object.assign
+   (common/base api (if is-error? "PostToolUseFailure" "PostToolUse"))
+   #js {:tool_name   (tool-names/cc-name (or (.-toolName event-data)
+                                             (.-name event-data) ""))
+        :tool_input  (or (.-args event-data) #js {})
+        :tool_use_id (or (.-toolCallId event-data) "")}
+   ;; CC's names: `tool_response` on success, `error` on failure
+   ;; (PostToolUse input / PostToolUseFailure input).
+   (if is-error?
+     #js {:error (str (or (.-result event-data)
+                          (.-errorMessage event-data) ""))}
+     #js {:tool_response (str (or (.-result event-data) ""))})))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]
@@ -54,7 +54,7 @@
           (let [is-error? (boolean (or (.-isError data) (aget data "is-error")))
                 tool-name (str (or (.-toolName data) (.-name data) ""))
                 disc      (tool-names/cc-name tool-name)
-                stdin     (payload data is-error?)
+                stdin     (payload api data is-error?)
                 merged    (js-await
                            (dispatch/dispatch
                             {:hooks-map     @hooks-atom

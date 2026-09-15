@@ -189,6 +189,7 @@
                     :appendEntry      (gate capabilities :session (.-appendEntry base-api))
                     :setSessionName   (gate capabilities :session (.-setSessionName base-api))
                     :getSessionName   (gate capabilities :session (.-getSessionName base-api))
+                    :getSessionFile   (gate capabilities :session (.-getSessionFile base-api))
                     ;; Status line segments — extensions can contribute segments
                     ;; that appear in the status line above the editor.
                     ;; (ids are not namespaced — pre-existing)
