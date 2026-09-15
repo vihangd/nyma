@@ -26,6 +26,11 @@
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure helpers — used by `start` below and by test/interactive_helpers.test.cljs
+;;;
+;;; The factories (make-turn-request-handler, make-submit-handler,
+;;; make-submit-dispatcher, make-interrupt-handler) take their dependencies as a map so
+;;; test/interactive_input_routing.test.cljs runs the real branches with
+;;; fakes — `start` builds them from its locals and wires the result.
 ;;; ---------------------------------------------------------------------------
 
 (defn alt-screen-enabled?
@@ -163,6 +168,195 @@
            (< attempt max-retries) (schedule (fn [] (handle data (inc attempt))))
            :else                   nil))
        nil))))
+
+(defn make-submit-dispatcher
+  "The submit dispatcher: where a trimmed line goes once no `input` handler
+   has claimed it. Five branches — steer, `/cmd`, `!cmd`/`!!cmd`,
+   `$expr`/`$$expr`, plain prompt — each with its own lock and streaming
+   rules. Built from a map of dependencies so the tests drive the REAL
+   branches with fakes: the routing tests used to mirror this function, and
+   passed while the code under them dropped turns.
+
+   `locked?` / `streaming?` are atoms. `run!` starts a turn and returns its
+   promise; `run-command!` runs a slash line; `exec-bash!` / `eval-expr!`
+   take the parsed command / expression and return a promise of the result
+   map; `expand-mentions` maps typed text to what the model sees;
+   `abort-controller` is the agent's controller atom (or nil); `add-msg!`
+   appends a message map (it stamps the id); `append-context!` adds a user
+   message to the model's context without showing it."
+  [{:keys [locked? streaming? editor abort-controller
+           add-user-msg! add-local-msg! add-msg! add-error! append-context!
+           set-busy! set-streaming! sync-status! sync-pane! on-turn-done!
+           run! steer! run-command! exec-bash! eval-expr! expand-mentions]}]
+  (let [do-run!
+        (fn [text]
+          (set-streaming! true)
+          (-> (js/Promise.resolve nil)
+              (.then (fn [_] (run! text)))
+              (.then (fn [_]
+                       (set-streaming! false)
+                       (on-turn-done!)
+                       (reset! locked? false)
+                       (sync-status!)
+                       (sync-pane!)))
+              (.catch (fn [e]
+                        (add-error! e)
+                        (set-streaming! false)
+                        (reset! locked? false)
+                        (sync-status!)))))
+
+        ;; `!cmd` and `$expr` differ only in what runs, how a result is judged
+        ;; and when it reaches the model; the lock, echo, output message and
+        ;; release were the same 25 lines twice.
+        side-channel!
+        (fn [trimmed {:keys [exec format failed? hidden? inject?]}]
+          (reset! locked? true)
+          (.addToHistory editor trimmed)
+          (add-user-msg! trimmed)
+          (-> (exec)
+              (.then (fn [result]
+                       (let [content (format result)]
+                         (add-msg! {:role       (if (failed? result) "error" "shell")
+                                    :content    content
+                                    :local-only hidden?})
+                         (when (inject? result)
+                           (append-context! (str trimmed "\n" content)))
+                         (reset! locked? false)
+                         (sync-pane!))))
+              (.catch (fn [e]
+                        (add-error! e)
+                        (reset! locked? false)))))]
+    (fn dispatch-submit! [trimmed]
+      (cond
+        ;; ── Steer: mid-stream follow-up ──────────────────────────
+        @streaming?
+        (do (.addToHistory editor trimmed)
+            (steer! trimmed)
+            (add-user-msg! (str trimmed " ↩")))
+
+        ;; ── Slash command ────────────────────────────────────────
+        (and (.startsWith trimmed "/") (not @locked?))
+        (do (reset! locked? true)
+            (.addToHistory editor trimmed)
+            ;; Fresh controller: Escape aborts it while the lock is held
+            ;; (a handler reads it as ctx.signal), and the loop only mints
+            ;; one per run, so a previously-aborted one would arrive dead.
+            (when abort-controller
+              (reset! abort-controller (js/AbortController.)))
+            (set-busy! (command-name trimmed))
+            ;; Echo the command. Every other branch does; this one did not,
+            ;; so a command's output — a notification, an import summary —
+            ;; appeared with no visible cause, and a session in which
+            ;; several had been run rendered as if it were empty.
+            ;; :local-only, like `!!cmd`: on screen, out of the model's
+            ;; context, since the model did not run it and the handler
+            ;; already reports whatever it needs to.
+            (add-local-msg! trimmed)
+            ;; run-command! inside .then so SYNCHRONOUS throws are
+            ;; absorbed into the same rejection path as async ones —
+            ;; one .catch/.finally, one lock reset, nothing to drift.
+            (-> (.then (js/Promise.resolve)
+                       (fn [] (run-command! trimmed)))
+                (.catch (fn [e]
+                          (add-error! (js/Error. (str "/" (command-name trimmed) " failed: "
+                                                      (or (.-message e) (str e)))))))
+                (.finally (fn []
+                            (set-busy! nil)
+                            (reset! locked? false)))))
+
+        ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
+        (and (not @locked?)
+             (not= :not-bash (:kind (editor-bash/parse-bash-input trimmed))))
+        (let [{:keys [kind command]} (editor-bash/parse-bash-input trimmed)]
+          (side-channel! trimmed
+                         {:exec    (fn [] (exec-bash! command))
+                          :format  editor-bash/format-bash-output
+                          :failed? (fn [r] (:blocked? r))
+                          :hidden? (= kind :run-hidden)
+                          ;; Inject into LLM context for !cmd (not !!cmd)
+                          :inject? (fn [_] (= kind :run))}))
+
+        ;; ── $expr / $$expr — Babashka eval ───────────────────────
+        (and (not @locked?)
+             (not= :not-eval (:kind (editor-eval/parse-eval-input trimmed))))
+        (let [{:keys [kind expr]} (editor-eval/parse-eval-input trimmed)]
+          (side-channel! trimmed
+                         {:exec    (fn [] (eval-expr! expr))
+                          :format  editor-eval/format-eval-output
+                          :failed? (fn [r] (or (:unavailable? r) (:blocked? r)))
+                          :hidden? (= kind :eval-hidden)
+                          ;; A blocked expression never ran — do not tell
+                          ;; the model it did.
+                          :inject? (fn [r] (and (= kind :eval) (not (:blocked? r))))}))
+
+        ;; ── Normal LLM prompt ────────────────────────────────────
+        (not @locked?)
+        ;; `@path` mentions expand here and nowhere else: steer, `/`, `!`
+        ;; and `$` keep their text verbatim. The expanded text is what the
+        ;; pane shows — it is what the model saw.
+        (let [expanded (expand-mentions trimmed)]
+          (reset! locked? true)
+          (.addToHistory editor trimmed)
+          (add-user-msg! expanded)
+          (do-run! expanded))))))
+
+(defn make-submit-handler
+  "The editor's submit: trim, announce, then let an `input` handler intercept
+   before `dispatch!` runs the line locally. Returns the handler `start`
+   hands the editor (and the seed prompt).
+
+   `input` is an INTERCEPTION hook, not a notification: a handler returns
+   {handle, streaming, subscribe} to take the turn over, and `route!` gets
+   that result and the text. emit-collect is async, so gate on handler-count
+   — with nothing subscribed (the common case) submit stays exactly as
+   synchronous as it was."
+  [{:keys [events dispatch! route! add-error!]}]
+  (fn on-submit [text]
+    (let [trimmed (.trim (str text))]
+      (when (pos? (count trimmed))
+        ((:emit-async events) "input_submit" #js {:text trimmed})
+        (if (zero? ((:handler-count events) "input"))
+          (dispatch! trimmed)
+          (-> ((:emit-collect events) "input" #js {:input trimmed})
+              (.then (fn [res]
+                       (if (and res (get res "handle"))
+                         (route! res trimmed)
+                         (dispatch! trimmed))))
+              (.catch (fn [e]
+                        ;; A broken router must not eat the user's input.
+                        (add-error! e)
+                        (dispatch! trimmed)))))))))
+
+(def ^:private interrupt-window-ms
+  "How long the first Ctrl-C's 'press again to exit' offer stands. The same
+   window as cli's SIGINT handler."
+  2000)
+
+(defn make-interrupt-handler
+  "Ctrl-C in the TUI: the first press during a turn aborts it and says how to
+   exit; a second press inside the window, or any press while idle, exits.
+
+   cli's SIGINT handler already decides this (`sigint-action`) — but pi-tui
+   puts stdin in raw mode, so in the TUI Ctrl-C arrives as a keypress and
+   SIGINT never fires. The TUI listener exited on the first press, full stop,
+   which is exactly the reflex-kills-the-session bug the cli half was written
+   to fix. Same rule here, on the TUI's own state.
+
+   `streaming?` is a 0-arg fn; `abort!` cancels the run; `notify!` posts the
+   re-arm line; `exit!` shuts down. Returns the 0-arg handler."
+  [{:keys [streaming? abort! notify! exit! now window-ms]
+    :or   {window-ms interrupt-window-ms}}]
+  (let [now        (or now (fn [] (js/Date.now)))
+        last-press (atom nil)]
+    (fn interrupt! []
+      (let [t (now)]
+        (if (and (streaming?)
+                 (or (nil? @last-press)
+                     (> (- t @last-press) window-ms)))
+          (do (reset! last-press t)
+              (abort!)
+              (notify! "interrupted — press Ctrl-C again to exit"))
+          (exit!))))))
 
 (defn mark-streaming!
   "Mirror the streaming flag into the agent's state atom.
@@ -584,135 +778,39 @@
         editor-theme   (make-editor-theme theme-fn border-atom)
         editor         (new Editor tui editor-theme #js {:paddingX 1})
 
-        do-run!
-        (fn [text]
-          (set-streaming! true)
-          (-> (js/Promise.resolve nil)
-              (.then (fn [_]
-                       (run-turn-with-update-handler
-                        agent add-chunk!
-                        #(run agent text))))
-              (.then (fn [_]
-                       (set-streaming! false)
-                       (swap! turn-count inc)
-                       (reset! submit-lock false)
-                       (sync-status!)
-                       (sync-pane!)))
-              (.catch (fn [e]
-                        (add-error! e)
-                        (set-streaming! false)
-                        (reset! submit-lock false)
-                        (sync-status!)))))
-
-        ;; The original submit dispatch, unchanged. Lifted out of `on-submit`
-        ;; so the routing interception below can decide whether to run it.
+        ;; The submit dispatch — see make-submit-dispatcher. Lifted out of
+        ;; `on-submit` so the routing interception below can decide whether
+        ;; to run it.
         dispatch-submit!
-        (fn [trimmed]
-          (cond
-                ;; ── Steer: mid-stream follow-up ──────────────────────────
-            @streaming
-            (do (.addToHistory editor trimmed)
-                (steer agent {:role "user" :content trimmed})
-                (add-user-msg! (str trimmed " ↩")))
-
-                ;; ── Slash command ────────────────────────────────────────
-            (and (.startsWith trimmed "/") (not @submit-lock))
-            (do (reset! submit-lock true)
-                (.addToHistory editor trimmed)
-                ;; Fresh controller: Escape aborts it while the lock is held
-                ;; (a handler reads it as ctx.signal), and the loop only mints
-                ;; one per run, so a previously-aborted one would arrive dead.
-                (when-let [c (:abort-controller agent)]
-                  (reset! c (js/AbortController.)))
-                (set-busy! (command-name trimmed))
-                ;; Echo the command. Every other branch does; this one did not,
-                ;; so a command's output — a notification, an import summary —
-                ;; appeared with no visible cause, and a session in which
-                ;; several had been run rendered as if it were empty.
-                ;; :local-only, like `!!cmd`: on screen, out of the model's
-                ;; context, since the model did not run it and the handler
-                ;; already reports whatever it needs to.
-                (add-local-msg! trimmed)
-                    ;; run-command! inside .then so SYNCHRONOUS throws are
-                    ;; absorbed into the same rejection path as async ones —
-                    ;; one .catch/.finally, one lock reset, nothing to drift.
-                (-> (.then (js/Promise.resolve)
-                           (fn [] (run-command! agent trimmed update-messages!)))
-                    (.catch (fn [e]
-                              (add-error! (js/Error. (str "/" (command-name trimmed) " failed: "
-                                                          (or (.-message e) (str e)))))))
-                    (.finally (fn []
-                                (set-busy! nil)
-                                (reset! submit-lock false)))))
-
-                ;; ── !cmd / !!cmd — shell exec ─────────────────────────────
-            (and (not @submit-lock)
-                 (not= :not-bash (:kind (editor-bash/parse-bash-input trimmed))))
-            (let [{:keys [kind command]} (editor-bash/parse-bash-input trimmed)]
-              (reset! submit-lock true)
-              (.addToHistory editor trimmed)
-              (add-user-msg! trimmed)
-              (-> (editor-bash/run-bash! agent command)
-                  (.then (fn [result]
-                           (let [content (editor-bash/format-bash-output result)
-                                 role    (if (:blocked? result) "error" "shell")]
-                             (update-messages!
-                              (fn [msgs]
-                                (conj (vec msgs)
-                                      {:role       role
-                                       :content    content
-                                       :id         (new-id)
-                                       :local-only (= kind :run-hidden)})))
-                                 ;; Inject into LLM context for !cmd (not !!cmd)
-                             (when (= kind :run)
-                               (swap! (:state agent) update :messages conj
-                                      {:role "user" :content (str trimmed "\n" content)}))
-                             (reset! submit-lock false)
-                             (sync-pane!))))
-                  (.catch (fn [e]
-                            (add-error! e)
-                            (reset! submit-lock false)))))
-
-                ;; ── $expr / $$expr — Babashka eval ───────────────────────
-            (and (not @submit-lock)
-                 (not= :not-eval (:kind (editor-eval/parse-eval-input trimmed))))
-            (let [{:keys [kind expr]} (editor-eval/parse-eval-input trimmed)]
-              (reset! submit-lock true)
-              (.addToHistory editor trimmed)
-              (add-user-msg! trimmed)
-              (-> (editor-eval/run-eval! expr events)
-                  (.then (fn [result]
-                           (let [content (editor-eval/format-eval-output result)
-                                 role    (if (or (:unavailable? result) (:blocked? result))
-                                           "error" "shell")]
-                             (update-messages!
-                              (fn [msgs]
-                                (conj (vec msgs)
-                                      {:role       role
-                                       :content    content
-                                       :id         (new-id)
-                                       :local-only (= kind :eval-hidden)})))
-                             ;; A blocked expression never ran — do not tell
-                             ;; the model it did.
-                             (when (and (= kind :eval) (not (:blocked? result)))
-                               (swap! (:state agent) update :messages conj
-                                      {:role "user" :content (str trimmed "\n" content)}))
-                             (reset! submit-lock false)
-                             (sync-pane!))))
-                  (.catch (fn [e]
-                            (add-error! e)
-                            (reset! submit-lock false)))))
-
-            ;; ── Normal LLM prompt ────────────────────────────────────
-            (not @submit-lock)
-            ;; `@path` mentions expand here and nowhere else: steer, `/`, `!`
-            ;; and `$` keep their text verbatim. The expanded text is what the
-            ;; pane shows — it is what the model saw.
-            (let [expanded (:text (file-mentions/expand-mentions trimmed (js/process.cwd)))]
-              (reset! submit-lock true)
-              (.addToHistory editor trimmed)
-              (add-user-msg! expanded)
-              (do-run! expanded))))
+        (make-submit-dispatcher
+         {:locked?          submit-lock
+          :streaming?       streaming
+          :editor           editor
+          :abort-controller (:abort-controller agent)
+          :add-user-msg!    add-user-msg!
+          :add-local-msg!   add-local-msg!
+          :add-msg!         (fn [m]
+                              (update-messages!
+                               (fn [msgs] (conj (vec msgs) (assoc m :id (new-id))))))
+          :add-error!       add-error!
+          :append-context!  (fn [text]
+                              (swap! (:state agent) update :messages conj
+                                     {:role "user" :content text}))
+          :set-busy!        set-busy!
+          :set-streaming!   set-streaming!
+          :sync-status!     sync-status!
+          :sync-pane!       sync-pane!
+          :on-turn-done!    (fn [] (swap! turn-count inc))
+          :run!             (fn [text]
+                              (run-turn-with-update-handler
+                               agent add-chunk!
+                               #(run agent text)))
+          :steer!           (fn [text] (steer agent {:role "user" :content text}))
+          :run-command!     (fn [trimmed] (run-command! agent trimmed update-messages!))
+          :exec-bash!       (fn [command] (editor-bash/run-bash! agent command))
+          :eval-expr!       (fn [expr] (editor-eval/run-eval! expr events))
+          :expand-mentions  (fn [text]
+                              (:text (file-mentions/expand-mentions text (js/process.cwd))))})
 
         ;; An extension handling "input" streams straight into the pane. Its
         ;; messages carry :role/:content/:prompt-id but no :id, and chat-pane
@@ -751,26 +849,10 @@
                               (sync-pane!)))))))
 
         on-submit
-        (fn [text]
-          (let [trimmed (.trim text)]
-            (when (pos? (count trimmed))
-              ((:emit-async events) "input_submit" #js {:text trimmed})
-              ;; `input` is an INTERCEPTION hook, not a notification: a handler
-              ;; returns {handle, streaming, subscribe} to take the turn over.
-              ;; emit-collect is async, so gate on handler-count — with nothing
-              ;; subscribed (the common case) submit stays exactly as
-              ;; synchronous as it was.
-              (if (zero? ((:handler-count events) "input"))
-                (dispatch-submit! trimmed)
-                (-> ((:emit-collect events) "input" #js {:input trimmed})
-                    (.then (fn [res]
-                             (if (and res (get res "handle"))
-                               (route-to-agent! res trimmed)
-                               (dispatch-submit! trimmed))))
-                    (.catch (fn [e]
-                              ;; A broken router must not eat the user's input.
-                              (add-error! e)
-                              (dispatch-submit! trimmed))))))))]
+        (make-submit-handler {:events     events
+                              :dispatch!  dispatch-submit!
+                              :route!     route-to-agent!
+                              :add-error! add-error!})]
 
     ;; Wire extension UI hooks
     (when-let [ext (.-extension-api agent)]
@@ -1021,24 +1103,37 @@
                                        @(:shortcuts agent) data matchesKey))
                              #js {:consume true})))
 
-      ;; Global Ctrl+C → graceful exit
-      (.addInputListener tui
-                         (fn [data]
-                           (when (matchesKey data "ctrl+c")
-                             (.stop tui)
-                             ;; Or the render ticker keeps the event loop alive
-                             ;; and the process never exits.
-                             (set-streaming! false)
-                             ((:off events) "tool_execution_start"  on-tool-start)
-                             ((:off events) "tool_execution_end"    on-tool-end)
-                             ((:off events) "tool_execution_update" on-tool-update)
-                             ((:off events) "model_select"          on-model-select)
-                             ((:off events) "session_clear"         on-session-clear)
-                             ((:off events) "session_start"         on-session-start)
-                             ((:off events) "turn_request"          on-turn-request)
-                             ((:emit-async events) "session_shutdown" #js {:reason "user-exit"})
-                             (js/process.exit 0))
-                           nil))
+      ;; Global Ctrl+C: abort the turn first, exit on the second press or
+      ;; while idle — see make-interrupt-handler.
+      (let [interrupt!
+            (make-interrupt-handler
+             {:streaming? (fn [] @streaming)
+              :abort!     (fn []
+                            (when-let [ctrl-atom (:abort-controller agent)]
+                              (.abort @ctrl-atom "user-interrupt")))
+              :notify!    (fn [text]
+                            (update-messages!
+                             (fn [msgs]
+                               (conj (vec msgs) {:role "info" :content text :id (new-id)}))))
+              :exit!      (fn []
+                            (.stop tui)
+                            ;; Or the render ticker keeps the event loop alive
+                            ;; and the process never exits.
+                            (set-streaming! false)
+                            ((:off events) "tool_execution_start"  on-tool-start)
+                            ((:off events) "tool_execution_end"    on-tool-end)
+                            ((:off events) "tool_execution_update" on-tool-update)
+                            ((:off events) "model_select"          on-model-select)
+                            ((:off events) "session_clear"         on-session-clear)
+                            ((:off events) "session_start"         on-session-start)
+                            ((:off events) "turn_request"          on-turn-request)
+                            ((:emit-async events) "session_shutdown" #js {:reason "user-exit"})
+                            (js/process.exit 0))})]
+        (.addInputListener tui
+                           (fn [data]
+                             (when (matchesKey data "ctrl+c")
+                               (interrupt!))
+                             nil)))
 
       (.start tui)
 
