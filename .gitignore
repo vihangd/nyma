@@ -21,3 +21,10 @@ docs/plan-*.md
 bench/tasks/
 bench/js-toolchain/node_modules/
 bench/traces/
+
+# crash dumps and one-off probe scripts left at the root
+*.core
+probe_*.mjs
+
+# rust benchmark build targets
+bench/rust-target*/
