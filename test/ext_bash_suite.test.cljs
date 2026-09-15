@@ -469,7 +469,7 @@
                                   (it "resolves tilde to home"
                                       (fn []
                                         (let [resolved (cwd-manager/resolve-cd-target "~" nil)]
-                                          (-> (expect resolved) (.toBe (os/homedir))))))
+                                          (-> (expect resolved) (.toBe (.-HOME (.-env js/process)))))))
 
                                   (it "resolves relative paths"
                                       (fn []

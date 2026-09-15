@@ -1,20 +1,21 @@
 (ns agent.keybindings
-  (:require [agent.debug :as d]
+  (:require [agent.utils.home :as home]
+             [agent.debug :as d]
             ["node:path" :as path]
             ["node:fs" :as fs]
-            ["node:os" :as os]
             [agent.keybinding-registry :as kbr]))
 
-(def keybindings-path
-  "Path to user keybindings file."
-  (path/join (os/homedir) ".nyma" "keybindings.json"))
+(defn keybindings-path
+  "Path to the user keybindings file. Per call: HOME can change after import."
+  []
+  (path/join (home/dir) ".nyma" "keybindings.json"))
 
 (defn load-keybindings
   "Read ~/.nyma/keybindings.json. Returns map of {key-combo → action-string} or {}."
   []
-  (if (fs/existsSync keybindings-path)
+  (if (fs/existsSync (keybindings-path))
     (try
-      (let [raw (js/JSON.parse (fs/readFileSync keybindings-path "utf8"))
+      (let [raw (js/JSON.parse (fs/readFileSync (keybindings-path) "utf8"))
             entries (js/Object.entries raw)]
         (into {} (map (fn [e] [(aget e 0) (aget e 1)]) entries)))
       (catch :default e

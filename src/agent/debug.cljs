@@ -29,18 +29,18 @@
 
    Tests: configure-logger! / reset-logger! swap the sink without
    touching globals. set-enabled! overrides env (both directions)."
-  (:require ["node:fs" :as fs]
-            ["node:os" :as os]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]))
 
 ;;; ─── Paths ─────────────────────────────────────────────
 
 (defn- log-path []
-  (path/join (os/homedir) ".nyma" "debug.log"))
+  (path/join (home/dir) ".nyma" "debug.log"))
 
 (defn- ensure-dir []
-  (let [dir (path/join (os/homedir) ".nyma")]
+  (let [dir (path/join (home/dir) ".nyma")]
     (when-not (fs/existsSync dir)
       (fs/mkdirSync dir #js {:recursive true}))))
 

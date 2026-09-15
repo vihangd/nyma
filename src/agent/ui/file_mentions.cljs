@@ -6,8 +6,8 @@
    and the file is appended after it in a `<file path=…>` block — so sessions
    keep `:content` an opaque string and the transcript shows exactly what the
    model saw."
-  (:require ["node:fs" :as fs]
-            ["node:os" :as os]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.utils.git-files :as gf]
             [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]
@@ -42,8 +42,8 @@
 (def ^:private max-file-bytes (* 200 1024))
 
 (defn- resolve-mention [cwd token]
-  (let [expanded (cond (= token "~") (os/homedir)
-                       (.startsWith token "~/") (path/join (os/homedir) (subs token 2))
+  (let [expanded (cond (= token "~") (home/dir)
+                       (.startsWith token "~/") (path/join (home/dir) (subs token 2))
                        :else token)]
     (path/resolve cwd expanded)))
 

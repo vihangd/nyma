@@ -174,8 +174,8 @@
    has claimed it. Five branches — steer, `/cmd`, `!cmd`/`!!cmd`,
    `$expr`/`$$expr`, plain prompt — each with its own lock and streaming
    rules. Built from a map of dependencies so the tests drive the REAL
-   branches with fakes: the routing tests used to mirror this function, and
-   passed while the code under them dropped turns.
+   branches with fakes — a test that mirrors this function cannot catch it
+   dropping a turn.
 
    `locked?` / `streaming?` are atoms. `run!` starts a turn and returns its
    promise; `run-command!` runs a slash line; `exec-bash!` / `eval-expr!`

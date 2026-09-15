@@ -1,7 +1,7 @@
 (ns agent.settings.manager
-  (:require ["node:path" :as path]
+  (:require [agent.utils.home :as home]
+             ["node:path" :as path]
             ["node:fs" :as fs]
-            ["node:os" :as os]
             [agent.debug :as d]
             [agent.utils.validation :as v]
             [clojure.string :as str]))
@@ -399,7 +399,7 @@
      :project-path — override the project settings file path (default: .nyma/settings.json)"
   ([] (create-settings-manager {}))
   ([{:keys [global-path project-path]}]
-   (let [global-path   (or global-path (path/join (os/homedir) ".nyma" "settings.json"))
+   (let [global-path   (or global-path (path/join (home/dir) ".nyma" "settings.json"))
          project-path  (or project-path ".nyma/settings.json")
          global-settings  (atom (load-json global-path))
          project-settings (atom (load-json project-path))

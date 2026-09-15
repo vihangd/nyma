@@ -21,7 +21,8 @@
    the hooks key, because PreToolUse: [A] in one source and [B] in
    another should produce [A, B] not [B]. We re-merge the hooks key
    ourselves with deep-concat semantics."
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
             [clojure.string :as str]))
@@ -128,8 +129,8 @@
   "Return the ordered list of source path objects to try.
 
    `compat` is a CLJS map: {:claude bool :agents bool}.
-   `home` overrides os/homedir() — used in tests to isolate."
-  ([cwd compat] (default-source-paths cwd compat (os/homedir)))
+   `home` overrides home/dir — used in tests to isolate."
+  ([cwd compat] (default-source-paths cwd compat (home/dir)))
   ([cwd compat home]
    (let [nyma-paths
          [{:read read-hooks-from-settings :path (path/join home ".nyma" "settings.json")}
@@ -186,8 +187,8 @@
       :disable-all-source path-or-nil}
 
    `home` is the optional global home dir override (defaults to
-   os/homedir()) — used in tests to isolate from the real ~/.claude."
-  ([cwd compat] (load-merged-hooks cwd compat (os/homedir)))
+   home/dir) — used in tests to isolate from the real ~/.claude."
+  ([cwd compat] (load-merged-hooks cwd compat (home/dir)))
   ([cwd compat home]
    (let [sources (default-source-paths cwd compat home)
          ;; Reduce with disable-all? short-circuit.
@@ -271,9 +272,9 @@
    collapse our hook arrays. We do a tiny separate read for the flags
    themselves.
 
-   `home` overrides os/homedir() — used in tests to isolate from the
+   `home` overrides home/dir — used in tests to isolate from the
    user's real ~/.nyma/settings.json."
-  ([cwd] (load-compat-flags cwd (os/homedir)))
+  ([cwd] (load-compat-flags cwd (home/dir)))
   ([cwd home]
    (let [candidates
          [(path/join cwd  ".nyma" "settings.local.json")

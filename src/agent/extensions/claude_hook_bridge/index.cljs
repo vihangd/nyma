@@ -12,8 +12,8 @@
    settings file changes, the atom is atomically updated. No
    subscriber churn — old handler closures keep working with the new
    config on their next call."
-  (:require [agent.debug :as d]
-            ["node:os" :as os]
+  (:require [agent.utils.home :as home]
+             [agent.debug :as d]
             [agent.extensions.claude-hook-bridge.config :as config]
             [agent.extensions.claude-hook-bridge.watch :as watch]
             [agent.extensions.claude-hook-bridge.audit :as audit]
@@ -134,7 +134,7 @@
                    (.join (clj->js
                            (mapv (fn [p]
                                    (let [h (or (.-NYMA_HOME js/process.env)
-                                               (.homedir os))]
+                                               (home/dir))]
                                      (if (and h (.startsWith p h))
                                        (str "~" (.slice p (count h)))
                                        p)))
@@ -145,9 +145,9 @@
     ;; any watched source path. The reload swaps the hooks-atom; per-
     ;; event closures pick up the new config on their next call.
     ;; NYMA_HOME is an undocumented test-isolation override. When unset
-    ;; (the common case) fall back to os.homedir() so path/join doesn't
+    ;; (the common case) fall back to home/dir so path/join doesn't
     ;; receive undefined and throw ERR_INVALID_ARG_TYPE on extension load.
-    (let [home        (or (.-NYMA_HOME js/process.env) (.homedir os))
+    (let [home        (or (.-NYMA_HOME js/process.env) (home/dir))
           watch-paths (watch/watched-paths cwd compat home)
           on-reload   (fn []
                         (try

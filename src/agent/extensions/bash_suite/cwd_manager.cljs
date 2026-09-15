@@ -1,7 +1,7 @@
 (ns agent.extensions.bash-suite.cwd-manager
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:os" :as os]
             [agent.extensions.bash-suite.shared :as shared]
             [clojure.string :as str]))
 
@@ -30,7 +30,7 @@
   (let [target (str target)
         ;; Expand ~ to home directory
         expanded (if (.startsWith target "~")
-                   (str/replace target #"^~" (os/homedir))
+                   (str/replace target #"^~" (home/dir))
                    target)]
     (if (path/isAbsolute expanded)
       expanded

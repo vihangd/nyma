@@ -10,10 +10,10 @@
    Servers are made available to nyma's main LLM via the
    mcp-client extension (registered as `mcp__<server>__<tool>`),
    and forwarded to ACP subprocess agents at session/new."
-  (:require [agent.debug :as d]
+  (:require [agent.utils.home :as home]
+             [agent.debug :as d]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:os" :as os]
             [clojure.string :as str]
             [agent.extensions.agent-shell.shared :as shared]))
 
@@ -53,7 +53,7 @@
 (defn candidate-paths
   "The four files consulted, lowest → highest precedence. One list, so the
    scan and the report it prints cannot drift apart."
-  ([project-root] (candidate-paths project-root (os/homedir)))
+  ([project-root] (candidate-paths project-root (home/dir)))
   ([project-root home]
    [(path/join home ".nyma" "mcp.json")
     (path/join project-root ".nyma" "mcp.json")
@@ -74,7 +74,7 @@
 
 (defn candidate-report
   "The consulted-files report for a real filesystem."
-  ([project-root] (candidate-report project-root (os/homedir)))
+  ([project-root] (candidate-report project-root (home/dir)))
   ([project-root home]
    (format-candidates
     (mapv (fn [p] {:file p :exists? (boolean (fs/existsSync p))})
@@ -160,7 +160,7 @@
      2. <cwd>/.nyma/mcp.json
      3. <cwd>/.cursor/mcp.json
      4. <cwd>/.mcp.json"
-  ([project-root] (scan-mcp-servers project-root (os/homedir) nil))
+  ([project-root] (scan-mcp-servers project-root (home/dir) nil))
   ([project-root home] (scan-mcp-servers project-root home nil))
   ([project-root home on-error]
    (let [[p-user p-nyma p-cursor p-project] (candidate-paths project-root home)
@@ -183,7 +183,7 @@
 (defn- scan-and-store!
   "Scan for MCP servers and update the shared atom."
   [project-root & [on-error]]
-  (let [servers (scan-mcp-servers project-root (os/homedir) on-error)]
+  (let [servers (scan-mcp-servers project-root (home/dir) on-error)]
     (reset! shared/mcp-servers servers)
     servers))
 
@@ -204,7 +204,7 @@
   "Everything `/mcp list` prints: the discovered servers, then the config
    files that were consulted. \"No MCP servers discovered\" on its own never
    said where nyma had looked."
-  ([servers project-root] (server-list-report servers project-root (os/homedir)))
+  ([servers project-root] (server-list-report servers project-root (home/dir)))
   ([servers project-root home]
    (str (if (empty? servers)
           "No MCP servers discovered. Add a .mcp.json to your project root."

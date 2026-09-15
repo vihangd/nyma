@@ -27,7 +27,7 @@
   (fs/writeFileSync p (js/JSON.stringify (clj->js obj) nil 2)))
 
 (defn- audit-line-count []
-  (let [p (path/join (os/homedir) ".nyma" "hooks-audit.log")]
+  (let [p (path/join (.-HOME (.-env js/process)) ".nyma" "hooks-audit.log")]
     (if (fs/existsSync p)
       (count (filter seq (.split (fs/readFileSync p "utf8") "\n")))
       0)))

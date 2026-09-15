@@ -18,13 +18,16 @@
    This module is intentionally small and side-effecting (file IO).
    The bridge calls `note!` from the dispatcher right before
    spawning each command-type handler."
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:os" :as os]
 ))
 
-(def ^:private audit-path
-  (path/join (os/homedir) ".nyma" "hooks-audit.log"))
+(defn- audit-path
+  ;; Per call, not at load: HOME can change after import (tests), and a
+  ;; baked path silently logs to the wrong home.
+  []
+  (path/join (home/dir) ".nyma" "hooks-audit.log"))
 
 (def ^:private seen
   "Set of sha256 strings already logged this session."
@@ -52,14 +55,14 @@
     (when-not (contains? @seen sha)
       (swap! seen conj sha)
       (try
-        (ensure-dir! audit-path)
+        (ensure-dir! (audit-path))
         (let [line (str (js/JSON.stringify
                          #js {:ts      (.toISOString (js/Date.))
                               :event   event-name
                               :command command
                               :sha256  sha})
                         "\n")]
-          (fs/appendFileSync audit-path line))
+          (fs/appendFileSync (audit-path) line))
         (catch :default _e nil)))
     sha))
 
@@ -70,4 +73,4 @@
   []
   (reset! seen #{}))
 
-(def audit-log-path audit-path)
+(def audit-log-path (audit-path))

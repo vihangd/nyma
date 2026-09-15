@@ -52,9 +52,9 @@
 
    See docs/gateway.md for the full reference, including per-channel config keys
    and the behaviour of each streaming/session policy."
-  (:require [agent.utils.js-interop :as ji]
+  (:require [agent.utils.home :as home]
+             [agent.utils.js-interop :as ji]
             ["node:fs/promises" :as fsp]
-            ["node:os" :as os]
             ["node:path" :as path]
             [clojure.string :as str]))
 
@@ -147,8 +147,8 @@
   [p]
   (cond
     (not (string? p)) p
-    (= p "~")         (os/homedir)
-    (str/starts-with? p "~/") (path/join (os/homedir) (subs p 2))
+    (= p "~")         (home/dir)
+    (str/starts-with? p "~/") (path/join (home/dir) (subs p 2))
     :else p))
 
 (defn projects-from-config

@@ -10,7 +10,7 @@
             [agent.commands.builtins :refer [register-builtins handle-reload]]))
 
 ;; discover reads ~/.nyma/prompts; HOME is the test scratch dir (test-preload).
-(def ^:private prompts-dir (path/join (os/homedir) ".nyma" "prompts"))
+(def ^:private prompts-dir (path/join (.-HOME (.-env js/process)) ".nyma" "prompts"))
 
 (beforeEach (fn [] (fs/mkdirSync prompts-dir #js {:recursive true})))
 (afterEach (fn [] (fs/rmSync prompts-dir #js {:recursive true :force true})))

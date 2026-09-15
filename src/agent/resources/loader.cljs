@@ -1,13 +1,16 @@
 (ns agent.resources.loader
-  (:require ["node:path" :as path]
+  (:require [agent.utils.home :as home]
+             ["node:path" :as path]
             ["node:fs" :as fs]
-            ["node:os" :as os]
             [clojure.string :as str]
             [agent.resources.skills :as skills]
             [agent.settings.manager :refer [defaults]]
             [agent.builtin-extensions :as builtin-extensions]))
 
-(def global-dir (path/join (os/homedir) ".nyma"))
+(defn global-dir
+  "~/.nyma, per call: HOME can change after import."
+  []
+  (path/join (home/dir) ".nyma"))
 (def project-dir ".nyma")
 
 ;; Builtins are no longer discovered by scanning dist/agent/extensions: that path
@@ -160,7 +163,7 @@ When multiple independent tool calls are needed, make them in parallel.
    Runtime monorepo resolution when the editing target is known (e.g.
    `packages/foo/AGENTS.md` overriding the root) still uses
    `walk-up-for-agents-md` from the call-site."
-  ([] (find-agents-files (os/homedir) (js/process.cwd)))
+  ([] (find-agents-files (home/dir) (js/process.cwd)))
   ([home cwd] (find-agents-files home cwd nil))
   ([home cwd names]
    (let [names     (or names default-context-files)
@@ -274,14 +277,14 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; own paths win over cross-vendor on name collision (matches MCP
         ;; discovery precedence in agent_shell/features/mcp_discovery.cljs).
         cwd     (js/process.cwd)
-        home    (os/homedir)
+        home    (home/dir)
         skills  (discover-all-skills home cwd)
 
         prompts (merge
-                 (or (discover-prompts (path/join global-dir "prompts")) {})
+                 (or (discover-prompts (path/join (global-dir) "prompts")) {})
                  (or (discover-prompts (path/join project-dir "prompts")) {}))
 
-        themes  (discover-themes [(path/join global-dir "themes")
+        themes  (discover-themes [(path/join (global-dir) "themes")
                                   (path/join project-dir "themes")])
 
         ;; AGENTS.md: walk every collected file, parse optional YAML
@@ -293,7 +296,7 @@ When multiple independent tool calls are needed, make them in parallel.
                        (str/join "\n\n"))
 
         system-md (or (read-if-exists (path/join project-dir "SYSTEM.md"))
-                      (read-if-exists (path/join global-dir "SYSTEM.md")))
+                      (read-if-exists (path/join (global-dir) "SYSTEM.md")))
 
         ;; Emit resources_discover event so extensions can contribute paths
         ext-resources (when events
@@ -356,7 +359,7 @@ When multiple independent tool calls are needed, make them in parallel.
      ;; machine running nyma, so scanning them works from a source tree and from
      ;; a binary alike.
      :extension-dirs
-     [(path/join global-dir "extensions")
+     [(path/join (global-dir) "extensions")
       (path/join project-dir "extensions")]
 
      ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them

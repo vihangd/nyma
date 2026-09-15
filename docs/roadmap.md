@@ -1665,10 +1665,11 @@ Known, deliberately left:
 - A model with no pricing entry (e.g. the default `glm-5.3-flash`) reports `total_cost_usd: 0`
   and hides the cost segment. Honest would be `null` / "n/a"; needs a pricing-unknown
   flag through `calculate-turn-cost` and the status line.
-- Hook-bridge payload field names diverged from Claude Code's (`tool_result` vs
-  `tool_response`, hardcoded `session_id` outside PreToolUse) — fix in flight.
 - "other"/"mcp" tool categories are `allow` in every permission mode (no metadata → no
   policy); MCP hardening item above.
-- `~/.nyma/debug.log` accumulates test-fixture compaction warnings (13 MB) — some test
-  writes past the scratch HOME; find the writer.
+- Found and fixed: Bun resolves `os.homedir()` once at process start, so every path
+  built from it ignored the preload's scratch HOME and the suite read/wrote the real
+  `~/.nyma` (that is where the 13 MB of fixture warnings in debug.log came from).
+  `agent.utils.home/dir` reads `process.env.HOME`; `home_dir_lint` keeps `os/homedir`
+  out of src.
 

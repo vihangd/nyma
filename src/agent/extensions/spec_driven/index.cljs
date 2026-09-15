@@ -43,7 +43,8 @@
 
    These ride the existing claude_hook_bridge, providing the same
    pre/post-task lifecycle Kiro users get from the Kiro IDE."
-  (:require ["node:path" :as path]
+  (:require [agent.utils.home :as home]
+             ["node:path" :as path]
             ["node:fs"   :as fs]
             ["node:os"   :as os]
             ["ai" :refer [generateText]]
@@ -1623,7 +1624,7 @@
               "install-skill"
               (let [opts   (vec rest-)
                     force? (some #(= % "--force") opts)
-                    home   (os/homedir)
+                    home   (home/dir)
                     result (skill-content/install-skill! home force?)]
                 (if (:ok? result)
                   (.notify (.-ui ctx)

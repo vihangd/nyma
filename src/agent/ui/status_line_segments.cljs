@@ -17,7 +17,8 @@
 
    All segments should degrade gracefully when their data is missing —
    return {:visible? false} rather than rendering empty noise."
-  (:require ["node:path" :as path]
+  (:require [agent.utils.home :as home]
+             ["node:path" :as path]
             ["node:os" :as os]))
 
 ;;; ─── Registry ───────────────────────────────────────────
@@ -165,7 +166,7 @@
   [p]
   (if (or (nil? p) (= p ""))
     ""
-    (let [home (try (os/homedir) (catch :default _ ""))
+    (let [home (try (home/dir) (catch :default _ ""))
           p    (if (and (seq home) (.startsWith p home))
                  (str "~" (.slice p (count home)))
                  p)

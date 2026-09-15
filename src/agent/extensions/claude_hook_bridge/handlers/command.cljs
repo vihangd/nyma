@@ -16,9 +16,9 @@
      - On timeout/abort, the process is hard-killed (SIGKILL after a
        short SIGTERM grace) so a misbehaving hook can't hold up the
        agent indefinitely."
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.home :as home]
+             ["node:fs" :as fs]
             ["node:path" :as path]
-            ["node:os" :as os]
             [agent.utils.stream-drain :as drain]))
 
 (def default-timeout-ms 600000)
@@ -39,7 +39,7 @@
 (defn- expand-tilde [p]
   (let [s (str p)]
     (if (.startsWith s "~/")
-      (path/join (os/homedir) (.slice s 2))
+      (path/join (home/dir) (.slice s 2))
       s)))
 
 (defn- resolve-command
