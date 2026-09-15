@@ -159,7 +159,7 @@ The flags are not arbitrary, and `test/bundle_flags.test.cljs` fails if they dri
 | `--format=esm` | **load-bearing.** `--bytecode` implies CJS, and out of a CJS binary the extension loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension fails with `Cannot find package 'ai'`, silently, since an empty scan is not an error |
 | `--minify` | −5.9 MB; startup unchanged, because bytecode already did the parse |
 
-Extensions in the binary: the 38 builtins are compiled in via the generated registry
+Extensions in the binary: the 40 builtins are compiled in via the generated registry
 (`src/agent/builtin_extensions.cljs` — regenerate with `bun run gen:builtins` after adding one), and
 user extensions are still discovered by scanning `~/.nyma/extensions` and `.nyma/extensions` at
 runtime. A bundled nyma reports the same 40 extensions and 20 providers as the dist entry point.
@@ -235,7 +235,6 @@ src/
     pricing.cljs        Token cost table + calculate-turn-cost
     commands/      Built-in slash command implementations + session export
     providers/     LLM provider registry (Anthropic, OpenAI, Google)
-    schema/        TypeBox ↔ Zod adapter for TS extensions
     utils/         Shared utilities (ANSI text, terminal width)
     modes/         Operational modes (interactive, print, rpc, sdk)
     ui/            pi-tui terminal components
@@ -252,7 +251,6 @@ src/
       partial.cljs   Checkpoints the in-flight response to a .partial sidecar
     settings/      Configuration system
     resources/     Resource discovery (prompts, skills, themes)
-    packages/      Package management
 test/              Test files (.cljs and .ts)
   integration/     Integration tests (tool pipeline, extension lifecycle, state+events)
 built-in/themes/   Default dark/light themes
@@ -316,7 +314,7 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-**Total: 10,600+ assertions across 280+ test files** (run `bun run test` to see live counts).
+**Total: 11,200+ assertions across 300+ test files** (run `bun run test` to see live counts).
 
 Coverage spans the full stack:
 
@@ -541,7 +539,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 ### SDK / Programmatic Usage
 
 ```javascript
-import { create_session } from "./dist/modes/sdk.mjs";
+import { create_session } from "./dist/agent/modes/sdk.mjs";
 
 const session = await create_session({
   model: "claude-sonnet-4-20250514",
@@ -772,7 +770,7 @@ turn its behaviour off.
 Each extension runs in a **scoped API sandbox**. All tools and commands are automatically prefixed with the extension's namespace, preventing collisions:
 
 ```
-Extension "git-tools" registers "status" → stored as "git-tools/status"
+Extension "git-tools" registers "status" → stored as "git-tools__status"
 ```
 
 Control which API methods the extension can access via a capabilities list in `extension.json`:
@@ -799,7 +797,7 @@ Available capabilities: `tools`, `commands`, `shortcuts`, `events`, `messages`, 
     #js {:description "A slash command"
          :handler     (fn [args ctx] (println "Running!" args))})
 
-  ;; Tools registered as "my-ext/my-tool", commands as "my-ext/my-cmd"
+  ;; Tools registered as "my-ext__my-tool", commands as "my-ext__my-cmd"
   (fn [] (.unregisterTool api "my-tool")))
 ```
 
@@ -874,7 +872,7 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 | `turn_start` / `turn_end` | emit | Each conversation turn |
 | `message_start` / `message_update` / `message_end` | emit | Streaming messages |
 | `tool_call` / `tool_result` | emit | Tool execution |
-| `before_tool_call` | emit | Before tool runs — set `ctx.cancelled = true` to block, or return `{__skip: result}` to short-circuit |
+| `before_tool_call` | emit | Before tool runs — set `ctx.cancelled = true` to block, or return `{skip: true, result}` to short-circuit |
 | `session_start` / `session_end` / `session_switch` | emit | Session lifecycle |
 | `session_clear` | emit | `/clear` invoked — extensions may reset their agent sessions |
 | `before_compact` / `compact` | emit | Context compaction |
@@ -992,7 +990,7 @@ Change the order, or add a name, in settings:
 | `@modelcontextprotocol/sdk` | MCP client for `mcp_client` |
 | `headroom-ai` | Tool-output compression (`headroom` extension) |
 | `marked` / `marked-terminal` | Markdown rendering in the chat pane |
-| `turndown` / `linkedom` | HTML → Markdown for the `fetch` tool |
+| `turndown` / `linkedom` | HTML → Markdown for the `web_fetch` tool |
 | `shell-quote` | Command tokenising for `bash_suite` security analysis |
 | `vscode-jsonrpc` | JSON-RPC transport for `lsp_suite` |
 | `zod` | Schema validation for tool parameters |

@@ -49,7 +49,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/extensions/token_suite/token_preview.cljs` | `agent.extensions.token-suite.token-preview` | Live token-count preview widget — subscribes to `editor_change`, shows `~N tokens` |
 | `src/agent/resources/skills.cljs` | `agent.resources.skills` | Skill discovery + `activate-skill` (deduped, tracked in `:active-skills`), `deactivate-skill`, `first-skill-line` |
 | `src/agent/ui/skill_picker.cljs` | `agent.ui.skill-picker` | Fuzzy skill picker for `/skills` — same `{render, onInput, dispose}` pattern as model picker |
-| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /sessions, /export, etc.) |
+| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.) |
 | `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML |
 | `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings |
 | `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models |
@@ -319,7 +319,7 @@ Squint's varargs destructuring `[& {:keys [a b]}]` does **not** work reliably. P
 
 Tests are in `test/` as `.cljs` (compiled by squint) or `.ts` files. Run with `bun test`.
 
-For async tests, use `defn ^:async` helpers (since `fn ^:async` doesn't work):
+For async tests, `^:async` on the `(fn …)` form works (see the Squint notes above); a named `defn ^:async` helper is still the readable choice for a long body:
 
 ```clojure
 (defn ^:async test-my-async-thing []
@@ -482,11 +482,11 @@ All tools and commands registered by an extension are automatically prefixed wit
 ```clojure
 ;; Extension "git-tools" calls:
 (.registerTool api "status" ...)
-;; Tool is registered as "git-tools/status"
+;; Tool is registered as "git-tools__status"
 
 ;; Extension "git-tools" calls:
 (.registerCommand api "log" ...)
-;; Command is registered as "git-tools/log"
+;; Command is registered as "git-tools__log"
 ```
 
 ### Capabilities
@@ -579,6 +579,7 @@ Settings are resolved in priority order:
 | print | `-p` / `--print` | Run once, print result to stdout |
 | json | `--mode json` | Run once, output JSON messages |
 | rpc | `--mode rpc` | JSONL protocol over stdio |
+| pi-rpc | `--mode pi-rpc` | JSONL protocol for the pi Emacs frontend |
 | sdk | (import) | Programmatic embedding |
 
 ## Quick Reference: DOs and DON'Ts
@@ -587,11 +588,9 @@ Settings are resolved in priority order:
 
 | ❌ Don't | ✅ Do instead |
 |---------|--------------|
-| `(fn ^:async [x] ...)` | `(defn ^:async f [x] ...)` |
-| `(name :my-key)` | Use string literal directly (keywords are strings in Squint) |
+| `(fn ^:async [x] ...)` — the tag on the args vector | `^:async (fn [x] ...)` — the tag on the `fn` form, or a `defn ^:async` |
 | `(keyword? x)` | `(string? x)` |
-| `(keyword "foo")` | `"foo"` — just use a string |
-| `(my-set :key)` or `(@atom-set :key)` | `(contains? my-set :key)` or `(contains? @atom-set :key)` |
+| `(my-set :key)` in new code | `(contains? my-set :key)` — callable sets do work; `contains?` reads as intent |
 | `(my-map :key)` | `(get my-map :key)` |
 | `(js->clj ...)` | Use the value directly — it's already a JS object. For deep clone: `(js/JSON.parse (js/JSON.stringify x))` |
 | `(array-seq xs)` | Pass the JS array directly — `map`/`filter`/`reduce`/`into` all accept JS arrays natively; use `(js/Array.from xs)` only for non-array iterables |
@@ -619,7 +618,7 @@ Settings are resolved in priority order:
 
 | ❌ Don't | ✅ Do instead |
 |---------|--------------|
-| `(fn ^:async [] ...)` as `it` callback | Extract to `(defn ^:async test-foo [] ...)`, pass by name |
+| `(fn ^:async [] ...)` as `it` callback | `^:async (fn [] ...)`, or a named `(defn ^:async test-foo [] ...)` passed by name |
 | Leave temp dirs after async tests | Always `.rmSync` in the test body before returning |
 | Spy on `console.error` without restoring | Save `orig` first, restore in all branches |
 | Test compiled output paths | Test source — squint compile is part of the test run |
@@ -627,5 +626,5 @@ Settings are resolved in priority order:
 
 ## Git Workflow
 
-- Commit messages: `<module>: <short description>` (e.g., `memory: add TTL to working memory`)
+- Commit messages: Conventional Commits, `type(scope): imperative subject` (e.g., `fix(rpc): stdin-EOF exit is a cli option, not a default`); the body says why
 - One logical change per commit
