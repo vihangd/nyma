@@ -7,6 +7,14 @@
 //    discovery stub `fetch` and opt back in explicitly.
 process.env.NYMA_NO_MODEL_DISCOVERY ??= "1";
 
+// 0. process.exit inside a test is a silent green: bun stops mid-run, prints
+//    no summary, and returns 0. (rpc-mode's stdin-EOF exit did exactly that.)
+//    Make it loud. A test that needs to observe an exit stubs process.exit
+//    itself, which still works because this only replaces the default.
+process.exit = (code) => {
+  throw new Error(`process.exit(${code ?? 0}) called inside a test`);
+};
+
 // 2. HOME is a scratch directory. credentials.json, debug.log, the extension
 //    cache and the sessions dir all resolve under ~/.nyma at call time; with the
 //    real HOME a test run read the developer's credentials, appended to their

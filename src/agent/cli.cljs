@@ -983,7 +983,9 @@ Examples:
                           (js-await (print-mode/start-json agent p))
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?
                                                       emit-session-shutdown-async! deactivate-all)))
-          "rpc"         (js-await (rpc/start agent))
+          ;; EOF on stdin means the host is gone; without the exit the process
+          ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
+          "rpc"         (js-await (rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
           "pi-rpc"      (js-await (pi-rpc/start agent)))
         (catch :default e
           (.write (.-stderr js/process)

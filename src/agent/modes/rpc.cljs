@@ -15,7 +15,12 @@
     (catch :default e
       (js/console.error (str "RPC error: " (.-message e))))))
 
-(defn ^:async start [agent]
+(defn ^:async start
+  "`on-eof` runs when stdin closes. cli passes a process exit — the host is
+   gone and nothing else would end the event loop — but it is an option, not
+   a default: a test calls `start` in-process on an already-closed stdin, and
+   an unconditional exit there ended the whole test run with status 0."
+  [agent & [{:keys [on-eof]}]]
   (let [stop-reading (atom nil)]
 
     ;; Subscribe to agent events → write as JSONL to stdout.
@@ -32,11 +37,9 @@
 
       ;; Read commands from stdin as JSONL. Not node:readline — it also splits
       ;; on U+2028/U+2029, which are legal inside a JSON string.
-      ;; EOF on stdin means the host is gone; without this the process sat
-      ;; forever on an idle event loop (`nyma --mode rpc </dev/null` hung).
       (reset! stop-reading
               (read-lines! js/process.stdin (partial handle-line agent)
-                           (fn [] (js/process.exit 0))))
+                           (or on-eof (fn [] nil))))
 
       ;; Return a cleanup thunk — call it to deregister all handlers
       (fn []
