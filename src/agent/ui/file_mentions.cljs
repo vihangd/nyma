@@ -9,7 +9,6 @@
   (:require ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            [agent.tools :refer [try-binary]]
             [agent.utils.git-files :as gf]
             [agent.ui.fuzzy-scorer :refer [fuzzy-filter]]
             [clojure.string :as str]))
@@ -90,9 +89,7 @@
 (defn detect-fd
   "Path of `fd` (or Debian's `fdfind`) on PATH, else nil."
   []
-  (cond (try-binary "fd") (js/Bun.which "fd")
-        (try-binary "fdfind") (js/Bun.which "fdfind")
-        :else nil))
+  (or (js/Bun.which "fd") (js/Bun.which "fdfind")))
 
 (def ^:private skip-dirs #{"node_modules" ".git" "dist" ".nyma" ".claude"})
 (def ^:private walk-cap 2000)
@@ -120,6 +117,13 @@
 ;; vector instead of spawning git for every character typed.
 (def ^:private index-cache (atom {}))
 (def ^:private cache-ttl-ms 5000)
+
+(defn reset-index!
+  "Drop every cached listing so the next keystroke re-lists. `/add-dir`
+   calls it: a root added mid-session was invisible to `@` for up to the
+   TTL, and the cache is keyed by cwd so nothing else would have noticed."
+  []
+  (reset! index-cache {}))
 
 (defn file-index [cwd]
   (let [now (js/Date.now)

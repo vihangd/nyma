@@ -397,11 +397,10 @@
   (let [theme     (or (.-theme resources)
                       (theme-catalog/active-theme (.-themes resources) default-dark))
         ;; Every consumer reads through this thunk rather than the map above,
-        ;; so `/theme` can swap it under them. theme-catalog/current is the
-        ;; process-wide view of the same thing (/theme and /reload write it).
-        theme-atom (atom theme)
-        theme-fn   (fn [] @theme-atom)
+        ;; so `/theme` and `/reload` (which write theme-catalog/current) swap
+        ;; it under them. There is no second copy to fall out of step.
         _          (reset! theme-catalog/current theme)
+        theme-fn   (fn [] @theme-catalog/current)
         terminal  (new ProcessTerminal)
         ;; pi-tui 0.85 split the concrete TUI class in two — `TUI` is now a
         ;; type-only export, with TuiMainScreen (scrollback, what nyma uses) and
@@ -798,12 +797,11 @@
                                      ((:get settings)))))})))
 
     ;; `/theme <name>` and `/reload` call theme-catalog/activate!; this is the
-    ;; TUI's half: swap the thunk's source, re-theme the pickers (they share
-    ;; one process-wide theme), drop the chat pane's cached lines (they were
-    ;; rendered in the old colours) and paint.
+    ;; TUI's half: re-theme the pickers (they share one process-wide theme),
+    ;; drop the chat pane's cached lines (they were rendered in the old
+    ;; colours) and paint. theme-fn already reads the catalog's atom.
     (theme-catalog/on-apply!
      (fn [new-theme]
-       (reset! theme-atom new-theme)
        (picker-frame/set-theme! new-theme)
        (.invalidate chat-pane)
        (.requestRender tui)))

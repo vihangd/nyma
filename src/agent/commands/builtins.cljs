@@ -290,54 +290,6 @@
 
 ;;; ─── Async command handlers ──
 
-(defn ^:async handle-reload
-  "Orchestrate full reload: deactivate → settings → resources → extensions → flags."
-  [agent resources extensions-atom resolve-flags-fn ctx]
-  ;; 1. Deactivate loaded extensions
-  (when extensions-atom
-    (js-await (deactivate-all @extensions-atom)))
-  ;; 2. Reload settings from disk
-  (when-let [settings (:settings resources)]
-    (when-let [reload-fn (:reload settings)]
-      (reload-fn)))
-  ;; 3. Rediscover resources
-  (let [new-resources (js-await (discover {:events (:events agent)
-                                           :reason "reload"
-                                           :context-files (when-let [s (:settings resources)]
-                                                            (when (fn? (:get s))
-                                                              (:context-files ((:get s)))))}))]
-    ;; 4. Rebuild system prompt
-    (when-let [build-fn (:build-system-prompt new-resources)]
-      (aset (:config agent) "system-prompt" (build-fn)))
-    ;; Theme too: a user theme file edited or added under .nyma/themes is
-    ;; part of what was just rediscovered.
-    (theme-catalog/activate!
-     (theme-catalog/active-theme (:themes new-resources) default-dark))
-    ;; 5. Reload extensions
-    (when (and extensions-atom (.-extension-api agent))
-      (let [loaded (js-await (discover-and-load
-                              (:extension-dirs new-resources)
-                              (.-extension-api agent)
-                              (:builtin-extensions new-resources)))]
-        (reset! extensions-atom loaded)))
-    ;; 6. Re-resolve CLI flags
-    (when resolve-flags-fn
-      (resolve-flags-fn agent))
-    ;; Prompt templates: after extensions, so a collision is detected against
-    ;; the reloaded command set.
-    (register-prompt-commands! agent (:prompts new-resources)))
-  ;; 7. session_ready again. Extensions set up their world on it — status
-  ;;    segments, ACP auto-connect, MCP servers — and it used to fire once at
-  ;;    startup only, so /reload deactivated all of that and brought none of
-  ;;    it back. `reload` had zero listeners.
-  (js-await ((:emit-async (:events agent)) "session_ready"
-                                           #js {:cwd        (js/process.cwd)
-                                                :model      (current-model-id agent)
-                                                :extensions (count (or (when extensions-atom @extensions-atom) []))
-                                                :reason     "reload"}))
-  ((:emit (:events agent)) "reload" {})
-  (notify ctx "Extensions reloaded"))
-
 (defonce ^:private prompt-command-names
   ;; What register-prompt-commands! last registered, so a reload can drop a
   ;; prompt whose file went away instead of leaving a stale `/name`.
@@ -371,6 +323,59 @@
                     (if (pos? ((:handler-count events) "turn_request"))
                       ((:emit events) "turn_request" #js {:text text :echo true})
                       (follow-up agent {:role "user" :content text}))))})))))
+
+(defn ^:async handle-reload
+  "Orchestrate full reload: deactivate → settings → resources → extensions → flags."
+  [agent resources extensions-atom resolve-flags-fn ctx]
+  ;; 1. Deactivate loaded extensions
+  (when extensions-atom
+    (js-await (deactivate-all @extensions-atom)))
+  ;; 2. Reload settings from disk
+  (when-let [settings (:settings resources)]
+    (when-let [reload-fn (:reload settings)]
+      (reload-fn)))
+  ;; 3. Rediscover resources
+  (let [new-resources (js-await (discover {:events (:events agent)
+                                           :reason "reload"
+                                           :context-files (when-let [s (:settings resources)]
+                                                            (when (fn? (:get s))
+                                                              (:context-files ((:get s)))))}))]
+    ;; 4. Rebuild system prompt
+    (when-let [build-fn (:build-system-prompt new-resources)]
+      (aset (:config agent) "system-prompt" (build-fn)))
+    ;; Theme too: a user theme file edited or added under .nyma/themes is
+    ;; part of what was just rediscovered.
+    (theme-catalog/activate!
+     (theme-catalog/active-theme (:themes new-resources) default-dark))
+    ;; 5. Reload extensions
+    (when (and extensions-atom (.-extension-api agent))
+      (let [loaded (js-await (discover-and-load
+                              (:extension-dirs new-resources)
+                              (.-extension-api agent)
+                              (:builtin-extensions new-resources)))]
+        (reset! extensions-atom loaded)))
+    ;; 6. Re-resolve CLI flags
+    (when resolve-flags-fn
+      (resolve-flags-fn agent))
+    ;; The `skill` tool closes over the skill map it was built with; a skill
+    ;; added since launch was `/skill`-able but unknown to the model.
+    (skills/register-skill-tool! agent (:skills new-resources))
+    ;; 7. session_ready again. Extensions set up their world on it — status
+    ;;    segments, ACP auto-connect, MCP servers — and it used to fire once at
+    ;;    startup only, so /reload deactivated all of that and brought none of
+    ;;    it back. `reload` had zero listeners.
+    (js-await ((:emit-async (:events agent)) "session_ready"
+                                             #js {:cwd        (js/process.cwd)
+                                                  :model      (current-model-id agent)
+                                                  :extensions (count (or (when extensions-atom @extensions-atom) []))
+                                                  :reason     "reload"}))
+    ;; Prompt templates LAST: an extension that registers its command on
+    ;; session_ready used to land after this and overwrite a prompt of the
+    ;; same name. Now the prompt sees the full command set and, on a
+    ;; collision, is the one that steps aside (skipped with a warning).
+    (register-prompt-commands! agent (:prompts new-resources)))
+  ((:emit (:events agent)) "reload" {})
+  (notify ctx "Extensions reloaded"))
 
 (def global-settings-path
   "Where `/settings` writes. Mirrors create-settings-manager's default."
@@ -613,8 +618,16 @@
                       (dissoc section ns))
             save    (if project? (:save-project sm) (:save-global sm))]
         (save {"extensions" section})
-        (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
-                         " (" (name scope) "). /reload to apply."))))))
+        ;; A global enable removes the global key, but the merge is per key
+        ;; and the project file wins — so if .nyma/settings.json also says
+        ;; false, nothing changed and the receipt must not claim it did.
+        (if (and (= sub "enable") (not project?)
+                 (false? (get-in ((:get sm)) [:extensions ns])))
+          (notify ctx (str "Enabled " ns " (global), but .nyma/settings.json still disables it"
+                           " — run /extensions enable " ns " --project")
+                  "warning")
+          (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
+                           " (" (name scope) "). /reload to apply.")))))))
 
 (defn register-builtins
   "Register all built-in slash commands on the agent.

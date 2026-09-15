@@ -407,6 +407,33 @@
                                             (finally
                                               (fs/rmSync dir #js {:recursive true :force true}))))))
 
+                                  (it "a global enable says so when .nyma/settings.json still disables it"
+                                      (fn []
+                                        (let [dir   (.mkdtempSync fs (path/join (os/tmpdir) "nyma-cmd-test-"))
+                                              gpath (path/join dir "settings.json")
+                                              ppath (path/join dir "project.json")
+                                              _     (fs/writeFileSync gpath (js/JSON.stringify #js {:extensions #js {:openwiki false}}))
+                                              _     (fs/writeFileSync ppath (js/JSON.stringify #js {:extensions #js {:openwiki false}}))
+                                              mgr   (create-settings-manager {:global-path gpath :project-path ppath})
+                                              agent (create-agent {:model "test-model" :system-prompt "test" :settings mgr})
+                                              _     (register-builtins agent nil {:settings mgr} (atom [{:namespace "openwiki" :type :builtin}]))
+                                              {:keys [ctx notifications]} (make-ctx)
+                                              handler (get-handler agent "extensions")]
+                                          (try
+                                            (handler ["enable" "openwiki"] ctx)
+                                            (-> (expect (:msg (first @notifications)))
+                                                (.toBe "Enabled openwiki (global), but .nyma/settings.json still disables it — run /extensions enable openwiki --project"))
+                                            (-> (expect (:level (first @notifications))) (.toBe "warning"))
+                                            ;; The global key is gone all the same.
+                                            (-> (expect (js/Object.keys (aget (js/JSON.parse (fs/readFileSync gpath "utf8")) "extensions")))
+                                                (.toEqual #js []))
+                                            ;; --project is the way out, and its receipt is the plain one.
+                                            (handler ["enable" "openwiki" "--project"] ctx)
+                                            (-> (expect (:msg (second @notifications)))
+                                                (.toBe "Enabled openwiki (project). /reload to apply."))
+                                            (finally
+                                              (fs/rmSync dir #js {:recursive true :force true}))))))
+
                                   (it "disable of an unknown namespace lists the known ones"
                                       (fn []
                                         (let [{:keys [agent dir]} (make-agent-with-settings {})

@@ -390,6 +390,8 @@ Runs once with the given prompt, prints the response, and exits. Useful for scri
 {"type":"result","is_error":false,"result":"…",…}
 ```
 
+`message_start`/`message_end` bracket each **text block** the model emits, not each message — a turn that writes, calls a tool and writes again produces two pairs. `usage` fires once per **step** (each model call), so sum them for a turn's total; a step whose provider reports no usage emits nothing.
+
 All three exit 1 when the run fails (`is_error: true`), and 2 on an unknown format.
 
 ### JSON Mode

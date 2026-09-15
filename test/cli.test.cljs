@@ -10,7 +10,23 @@
             ["node:util" :refer [parseArgs]]
             [agent.cli :refer [resolve-ext-flags resolve-model-via-registry help-text
                                parse-args-error error-line resolve-session cli-options
-                               interactive-resources]]))
+                               interactive-resources output-format-error]]))
+
+;; ── output-format-error ────────────────────────────────────
+
+(describe "output-format-error"
+          (fn []
+            (it "refuses a typo in print mode, where the flag is read"
+                (fn []
+                  (-> (expect (output-format-error "josn" "print"))
+                      (.toBe "nyma: --output-format must be text, json or stream-json"))
+                  (-> (expect (output-format-error "stream-json" "print")) (.toBeNil))
+                  (-> (expect (output-format-error nil "print")) (.toBeNil))))
+
+            (it "ignores the flag in rpc and interactive mode, which never read it"
+                (fn []
+                  (-> (expect (output-format-error "josn" "rpc")) (.toBeNil))
+                  (-> (expect (output-format-error "josn" "interactive")) (.toBeNil))))))
 
 ;; ── resolve-ext-flags ──────────────────────────────────────
 

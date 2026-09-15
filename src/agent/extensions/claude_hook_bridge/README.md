@@ -102,7 +102,8 @@ JSON from stdout. Default 600s timeout.
 allowlist prevents arbitrary env exfiltration).
 
 `type: "prompt"` — small-model LLM evaluator with `$ARGUMENTS` =
-JSON event body. Default 30s.
+JSON event body (`$1` and `$@` name the same thing: the event is the
+one and only argument). Default 30s.
 
 `type: "mcp_tool"` — currently a stub; full MCP-client wiring is a
 follow-up.

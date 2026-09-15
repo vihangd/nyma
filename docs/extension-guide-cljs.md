@@ -410,6 +410,7 @@ on-disk data, keyed by namespace, and must survive a `/reload`.
 ## System Events
 
 - **`editor_change`** — fired on every keystroke in the editor; payload `{text: string}`. Subscribe to build live previews or debounced analysis widgets.
+- **`input_submit`** / **`input`** — see the raw typed text: `@file` mentions are expanded into `<file>` blocks after both hooks run, so a handler that inspects or routes the prompt reads `@notes.txt`, not the file's contents.
 - **`session_clear`** — fired when `/clear` is invoked; extensions (e.g. agent-shell) use this to send `session/new` to their backend.
 - **`before_message_send`** (emit-collect) — final transform between `context_assembly` and the streamText call. Return `{messages?, system?}` to replace either. See §Shaping the LLM Call Pipeline above.
 - **`stream_filter`** (emit-collect) — fires per text delta during streaming. Return `{abort: true, reason?, inject?}` to stop the stream and retry with injected messages (max 2 retries). See §Shaping the LLM Call Pipeline above.

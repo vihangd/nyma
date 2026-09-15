@@ -37,6 +37,8 @@ try {
   restores.push(() => seg.reset_registry_BANG_());
   const meta = await import("../dist/agent/tool_metadata.mjs");
   restores.push(() => meta.reset_extension_metadata_BANG_());
+  const theme = await import("../dist/agent/ui/theme_catalog.mjs");
+  restores.push(() => theme.reset_theme_state_BANG_());
 } catch {
   // dist not built yet (bare `bun test` before a compile) — the freshness test
   // will say so; nothing to restore.

@@ -23,11 +23,10 @@
               (reset! orig-cwd (js/process.cwd))
               (reset! tmp (fs/mkdtempSync (path/join (os/tmpdir) "nyma-theme-")))
               (js/process.chdir @tmp)
-              (tc/on-apply! nil)
-              (reset! tc/current nil)))
+              (tc/reset-theme-state!)))
 
 (afterEach (fn []
-             (tc/on-apply! nil)
+             (tc/reset-theme-state!)
              (js/process.chdir @orig-cwd)
              (try (fs/rmSync @tmp #js {:recursive true :force true})
                   (catch :default _ nil))))

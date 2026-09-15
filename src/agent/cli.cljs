@@ -349,9 +349,13 @@ Examples:
 (defn output-format-error
   "The stderr line for an unaccepted `--output-format`, nil when it is fine
    (absent means text). A typo used to fall through to text silently, so
-   `--output-format josn` handed a JSON parser plain prose."
-  [f]
-  (when (and (some? f) (not (contains? output-formats f)))
+   `--output-format josn` handed a JSON parser plain prose. Only print mode
+   reads the flag, so only print mode is refused over it: `--mode rpc` with
+   a typo there exited 2 for a flag it never looks at."
+  [f & [mode]]
+  (when (and (some? f)
+             (or (nil? mode) (= mode "print"))
+             (not (contains? output-formats f)))
     "nyma: --output-format must be text, json or stream-json"))
 
 (defn- die-no-prompt! [mode-label]
@@ -614,13 +618,13 @@ Examples:
         ;; Same gate NYMA_DEBUG=1 opens; the flag is for the one-off run.
         _ (when (:debug values) (d/set-enabled! true))
 
-        _ (when-let [msg (output-format-error (:output-format values))]
-            (.write (.-stderr js/process) (str msg "\n"))
-            (js/process.exit 2))
-
         mode      (or (:mode values)
                       (when (:print values) "print")
                       "interactive")
+
+        _ (when-let [msg (output-format-error (:output-format values) mode)]
+            (.write (.-stderr js/process) (str msg "\n"))
+            (js/process.exit 2))
         ;; Provider extensions fetch every gateway's full catalogue at launch so
         ;; the picker and /model autocomplete have something to show. A one-shot
         ;; run has neither: it resolves exactly the model named on the command
@@ -698,9 +702,9 @@ Examples:
 
     ;; The `skill` tool needs the discovered skill map and the agent, so it
     ;; cannot sit in `builtin-tools`; registered before the --tools filter so
-    ;; the allowlist governs it like any built-in.
-    (when (seq (:skills resources))
-      ((:register (:tool-registry agent)) "skill" (skills/skill-tool (:skills resources) agent)))
+    ;; the allowlist governs it like any built-in. /reload calls the same
+    ;; helper with the rediscovered map.
+    (skills/register-skill-tool! agent (:skills resources))
 
     ;; Filter active tools if --tools flag was used
     (when active-tools

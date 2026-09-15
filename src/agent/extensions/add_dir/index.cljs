@@ -9,6 +9,7 @@
    injected roots let the agent target them explicitly today."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
+            [agent.ui.file-mentions :as file-mentions]
             [clojure.string :as str]))
 
 (defn ^:export default [api]
@@ -56,6 +57,10 @@
                                      (not (.isDirectory (fs/statSync abs))) (notify (str "Not a directory: " abs) "error")
                                      (some #(= % abs) @roots) (notify (str "Already added: " abs) "warning")
                                      :else (do (swap! roots conj abs)
+                                               ;; The `@` listing is cached per cwd for a few
+                                               ;; seconds; a new root must show up on the next
+                                               ;; keystroke, not after the TTL.
+                                               (file-mentions/reset-index!)
                                                (notify (str "Added root: " abs " (fires on your next message)") "info")))))))})
 
     (fn []

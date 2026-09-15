@@ -299,6 +299,24 @@
                                              (.describe "Arguments for $ARGUMENTS / $1… in the skill"))})
         :execute     (fn [input] (skill-tool-execute skills agent input))}))
 
+(defn register-skill-tool!
+  "Put the `skill` tool for `skills` on the agent's registry, replacing the
+   one built at startup. Called again on /reload: the tool closes over the
+   skill map, so without this a skill added since launch was `/skill`-able
+   but \"Unknown skill\" to the model. With no skills the tool is removed.
+   A --tools filter that left it inactive stays respected."
+  [agent skills]
+  (let [reg      (:tool-registry agent)
+        existed? (contains? ((:all reg)) "skill")
+        active?  (contains? ((:get-active reg)) "skill")]
+    ;; Unregister first: registering over an existing name stashes the old
+    ;; tool as an "original" that a later unregister would resurrect.
+    (when existed? ((:unregister reg) "skill"))
+    (when (seq skills)
+      ((:register reg) "skill" (skill-tool skills agent))
+      (when (and existed? (not active?))
+        ((:set-active reg) (disj (set (keys ((:get-active reg)))) "skill"))))))
+
 ;;; ─── Path glob matching for path-scoped skills ─────────────────
 
 (defn- glob->regex

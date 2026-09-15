@@ -45,10 +45,13 @@
             (doseq [[text args expected]
                     [["$ARGUMENTS"        ["a" "b"]  "a b"]
                      ["$@"                ["a" "b"]  "a b"]
-                     ["$ARGUMENTS"        []         ""]
+                     ;; No arguments: the text is left alone, so a skill body
+                     ;; quoting `echo $1` or `"$@"` still reads as written.
+                     ["$ARGUMENTS"        []         "$ARGUMENTS"]
+                     ["echo $1 \"$@\""    nil        "echo $1 \"$@\""]
+                     ["${1:-dflt}"        []         "${1:-dflt}"]
                      ["$1-$2"             ["x" "y"]  "x-y"]
                      ["$1-$2"             ["x"]      "x-"]
-                     ["${1:-dflt}"        []         "dflt"]
                      ["${1:-dflt}"        ["v"]      "v"]
                      ["${2:-b} $1"        ["a"]      "b a"]
                      ["plain $$ text"     ["a"]      "plain $$ text"]
@@ -175,4 +178,37 @@
                 (fn []
                   (let [desc (skills/skill-tool-description test-skills)]
                     (-> (expect desc) (.toContain "- deploy — Ship it"))
-                    (.toContain (.-not (expect desc)) "hidden"))))))
+                    (.toContain (.-not (expect desc)) "hidden"))))
+
+            (it "a skill added after launch is known to the tool once it is registered again (/reload)"
+                (fn []
+                  (let [agent (fresh-agent)
+                        reg   (:tool-registry agent)
+                        later (assoc test-skills "newer"
+                                     (record "newer" "---\ndescription: Arrived later\n---\nNew body"))]
+                    (skills/register-skill-tool! agent test-skills)
+                    (skills/register-skill-tool! agent later)
+                    (let [t (get ((:all reg)) "skill")]
+                      (-> (expect (.-description t)) (.toContain "newer — Arrived later"))
+                      (-> (expect (contains? ((:get-active reg)) "skill")) (.toBe true))
+                      (-> (.execute t #js {:name "newer"})
+                          (.then (fn [out]
+                                   (-> (expect out) (.toContain "New body")))))))))
+
+            (it "re-registering keeps the tool inactive when a --tools filter left it out"
+                (fn []
+                  (let [agent (fresh-agent)
+                        reg   (:tool-registry agent)]
+                    (skills/register-skill-tool! agent test-skills)
+                    ((:set-active reg) #{"read"})
+                    (skills/register-skill-tool! agent test-skills)
+                    (-> (expect (contains? ((:get-active reg)) "skill")) (.toBe false))
+                    (-> (expect (contains? ((:all reg)) "skill")) (.toBe true)))))
+
+            (it "with no skills left the tool is removed"
+                (fn []
+                  (let [agent (fresh-agent)
+                        reg   (:tool-registry agent)]
+                    (skills/register-skill-tool! agent test-skills)
+                    (skills/register-skill-tool! agent {})
+                    (-> (expect (contains? ((:all reg)) "skill")) (.toBe false)))))))

@@ -1,5 +1,6 @@
 (ns state.test
   (:require ["bun:test" :refer [describe it expect]]
+            [agent.middleware :refer [skill-allows-tool?]]
             [agent.state :refer [create-store create-agent-store core-reducers]]))
 
 (describe "create-store" (fn []
@@ -97,7 +98,7 @@
   (it "message-added appends to messages"
     (fn []
       (let [store (create-agent-store {:messages [{:role "user" :content "first"}]
-                                       :active-tools #{} :model nil})]
+        :active-tools #{} :model nil})]
         ((:dispatch! store) :message-added {:message {:role "assistant" :content "second"}})
         (-> (expect (count (:messages ((:get-state store))))) (.toBe 2))
         (-> (expect (:content (second (:messages ((:get-state store)))))) (.toBe "second")))))
@@ -105,9 +106,22 @@
   (it "messages-cleared empties messages"
     (fn []
       (let [store (create-agent-store {:messages [{:role "user" :content "hi"}]
-                                       :active-tools #{} :model nil})]
+        :active-tools #{} :model nil})]
         ((:dispatch! store) :messages-cleared {})
         (-> (expect (count (:messages ((:get-state store))))) (.toBe 0)))))
+
+  (it "messages-cleared ends every active skill, so its tool allowance does not outlive /new"
+      (fn []
+        (let [store (create-agent-store {:messages [{:role "user" :content "hi"}]
+                                         :active-skills #{"deploy"}
+                                         :skill-allowed-tools {"deploy" #{"bash"}}
+                                         :active-tools #{} :model nil})]
+          (-> (expect (skill-allows-tool? ((:get-state store)) "bash")) (.toBe true))
+          ((:dispatch! store) :messages-cleared {})
+          (let [s ((:get-state store))]
+            (-> (expect (skill-allows-tool? s "bash")) (.toBe false))
+            (-> (expect (count (:active-skills s))) (.toBe 0))
+            (-> (expect (count (:skill-allowed-tools s))) (.toBe 0))))))
 
   (it "tools-changed updates active tools"
     (fn []
@@ -133,11 +147,11 @@
                 (fn []
                   (let [store (create-agent-store {})]
                     ((:dispatch! store) :usage-updated
-                                        {:input-tokens 1000 :output-tokens 50
-                                         :cache-read-tokens 800 :cache-write-tokens 120 :cost 0.01})
+         {:input-tokens 1000 :output-tokens 50
+          :cache-read-tokens 800 :cache-write-tokens 120 :cost 0.01})
                     ((:dispatch! store) :usage-updated
-                                        {:input-tokens 1200 :output-tokens 60
-                                         :cache-read-tokens 1100 :cache-write-tokens 0 :cost 0.01})
+         {:input-tokens 1200 :output-tokens 60
+          :cache-read-tokens 1100 :cache-write-tokens 0 :cost 0.01})
                     (let [st ((:get-state store))]
                       (-> (expect (:total-cache-read-tokens st)) (.toBe 1900))
                       (-> (expect (:total-cache-write-tokens st)) (.toBe 120))
@@ -149,5 +163,5 @@
                 (fn []
                   (let [store (create-agent-store {})]
                     ((:dispatch! store) :usage-updated
-                                        {:input-tokens 100 :output-tokens 10 :cost 0})
+         {:input-tokens 100 :output-tokens 10 :cost 0})
                     (-> (expect (:total-cache-read-tokens ((:get-state store)))) (.toBe 0)))))))

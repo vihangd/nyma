@@ -8,6 +8,11 @@
      $1 … $9             one argument, or empty when absent
      ${N:-default}       one argument, or `default` when absent
 
+   With no arguments at all the text comes back untouched: a skill body
+   quoting a shell snippet (`echo $1`, `for f in \"$@\"`) is read far more
+   often than it is invoked with arguments, and substituting empty strings
+   silently broke the snippet the skill was written to show.
+
    Pure: no filesystem, no agent."
   (:require [clojure.string :as str]))
 
@@ -19,10 +24,13 @@
   "Replace argument placeholders in `text` with the strings in `args`."
   [text args]
   (let [args (vec (or args []))
+        text (str (or text ""))
         nth-arg (fn [n] (get args (dec (js/parseInt n 10))))]
-    (.replace (str (or text "")) placeholder
-              (fn [m dflt-n dflt n]
-                (cond
-                  dflt-n (or (nth-arg dflt-n) dflt)
-                  n      (or (nth-arg n) "")
-                  :else  (str/join " " args))))))
+    (if (empty? args)
+      text
+      (.replace text placeholder
+                (fn [m dflt-n dflt n]
+                  (cond
+                    dflt-n (or (nth-arg dflt-n) dflt)
+                    n      (or (nth-arg n) "")
+                    :else  (str/join " " args)))))))

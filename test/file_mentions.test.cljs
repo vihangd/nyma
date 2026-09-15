@@ -7,6 +7,7 @@
             ["node:child_process" :as cp]
             ["@earendil-works/pi-tui" :refer [CombinedAutocompleteProvider]]
             [agent.ui.file-mentions :as fm]
+            [agent.extensions.add-dir.index :as add-dir]
             [clojure.string :as str]))
 
 (defn- fixture []
@@ -98,3 +99,46 @@
                                                                                 (-> (expect (first items)) (.toBe "@src/main.cljs"))
                                                                                 (resolve)))
                                                                        (.catch reject))))))))
+
+;; The listing is cached per cwd for a few seconds; a file that appears inside
+;; the TTL is invisible until `reset-index!` — which is what `/add-dir` calls.
+(defn- mock-add-dir-api []
+  (let [cmds (atom {})]
+    #js {:on                (fn [_ev _h] nil)
+         :registerCommand   (fn [name opts] (swap! cmds assoc name opts))
+         :unregisterCommand (fn [name] (swap! cmds dissoc name))
+         :_commands         cmds}))
+
+(describe "@file listing cache" (fn []
+                                  (it "reset-index! makes the next suggestion re-list, so a file added mid-TTL shows up"
+                                      (fn [] (js/Promise.
+                                              (fn [resolve reject]
+                                                (let [dir (fixture)
+                                                      p   (provider dir nil)]
+                                                  (-> (suggest p "@")
+                                                      (.then (fn [items]
+                                                               (-> (expect items) (.toContain "@notes.txt"))
+                                                               (fs/writeFileSync (path/join dir "later.txt") "x")
+                                                               (suggest p "@later")))
+                                                      (.then (fn [items]
+                                                               ;; Still cached: nothing knows about later.txt.
+                                                               (-> (expect (vec (or items []))) (.not.toContain "@later.txt"))
+                                                               (fm/reset-index!)
+                                                               (suggest p "@later")))
+                                                      (.then (fn [items]
+                                                               (-> (expect items) (.toContain "@later.txt"))
+                                                               (resolve)))
+                                                      (.catch reject)))))))
+
+                                  (it "/add-dir drops the cached listing"
+                                      (fn []
+                                        (let [dir     (fixture)
+                                              extra   (fs/mkdtempSync (path/join (os/tmpdir) "nyma-extra-root-"))
+                                              api     (mock-add-dir-api)
+                                              _       ((.-default add-dir) api)
+                                              handler (.-handler (get @(.-_commands api) "add-dir"))]
+                                          (fm/file-index dir)
+                                          (fs/writeFileSync (path/join dir "later.txt") "x")
+                                          (-> (expect (fm/file-index dir)) (.not.toContain "later.txt"))
+                                          (handler #js [extra] #js {:ui #js {:notify (fn [_m _l] nil)}})
+                                          (-> (expect (fm/file-index dir)) (.toContain "later.txt")))))))

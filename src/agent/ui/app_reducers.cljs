@@ -80,8 +80,16 @@
                             :verbosity (or (get data :customVerbosity) verbosity)
                             :max-lines max-lines
                             ;; The renderer reads this; the setting decides the
-                            ;; default and ctrl+o flips it afterwards.
-                            :expanded  (= "expanded" (or (get data :customVerbosity) verbosity))}
+                            ;; default and ctrl+o flips it. A flip made while
+                            ;; the tool was still running lives on the start
+                            ;; message; carry it over, or finishing undoes it.
+                            ;; Untouched, the end payload's own verbosity wins.
+                            :expanded  (if (and start-msg
+                                                (some? (:expanded start-msg))
+                                                (not= (:expanded start-msg)
+                                                      (= "expanded" (:verbosity start-msg))))
+                                         (:expanded start-msg)
+                                         (= "expanded" (or (get data :customVerbosity) verbosity)))}
                      start-id                          (assoc :id start-id)
                      start-args                         (assoc :args start-args)
                      ;; The end payload has no customOneLineArgs — only the

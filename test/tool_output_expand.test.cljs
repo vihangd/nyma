@@ -107,6 +107,22 @@
                                          (let [msgs [{:role "user" :id "d" :content "y"}]]
                                            (-> (expect (count (r/tool-toggle-expanded msgs))) (.toBe 1)))))
 
+                                   (it "ctrl+o on a running tool stays expanded once it finishes"
+                                       (fn []
+                                         (let [running (r/apply-tool-start [] {:toolName "bash" :execId "e" :args {:command "ls"}} "collapsed" 40)
+                                               toggled (r/tool-toggle-expanded running)
+                                               done    (r/apply-tool-end toggled {:toolName "bash" :execId "e" :result "x"} "collapsed" 40)]
+                                           (-> (expect (:expanded (first toggled))) (.toBe true))
+                                           (-> (expect (:role (first done))) (.toBe "tool-end"))
+                                           (-> (expect (:expanded (first done))) (.toBe true)))))
+
+                                   (it "an untouched running tool still takes the end payload's verbosity"
+                                       (fn []
+                                         (let [running (r/apply-tool-start [] {:toolName "bash" :execId "e" :args {:command "ls"}} "collapsed" 40)
+                                               done    (r/apply-tool-end running {:toolName "bash" :execId "e" :result "x"
+                                                                                  :customVerbosity "expanded"} "collapsed" 40)]
+                                           (-> (expect (:expanded (first done))) (.toBe true)))))
+
                                    (it "the reducers stamp :expanded from the tool-display setting"
                                        (fn []
                                          (let [collapsed (r/apply-tool-end [] {:toolName "bash" :execId "e" :result "x"} "collapsed" 40)

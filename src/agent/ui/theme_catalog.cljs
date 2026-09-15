@@ -138,14 +138,14 @@
 ;; ── Live switching ─────────────────────────────────────────────────
 
 (def current
-  "The theme in effect. The TUI reads its colours through this (per render)
-   rather than from the map it was constructed with, so `/theme` no longer
-   needs a restart."
+  "The theme in effect. Interactive mode's `theme-fn` derefs this on every
+   render (it is the only theme source the TUI has), so `/theme` and
+   `/reload` switch colours without a restart. nil outside the TUI."
   (atom nil))
 
 (def ^:private on-apply
-  "What the TUI does after `current` changes: swap its atom, re-theme the
-   pickers, drop the chat pane's line cache, request a frame. Set by
+  "What the TUI does after `current` changes: re-theme the pickers, drop
+   the chat pane's line cache, request a frame. Set by
    interactive mode; nil elsewhere (print, rpc, tests)."
   (atom nil))
 
@@ -153,6 +153,14 @@
   "Register the TUI's post-switch hook. One host per process."
   [f]
   (reset! on-apply f))
+
+(defn reset-theme-state!
+  "Forget the current theme and the host hook. Both are process-wide, and
+   bun runs every test file in one process: the test preload calls this
+   per file so a theme applied in one file is not the theme of the next."
+  []
+  (reset! current nil)
+  (reset! on-apply nil))
 
 (defn activate!
   "Make `theme` the current one and run the host hook. Returns the theme."
