@@ -358,6 +358,16 @@ Examples:
              (not (contains? output-formats f)))
     "nyma: --output-format must be text, json or stream-json"))
 
+(def modes #{"interactive" "print" "json" "rpc" "pi-rpc"})
+
+(defn mode-error
+  "The stderr line for an unaccepted `--mode`, nil when it is fine. A typo
+   used to reach the mode dispatch and die there with `No matching clause:
+   josn` and exit 1 — a usage error reported as a crash."
+  [mode]
+  (when-not (contains? modes mode)
+    "nyma: --mode must be interactive, print, json, rpc or pi-rpc"))
+
 (defn- die-no-prompt! [mode-label]
   (.write (.-stderr js/process)
           (str "nyma " mode-label
@@ -622,7 +632,8 @@ Examples:
                       (when (:print values) "print")
                       "interactive")
 
-        _ (when-let [msg (output-format-error (:output-format values) mode)]
+        _ (when-let [msg (or (mode-error mode)
+                             (output-format-error (:output-format values) mode))]
             (.write (.-stderr js/process) (str msg "\n"))
             (js/process.exit 2))
         ;; Provider extensions fetch every gateway's full catalogue at launch so

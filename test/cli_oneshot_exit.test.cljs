@@ -12,63 +12,19 @@
    caught it — those runs use an unresolvable model and die on the error path.
    So this test needs a turn that actually succeeds, and therefore a model
    server. It serves its own: a local OpenAI-compatible SSE endpoint, so the
-   test needs no credentials and touches no network."
+   test needs no credentials and touches no network (test-util.fake-model-server)."
   (:require ["bun:test" :refer [describe it expect]]
-            ["node:fs" :as fs]
-            ["node:os" :as os]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [test-util.fake-model-server :as fms]))
 
-(def ^:private reply-text "ok-from-fake-model")
-
-(defn- chunk [obj]
-  (str "data: " (js/JSON.stringify (clj->js obj)) "\n\n"))
-
-(defn- sse-body []
-  (str (chunk {:id "1" :object "chat.completion.chunk" :model "m1"
-               :choices [{:index 0 :delta {:role "assistant"} :finish_reason nil}]})
-       (chunk {:id "1" :object "chat.completion.chunk" :model "m1"
-               :choices [{:index 0 :delta {:content reply-text} :finish_reason nil}]})
-       (chunk {:id "1" :object "chat.completion.chunk" :model "m1"
-               :choices [{:index 0 :delta {} :finish_reason "stop"}]})
-       "data: [DONE]\n\n"))
-
-(defn- start-fake-model-server []
-  (js/Bun.serve
-   #js {:port 0
-        :fetch (fn [req]
-                 (let [url (js/URL. (.-url req))]
-                   (cond
-                     (.endsWith (.-pathname url) "/models")
-                     (js/Response.json #js {:object "list"
-                                            :data #js [#js {:id "m1" :object "model"}]})
-
-                     (.endsWith (.-pathname url) "/chat/completions")
-                     (js/Response. (sse-body)
-                                   #js {:headers #js {"content-type" "text/event-stream"}})
-
-                     :else (js/Response. "not found" #js {:status 404}))))}))
-
-(defn- temp-home!
-  "A HOME whose settings register the fake server as a local provider."
-  [base-url]
-  (let [dir  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-oneshot-"))
-        nyma (path/join dir ".nyma")]
-    (fs/mkdirSync nyma #js {:recursive true})
-    (fs/writeFileSync
-     (path/join nyma "settings.json")
-     (js/JSON.stringify
-      #js {"local-models" #js [#js {"name" "faketest"
-                                    "baseUrl" base-url
-                                    "models" #js [#js {"id" "m1" "ctx" 8192}]}]}))
-    dir))
+(def ^:private reply-text fms/default-reply)
 
 (defn ^:async run-one-shot
   "Spawn the real CLI and wait for it to exit. Returns {:exited :out}, or
    {:exited nil} when it had to be killed — which is the bug."
   [args timeout-ms]
-  (let [server (start-fake-model-server)
-        base   (str "http://localhost:" (.-port server) "/v1")
-        home   (temp-home! base)]
+  (let [server (fms/start!)
+        home   (fms/temp-home! (:base-url server))]
     (try
       (let [cli  (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs")
             proc (js/Bun.spawn
@@ -92,7 +48,7 @@
             (do (.kill proc) {:exited nil :out (js-await out-p)})
             {:exited raced :out (js-await out-p)})))
       (finally
-        (.stop server true)))))
+        ((:stop server))))))
 
 (defn ^:async test-print-mode-exits []
   (let [{:keys [exited out]} (js-await (run-one-shot ["-p" "say ok"] 90000))]

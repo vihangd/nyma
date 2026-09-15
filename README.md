@@ -520,7 +520,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 |------|-------------|---------|
 | `-m, --model` | LLM model to use | `claude-sonnet-4-20250514` |
 | `--provider` | Provider id (`anthropic`, `openai`, `google`, or any extension-registered one) | `anthropic` |
-| `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc` | `interactive` |
+| `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc`; anything else exits 2 | `interactive` |
 | `-p, --print` | Print mode shorthand | — |
 | `--output-format` | With `-p`: `text`, `json` (one claude-style result object) or `stream-json` (JSONL progress events, then that object). Every format exits 1 when the run fails; an unknown format exits 2 | `text` |
 | `--permission-mode` | `default` \| `accept-edits` \| `plan` \| `full-auto` | `default` (headless: `full-auto`) |
