@@ -1,28 +1,28 @@
 (ns pricing.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.pricing :refer [calculate-cost calculate-turn-cost format-cost
+            [agent.pricing :refer [calculate-turn-cost format-cost
                                    format-tokens token-costs]]))
 
-(describe "calculate-cost" (fn []
+(describe "calculate-turn-cost — uncached" (fn []
   (it "calculates cost for known model"
     (fn []
       ;; claude-sonnet: $3/M input, $15/M output
       ;; 1000 input tokens = $0.003, 500 output = $0.0075 → $0.0105
-      (let [cost (calculate-cost "claude-sonnet-4-20250514" 1000 500)]
+      (let [cost (calculate-turn-cost "claude-sonnet-4-20250514" {:input-tokens 1000 :output-tokens 500})]
         (-> (expect cost) (.toBeCloseTo 0.0105 6)))))
 
   (it "returns 0 for unknown model"
     (fn []
-      (-> (expect (calculate-cost "unknown-model-xyz" 1000 500)) (.toBe 0))))
+      (-> (expect (calculate-turn-cost "unknown-model-xyz" {:input-tokens 1000 :output-tokens 500})) (.toBe 0))))
 
   (it "returns 0 for zero tokens"
     (fn []
-      (-> (expect (calculate-cost "claude-sonnet-4-20250514" 0 0)) (.toBe 0))))
+      (-> (expect (calculate-turn-cost "claude-sonnet-4-20250514" {:input-tokens 0 :output-tokens 0})) (.toBe 0))))
 
   (it "scales linearly with token count"
     (fn []
-      (let [cost1 (calculate-cost "gpt-4o" 1000 1000)
-            cost2 (calculate-cost "gpt-4o" 2000 2000)]
+      (let [cost1 (calculate-turn-cost "gpt-4o" {:input-tokens 1000 :output-tokens 1000})
+            cost2 (calculate-turn-cost "gpt-4o" {:input-tokens 2000 :output-tokens 2000})]
         (-> (expect (js/Math.abs (- (* 2 cost1) cost2))) (.toBeLessThan 0.0001)))))))
 
 (describe "format-cost" (fn []
@@ -80,7 +80,7 @@
     (it "prices the measured turn well below the undifferentiated rate"
         (fn []
           (let [priced (calculate-turn-cost "claude-opus-5" (usage 6765 112 5478 1286))
-                flat   (calculate-cost "claude-opus-5" 6765 112)]
+                flat   (calculate-turn-cost "claude-opus-5" {:input-tokens 6765 :output-tokens 112})]
             (-> (expect priced) (.toBeLessThan flat))
             ;; noCache 1 + read 5478@0.5 + write 1286@6.25 + out 112@25
             (-> (expect (js/Math.round (* priced 10000))) (.toBe 136)))))
@@ -96,7 +96,7 @@
     (it "matches the old number when nothing was cached"
         (fn []
           (-> (expect (calculate-turn-cost "claude-opus-5" (usage 6765 112 0 0)))
-              (.toBe (calculate-cost "claude-opus-5" 6765 112)))))
+              (.toBe (calculate-turn-cost "claude-opus-5" {:input-tokens 6765 :output-tokens 112})))))
 
     (it "leaves a model with no declared cache rates exactly as it was"
         (fn []
@@ -104,7 +104,7 @@
           ;; guessed ratio would swap a known-wrong number for an unknown-wrong
           ;; one, so it must stay unchanged.
           (-> (expect (calculate-turn-cost "gpt-4-turbo" (usage 1000 100 500 200)))
-              (.toBe (calculate-cost "gpt-4-turbo" 1000 100)))))
+              (.toBe (calculate-turn-cost "gpt-4-turbo" {:input-tokens 1000 :output-tokens 100})))))
 
     (it "falls back to the input rate for a side the provider doesn't price"
         (fn []

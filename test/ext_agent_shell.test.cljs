@@ -1402,3 +1402,71 @@
         ;; Gateway/programmatic APIs have no getGlobalFlag; calling it threw
         ;; inside subscribe and took the whole turn down.
                                                 (-> (expect (input-router/inline-thinking? #js {})) (.toBe true))))))
+
+;; ── /agent pool, /agent disconnect <project> ────────────────────────────────
+
+(defn- agent-handler
+  "The /agent handler as registered by the switcher on a mock api."
+  [api]
+  (agent-switcher/activate api)
+  (.-handler (get @(.-_commands api) "agent")))
+
+(defn- fake-worker
+  "A pooled in-process connection, the shape `disconnect-by-pool-key` tears down
+   without a subprocess. Keyed exactly as the pool keys real workers."
+  [agent cwd]
+  (swap! shared/connections assoc (shared/pool-key agent cwd)
+         {:in-process? true :session-id (atom (str agent "-session"))}))
+
+(describe "agent-shell:/agent pool" (fn []
+                                      (it "lists every live worker with its project and session"
+                                          (fn []
+                                            (let [api     (make-mock-api)
+                                                  handler (agent-handler api)]
+                                              (fake-worker "claude" "/tmp/proj-a")
+                                              (fake-worker "claude" "/tmp/proj-b")
+                                              (handler ["pool"] nil)
+                                              (let [msg (last @(.-_notifications api))]
+                                                (-> (expect (.includes msg "claude @ ")) (.toBe true))
+                                                (-> (expect (.includes msg "/tmp/proj-a")) (.toBe true))
+                                                (-> (expect (.includes msg "/tmp/proj-b")) (.toBe true))
+                                                (-> (expect (.includes msg "claude-session")) (.toBe true))))))
+
+                                      (it "says so when nothing is running"
+                                          (fn []
+                                            (let [api     (make-mock-api)
+                                                  handler (agent-handler api)]
+                                              (handler ["pool"] nil)
+                                              (-> (expect (last @(.-_notifications api)))
+                                                  (.toBe "No ACP workers running")))))))
+
+(describe "agent-shell:/agent disconnect <project>" (fn []
+                                                      (it "stops the worker on that project and keeps the others"
+                                                          (fn []
+                                                            (let [api     (make-mock-api)
+                                                                  handler (agent-handler api)]
+                                                              (fake-worker "claude" "/tmp/proj-a")
+                                                              (fake-worker "claude" "/tmp/proj-b")
+                                                              (-> (handler ["disconnect" "/tmp/proj-a"] nil)
+                                                                  (.then (fn [_]
+                                                                           (let [ks (set (keys @shared/connections))]
+                                                                             (-> (expect (contains? ks (shared/pool-key "claude" "/tmp/proj-a"))) (.toBe false))
+                                                                             (-> (expect (contains? ks (shared/pool-key "claude" "/tmp/proj-b"))) (.toBe true))
+                                                                             (-> (expect (.includes (last @(.-_notifications api)) "/tmp/proj-a"))
+                                                                                 (.toBe true)))))))))
+
+                                                      (it "names the project when no worker runs there"
+                                                          (fn []
+                                                            (let [api     (make-mock-api)
+                                                                  handler (agent-handler api)]
+                                                              (handler ["disconnect" "/tmp/nowhere"] nil)
+                                                              (-> (expect (.includes (last @(.-_notifications api)) "No ACP worker on"))
+                                                                  (.toBe true)))))
+
+                                                      (it "the bare form still disconnects the active agent"
+                                                          (fn []
+                                                            (let [api     (make-mock-api)
+                                                                  handler (agent-handler api)]
+                                                              (handler ["disconnect"] nil)
+                                                              (-> (expect (last @(.-_notifications api)))
+                                                                  (.toBe "No agent connected")))))))

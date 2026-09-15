@@ -245,7 +245,8 @@
         ;; Apply per-tool result policy: truncates to :max-string-length and builds
         ;; structured envelope {:ok :summary :data :error :error-kind}.
         ;; ctx :result is replaced with the policy-truncated model-visible string.
-        ;; The full envelope is stored as :result-envelope for UI consumers.
+        ;; The full envelope is stored as :result-envelope and carried on
+        ;; `tool_result` for rpc clients and extensions.
         ;; Measured either side of the policy, because these are the only two
         ;; points where both numbers exist: `raw-bytes` is what the tool
         ;; produced, `model-bytes` is what actually enters the context window.
@@ -319,7 +320,7 @@
    :leave (fn [ctx]
             (tool-tracking-leave events store ctx))})
 
-(defn- categorize-tool
+(defn categorize-tool
   "Permission category from the tool's safety metadata — one table for
    built-ins (`tool_metadata/builtin-metadata`) and extension tools
    (`registerTool` reads a `:safety` field off the def). A tool with no

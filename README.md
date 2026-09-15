@@ -232,7 +232,7 @@ src/
     permissions.cljs    Extension capability gating
     extension_scope.cljs  Namespaced extension API wrapper
     keybindings.cljs    Loads ~/.nyma/keybindings.json user key mappings
-    pricing.cljs        Token cost table + calculate-cost
+    pricing.cljs        Token cost table + calculate-turn-cost
     commands/      Built-in slash command implementations + session export
     providers/     LLM provider registry (Anthropic, OpenAI, Google)
     schema/        TypeBox ↔ Zod adapter for TS extensions

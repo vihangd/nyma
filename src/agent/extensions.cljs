@@ -75,7 +75,7 @@
    - Messaging (sendMessage, sendUserMessage)
    - Middleware (addMiddleware, removeMiddleware)
    - Shell execution (exec)
-   - Session entries (appendEntry, setSessionName, getSessionName, setLabel)
+   - Session entries (appendEntry, setSessionName, getSessionName)
    - Provider management (registerProvider, unregisterProvider)
    - Model/thinking control (setModel, getThinkingLevel, setThinkingLevel)
    - Inter-extension events
@@ -109,14 +109,17 @@
                               ;; e.g. #js {:destructive? true
                               ;;           :capabilities ["filesystem" "write"]}
                               (when-let [s (and tool-def (aget tool-def "safety"))]
-                                (let [caps (aget s "capabilities")]
+                                (let [caps (aget s "capabilities")
+                                      cat  (aget s "category")]
                                   (tool-metadata/register-metadata!
                                    name
                                    (cond-> {:destructive?           (boolean (aget s "destructive?"))
                                             :network?               (boolean (aget s "network?"))
                                             :read-only?             (boolean (aget s "read-only?"))
-                                            :requires-confirmation? (boolean (aget s "requires-confirmation?"))}
-                                     caps (assoc :capabilities (set caps))))))
+                                            :requires-confirmation? (boolean (aget s "requires-confirmation?"))
+                                            :long-running?          (boolean (aget s "long-running?"))}
+                                     caps (assoc :capabilities (set caps))
+                                     cat  (assoc :category (keyword cat))))))
                               ((:register (:tool-registry agent)) name tool-def))
          :unregisterTool    (fn [name]
                               (tool-metadata/unregister-metadata! name)
@@ -258,10 +261,6 @@
                               (when-let [session @(:session agent)]
                                 (when-let [f (:get-session-name session)]
                                   (f))))
-         :setLabel          (fn [entry-id label]
-                              (when-let [session @(:session agent)]
-                                (when-let [f (:set-label session)]
-                                  (f entry-id label))))
 
        ;; ── Status line segments ────────────────────────────
          :registerStatusSegment

@@ -70,7 +70,8 @@
   (let [dir      (:dir config)
         sections (:sections config)]
     [["save_metadata"
-      #js {:description "Save OpenWiki metadata after generating/updating docs. Call this once at the end of an init or update run. It also reports any OKF conformance violations in the bundle — fix them and call it again."
+      #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+           :description "Save OpenWiki metadata after generating/updating docs. Call this once at the end of an init or update run. It also reports any OKF conformance violations in the bundle — fix them and call it again."
            :parameters
            #js {:type "object"
                 :required #js ["command" "model"]
@@ -88,7 +89,8 @@
                     (when report (str "\n\n" report)))))}]
 
      ["ensure_agents_md"
-      #js {:description "Add an OpenWiki reference section to AGENTS.md / CLAUDE.md so coding agents discover the wiki. Idempotent; refreshes the block if the wiki directory changed."
+      #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+           :description "Add an OpenWiki reference section to AGENTS.md / CLAUDE.md so coding agents discover the wiki. Idempotent; refreshes the block if the wiki directory changed."
            :parameters #js {:type "object" :properties #js {}}
            :execute
            (fn [_args]

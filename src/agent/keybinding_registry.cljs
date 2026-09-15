@@ -95,62 +95,6 @@
 
 ;;; ─── Combo canonicalization ─────────────────────────────
 
-(defn key-name
-  "Extract the canonical base key name from Ink's (input, key) pair.
-   Returns nil if nothing maps.
-
-   Mirrors cc-kit's getKeyName (packages/ui/src/keybindings/match.ts:29-47)
-   — one place for platform quirks, so pickers and the action registry
-   can't drift. Does NOT include modifiers; use combo-from-ink for that.
-
-   Canonical names:
-     escape, return, tab, backspace, delete, space,
-     up, down, left, right, pageup, pagedown, home, end,
-     and any single-character input (lowercased)."
-  [input key]
-  (cond
-    (.-escape key)     "escape"
-    (.-return key)     "return"
-    (.-tab key)        "tab"
-    (.-backspace key)  "backspace"
-    (.-delete key)     "delete"
-    (.-upArrow key)    "up"
-    (.-downArrow key)  "down"
-    (.-leftArrow key)  "left"
-    (.-rightArrow key) "right"
-    (.-pageUp key)     "pageup"
-    (.-pageDown key)   "pagedown"
-    (.-home key)       "home"
-    (.-end key)        "end"
-    (= input " ")      "space"
-    (and (string? input) (pos? (count input)))
-    (.toLowerCase input)
-    :else nil))
-
-(defn combo-from-ink
-  "Convert Ink's (input, key) pair to a canonical combo string.
-   Modifier order: ctrl+ then alt+ then base.
-   Shift is NOT emitted for alphabetic bare input — Ink already
-   uppercases it via input.
-
-   QUIRK: Ink's parse-keypress sets key.meta=true whenever the escape
-   key is pressed — the escape sequence leader leaks through as the
-   meta flag (see ink's use-input.js:
-     meta: keypress.meta || keypress.name === 'escape' || keypress.option).
-   Without the strip below, a plain Escape press would canonicalize to
-   'alt+escape' and bindings like 'escape' (the default for
-   app.interrupt) would silently never match. cc-kit handles the same
-   quirk at packages/ui/src/keybindings/match.ts:93-95."
-  [input key]
-  (when-let [base (key-name input key)]
-    (let [escape? (= base "escape")
-          ctrl?   (.-ctrl key)
-          ;; Strip the meta flag when the key is Escape — see QUIRK above.
-          alt?    (and (.-meta key) (not escape?))]
-      (str (when ctrl? "ctrl+")
-           (when alt?  "alt+")
-           base))))
-
 (defn- parse-combo-internal
   "Split 'ctrl+alt+r' into {:mods #{\"ctrl\" \"alt\"} :base \"r\"}."
   [combo]
@@ -237,7 +181,7 @@
    Returns: {:actions :user-overrides :user-by-action :conflicts}
 
    :user-by-action is the inverse of :user-overrides — {action-id → #{combos}}.
-   Used for get-binding and matches? to compute effective bindings quickly."
+   Used for get-binding to compute effective bindings quickly."
   ([]
    (create-registry {}))
   ([user-overrides]
@@ -262,24 +206,6 @@
   (or (first (get-in registry [:user-by-action action-id]))
       (when-let [defaults (get-in registry [:actions action-id :default-keys])]
         (normalize-combo (first defaults)))))
-
-(defn get-bindings
-  "Return the set of effective combos (normalized) for an action.
-   User overrides REPLACE defaults when present."
-  [registry action-id]
-  (if-let [user-set (get-in registry [:user-by-action action-id])]
-    user-set
-    (into #{} (map normalize-combo)
-          (get-in registry [:actions action-id :default-keys]))))
-
-(defn matches?
-  "True when the given Ink (input, key) pair matches any of the effective
-   combos for action-id. Returns false when action-id is unknown."
-  [registry input key action-id]
-  (let [combo (combo-from-ink input key)]
-    (and combo
-         (contains? (get-bindings registry action-id)
-                    (normalize-combo combo)))))
 
 ;;; ─── /hotkeys ───────────────────────────────────────────
 
@@ -330,6 +256,13 @@
        (sort-by :description)
        vec))
 
+(defn- all-fixed?
+  "A conflict nobody can act on: every action on the key is `:fixed?`, so the
+   sharing is by design (submit and steer both live on Enter) and no
+   keybindings.json entry could separate them."
+  [{:keys [action-ids]}]
+  (every? (fn [id] (:fixed? (get default-actions id))) action-ids))
+
 (defn hotkeys-text
   "The `/hotkeys` list, generated from the action registry (so a user
    override in keybindings.json shows the combo that is really in effect)
@@ -339,6 +272,11 @@
    model and Ctrl+P was 'Reserved' — neither was bound to anything — while
    saying nothing about Ctrl-C, Enter, Tab, or the extension shortcuts that
    are the only keys most sessions actually use.
+
+   Ends with the registry's conflicts — a keybindings.json line that put a
+   second action on a key that already had one — so the user learns why a
+   key does something other than what they bound, instead of the warning
+   only ever reaching NYMA_DEBUG output.
 
    Pure: takes the registry value and the shortcuts map, returns a string."
   [registry shortcuts]
@@ -364,12 +302,19 @@
                              {:combo combo :description (shortcut-description entry)}))
                       (sort-by :combo)
                       vec)
+        conflict-rows (->> (:conflicts registry)
+                           (remove all-fixed?)
+                           (map (fn [{:keys [key action-ids]}]
+                                  {:combo key :description (str/join ", " (sort action-ids))}))
+                           (sort-by :combo)
+                           vec)
         blocks (keep identity
                      [(section "Agent"      (category-rows registry :agent))
                       (section "Editor"     (category-rows registry :editor))
                       (section "Tools"      (category-rows registry :tools))
                       (section "Navigation" (category-rows registry :navigation))
-                      (section "Extensions and custom bindings" ext-rows)])]
+                      (section "Extensions and custom bindings" ext-rows)
+                      (section "Conflicts (one key, several actions)" conflict-rows)])]
     (if (seq blocks)
       (str/join "\n\n" blocks)
       "No keyboard shortcuts are bound.")))

@@ -82,8 +82,8 @@
    at the input rate. That keeps an unknown model's number unchanged rather than
    swapping one wrong answer for another.
 
-   Deliberately not an extra arity of `calculate-cost` — this repo's formatter
-   mangles multi-arity defns."
+   A usage map carrying only :input-tokens and :output-tokens prices the
+   whole input at the input rate."
   [model-id usage]
   (if-let [rates (lookup-cost model-id)]
     (let [[in-rate out-rate cr-rate cw-rate] rates
@@ -103,16 +103,6 @@
              (per-1m cw (or cw-rate in-rate))
              (per-1m output out-rate)))))
     0))
-
-(defn calculate-cost
-  "Calculate USD cost for a given model and token counts.
-   Returns 0 if model pricing is unknown.
-
-   Cache-unaware: callers that know the cache split should use
-   `calculate-turn-cost`, which prices it."
-  [model-id input-tokens output-tokens]
-  (calculate-turn-cost model-id {:input-tokens input-tokens
-                                 :output-tokens output-tokens}))
 
 (defn format-cost
   "Format USD cost as a human-readable string."

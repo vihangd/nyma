@@ -203,7 +203,8 @@ plain text; the executor will read it on its next turn.")
 (defn ^:export default [api]
   ;; Tool: model-invokable autonomous consultation.
   (.registerTool api "advisor"
-                 #js {:description
+                 #js {:safety #js {:read-only? true :network? true :category "network"}
+                      :description
                       (str "Consult a stronger reviewer LLM (the 'advisor') "
                            "with the full conversation transcript. The advisor "
                            "sees what you've done — every tool call, every "

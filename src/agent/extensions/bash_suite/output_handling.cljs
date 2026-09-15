@@ -76,7 +76,8 @@
 
 (defn- make-retrieve-tool []
   (tool
-   #js {:description "Retrieve full output from a previously truncated bash command result."
+   #js {:safety #js {:read-only? true :category "shell"}
+        :description "Retrieve full output from a previously truncated bash command result."
         :inputSchema (.object z
                               #js {:id     (-> (.string z) (.describe "Output ID from truncation notice"))
                                    :offset (-> (.number z) (.optional)

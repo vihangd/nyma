@@ -96,14 +96,14 @@
                       (.finally (fn [] (reset! (:callbacks conn) nil)))))))))))))
 
 (defn disconnect-project
-  "Disconnect a single (agent, cwd) ACP worker. Used by gateway idle eviction.
+  "Disconnect a single (agent, cwd) ACP worker — `/agent disconnect <project>`.
    No-op if no matching connection exists."
   [agent cwd]
   (pool/disconnect (shared/kw-name agent) cwd))
 
 (defn list-pool
   "Return a snapshot of live pool entries as `[{:agent :cwd :session-id} ...]`.
-   Useful for status/admin tools."
+   Backs `/agent pool`."
   []
   (->> @shared/connections
        (keep (fn [[k v]]

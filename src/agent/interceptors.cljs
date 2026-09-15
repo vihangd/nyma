@@ -127,8 +127,3 @@
                         (recur (rest stack) next-ctx)))
                     (recur (rest stack) ctx)))))))]
     ctx))
-
-(defn into-chain
-  "Compose multiple chains/interceptors into a single chain vector."
-  [& chains]
-  (vec (mapcat #(if (map? %) [%] %) chains)))

@@ -15,6 +15,8 @@ This is the most feature-rich extension in the tree. For details — wire format
 | Command | What it does |
 |---|---|
 | `/agent` | Connect, detach, disconnect, list, or switch the active agent; `/agent handoff` transfers the session |
+| `/agent pool` | List every live ACP worker (agent, project directory, session id) |
+| `/agent disconnect <project>` | Stop the workers on one project directory and leave the others running |
 | `/disconnect` | Disconnect the currently active agent |
 | `/model` | Show the model picker, list models, or switch model directly |
 | `/agent mode <id>` | Set the ACP agent's mode — this is where plan mode lives (`/agent mode plan`) |

@@ -100,7 +100,8 @@
 
 (defn- make-list-jobs-tool []
   (tool
-    #js {:description "List all background jobs with their status and duration."
+    #js {:safety #js {:read-only? true :category "shell"}
+         :description "List all background jobs with their status and duration."
          :inputSchema (.object z #js {})
          :execute (fn [_args]
                     (let [all-jobs @jobs]
@@ -121,7 +122,8 @@
 
 (defn- make-job-output-tool []
   (tool
-    #js {:description "Get recent output from a background job."
+    #js {:safety #js {:read-only? true :category "shell"}
+         :description "Get recent output from a background job."
          :inputSchema (.object z
                         #js {:job_id (-> (.number z) (.describe "Job ID"))
                              :lines  (-> (.number z) (.optional)
@@ -145,7 +147,9 @@
 
 (defn- make-kill-job-tool []
   (tool
-    #js {:description "Kill a background job."
+    #js {;; Kills a process: "exec" for the permission gate, like bash itself.
+         :safety #js {:destructive? true :capabilities #js ["shell"] :category "shell"}
+         :description "Kill a background job."
          :inputSchema (.object z
                         #js {:job_id (-> (.number z) (.describe "Job ID to kill"))
                              :signal (-> (.string z) (.optional)

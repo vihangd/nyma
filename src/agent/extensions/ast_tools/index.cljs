@@ -58,7 +58,8 @@
 
   ;; ast_grep tool
   (.registerTool api "ast_grep"
-                 #js {:description "Search code using AST patterns (syntax-aware, not regex). Uses ast-grep for structural matching."
+                 #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+                      :description "Search code using AST patterns (syntax-aware, not regex). Uses ast-grep for structural matching."
                       :parameters #js {:type "object"
                                        :properties #js {:pattern    #js {:type "string" :description "ast-grep pattern (e.g., 'console.log($$$)')"}
                                                         :path       #js {:type "string" :description "Directory or file to search (default: .)"}

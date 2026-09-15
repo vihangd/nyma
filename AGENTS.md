@@ -52,7 +52,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 | `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /sessions, /export, etc.) |
 | `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML |
 | `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings |
-| `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-cost` for all supported models |
+| `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models |
 | `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name) |
 | `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories |
 | `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`) |

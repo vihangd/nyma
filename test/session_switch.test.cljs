@@ -51,13 +51,10 @@
             _   (fs/writeFileSync f2 "")
             mgr (create-session-manager f1)]
         ((:set-session-name mgr) "My Session")
-        ((:set-label mgr) "entry-1" "Important")
         (-> (expect ((:get-session-name mgr))) (.toBe "My Session"))
-        (-> (expect ((:get-label mgr) "entry-1")) (.toBe "Important"))
         ;; Switch resets metadata
         ((:switch-file mgr) f2)
-        (-> (expect ((:get-session-name mgr))) (.toBeNull))
-        (-> (expect ((:get-label mgr) "entry-1")) (.toBeUndefined)))))
+        (-> (expect ((:get-session-name mgr))) (.toBeNull)))))
 
   (it "switch-file returns new path"
     (fn []

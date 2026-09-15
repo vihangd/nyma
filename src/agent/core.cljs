@@ -26,19 +26,16 @@
     tools  ;; fast path — no filters, preserve original map
     (into {}
           (filter (fn [[tool-name _]]
-                    (let [caps   (tool-metadata/capabilities tool-name)
-                          tmodes (tool-metadata/modes tool-name)]
-                      (and
-                       ;; Must have every required capability
-                       (or (nil? require-capabilities)
-                           (every? #(contains? caps %) require-capabilities))
-                       ;; Must not have any excluded capability
-                       (or (nil? exclude-capabilities)
-                           (not (some #(contains? caps %) exclude-capabilities)))
-                       ;; Must be allowed in at least one of the requested modes
-                       (or (nil? modes)
-                           (nil? tmodes)
-                           (some #(contains? tmodes %) modes)))))
+                    (and
+                     ;; Must have every required capability
+                     (or (nil? require-capabilities)
+                         (every? #(tool-metadata/has-capability? tool-name %) require-capabilities))
+                     ;; Must not have any excluded capability
+                     (or (nil? exclude-capabilities)
+                         (not (some #(tool-metadata/has-capability? tool-name %) exclude-capabilities)))
+                     ;; Must be allowed in at least one of the requested modes
+                     (or (nil? modes)
+                         (some #(tool-metadata/allowed-in-mode? tool-name %) modes))))
                   tools))))
 
 (defn create-agent

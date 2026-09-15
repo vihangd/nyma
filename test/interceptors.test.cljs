@@ -1,6 +1,6 @@
 (ns interceptors.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.interceptors :refer [execute interceptor into-chain]]))
+            [agent.interceptors :refer [execute interceptor]]))
 
 ;; All async test fns must be top-level defn ^:async (Squint pitfall)
 
@@ -104,13 +104,6 @@
         result   (js-await (execute [sync-ic async-ic] {:value 0}))]
     (-> (expect (:value result)) (.toBe 2))))
 
-(defn ^:async test-composed-chain-executes []
-  (let [a (interceptor :a {:enter (fn [ctx] (update ctx :value inc))})
-        b (interceptor :b {:enter (fn [ctx] (update ctx :value inc))})
-        chain (into-chain [a] [b])
-        result (js-await (execute chain {:value 0}))]
-    (-> (expect (:value result)) (.toBe 2))))
-
 (defn ^:async test-error-during-leave []
   (let [log (atom [])
         a (interceptor :a
@@ -193,15 +186,3 @@
   (it "awaits async enter stages" test-async-enter)
   (it "awaits async leave stages" test-async-leave)
   (it "handles mixed sync and async" test-mixed-sync-async)))
-
-(describe "into-chain" (fn []
-  (it "composes individual interceptors and chains"
-    (fn []
-      (let [a (interceptor :a {:enter (fn [ctx] ctx)})
-            b (interceptor :b {:enter (fn [ctx] ctx)})
-            chain (into-chain [a] b [a b])]
-        (-> (expect (count chain)) (.toBe 4))
-        (-> (expect (:name (first chain))) (.toBe :a))
-        (-> (expect (:name (second chain))) (.toBe :b)))))
-
-  (it "composed chain executes correctly" test-composed-chain-executes)))

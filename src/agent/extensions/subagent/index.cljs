@@ -338,7 +338,10 @@ intermediate tool calls, so put everything that matters in the summary.")
 (defn ^:export default [api]
   (.registerTool
    api "subagent"
-   #js {:description
+   #js {;; Delegation, not a file or shell action of its own: every tool a
+        ;; subagent runs is gated in its own loop.
+        :safety #js {:long-running? true :capabilities #js ["execution"] :category "meta"}
+        :description
         (str "Delegate to context-isolated subagents (built on roles). "
              "Default subagent roles are READ-ONLY (scout/planner/reviewer/researcher) "
              "— use for exploration, planning, review, research. Keep code EDITS on the "

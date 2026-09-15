@@ -96,7 +96,6 @@
         leaf-id       (atom nil)
         index         (atom {})  ;; id → {:idx, :parent-id, :role}
         session-name  (atom nil)
-        entry-labels  (atom {})  ;; entry-id → label string
         sqlite-store  (:sqlite-store opts)
         events        (:events opts)
         session-file  (or (:session-file opts) initial-file-path)
@@ -203,8 +202,6 @@
                                  (append-fn {:role "session-name" :content (str n)})
                                  n)
              :get-session-name (fn [] @session-name)
-             :set-label        (fn [entry-id label] (swap! entry-labels assoc entry-id label))
-             :get-label        (fn [entry-id] (get @entry-labels entry-id))
              :get-entries      (fn [] @entries)
              :get-branch       (fn [] (build-context-fn))
              ;; The file this session persists to — the key usage rows and
@@ -223,7 +220,6 @@
                                    (reset! index {})
                                    (reset! leaf-id nil)
                                    (reset! session-name nil)
-                                   (reset! entry-labels {})
                                    (load-fn)
                                    (when events
                                      ((:emit events) "session_switch"

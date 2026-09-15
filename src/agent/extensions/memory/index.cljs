@@ -53,7 +53,9 @@
     (.on api "before_agent_start" on-before-start)
 
     (.registerTool api "memory_write"
-                   #js {:description "Save or update a durable fact in your persistent MEMORY.md (survives across sessions). Use for stable project conventions, decisions, and hard-won insights — NOT transient state. Keep it terse; a bloated memory hurts you."
+                   #js {;; Rewrites MEMORY.md: category "write" for the permission gate.
+                        :safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+                        :description "Save or update a durable fact in your persistent MEMORY.md (survives across sessions). Use for stable project conventions, decisions, and hard-won insights — NOT transient state. Keep it terse; a bloated memory hurts you."
                         :parameters
                         #js {:type "object"
                              :required #js ["key" "value"]
@@ -67,7 +69,8 @@
                             (str "Remembered \"" k "\".")))})
 
     (.registerTool api "memory_forget"
-                   #js {:description "Remove a fact from your persistent MEMORY.md by key. Use to prune stale/wrong notes (memory hygiene)."
+                   #js {:safety #js {:destructive? true :capabilities #js ["filesystem" "write"]}
+                        :description "Remove a fact from your persistent MEMORY.md by key. Use to prune stale/wrong notes (memory hygiene)."
                         :parameters
                         #js {:type "object"
                              :required #js ["key"]

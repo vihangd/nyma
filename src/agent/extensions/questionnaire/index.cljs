@@ -174,7 +174,8 @@
 
 (defn ^:export default [api]
   (.registerTool api "questionnaire"
-                 #js {:description
+                 #js {:safety #js {:read-only? true :category "meta"}
+                      :description
                       "Ask the user one or more questions and collect their answers.
 Use for clarifications, preference choices, or gathering structured user input.
 Each question may offer a list of options (user may also type a custom answer)

@@ -163,3 +163,21 @@
                                          "demo" #{"shortcuts"})]
            (.registerShortcut scoped "ctrl+t" (fn []))
            (-> (expect (fn? (get @(:shortcuts agent) "ctrl+t"))) (.toBe true)))))))
+
+(describe
+ "/hotkeys reports keybinding conflicts"
+ (fn []
+   (it "prints a Conflicts section when keybindings.json puts two actions on one key"
+       (fn []
+         ;; ctrl+r is app.history.search by default; binding it to app.help too
+         ;; used to warn only under NYMA_DEBUG, so the user never learned why
+         ;; the key did something other than what they bound.
+         (let [text (kbr/hotkeys-text (kbr/create-registry {"ctrl+r" "app.help"}) {})]
+           (-> (expect (.includes text "Conflicts")) (.toBe true))
+           (-> (expect (.includes text "app.help, app.history.search")) (.toBe true)))))
+
+   (it "prints no Conflicts section without one"
+       (fn []
+         ;; Enter is shared by submit and steer on purpose, and neither is
+         ;; rebindable — that is not a conflict the user can do anything about.
+         (-> (expect (.includes (kbr/hotkeys-text registry {}) "Conflicts")) (.toBe false))))))

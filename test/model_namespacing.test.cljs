@@ -46,25 +46,25 @@
                                          (fn []
                                            (-> (expect (pricing/model-cost-key nil)) (.toBe ""))))))
 
-;; ── calculate-cost end to end ────────────────────────────────
+;; ── calculate-turn-cost end to end ────────────────────────────────
 
-(describe "pricing/calculate-cost with qualified keys" (fn []
+(describe "pricing/calculate-turn-cost with qualified keys" (fn []
                                                          (it "prices a registry-resolved model — previously always $0"
                                                              (fn []
                                                                (let [key  (pricing/model-cost-key
                                                                            #js {"model" #js {:modelId "claude-opus-5"}
                                                                                 "active-provider-name" "anthropic"})
-                                                                     cost (pricing/calculate-cost key 1000000 0)]
+                                                                     cost (pricing/calculate-turn-cost key {:input-tokens 1000000 :output-tokens 0})]
         ;; claude-opus-5 input is $5/1M; resolution goes qualified -> bare.
                                                                  (-> (expect cost) (.toBe 5.0)))))
 
                                                          (it "still prices a bare id"
                                                              (fn []
-                                                               (-> (expect (pricing/calculate-cost "claude-opus-5" 1000000 0)) (.toBe 5.0))))
+                                                               (-> (expect (pricing/calculate-turn-cost "claude-opus-5" {:input-tokens 1000000 :output-tokens 0})) (.toBe 5.0))))
 
                                                          (it "returns 0 for an unknown model"
                                                              (fn []
-                                                               (-> (expect (pricing/calculate-cost "nope/nothing" 1000000 0)) (.toBe 0))))))
+                                                               (-> (expect (pricing/calculate-turn-cost "nope/nothing" {:input-tokens 1000000 :output-tokens 0})) (.toBe 0))))))
 
 ;; ── unpriced providers ───────────────────────────────────────
 

@@ -1,6 +1,8 @@
 (ns agent.extensions.agent-shell.features.agent-switcher
   "The /agent command — connect, disconnect, list, and switch agents."
-  (:require [agent.extensions.agent-shell.shared :as shared]
+  (:require ["node:path" :as path]
+            [agent.extensions.agent-shell.api :as as-api]
+            [agent.extensions.agent-shell.shared :as shared]
             [agent.extensions.agent-shell.agents.registry :as registry]
             [agent.extensions.agent-shell.acp.pool :as pool]
             [agent.extensions.agent-shell.acp.client :as client]
@@ -91,6 +93,39 @@
                     (notify api (str "Disconnect error: " (.-message e)) "error")))))
     (notify api "No agent connected")))
 
+(defn- disconnect-project!
+  "`/agent disconnect <project>` — stop the workers on one project directory
+   and leave the rest alone. The bare form tears down every worker of the
+   active agent, which is the wrong tool when only one of several projects is
+   finished."
+  [api project]
+  (let [cwd     (path/resolve project)
+        targets (filter (fn [e] (= (:cwd e) cwd)) (as-api/list-pool))]
+    (if (empty? targets)
+      (notify api (str "No ACP worker on " cwd) "error")
+      (-> (js/Promise.all
+           (clj->js (mapv (fn [e] (as-api/disconnect-project (:agent e) cwd)) targets)))
+          (.then (fn [_]
+                   (notify api (str "Disconnected " (str/join ", " (map :agent targets))
+                                    " on " cwd))))
+          (.catch (fn [e]
+                    (notify api (str "Disconnect error: " (.-message e)) "error")))))))
+
+(defn- list-pool
+  "`/agent pool` — every live ACP worker. One agent can run against several
+   project directories at once (the gateway fans out per project), and
+   `/agent` alone only says which agent is active, not which workers exist."
+  [api]
+  (let [entries (as-api/list-pool)]
+    (if (empty? entries)
+      (notify api "No ACP workers running")
+      (notify api (str "ACP workers:\n"
+                       (str/join "\n"
+                                 (map (fn [{:keys [agent cwd session-id]}]
+                                        (str "  " agent " @ " cwd
+                                             (when session-id (str " (session " session-id ")"))))
+                                      entries)))))))
+
 (defn- detach-agent!
   "Stop routing input to the agent WITHOUT tearing the process down.
 
@@ -154,7 +189,7 @@
   "Register the /agent command."
   [api]
   (.registerCommand api "agent"
-                    #js {:description "Connect to a coding agent. /agent <key> | handoff | mode <id> | detach | disconnect"
+                    #js {:description "Connect to a coding agent. /agent <key> | handoff | mode <id> | detach | disconnect [project] | pool"
                          :handler (fn [args _ctx]
                                     (let [subcmd (first args)]
                                       (cond
@@ -162,7 +197,12 @@
                                         (list-agents api)
 
                                         (= subcmd "disconnect")
-                                        (disconnect-agent! api)
+                                        (if-let [project (second args)]
+                                          (disconnect-project! api project)
+                                          (disconnect-agent! api))
+
+                                        (= subcmd "pool")
+                                        (list-pool api)
 
                                         (= subcmd "detach")
                                         (detach-agent! api)

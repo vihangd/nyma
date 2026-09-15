@@ -97,7 +97,9 @@
                                  :visible? (pos? total)}))}))
 
     (.registerTool api "todo_write"
-                   #js {:description "Set/replace your todo list for the current task (pass the FULL list each time). Track multi-step work so you don't drift or drop steps. status: pending | in_progress | completed. Keep exactly one item in_progress. Update as you finish steps."
+                   #js {;; Session state only — nothing on disk, so no capability to gate.
+                        :safety #js {:category "meta"}
+                        :description "Set/replace your todo list for the current task (pass the FULL list each time). Track multi-step work so you don't drift or drop steps. status: pending | in_progress | completed. Keep exactly one item in_progress. Update as you finish steps."
                         :parameters
                         #js {:type "object"
                              :required #js ["todos"]
@@ -121,7 +123,8 @@
                                  (or (shared/render-ledger @ledger) "(empty)"))))})
 
     (.registerTool api "todo_read"
-                   #js {:description "Read your current todo list."
+                   #js {:safety #js {:read-only? true :category "meta"}
+                        :description "Read your current todo list."
                         :parameters #js {:type "object" :properties #js {}}
                         :execute
                         (fn [_args]

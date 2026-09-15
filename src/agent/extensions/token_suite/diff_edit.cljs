@@ -309,7 +309,11 @@
         de-cfg (:diff-edit config)
         multi-edit-tool
         (tool
-         #js {:description "Apply multiple search-and-replace edits to a file in one call. Supports fuzzy matching for whitespace and indentation differences."
+         #js {;; Same profile as `edit`; builtin-metadata carries it too so the
+              ;; classification holds when this extension is not loaded.
+              :safety #js {:destructive? true :requires-confirmation? true
+                           :capabilities #js ["filesystem" "write"] :category "file"}
+              :description "Apply multiple search-and-replace edits to a file in one call. Supports fuzzy matching for whitespace and indentation differences."
               :inputSchema (.object z
                                     #js {:path  (-> (.string z) (.describe "File path to edit"))
                                          :edits (-> (.array z

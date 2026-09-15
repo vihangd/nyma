@@ -47,7 +47,8 @@
             (str "Hover error: " (.-message e))))))))
 
 (defn make-hover-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "Get hover documentation for a symbol at a file position (types, docs, signatures). Line and col are 1-based."
        :parameters
        #js {:type "object"
@@ -96,7 +97,8 @@
             (str "Definition error: " (.-message e))))))))
 
 (defn make-goto-definition-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "Jump to the definition of a symbol at a file position. Returns path:line:col. Line and col are 1-based."
        :parameters
        #js {:type "object"
@@ -140,7 +142,8 @@
             (str "References error: " (.-message e))))))))
 
 (defn make-find-references-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "Find all references to a symbol at a file position. Returns path:line:col list. Line and col are 1-based."
        :parameters
        #js {:type "object"
@@ -176,7 +179,8 @@
             (str "Document symbols error: " (.-message e))))))))
 
 (defn make-document-symbols-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "List all symbols in a file (classes, functions, variables). Returns a hierarchical tree."
        :parameters
        #js {:type "object"
@@ -214,7 +218,8 @@
           (str "Workspace symbols error: " (.-message e)))))))
 
 (defn make-workspace-symbols-tool [manager cwd]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "Search for symbols across the workspace by name query. Returns list of name, kind, and location."
        :parameters
        #js {:type "object"
@@ -249,7 +254,8 @@
                (str/join "\n")))))))
 
 (defn make-get-diagnostics-tool [manager cwd diag-registry]
-  #js {:description
+  #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+       :description
        "Get current LSP diagnostics (type errors, warnings, hints). Optionally filter by file."
        :parameters
        #js {:type "object"

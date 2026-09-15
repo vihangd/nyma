@@ -284,7 +284,8 @@
     ;; Register context_files tool
     (.registerTool api "context_files"
                    (tool
-                    #js {:description "List or read project context files (CONTEXT.md, .cursorrules, etc.; AGENTS.md and CLAUDE.md are already in the system prompt). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
+                    #js {:safety #js {:read-only? true :capabilities #js ["filesystem" "read"]}
+                         :description "List or read project context files (CONTEXT.md, .cursorrules, etc.; AGENTS.md and CLAUDE.md are already in the system prompt). Use 'list' to see all discovered files with their tier and token count, or 'read' to get a specific file's content."
                          :inputSchema (.object z
                                                #js {:action (-> (.enum z #js ["list" "read"])
                                                                 (.describe "list = show all files; read = get content"))

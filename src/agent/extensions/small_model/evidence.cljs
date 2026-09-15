@@ -24,7 +24,8 @@
         max-chars (or (:max-snippet-chars ev-cfg) 1024)
 
         add-tool
-        #js {:description
+        #js {:safety #js {:category "meta"}
+             :description
              (str "Store a key fact, finding, or progress note in the evidence "
                   "store.  Evidence persists across context compaction.  Use it "
                   "to record: task goals, files changed, errors seen, "
@@ -53,7 +54,8 @@
                  (str "Evidence stored: \"" k "\"")))}
 
         get-tool
-        #js {:description "Retrieve a stored evidence snippet by key."
+        #js {:safety #js {:read-only? true :category "meta"}
+             :description "Retrieve a stored evidence snippet by key."
              :parameters
              #js {:type       "object"
                   :required   #js ["key"]
@@ -67,7 +69,8 @@
                      (str "No evidence found for key: \"" k "\""))))}
 
         list-tool
-        #js {:description "List all evidence keys and a short preview of each value."
+        #js {:safety #js {:read-only? true :category "meta"}
+             :description "List all evidence keys and a short preview of each value."
              :parameters
              #js {:type "object" :properties #js {}}
              :execute

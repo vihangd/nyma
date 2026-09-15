@@ -36,7 +36,8 @@
                                   that turn.
 
    Other Claude-Code-extended fields (`context: fork`, `hooks`, `model`,
-   `effort`) are preserved on the skill record but not yet acted upon.
+   `effort`) are not read: nothing acts on them, and a parsed-but-ignored
+   field reads as support. They stay reachable under `:frontmatter`.
 
    Reference: https://agentskills.io/specification"
   (:require [agent.debug :as d]
@@ -162,10 +163,6 @@
                :disable-model-invocation (bool-fm frontmatter "disable-model-invocation")
                :paths       (list-fm frontmatter "paths")
                :triggers    (list-fm frontmatter "triggers")
-               :model       (get-fm frontmatter "model")
-               :effort      (get-fm frontmatter "effort")
-               :context     (get-fm frontmatter "context")
-               :hooks       (get-fm frontmatter "hooks")
                :frontmatter frontmatter
                :body        body
                ;; Legacy: kept so existing callers (activate-skill,
