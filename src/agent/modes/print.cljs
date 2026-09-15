@@ -175,9 +175,8 @@
                           :execId (:execId d)
                           :result (str (or (:result d) ""))
                           :isError (boolean (:isError d))}))]
-         ;; No agent_end line: the bus carries it twice per run (the AI SDK
-         ;; finish chunk and the loop's own emit) and `result` is the terminal
-         ;; line a reader should wait for.
+         ;; No agent_end line: `result` is the terminal line a reader should
+         ;; wait for, and it already carries everything agent_end would.
          ["turn_end"
           ;; Usage lives on the StepResult; absent stays absent so "no usage
           ;; reported" is not mistaken for a free turn.

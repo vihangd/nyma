@@ -2,8 +2,10 @@
   (:require ["bun:test" :refer [describe it expect]]
             ["ai" :refer [tool]]
             ["zod" :as z]
-            [agent.loop :as l :refer [steer follow-up stream-event-types wrap-tools-with-before-hook]]
-            [agent.events :refer [create-event-bus]]))
+            ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
+            [agent.loop :as l :refer [run steer follow-up stream-event-types wrap-tools-with-before-hook]]
+            [agent.events :refer [create-event-bus]]
+            [test-util.agent-harness :refer [make-test-agent]]))
 
 ;; --- stream-event-types map ---
 
@@ -39,10 +41,10 @@
         (-> (expect (get stream-event-types "finish-step"))
             (.toBeUndefined))))
 
-    (it "maps finish to agent_end"
+    (it "does NOT map finish (the loop emits agent_end itself, with text + usage)"
       (fn []
         (-> (expect (get stream-event-types "finish"))
-            (.toBe "agent_end"))))
+            (.toBeUndefined))))
 
     (it "maps reasoning-start to reasoning_start"
       (fn []
@@ -59,9 +61,9 @@
         (-> (expect (get stream-event-types "reasoning-end"))
             (.toBe "reasoning_end"))))
 
-    (it "contains exactly 9 mappings"
+    (it "contains exactly 8 mappings"
       (fn []
-        (-> (expect (count stream-event-types)) (.toBe 9))))))
+        (-> (expect (count stream-event-types)) (.toBe 8))))))
 
 ;; --- steer / follow-up queue functions ---
 
@@ -232,3 +234,39 @@
                 (fn []
                   (-> (expect l/cut-off-nudge) (.toContain "output token limit"))
                   (-> (expect l/cut-off-nudge) (.toContain "concisely"))))))
+
+;; --- agent_end fires once per run ---
+
+(defn- text-model
+  "A model whose stream is one complete text step ending in a `finish` chunk —
+   the chunk that, mapped to agent_end, used to make every listener hear the
+   run end twice (first with the raw chunk, then with the loop's payload)."
+  [text]
+  (new MockLanguageModelV4
+       #js {:doStream (fn [_]
+                        (js/Promise.resolve
+                         #js {:stream (convertArrayToReadableStream
+                                       #js [#js {:type "text-start" :id "t1"}
+                                            #js {:type "text-delta" :id "t1" :delta text}
+                                            #js {:type "text-end" :id "t1"}
+                                            #js {:type "finish"
+                                                 :finishReason #js {:unified "stop" :raw "end_turn"}
+                                                 :usage #js {:inputTokens  #js {:total 3}
+                                                             :outputTokens #js {:total 2}}}])}))}))
+
+(defn ^:async t-agent-end-once []
+  (let [agent (make-test-agent)
+        ends  (atom [])]
+    (set! (.-model (:config agent)) (text-model "hello"))
+    ((:on (:events agent)) "agent_end" (fn [d] (swap! ends conj d)))
+    (js-await (run agent "hi"))
+    (-> (expect (count @ends)) (.toBe 1))
+    (let [d (first @ends)]
+      (-> (expect (.-text d)) (.toBe "hello"))
+      (-> (expect (.-finishReason d)) (.toBe "stop"))
+      (-> (expect (some-> (.-usage d) .-outputTokens)) (.toBe 2)))))
+
+(describe "agent.loop - agent_end"
+  (fn []
+    (it "fires exactly once per run and carries text + usage"
+        t-agent-end-once)))

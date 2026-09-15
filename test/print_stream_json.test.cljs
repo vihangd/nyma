@@ -55,8 +55,8 @@
                         evs   (parsed lines)]
                     (off)
                     ;; every line parses — `parsed` would have thrown otherwise
-                    ;; agent_end is deliberately absent: the bus emits it twice per
-                    ;; run and `result` is the line a reader waits for.
+                    ;; agent_end is deliberately absent: `result` is the line a
+                    ;; reader waits for.
                     (-> (expect (count evs)) (.toBe 5))
                     (-> (expect (mapv #(.-type %) evs))
                         (.toEqual #js ["message_start" "message_update" "message_update"

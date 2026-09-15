@@ -20,11 +20,13 @@
    "reasoning-end"   "reasoning_end"
    "tool-call"       "tool_call"
    "tool-result"     "tool_result"
-   ;; NOTE: "finish-step" is deliberately unmapped — onStepFinish already
-   ;; emits "turn_end" with the richer StepResult; mapping the stream chunk
-   ;; too made turn_end fire TWICE per step (budget double-counted usage and
-   ;; aborted at half its cap, per-turn counters ran 2x).
-   "finish"          "agent_end"})
+   ;; NOTE: "finish-step" and "finish" are deliberately unmapped. onStepFinish
+   ;; already emits "turn_end" with the richer StepResult, and the loop emits
+   ;; "agent_end" itself with {:text :usage :finishReason}; mapping the stream
+   ;; chunks too made each fire TWICE (budget double-counted usage and aborted
+   ;; at half its cap, per-turn counters ran 2x, every agent_end listener saw a
+   ;; raw finish chunk first and the real payload second).
+   })
 
 (defn turn-outcome
   "Pure: how did the turn end, and what should react to it?
