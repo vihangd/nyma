@@ -28,6 +28,16 @@
 (defn- nanoid []
   (-> (js/Math.random) (.toString 36) (.slice 2 11)))
 
+(defn new-session-path
+  "A fresh session file under `dir`: `<ms>-<6 base36 chars>.jsonl`.
+
+   The name used to be the bare millisecond clock, and five instances launched
+   by one script in the same millisecond all appended to the same file — /tree
+   in each showed the other processes' entries. Nothing parses the name as a
+   number: listing sorts by mtime and hook payloads take it as an opaque id."
+  [dir & [prefix]]
+  (str dir "/" (or prefix "") (js/Date.now) "-" (.padEnd (.slice (nanoid) 0 6) 6 "0") ".jsonl"))
+
 (defn- entry->core-message [entry]
   (select-keys entry [:role :content]))
 

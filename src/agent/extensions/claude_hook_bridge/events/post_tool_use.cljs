@@ -55,8 +55,12 @@
                 tool-name (str (or (.-toolName data) (.-name data) ""))
                 disc      (tool-names/cc-name tool-name)
                 stdin     (payload api data is-error?)
-                merged    (js-await
-                           (dispatch/dispatch
+                ;; A denied or blocked call never executed, so there is no
+                ;; PostToolUse for it (Claude Code runs none either). Running
+                ;; it appended the hook's stdout to the denial the model saw.
+                merged    (when-not (.-cancelled data)
+                            (js-await
+                             (dispatch/dispatch
                             {:hooks-map     @hooks-atom
                              :event-name    (if is-error? "PostToolUseFailure" "PostToolUse")
                              :discriminator disc
@@ -64,7 +68,7 @@
                              :abort-signal  (when-let [a (.-abortController api)]
                                               (.-signal a))
                              :cwd           cwd
-                             :api           api}))]
+                             :api           api})))]
             (when merged
               (let [out  #js {}
                     base (str (or (.-result data) ""))

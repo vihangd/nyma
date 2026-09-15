@@ -60,16 +60,37 @@
     (path/join project-root ".cursor" "mcp.json")
     (path/join project-root ".mcp.json")]))
 
+(defn truncate-path-middle
+  "Shorten a path to `max` chars by cutting from the MIDDLE, so the parent
+   and basename — the parts that tell candidates apart — survive.
+
+   The candidates were tail-truncated to the terminal width, which made
+   `<deep project root>/.nyma/mcp.json` and `<deep project root>/.cursor/
+   mcp.json` the same string. Shortening the head instead loses the parent;
+   the middle is where the shared prefix lives."
+  [p limit]
+  (let [p (str p)]
+    (if (<= (count p) limit)
+      p
+      (let [tail-n (min (count p) (max 12 (quot limit 2)))
+            tail   (subs p (- (count p) tail-n))
+            head-n (max 0 (- limit tail-n 1))]
+        (str (subs p 0 head-n) "…" tail)))))
+
 (defn format-candidates
-  "Render `[{:file \"…\" :exists? bool}]` as the consulted-files report.
-   Pure, so both /mcp list and /mcp-status can print it without a filesystem
-   in the test."
-  [entries]
+  "Render `[{:file \"…\" :exists? bool}]` as the consulted-files report, one
+   line per candidate with the status at the end. Pure, so both /mcp list and
+   /mcp-status can print it without a filesystem in the test. `width` is the
+   line budget (the terminal's columns); nil means no truncation."
+  [entries & [width]]
   (str "Config files consulted (lowest → highest precedence):\n"
        (str/join "\n"
                  (map (fn [e]
-                        (str "  " (if (:exists? e) "✓" "·") " " (:file e)
-                             (if (:exists? e) "" " (not found)")))
+                        (let [status (if (:exists? e) "" " (not found)")
+                              file   (if width
+                                       (truncate-path-middle (:file e) (- width 4 (count status)))
+                                       (:file e))]
+                          (str "  " (if (:exists? e) "✓" "·") " " file status)))
                       entries))))
 
 (defn candidate-report
@@ -78,7 +99,10 @@
   ([project-root home]
    (format-candidates
     (mapv (fn [p] {:file p :exists? (boolean (fs/existsSync p))})
-          (candidate-paths project-root home)))))
+          (candidate-paths project-root home))
+    ;; nil off a pipe: nothing wraps there, so nothing is cut. In the TUI the
+    ;; info card's frame and indent take a few columns off the terminal's.
+    (some-> (.-columns (.-stdout js/process)) (- 8)))))
 
 (defn- expand-env
   "Expand ${ENV_VAR} placeholders in a string using process.env."

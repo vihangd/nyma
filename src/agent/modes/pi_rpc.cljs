@@ -14,6 +14,7 @@
    stdout is the protocol channel — only JSONL goes there. Everything else
    (errors, debug) goes to stderr via js/console.error."
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
+            [agent.sessions.manager :as sessions]
             [agent.loop :refer [run steer follow-up]]
             [agent.model-info :as model-info]
             [agent.utils.event-json :refer [step-usage tool-results]]
@@ -346,7 +347,7 @@
   [(let [mo (model-obj agent)] {:id (:id mo) :name (:name mo) :provider (:provider mo)})])
 
 (defn- new-session-path []
-  (str (.. js/process -env -HOME) "/.nyma/sessions/" (js/Date.now) ".jsonl"))
+  (sessions/new-session-path (str (.. js/process -env -HOME) "/.nyma/sessions")))
 
 (defn- content->text
   "Flatten a nyma message :content (string or vector of parts) to plain text."

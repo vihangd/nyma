@@ -81,6 +81,31 @@
    module load; swap via configure-logger! for tests."
   (atom (pick-default-sink)))
 
+(def ^:private stderr-mirror?
+  "Whether warn/error lines also go to stderr while the sink is the file.
+   Off while a TUI owns the terminal — see `silence-stderr-mirror!`."
+  (atom true))
+
+(defn silence-stderr-mirror!
+  "Stop mirroring warn/error to stderr: the TUI is mounted.
+
+   The mirror exists so a failed extension load is seen at startup. Once pi-tui
+   owns the terminal a stderr write lands raw in the transcript area — a
+   provider error and a compaction warning both painted over the screen and
+   then arrived again as proper cards. NYMA_DEBUG_STDERR=1 is an explicit
+   request for stderr and keeps it."
+  []
+  (when-not (env "NYMA_DEBUG_STDERR")
+    (reset! stderr-mirror? false)))
+
+(defn stderr-mirror-on?
+  "Do warn/error lines currently reach stderr? Reads the same state `log`
+   consults, so a test can assert the sink selection without writing a line."
+  []
+  (and @stderr-mirror?
+       (identical? @sink default-file-sink)
+       (not (env "NYMA_QUIET"))))
+
 ;;; ─── Env gate ──────────────────────────────────────────
 
 (defn- env [k]
@@ -135,9 +160,10 @@
   (reset! sink sink-fn))
 
 (defn reset-logger!
-  "Restore the default sink (re-picked from env). Pair with
-   configure-logger! in test cleanup."
+  "Restore the default sink (re-picked from env) and the stderr mirror.
+   Pair with configure-logger! in test cleanup."
   []
+  (reset! stderr-mirror? true)
   (reset! sink (pick-default-sink)))
 
 (defn- timestamp []
@@ -168,8 +194,7 @@
        ;; the default file sink; custom sinks (tests, TUI reroutes) own
        ;; their routing. NYMA_QUIET=1 suppresses the mirror.
        (when (and (contains? #{"warn" "error"} level)
-                  (identical? @sink default-file-sink)
-                  (not (some-> js/process.env (aget "NYMA_QUIET"))))
+                  (stderr-mirror-on?))
          (default-stderr-sink line))))))
 
 (defn debug

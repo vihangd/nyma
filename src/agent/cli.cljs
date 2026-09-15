@@ -9,7 +9,7 @@
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
             [agent.resources.skills :as skills]
-            [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence!]]
+            [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence! new-session-path]]
             [agent.sessions.partial :as session-partial]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.sessions.archive :as archive]
@@ -370,9 +370,6 @@ Examples:
           (str "nyma " mode-label
                ": no prompt — pass a positional or pipe text on stdin.\n"))
   (js/process.exit 2))
-
-(defn- new-session-path [sessions-dir]
-  (str sessions-dir "/" (js/Date.now) ".jsonl"))
 
 (defn pick-session
   "Select a session from a mtime-desc `list-sessions` vector by 1-based numeric

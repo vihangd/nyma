@@ -499,7 +499,7 @@
                               (when (= "error" (.-type chunk-val))
                                 (let [msg (stream-error-message chunk-val)]
                                   (reset! stream-error (or msg "stream error"))
-                                  (dbg/error "[loop] provider stream error:" (or msg chunk-val))
+                                  (dbg/error "loop" (str "provider stream error: " (or msg chunk-val)))
                                   (emit "provider_error" #js {:message (or msg "stream error")
                                                               :source  "stream"})))
                               (if (= evt-type "message_update")
@@ -682,7 +682,7 @@
                 ;; merely too long.
                 (cond
                   count-stall?             (swap! st update :no-op-turns (fnil inc 0))
-                  (pos? @tools-this-turn)  (swap! st assoc :no-op-turns 0)
+                  (pos? @tools-this-turn)  (swap! st assoc :worked? true :no-op-turns 0)
                   :else                    nil)
 
                 ;; The nudge is NOT conditioned on the tool count: a turn that ran
@@ -702,9 +702,12 @@
                                 ") with work still in progress. Send a message to continue, "
                                 "or raise `max-steps` in settings.")))
 
-                (when (= 2 (:no-op-turns @st))
-                  (dbg/warn "[loop] two turns in a row ran no tools — the model may have stopped making progress (/refine)")
-                  (notify! "Two turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."))))
+                ;; Only once the session has asked for work: two one-word
+                ;; conversational turns tripped this. Three in a row after a
+                ;; tool has run is the collapse; escalate keeps its own count.
+                (when (and (= 3 (:no-op-turns @st)) (:worked? @st))
+                  (dbg/warn "[loop] three turns in a row ran no tools — the model may have stopped making progress (/refine)")
+                  (notify! "Three turns ran no tools — the model may have stopped making progress. Run /refine to see the pattern."))))
 
             (js-await ((:emit-async events) "turn_finalize"
                                             #js {:error        (or (boolean @turn-error) blocked?)

@@ -2,14 +2,14 @@
   (:require [agent.core :refer [create-agent]]
             [agent.loop :refer [run steer follow-up]]
             [agent.resources.loader :refer [discover]]
-            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence! new-session-path]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [clojure.string :as str]))
 
 (defn- temp-session-path []
-  (str "/tmp/nyma-sdk-session-" (js/Date.now) ".jsonl"))
+  (new-session-path "/tmp" "nyma-sdk-session-"))
 
 (defn- extract-last-assistant-text
   "Pull the final assistant message text out of agent state after a run."

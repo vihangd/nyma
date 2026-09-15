@@ -1,6 +1,7 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
   (:require [agent.model-info :as model-info]
+            [agent.debug :as d]
             ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
                                               matchesKey]]
@@ -70,6 +71,38 @@
    progress produced the identical cyan info line."
   [level]
   (or (get notify-levels (str/lower-case (str (or level "info")))) "info"))
+
+(defn abort-error?
+  "Was this rejection the user's own abort (Esc / Ctrl-C), not a failure?
+   `AbortController.abort(\"user-interrupt\")` rejects with a DOMException
+   named AbortError, or with the reason string itself depending on who awaited
+   the signal; both are the user, and neither has a message worth a card."
+  [e]
+  (boolean
+   (and e
+        (or (= "user-interrupt" e)
+            (= "AbortError" (.-name e))
+            (.-aborted e)
+            (= "user-interrupt" (.-message e))))))
+
+(defn append-error-message
+  "The transcript after a run's promise rejected with `err`. Pure.
+
+   An abort used to arrive here with an empty message and render as
+   `✗ unknown error` after every Esc. It is one `ℹ aborted` line — or nothing
+   when the Ctrl-C handler already posted its info line as the last message."
+  [msgs err new-id]
+  (let [v (vec msgs)]
+    (cond
+      (and (abort-error? err) (= "info" (:role (last v)))) v
+      (abort-error? err) (conj v {:role "info" :content "aborted" :id (new-id)})
+      :else
+      (conj v {:role    "error"
+               ;; Raw message first, then the one actionable next step.
+               :content (classify-error-message
+                         (let [m (or (.-message err) (when (string? err) err))]
+                           (if (seq (str m)) m "unknown error")))
+               :id      (new-id)}))))
 
 (defn classify-error-message
   "A provider error, plus the one thing the user can do about it.
@@ -626,6 +659,9 @@
         ;; type-only export, with TuiMainScreen (scrollback, what nyma uses) and
         ;; TuiAltScreen (full-screen) as the implementations.
         tui       (new TuiMainScreen terminal)
+        ;; From here the terminal is pi-tui's: a warn/error mirrored to stderr
+        ;; paints over the transcript and then arrives again as a card.
+        _         (d/silence-stderr-mirror!)
 
         ;; ── Message + UI state ─────────────────────────────────────────────
         messages     (atom [])
@@ -740,14 +776,7 @@
 
         add-error!
         (fn [err]
-          (let [msg (.-message err)]
-            (update-messages!
-             (fn [msgs]
-               (conj (vec msgs)
-                     {:role    "error"
-                      ;; Raw message first, then the one actionable next step.
-                      :content (classify-error-message (or msg "unknown error"))
-                      :id      (new-id)})))))
+          (update-messages! (fn [msgs] (append-error-message msgs err new-id))))
 
         ;; ── Tool events ────────────────────────────────────────────────────
         ;; From settings — both keys were defaults nothing read.

@@ -82,7 +82,7 @@ Claude Code hooks reference. Keys marked *(nyma)* are extras.
 | Claude Code event | Fires on nyma | Payload fields | Response handling |
 |---|---|---|---|
 | `PreToolUse` | `before_tool_call` | `tool_name`, `tool_input`, `tool_use_id` | `permissionDecision` (deny/ask/allow), `updatedInput`, `additionalContext` |
-| `PostToolUse` | `tool_complete` (success) | `tool_name`, `tool_input`, `tool_use_id`, `tool_response` | `decision: block`, `additionalContext` |
+| `PostToolUse` | `tool_complete` (success; never for a denied/blocked call) | `tool_name`, `tool_input`, `tool_use_id`, `tool_response` | `decision: block`, `additionalContext` |
 | `PostToolUseFailure` | `tool_complete` (`isError: true`) | `tool_name`, `tool_input`, `tool_use_id`, `error` | as PostToolUse |
 | `PermissionRequest` | `permission_request` | `tool_name`, `tool_input` | `decision.behavior: allow|deny`, `updatedInput` |
 | `SessionStart` | `session_start` | `source` | `additionalContext` injected into next turn |

@@ -196,6 +196,12 @@ the user will approve the plan before execution begins.")
                         "Execute the plan we just discussed.")
                       #js {:deliverAs "followUp"})))
 
+(defn cancel-receipt
+  "`Plan mode OFF.` said nothing about the draft or what to do next."
+  [draft?]
+  (str "Plan mode OFF" (when draft? " — draft discarded")
+       ". Send a prompt to work normally, or /planmode to plan again."))
+
 (defn cancel!
   "Leave plan mode without executing; restore the prior permission mode + the
    model role's model."
@@ -206,7 +212,7 @@ the user will approve the plan before execution begins.")
     (swap! (state-atom api) assoc
            :plan-mode false :plan-executing false :permission-mode prev-mode)
     (restore-role-model! api role)
-    (notify api "Plan mode OFF." "info")))
+    (notify api (cancel-receipt (seq (:plan-todos s))) "info")))
 
 ;; ---------------------------------------------------------------------------
 ;; event handlers

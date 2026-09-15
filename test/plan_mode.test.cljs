@@ -208,6 +208,27 @@
                     (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (count @sent)) (.toBe 0)))))))
 
+;; `/planmode cancel` printed only `Plan mode OFF.` — nothing about the draft it
+;; threw away or what to do next.
+(describe "plan-mode:/planmode cancel receipt"
+          (fn []
+            (it "says the draft was discarded and how to continue"
+                (fn []
+                  (let [st  (atom {:permission-mode "plan" :plan-mode true :plan-prev-mode "default"
+                                   :plan-todos (pm/extract-todos plan-text)})
+                        seen (atom nil)
+                        api (stub-api st (atom []))]
+                    (set! (.-ui api) #js {:available true
+                                          :notify (fn [msg _lvl] (reset! seen msg))})
+                    (pm/cancel! api)
+                    (-> (expect @seen)
+                        (.toBe "Plan mode OFF — draft discarded. Send a prompt to work normally, or /planmode to plan again.")))))
+
+            (it "does not mention a draft when none was written"
+                (fn []
+                  (-> (expect (pm/cancel-receipt nil))
+                      (.toBe "Plan mode OFF. Send a prompt to work normally, or /planmode to plan again."))))))
+
 ;; ── there is no /plan ──
 ;;
 ;; Both this extension and agent_shell's ACP mode switcher used to register

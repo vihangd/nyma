@@ -132,6 +132,17 @@
                                                                (-> (expect (nil? (.-error p))) (.toBe true))
                                                                (-> (expect (nil? (.-tool_result p))) (.toBe true)))))
 
+                                                       ;; After a Deny the model saw `Permission denied / Session
+                                                       ;; status updated`: the PostToolUse hook's stdout appended to
+                                                       ;; the denial. A call that never ran has no PostToolUse.
+                                                       (it "a denied or blocked call runs no PostToolUse hook and leaves the denial alone"
+                                                           (^:async fn []
+                                                             (let [p (js-await (fire! post/register! "PostToolUse" "tool_complete"
+                                                                                      #js {:toolName "bash" :args #js {:command "touch x"}
+                                                                                           :toolCallId "call-9" :result "Permission denied"
+                                                                                           :cancelled true :isError false}))]
+                                                               (-> (expect (nil? p)) (.toBe true)))))
+
                                                        (it "failure: switches the event name and moves the result into error"
                                                            (^:async fn []
                                                              (let [p (js-await (fire! post/register! "PostToolUseFailure" "tool_complete"

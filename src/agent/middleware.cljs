@@ -157,9 +157,12 @@
       (assoc ctx :skip? true
              :result (or (get result "result") ""))
 
-      ;; Allow arg transformation via returned {args: ...}
+      ;; Allow arg transformation via returned {args: ...}. The pre-rewrite
+      ;; args are kept for the permission prompt: bash_suite prefixes every
+      ;; command with `unset LD_PRELOAD …`, and the prompt truncated to that
+      ;; wrapper before the user's own command appeared.
       (get result "args")
-      (assoc ctx :args (get result "args"))
+      (assoc ctx :args (get result "args") :original-args (:args ctx))
 
       :else ctx)))
 
@@ -427,7 +430,8 @@
     (assoc ctx :cancelled true
            :cancel-reason (or reason (str "Permission required for '" tool-name
                                           "' but no interactive approval is available")))
-    (let [prompt (permission-prompt-text tool-name (categorize-tool tool-name) (:args ctx) reason)
+    (let [prompt (permission-prompt-text tool-name (categorize-tool tool-name)
+                                         (or (:original-args ctx) (:args ctx)) reason)
           choice (js-await
                   (.select ui prompt
                            (clj->js ["Allow once"

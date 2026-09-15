@@ -1,7 +1,6 @@
 (ns agent.commands.builtins
   (:require [agent.model-info :as model-info]
-            [agent.token-estimation :as te]
-            [agent.sessions.compaction :refer [compact]]
+            [agent.sessions.compaction :refer [compact compaction-receipt]]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.themes :refer [default-dark]]
@@ -880,19 +879,16 @@
                       ;; cover it: this used to fire "Compaction complete"
                       ;; before compaction ran, and without :force? a manual
                       ;; /compact below the auto threshold did nothing at all.
+                      ;; The receipt comes from what `compact` returned, not
+                      ;; from re-estimating the live messages: a summary longer
+                      ;; than the two turns it replaced read as "nothing".
                       (when-let [s @(:session agent)]
-                        (let [st     (:state agent)
-                              before (te/estimate-messages-tokens (:messages @st))]
-                          (-> (compact s (:model (:config agent)) (:events agent)
-                                       {:model-registry (:model-registry agent)
-                                        :state-atom     st
-                                        :force?         true
-                                        :model-key      (model-info/config-model-key (:config agent))})
-                              (.then (fn [_]
-                                       (let [after (te/estimate-messages-tokens (:messages @st))]
-                                         (notify ctx (if (< after before)
-                                                       (str "Compacted ~" before " → ~" after " tokens")
-                                                       "Nothing to compact")))))))))}
+                        (-> (compact s (:model (:config agent)) (:events agent)
+                                     {:model-registry (:model-registry agent)
+                                      :state-atom     (:state agent)
+                                      :force?         true
+                                      :model-key      (model-info/config-model-key (:config agent))})
+                            (.then (fn [result] (notify ctx (compaction-receipt result)))))))}
 
           "debug"
           {:description "Show debug information"

@@ -655,18 +655,22 @@ with every section below present.
                               {:summary ext-summary
                                :trigger trigger
                                :before  usage
-                               :after   after})))
+                               :after   after})
+              {:before usage :after after :summariser :extension}))
 
           ;; Main path: use compact-with-retry (validates + one fix-retry).
           ;; Also reached when an extension offered a summary that did not
           ;; validate — say so, or the fallback looks like the extension never
           ;; ran.
-          (do
-            (when-let [rejected (.-summary evt-ctx)]
-              (d/warn "compaction" "extension summary rejected, using built-in summariser"
-                      #js {:errors (clj->js (validate-compaction rejected files-read files-modified))
-                           :length (count rejected)}))
-          (let [user-prompt  (build-compact-user-prompt
+          (let [rejected-errors
+                (when-let [rejected (.-summary evt-ctx)]
+                  (let [errors (vec (validate-compaction rejected files-read files-modified))]
+                    ;; warn-quiet: this fires from /compact while the TUI is
+                    ;; mounted, and the receipt below carries the same text.
+                    (d/warn-quiet "compaction" "extension summary rejected, using built-in summariser"
+                                  #js {:errors (clj->js errors) :length (count rejected)})
+                    errors))
+                user-prompt  (build-compact-user-prompt
                               {:custom-instructions custom-instructions
                                :previous-summary    (:content prev-compaction)
                                :to-summarize        to-summarize
@@ -693,15 +697,35 @@ with every section below present.
             ;; thing that burns an afternoon.
             (let [after (te/estimate-messages-tokens
                          (into [{:role "compaction" :content summary-text}] to-keep))]
-              (d/warn "compaction"
-                      (str "compacted " usage " -> " after " tokens")
-                      #js {:before usage :after after :splitPoint split-point
-                           :summarized (count to-summarize) :kept (count to-keep)})
+              (d/warn-quiet "compaction"
+                            (str "compacted " usage " -> " after " tokens")
+                            #js {:before usage :after after :splitPoint split-point
+                                 :summarized (count to-summarize) :kept (count to-keep)})
               ((:emit events) "compact"
                               {:summary summary-text
                                :trigger trigger
                                :before  usage
-                               :after   after})))))))))
+                               :after   after})
+              {:before usage :after after :summariser :built-in
+               :rejected rejected-errors})))))))
+
+(defn compaction-receipt
+  "What /compact tells the user, from what `compact` returned.
+
+   The receipt used to compare token estimates of the live message list before
+   and after: a two-turn session whose six-section summary was longer than the
+   turns it replaced printed `Nothing to compact` while the session file got a
+   summary and the next resume showed it. Only a nil result means nothing ran."
+  [result]
+  (if-not result
+    "Nothing to compact"
+    (let [{:keys [before after summariser rejected]} result]
+      (str "Compacted ~" before " → ~" after " tokens"
+           (when (= summariser :built-in)
+             (str " (built-in summariser"
+                  (when (seq rejected)
+                    (str "; the extension summary was rejected: " (str/join "; " rejected)))
+                  ")"))))))
 
 (def ^:private branch-summary-prompt
   "Summarize this conversation branch in a structured format. Include:

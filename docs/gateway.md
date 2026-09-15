@@ -583,6 +583,6 @@ Things the code does not do, listed so nobody has to rediscover them:
   `:approval-pipeline`, and nothing ever consults it.
 - **Shutdown does not drain** in-flight turns.
 - **Session transcripts leak.** Every gateway conversation is written to
-  `/tmp/nyma-sdk-session-<ts>.jsonl` and never removed. So are Telegram
+  `/tmp/nyma-sdk-session-<ts>-<id>.jsonl` and never removed. So are Telegram
   attachment downloads.
 - **No idle eviction for ACP workers** (see `gateway.projects`).
