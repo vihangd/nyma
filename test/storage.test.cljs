@@ -11,11 +11,13 @@
 
 (describe "create-sqlite-store" (fn []
 
-  (it "creates schema without error"
+  (it "a freshly opened store already has its tables — no init-schema call needed"
     (fn []
-      (let [store (make-store)]
-        ;; If we get here, schema creation succeeded
-        (-> (expect store) (.toBeDefined))
+      ;; cli never called :init-schema, so the real ~/.nyma/nyma.db had no
+      ;; tables and prompt history / usage rows failed on every launch.
+      (let [store (create-sqlite-store test-db-path)]
+        ((:insert-prompt store) "hello" "sess.jsonl" 1)
+        (-> (expect (count ((:recent-prompts store) 5))) (.toBe 1))
         ((:close store)))))
 
   (it "upserts and retrieves entry via branch path"
