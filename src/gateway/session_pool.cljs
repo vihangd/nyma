@@ -105,10 +105,21 @@
 
 ;;; ─── Eviction ─────────────────────────────────────────────────────────
 
+(defn- close-session-bundle!
+  "Tear down the sdk session an entry holds before its data is dropped.
+   `:close` deactivates the extensions that session loaded; without this an
+   :ephemeral gateway kept one full set of extension handlers per message
+   for the life of the process."
+  [entry]
+  (when-let [close (get-in @(:data entry) [:session-bundle :sdk-session :close])]
+    (try (close) (catch :default _ nil))))
+
 (defn evict!
   "Remove a session from the pool entirely (clears lane + data)."
   [pool session-key]
-  (swap! (:sessions pool) dissoc session-key))
+  (when-let [entry (get-entry pool session-key)]
+    (close-session-bundle! entry)
+    (swap! (:sessions pool) dissoc session-key)))
 
 (defn evict-idle!
   "Evict all :idle-evict sessions that have been inactive for longer than
@@ -128,6 +139,7 @@
   [pool session-key]
   (when-let [entry (get-entry pool session-key)]
     (when (= (:policy entry) :ephemeral)
+      (close-session-bundle! entry)
       (reset! (:data entry) {}))))
 
 ;;; ─── Pool stats ────────────────────────────────────────────────────────

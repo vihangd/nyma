@@ -98,7 +98,7 @@ fallback (`appToken`, `botToken`, …).
 | Key | Type | Purpose |
 |---|---|---|
 | `model` | string, **required** | Model ID the agent runs with (e.g. `claude-sonnet-4-6`) |
-| `system-prompt` | string | Optional base system prompt; agent's own discovery pipeline still runs |
+| `system-prompt` | string | Optional base system prompt; agent's own discovery pipeline still runs. When omitted, the session gets the same default prompt the CLI builds (AGENTS.md / CLAUDE.md and the other `context-files` included) |
 | `modes` | string[] | Tool mode filter — only tools declaring one of these modes are loaded. The built-in gateway tool set uses `"gateway"` |
 | `exclude-capabilities` | string[] | Drops tools that declare any of these capabilities — typical values: `"execution"`, `"shell"`, `"filesystem"` |
 | `require-capabilities` | string[] | Inverse filter — only loads tools declaring all of these capabilities |

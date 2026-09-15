@@ -547,6 +547,25 @@
                        {:gen-fn (gen-stub six-section)}))
     (-> (expect (mapv first @emitted)) (.toContain "compact"))))
 
+;; The hook bridge maps before_compact → PreCompact (matcher manual|auto) and
+;; reads `trigger` off the ctx; nothing set it, so a /compact always matched
+;; "auto". PostCompact's tokens_removed is before − after from the compact event.
+(defn ^:async test-compact-events-carry-trigger-and-counts []
+  (let [seen-ctx (atom nil)
+        emitted  (atom [])
+        events   {:on         (fn [_e _h] nil)
+                  :emit-async (fn [event ctx]
+                                (when (= event "before_compact") (reset! seen-ctx ctx))
+                                (js/Promise.resolve nil))
+                  :emit       (fn [e d] (swap! emitted conj [e d]) nil)}]
+    (js-await (compact (big-session) "mock-model" events
+                       {:gen-fn (gen-stub six-section) :force? true}))
+    (-> (expect (.-trigger @seen-ctx)) (.toBe "manual"))
+    (-> (expect (.-customInstructions @seen-ctx)) (.toBe nil))
+    (let [[_ d] (first (filter #(= "compact" (first %)) @emitted))]
+      (-> (expect (:trigger d)) (.toBe "manual"))
+      (-> (expect (> (:before d) (:after d))) (.toBe true)))))
+
 ;; The pure should-compact? test passes whether or not `compact` forwards the
 ;; setting — which is exactly how the ceiling stayed dead. Drive `compact`.
 (defn ^:async test-ceiling-drives-real-compaction []
@@ -600,6 +619,8 @@
                 (^:async fn [] (js-await (test-no-ceiling-no-compaction))))
             (it "announces the compaction on the built-in path"
                 (^:async fn [] (js-await (test-builtin-summary-emits-compact))))
+            (it "before_compact and compact say whether /compact or the threshold fired, and how many tokens went"
+                (^:async fn [] (js-await (test-compact-events-carry-trigger-and-counts))))
             (it "does not compact twice in a row"
                 (^:async fn [] (js-await (test-does-not-recompact-immediately))))))
 

@@ -6,8 +6,8 @@
 
    Sessions are built by a fake create-session-fn around a scripted model
    driven through the real `run`, so the event names and payload fields the
-   loop reads (`.text` on message_update, the two agent_end producers) are
-   the ones the loop actually emits."
+   loop reads (`.text` on message_update, agent_end firing once) are the
+   ones the loop actually emits."
   (:require ["bun:test" :refer [describe it expect]]
             [agent.loop :refer [run]]
             [gateway.loop :as gloop]
@@ -78,7 +78,7 @@
                                                             (-> (expect (mapv #(:text (:arg %)) (ops log :stream!)))
                                                                 (.toEqual ["hel" "lo!"])))))
 
-                                                    (it "signals :done exactly once even though agent_end fires twice per run"
+                                                    (it "signals :done exactly once per run"
                                                         (^:async fn []
                                                           (let [log (js-await (run-with-policy :batch-on-end))]
                                                             (-> (expect (count (ops log :done))) (.toBe 1)))))))
@@ -140,7 +140,32 @@
                                           (js-await (gloop/handle-message pool "a" {:text "1"} (recording-ctx (atom [])) opts))
                                           (-> (expect (sp/get-data pool "a" :session-bundle)) (.toBeNil))
                                           (js-await (gloop/handle-message pool "a" {:text "2"} (recording-ctx (atom [])) opts))
-                                          (-> (expect (count @calls)) (.toBe 2)))))))
+                                          (-> (expect (count @calls)) (.toBe 2)))))
+
+                                  (it "ephemeral: dropping the session closes it, so its extension handlers do not accumulate"
+                                      (^:async fn []
+                                        ;; create-session returns :close (deactivates the extensions it
+                                        ;; loaded); the pool never called it, so an ephemeral gateway grew
+                                        ;; one set of handlers per message for the life of the process.
+                                        (let [{:keys [model]} (scripted-model ["ok"])
+                                              total (atom nil)
+                                              baseline (atom nil)
+                                              factory (fn [_opts]
+                                                        (let [agent  (make-test-agent {:model model})
+                                                              events (:events agent)
+                                                              ext-h  (fn [_] nil)]
+                                                          (reset! total (:handler-total events))
+                                                          (reset! baseline (@total))
+                                                          ((:on events) "agent_start" ext-h)
+                                                          (js/Promise.resolve
+                                                           {:agent agent
+                                                            :send  (partial run agent)
+                                                            :close (fn [] ((:off events) "agent_start" ext-h))})))
+                                              pool  (sp/create-session-pool {:default-policy :ephemeral})
+                                              opts  {:create-session-fn factory
+                                                     :agent-opts {:model "m"} :streaming-policy :immediate}]
+                                          (js-await (gloop/handle-message pool "a" {:text "1"} (recording-ctx (atom [])) opts))
+                                          (-> (expect (@total)) (.toBe @baseline)))))))
 
 (describe "wire-and-run" (fn []
                            (it "runs an allowed message on its lane, drops a denied one, and skips a replayed event id"

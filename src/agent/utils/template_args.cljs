@@ -8,10 +8,12 @@
      $1 … $9             one argument, or empty when absent
      ${N:-default}       one argument, or `default` when absent
 
-   With no arguments at all the text comes back untouched: a skill body
-   quoting a shell snippet (`echo $1`, `for f in \"$@\"`) is read far more
-   often than it is invoked with arguments, and substituting empty strings
-   silently broke the snippet the skill was written to show.
+   `{:keep-when-empty? true}` leaves the text untouched when there are no
+   arguments at all. Skill activation asks for it: a SKILL.md quoting a shell
+   snippet (`echo $1`, `for f in \"$@\"`) is read far more often than it is
+   invoked with arguments, and substituting empty strings silently broke the
+   snippet the skill was written to show. A prompt template must NOT get it —
+   `/review` with no arguments sent a literal `$ARGUMENTS` to the model.
 
    Pure: no filesystem, no agent."
   (:require [clojure.string :as str]))
@@ -22,11 +24,11 @@
 
 (defn substitute
   "Replace argument placeholders in `text` with the strings in `args`."
-  [text args]
+  [text args & [{:keys [keep-when-empty?]}]]
   (let [args (vec (or args []))
         text (str (or text ""))
         nth-arg (fn [n] (get args (dec (js/parseInt n 10))))]
-    (if (empty? args)
+    (if (and keep-when-empty? (empty? args))
       text
       (.replace text placeholder
                 (fn [m dflt-n dflt n]

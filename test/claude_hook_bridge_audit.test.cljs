@@ -5,8 +5,8 @@
             [agent.extensions.claude-hook-bridge.audit :as audit]))
 
 (defn- audit-lines []
-  (when (fs/existsSync audit/audit-log-path)
-    (let [raw (fs/readFileSync audit/audit-log-path "utf8")]
+  (when (fs/existsSync (audit/audit-log-path))
+    (let [raw (fs/readFileSync (audit/audit-log-path) "utf8")]
       (vec (filter seq (.split raw "\n"))))))
 
 (defn- audit-line-count []

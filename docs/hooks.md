@@ -191,7 +191,7 @@ common input fields, read live from the agent on each fire:
 | `session_id` | the session file's basename (the id `/resume` lists), or `session` before a session exists |
 | `transcript_path` | the session `.jsonl` file, or `""` |
 | `cwd` | `process.cwd()` |
-| `permission_mode` | the current permission mode (`default`, `plan`, `acceptEdits`, …) |
+| `permission_mode` | the current permission mode: `default`, `accept-edits`, `plan` or `full-auto` |
 | `hook_event_name` | the event name |
 
 Event-specific fields follow. Keys marked *(nyma)* are extras Claude
@@ -297,7 +297,8 @@ or task-tracker notes.
 ### `SessionEnd`
 
 Fires when a session ends. Matcher is the end reason
-(`clear`, `prompt_input_exit` for `/exit`, `other`).
+(`clear`, `prompt_input_exit` for Ctrl-C pressed at the prompt, `other`
+for `/exit` and a signal).
 
 **stdin payload:** common fields plus `reason` (the matcher value).
 
@@ -334,16 +335,17 @@ Fires on a provider error. Matcher is the error type.
 Fires before context compaction. Matcher is `manual` or `auto`.
 `decision: "block"` aborts the compaction.
 
-**stdin payload:** common fields plus `trigger` and
-`custom_instructions` (`null` unless the user passed text to
-`/compact`).
+**stdin payload:** common fields plus `trigger` (`manual` for
+`/compact`, `auto` for the threshold) and `custom_instructions`, which
+is always `null` today: `/compact` takes no text.
 
 ### `PostCompact`
 
 Fires after context compaction. Observational.
 
 **stdin payload:** common fields plus `trigger`, `compact_summary`
-(the generated summary) and `tokens_removed` *(nyma)*.
+(the generated summary) and `tokens_removed` *(nyma)* — the estimated
+context size before compaction minus the size after.
 
 ### Not mapped (yet)
 

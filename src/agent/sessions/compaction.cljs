@@ -590,8 +590,13 @@ with every section below present.
             ;; recent ones keeps the check meaningful and satisfiable.
             files-read      (take-last max-tracked-files (extract-files-read tree-entries))
             files-modified  (take-last max-tracked-files (extract-files-modified tree-entries))
+            ;; "manual" is a /compact; anything else is the threshold.
+            trigger         (if force? "manual" "auto")
             evt-ctx #js {:context               context
                          :usage                 usage
+                         :trigger               trigger
+                         ;; nil unless a caller passed text; /compact takes none.
+                         :customInstructions    (or custom-instructions nil)
                          :summary               nil
                          :split-point           split-point
                          :messages-to-summarize (clj->js to-summarize)
@@ -648,6 +653,7 @@ with every section below present.
                          (into [{:role "compaction" :content ext-summary}] to-keep))]
               ((:emit events) "compact"
                               {:summary ext-summary
+                               :trigger trigger
                                :before  usage
                                :after   after})))
 
@@ -693,6 +699,7 @@ with every section below present.
                            :summarized (count to-summarize) :kept (count to-keep)})
               ((:emit events) "compact"
                               {:summary summary-text
+                               :trigger trigger
                                :before  usage
                                :after   after})))))))))
 

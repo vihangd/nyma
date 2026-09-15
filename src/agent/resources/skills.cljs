@@ -206,7 +206,9 @@
   {:role    "system"
    :skill   (:name skill)
    :content (str "<skill name=\"" (:name skill) "\">\n"
-                 (template-args/substitute (skill-body skill) args)
+                 ;; keep-when-empty?: a body read with no args must still show
+                 ;; its quoted shell snippets (`echo $1`) as written.
+                 (template-args/substitute (skill-body skill) args {:keep-when-empty? true})
                  "\n</skill>")})
 
 (defn ^:async activate-skill

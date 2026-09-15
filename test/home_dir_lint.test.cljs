@@ -33,4 +33,13 @@
                          :let [src (fs/readFileSync f "utf8")]
                          :when (re-find #"\(def [^\n]*\n?[^\n]*\(home/dir\)" src)]
                      f)]
+          (-> (expect (vec hits)) (.toEqual #js [])))))
+  (it "src never bakes a *-path / *-dir helper's result into a load-time def"
+      (fn []
+        ;; The indirect form of the same bug: `(def x (audit-path))`, where the
+        ;; helper reads HOME per call but the def captured its answer once.
+        (let [hits (for [f (cljs-files "src")
+                         :let [src (fs/readFileSync f "utf8")]
+                         :when (re-find #"(?m)^\(def (?:\^\S+ )?\S+\s*\n?\s*\([\w.\-/]*(?:-path|-dir|/dir|/path)\)" src)]
+                     f)]
           (-> (expect (vec hits)) (.toEqual #js [])))))))

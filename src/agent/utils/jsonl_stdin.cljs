@@ -40,7 +40,10 @@
    across two chunks safe — node decodes with a StringDecoder that holds the
    partial sequence, so we only ever see whole characters."
   [stream on-line & [on-close]]
-  (let [buf (atom "")
+  (let [buf    (atom "")
+        ;; A stream emits "end" AND "close"; both mean the same thing here,
+        ;; and a caller's on-close (exit, teardown) must run once.
+        closed (atom false)
         flush!
         (fn []
           ;; A final record with no trailing newline is still a record.
@@ -54,8 +57,10 @@
             (doseq [r records] (on-line r))))
         on-end
         (fn []
-          (flush!)
-          (when on-close (on-close)))]
+          (when-not @closed
+            (reset! closed true)
+            (flush!)
+            (when on-close (on-close))))]
     (.setEncoding stream "utf8")
     (.on stream "data" on-data)
     (.on stream "end" on-end)

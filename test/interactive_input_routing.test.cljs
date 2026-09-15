@@ -503,7 +503,7 @@
 ;; `/spec import --run` vanish: they emit from inside a slash handler, while
 ;; the dispatcher still holds the lock.
 
-(defn- req-state [locked]
+(defn- req-state [locked & [fallback!]]
   (let [st {:locked? (atom locked) :dispatched (atom []) :echoed (atom []) :queue (atom [])}]
     (assoc st :handler
            (interactive/make-turn-request-handler
@@ -511,6 +511,7 @@
              :dispatch!   (fn [t] (swap! (:dispatched st) conj t))
              :echo!       (fn [t] (swap! (:echoed st) conj t))
              :schedule    (fn [f] (swap! (:queue st) conj f))
+             :fallback!   fallback!
              :max-retries 3}))))
 
 (defn- run-queue! [st]
@@ -542,6 +543,15 @@
                                    (dotimes [_ 5] (run-queue! st))
                                    (-> (expect (count @(:dispatched st))) (.toBe 0))
                                    (-> (expect (count @(:queue st))) (.toBe 0)))))
+
+                           (it "queues the text as a follow-up when it gives up, so the turn still runs"
+                               (fn []
+                                 (let [queued (atom [])
+                                       st     (req-state true (fn [t] (swap! queued conj t)))]
+                                   ((:handler st) #js {:text "go"})
+                                   (dotimes [_ 5] (run-queue! st))
+                                   (-> (expect (count @(:dispatched st))) (.toBe 0))
+                                   (-> (expect @queued) (.toEqual #js ["go"])))))
 
                            (it "ignores empty and whitespace-only requests"
                                (fn []

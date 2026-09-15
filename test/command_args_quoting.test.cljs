@@ -32,7 +32,7 @@
                   (-> (expect (fill "$ARGUMENTS" "--dry-run \"a b\""))
                       (.toBe "--dry-run a b"))))
 
-            (it "no arguments at all leaves the template untouched"
+            (it "no arguments at all empties the placeholders — a prompt never sends a literal $1"
                 (fn []
-                  (-> (expect (fill "echo $1 \"$@\"" ""))
-                      (.toBe "echo $1 \"$@\""))))))
+                  (-> (expect (fill "run $1 on $ARGUMENTS" ""))
+                      (.toBe "run  on "))))))

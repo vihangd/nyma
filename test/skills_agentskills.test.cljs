@@ -45,11 +45,12 @@
             (doseq [[text args expected]
                     [["$ARGUMENTS"        ["a" "b"]  "a b"]
                      ["$@"                ["a" "b"]  "a b"]
-                     ;; No arguments: the text is left alone, so a skill body
-                     ;; quoting `echo $1` or `"$@"` still reads as written.
-                     ["$ARGUMENTS"        []         "$ARGUMENTS"]
-                     ["echo $1 \"$@\""    nil        "echo $1 \"$@\""]
-                     ["${1:-dflt}"        []         "${1:-dflt}"]
+                     ;; No arguments: placeholders become empty (or their
+                     ;; default), so a prompt template never sends a literal
+                     ;; `$ARGUMENTS` to the model.
+                     ["$ARGUMENTS"        []         ""]
+                     ["echo $1 \"$@\""    nil        "echo  \"\""]
+                     ["${1:-dflt}"        []         "dflt"]
                      ["$1-$2"             ["x" "y"]  "x-y"]
                      ["$1-$2"             ["x"]      "x-"]
                      ["${1:-dflt}"        ["v"]      "v"]
@@ -58,7 +59,17 @@
                      ["$1 says $ARGUMENTS" ["$2" "z"] "$2 says $2 z"]
                      [nil                 ["a"]      ""]]]
               (it (str (pr-str text) " with " (pr-str args) " → " (pr-str expected))
-                  (fn [] (-> (expect (substitute text args)) (.toBe expected)))))))
+                  (fn [] (-> (expect (substitute text args)) (.toBe expected)))))
+            ;; Skill activation opts in: a body read with no arguments keeps
+            ;; the shell snippet it quotes (`echo $1`, `"$@"`) as written.
+            (doseq [[text args expected]
+                    [["$ARGUMENTS"        []  "$ARGUMENTS"]
+                     ["echo $1 \"$@\""    nil "echo $1 \"$@\""]
+                     ["${1:-dflt}"        []  "${1:-dflt}"]
+                     ["$1-$2"             ["x"] "x-"]]]
+              (it (str "keep-when-empty? " (pr-str text) " with " (pr-str args) " → " (pr-str expected))
+                  (fn [] (-> (expect (substitute text args {:keep-when-empty? true}))
+                             (.toBe expected)))))))
 
 ;;; ─── /skill:<name> ────────────────────────────────────────────
 

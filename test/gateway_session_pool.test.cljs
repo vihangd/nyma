@@ -138,7 +138,15 @@
                                                   (pool/get-or-create-entry! p "k1")
                                                   (-> (expect (some? (pool/get-entry p "k1"))) (.toBe true))
                                                   (pool/evict! p "k1")
-                                                  (-> (expect (pool/get-entry p "k1")) (.toBeUndefined)))))))
+                                                  (-> (expect (pool/get-entry p "k1")) (.toBeUndefined)))))
+                                          (it "closes the sdk session it drops"
+                                              (fn []
+                                                (let [p      (pool/create-session-pool)
+                                                      closed (atom 0)]
+                                                  (pool/set-data! p "k1" :session-bundle
+                                                                  {:sdk-session {:close (fn [] (swap! closed inc))}})
+                                                  (pool/evict! p "k1")
+                                                  (-> (expect @closed) (.toBe 1)))))))
 
 (describe "gateway.session-pool/evict-idle!" (fn []
                                                (it "evicts :idle-evict sessions past the TTL"

@@ -265,8 +265,9 @@
 
                                                (it "PostCompact carries compact_summary from the compact event, plus nyma's tokens_removed"
                                                    (^:async fn []
+                                                     ;; The compact event carries :before/:after counts, never a delta.
                                                      (let [p (js-await (fire! compact/register! "PostCompact" "compact"
-                                                                              #js {:trigger "auto" :summary "we did things" :tokensRemoved 1234}))]
+                                                                              #js {:trigger "auto" :summary "we did things" :before 5000 :after 3766}))]
                                                        (common-fields p "PostCompact")
                                                        (-> (expect (.-trigger p)) (.toBe "auto"))
                                                        (-> (expect (.-compact_summary p)) (.toBe "we did things"))

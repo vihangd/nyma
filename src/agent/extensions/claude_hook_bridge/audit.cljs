@@ -73,4 +73,7 @@
   []
   (reset! seen #{}))
 
-(def audit-log-path (audit-path))
+(defn audit-log-path
+  "Where the log lives, resolved per call (see audit-path)."
+  []
+  (audit-path))

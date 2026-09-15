@@ -1,10 +1,11 @@
 (ns agent.extensions.claude-hook-bridge.events.compact
   "PreCompact and PostCompact hook events.
 
-   nyma:  `before_compact` → PreCompact (matcher = manual|auto)
-          we synthesize PostCompact ourselves when the compact event
-          completes (nyma already emits a `compact` event after the
-          summary is appended).
+   nyma:  `before_compact` → PreCompact (matcher = manual|auto); the
+          ctx carries `trigger` and `customInstructions` (always nil
+          today — /compact takes no text).
+          `compact` → PostCompact; the payload is {summary trigger
+          before after}, so tokens_removed is before − after.
 
    Outbound:
      - PreCompact decision \"block\"  → set evt-ctx.skip = true so
@@ -31,8 +32,9 @@
    #js {:trigger         (or (.-trigger data) "auto")
         ;; CC's PostCompact input; nyma's `compact` event carries :summary.
         :compact_summary (str (or (.-summary data) ""))
-        ;; nyma extra.
-        :tokens_removed  (or (.-tokensRemoved data) 0)}))
+        ;; nyma extra. The event carries token counts, not a delta; a
+        ;; `tokensRemoved` key never existed, so this was always 0.
+        :tokens_removed  (max 0 (- (or (.-before data) 0) (or (.-after data) 0)))}))
 
 (defn register!
   [{:keys [api hooks-atom cwd]}]

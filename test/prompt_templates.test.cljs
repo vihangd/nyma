@@ -50,6 +50,18 @@
                     (-> (expect (.-text @sent)) (.toBe "Fix tests then run tests again"))
                     (-> (expect (.-echo @sent)) (.toBe true)))))
 
+            (it "with no arguments sends the prompt with $ARGUMENTS emptied, never literally"
+                (fn []
+                  ;; The empty-args passthrough is for skill bodies quoting shell
+                  ;; snippets; a prompt template with it sent `$ARGUMENTS` to
+                  ;; the model as text.
+                  (write-prompt! "review" "Review $ARGUMENTS carefully")
+                  (let [agent (agent-with-prompts)
+                        sent  (atom nil)]
+                    ((:on (:events agent)) "turn_request" (fn [d] (reset! sent d)))
+                    ((:handler (get @(:commands agent) "review")) [] nil)
+                    (-> (expect (.-text @sent)) (.toBe "Review  carefully")))))
+
             (it "queues a follow-up when nothing can start a turn"
                 (fn []
                   (write-prompt! "hi" "Hello $1")

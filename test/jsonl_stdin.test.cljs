@@ -100,8 +100,22 @@
     (-> (expect (.-length out)) (.toBe 1))
     (-> (expect (.-m (js/JSON.parse (aget out 0)))) (.toBe "héllo → 🌍"))))
 
+(defn ^:async t-on-close-once []
+  ;; Readable emits "end" and then "close"; on-close is how rpc mode exits,
+  ;; and it was wired to both.
+  (let [closes (atom 0)]
+    (js-await (js/Promise.
+               (fn [resolve _]
+                 (read-lines! (.from Readable #js ["{\"a\":1}\n"])
+                              (fn [_] nil)
+                              (fn [] (swap! closes inc)))
+                 (js/setTimeout resolve 20))))
+    (-> (expect @closes) (.toBe 1))))
+
 (describe "read-lines!"
           (fn []
+            (it "calls on-close once although the stream emits both end and close"
+                t-on-close-once)
             (it "delivers one record for a payload containing U+2028"
                 t-one-record-with-separators)
             (it "reassembles records split across chunks" t-records-split-across-chunks)

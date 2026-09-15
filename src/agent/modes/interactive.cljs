@@ -4,7 +4,7 @@
             ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
                                               matchesKey]]
-            [agent.loop :refer [run steer run-turn-with-update-handler]]
+            [agent.loop :refer [run steer follow-up run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command split-skill-invocation]]
             [agent.commands.parser :as parser]
             [agent.ui.themes :refer [default-dark]]
@@ -153,8 +153,10 @@
    emits the request FROM INSIDE that handler — so checking the lock once and
    dropping the request meant every such turn vanished with no message. While
    locked, `schedule` retries (50 ms in production; the test passes a queue),
-   giving up after `max-retries` so a stuck lock cannot spin forever."
-  [{:keys [locked? dispatch! echo! schedule max-retries]
+   giving up after `max-retries` so a stuck lock cannot spin forever. Giving
+   up hands the text to `fallback!` — the follow-up queue, so it still runs
+   as the next turn instead of vanishing."
+  [{:keys [locked? dispatch! echo! schedule max-retries fallback!]
     :or   {max-retries 600}}]
   (fn handle
     ([data] (handle data 0))
@@ -166,6 +168,7 @@
            (not @locked?)          (do (when echo? (echo! text))
                                        (dispatch! text))
            (< attempt max-retries) (schedule (fn [] (handle data (inc attempt))))
+           fallback!               (fallback! text)
            :else                   nil))
        nil))))
 
@@ -1010,7 +1013,9 @@
            {:locked?   submit-lock
             :dispatch! dispatch-submit!
             :echo!     add-user-msg!
-            :schedule  (fn [f] (js/setTimeout f 50))})]
+            :schedule  (fn [f] (js/setTimeout f 50))
+            ;; Same queue sendUserMessage deliverAs=followUp uses.
+            :fallback! (fn [text] (follow-up agent {:role "user" :content text}))})]
 
       ;; Subscribe to tool lifecycle events
       ((:on events) "tool_execution_start"  on-tool-start)
