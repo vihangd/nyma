@@ -251,3 +251,41 @@
            (-> (expect (.-length (.split content "<think>"))) (.toBe 2))
            (-> (expect (.-length (.split content "</think>"))) (.toBe 2))
            (-> (expect content) (.toContain "<think>weighing options</think>")))))))
+
+
+;; The SSE rewriter buffers on \n\n, so an event split across two network
+;; chunks — even inside the JSON — must come out as one rewritten event.
+(defn- ^:async collect-content [chunks]
+  (let [resp (js-await (wrap-response (sse-response chunks) false))
+        text (js-await (.text resp))]
+    (->> (.split text "\n\n")
+         (filter #(.startsWith % "data: {"))
+         (map #(js/JSON.parse (.slice % 6)))
+         (keep #(some-> (aget % "choices") (aget 0) (aget "delta") (aget "content")))
+         (apply str))))
+
+(describe "reasoning-stream/wrap-response across chunk boundaries"
+          (fn []
+            (it "an event split mid-JSON is reassembled before rewriting"
+                (fn []
+                  (-> (collect-content
+                       #js ["data: {\"choices\":[{\"delta\":{\"reason"
+                            "ing_content\":\"think\"},\"index\":0}]}\n\n"
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"index\":0}]}\n"
+                            "\ndata: [DONE]\n\n"])
+                      (.then (fn [s] (-> (expect s) (.toBe "<think>think</think>\n\nanswer")))))))
+
+            (it "reasoning that never closes is closed at [DONE]"
+                (fn []
+                  (-> (collect-content
+                       #js ["data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"a\"},\"index\":0}]}\n\n"
+                            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"b\"},\"index\":0}]}\n\n"
+                            "data: [DONE]\n\n"])
+                      (.then (fn [s] (-> (expect s) (.toBe "<think>ab</think>\n\n")))))))
+
+            (it "a stream with no reasoning at all passes through untouched"
+                (fn []
+                  (-> (collect-content
+                       #js ["data: {\"choices\":[{\"delta\":{\"content\":\"plain\"},\"index\":0}]}\n\n"
+                            "data: [DONE]\n\n"])
+                      (.then (fn [s] (-> (expect s) (.toBe "plain")))))))))

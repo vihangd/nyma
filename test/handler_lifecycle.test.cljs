@@ -60,10 +60,9 @@
   ;; run-turn-with-update-handler must still deregister the handler.
   (let [agent    (make-test-agent)
         on-chunk (fn [_])
-        _        (throw-from-run! agent (js/Error. "simulated run failure"))]
-    (try
-      (js-await (run-turn-with-update-handler agent on-chunk #(run agent "fail")))
-      (catch :default _))
+        _        (throw-from-run! agent)]
+    (js-await (.toThrow (.-rejects (expect (run-turn-with-update-handler agent on-chunk #(run agent "fail"))))
+                        "No model configured"))
     (-> (expect ((:handler-count (:events agent)) "message_update")) (.toBe 0))))
 
 (defn ^:async test-handler-count-never-exceeds-one-across-throw-then-success []
@@ -71,15 +70,13 @@
   ;; At no point should there be > 1 handler; after the second turn count = 0.
   (let [agent    (make-test-agent)
         on-chunk (fn [_])
-        err      (js/Error. "first turn fails")
-        throw-h  (throw-from-run! agent err)]
+        restore! (throw-from-run! agent)]
     ;; First turn: throw
-    (try
-      (js-await (run-turn-with-update-handler agent on-chunk #(run agent "fail")))
-      (catch :default _))
+    (js-await (.toThrow (.-rejects (expect (run-turn-with-update-handler agent on-chunk #(run agent "fail"))))
+                        "No model configured"))
     (-> (expect ((:handler-count (:events agent)) "message_update")) (.toBe 0))
-    ;; Remove throw hook, install block so second turn completes cleanly
-    ((:off (:events agent)) "before_agent_start" throw-h)
+    ;; Put the model back, install block so second turn completes cleanly
+    (restore!)
     (block-provider! agent)
     ;; Second turn: success
     (js-await (run-turn-with-update-handler agent on-chunk #(run agent "ok")))

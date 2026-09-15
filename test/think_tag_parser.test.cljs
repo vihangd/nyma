@@ -115,3 +115,29 @@
             (it "no tags passthrough"
                 (fn []
                   (-> (expect (strip-think-tags "plain")) (.toBe "plain"))))))
+
+
+;; The renderer re-parses the ACCUMULATED text on every chunk, so a tag split
+;; across chunks must classify the same way at each prefix as it does whole.
+(def ^:private stream-table
+  ;; [accumulated-text expected-reasoning expected-text]
+  [["<thi"                              ""          "<thi"]
+   ["<think"                            ""          "<think"]
+   ["<think>"                           ""          ""]
+   ["<think>plan"                       "plan"      ""]
+   ["<think>plan</thi"                  "plan</thi" ""]
+   ["<think>plan</think>"               "plan"      ""]
+   ["<think>plan</think>ans"            "plan"      "ans"]
+   ["<think>plan</think>ans<think>more" "plan\n\nmore" "ans"]
+   ;; nested / literal text inside the block is reasoning, not a second tag
+   ["<think>a <b> c</think>x"           "a <b> c"   "x"]
+   ["<think>outer <think>inner</think>" "outer <think>inner" ""]])
+
+(describe "think_tag_parser/split-think-blocks on streamed prefixes"
+          (fn []
+            (doseq [[text reasoning clean] stream-table]
+              (it (str (pr-str text) " → reasoning " (pr-str reasoning) ", text " (pr-str clean))
+                  (fn []
+                    (let [r (split-think-blocks text)]
+                      (-> (expect (.-reasoning r)) (.toBe reasoning))
+                      (-> (expect (.-text r)) (.toBe clean))))))))

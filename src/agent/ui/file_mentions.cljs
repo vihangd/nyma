@@ -18,15 +18,24 @@
 ;; `@` at start or after whitespace, then a path-ish run. Emails fail the
 ;; "after whitespace" test; `@scope/pkg` matches but resolves to nothing and
 ;; is left alone by expand-mentions.
-(def ^:private mention-re (js/RegExp. "(?:^|\\s)@([A-Za-z0-9_./~-]+)" "g"))
+(def ^:private mention-re (js/RegExp. "(?:^|\\s)@(?:\"([^\"\\n]+)\"|([A-Za-z0-9_./~-]+))" "g"))
+
+;; A fenced block is quoted verbatim — `@decorator` in a Python snippet, an
+;; `@import` in CSS — never a file the user wants pulled in.
+(def ^:private fence-re (js/RegExp. "```[\\s\\S]*?(?:```|$)" "g"))
 
 (defn find-mentions
-  "Distinct `@` tokens in `text`, in order, trailing punctuation stripped."
+  "Distinct `@` tokens in `text`, in order, trailing punctuation stripped.
+   `@\"a b.txt\"` names a path with spaces; anything inside a ``` fence is
+   left alone."
   [text]
   (let [re     (js/RegExp. (.-source mention-re) "g")
+        src    (.replace (str text) fence-re " ")
         tokens (loop [acc []]
-                 (if-let [m (.exec re (str text))]
-                   (recur (conj acc (str/replace (aget m 1) #"[.,;:!?]+$" "")))
+                 (if-let [m (.exec re src)]
+                   (recur (conj acc (if (aget m 1)
+                                      (aget m 1)
+                                      (str/replace (aget m 2) #"[.,;:!?]+$" ""))))
                    acc))]
     (vec (distinct (remove str/blank? tokens)))))
 
@@ -48,6 +57,9 @@
        sort
        (str/join "\n")))
 
+(defn- binary? [buf]
+  (>= (.indexOf (.subarray buf 0 8192) 0) 0))
+
 (defn- render-block [cwd abs]
   (let [st   (fs/statSync abs)
         disp (display-path cwd abs)]
@@ -63,8 +75,14 @@
        :block (str "<file path=\"" disp "\" skipped=\"" (js/Math.round (/ (.-size st) 1024)) " KB\"/>")}
 
       :else
-      {:kind :file
-       :block (str "<file path=\"" disp "\">\n" (fs/readFileSync abs "utf-8") "\n</file>")})))
+      (let [buf (fs/readFileSync abs)]
+        ;; A NUL in the first 8 KB is the usual text-vs-binary test; the
+        ;; model gets nothing useful from mojibake and the marker says why.
+        (if (binary? buf)
+          {:kind :skipped
+           :block (str "<file path=\"" disp "\" skipped=\"binary\"/>")}
+          {:kind :file
+           :block (str "<file path=\"" disp "\">\n" (.toString buf "utf-8") "\n</file>")})))))
 
 (defn expand-mentions
   "Append a block per resolvable mention. Returns {:text :files :skipped};

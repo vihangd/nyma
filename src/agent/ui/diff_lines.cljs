@@ -11,10 +11,13 @@
   "Total (old + new) line count above which the LCS is skipped."
   2000)
 
-(defn- split-lines [s]
+(defn- split-lines
+  "CRLF is normalised first: an editor that writes \\r\\n against a model that
+   sends \\n would otherwise diff as every line replaced."
+  [s]
   (if (or (nil? s) (= s ""))
     []
-    (vec (.split (str s) "\n"))))
+    (vec (.split (.replace (str s) (js/RegExp. "\\r\\n" "g") "\n") "\n"))))
 
 (defn diff-lines
   "[:- s] / [:+ s] / [:= s] rows describing how `old` becomes `new`.

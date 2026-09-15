@@ -38,3 +38,14 @@
                                  (-> (expect (count rows)) (.toBe (* 2 (inc lcs-cap))))
                                  (-> (expect (first (first rows))) (.toBe :-))
                                  (-> (expect (first (last rows))) (.toBe :+)))))))
+
+
+(describe "diff-lines line endings" (fn []
+                                      (it "CRLF against LF is not a whole-file change"
+                                          (fn []
+                                            (-> (expect (ops (diff-lines "a\r\nb\r\nc" "a\nb\nc"))) (.toBe "==="))
+                                            (-> (expect (ops (diff-lines "a\r\nb\r\nc\r\n" "a\nB\nc\n"))) (.toBe "=-+=="))))
+
+                                      (it "the rows carry the line without its \\r"
+                                          (fn []
+                                            (-> (expect (second (first (diff-lines "a\r\n" "a\n")))) (.toBe "a"))))))

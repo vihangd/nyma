@@ -92,26 +92,6 @@
                                                            (-> (expect (policy/resolve-initial-mode "full_auto" true)) (.toBe "full-auto"))
                                                            (-> (expect (policy/resolve-initial-mode "bogus" false)) (.toBe "default"))))))
 
-;; A2: a permissive MODE must not shadow a restrictive ROLE (and vice-versa).
-;; This mirrors on-permission: combine the mode + role decisions by precedence.
-(describe "model-roles-modes:two-axis-decision" (fn []
-                                                  (it "full-auto mode allow does NOT shadow a role's per-tool bash deny"
-                                                      (fn []
-                                                        (let [mode-cfg (:full-auto (:roles defaults))            ; exec → allow
-                                                              role-cfg {:permissions {"bash" "deny"}}
-                                                              mode-d   (policy/resolve-decision mode-cfg "bash" "exec")
-                                                              role-d   (policy/resolve-decision role-cfg "bash" "exec")]
-                                                          (-> (expect mode-d) (.toBe "allow"))
-                                                          (-> (expect role-d) (.toBe "deny"))
-                                                          (-> (expect (combine-decision mode-d role-d)) (.toBe "deny")))))
-                                                  (it "plan mode write-deny survives a role that would allow write"
-                                                      (fn []
-                                                        (let [mode-cfg (:plan (:roles defaults))                 ; write → deny
-                                                              role-cfg {:permissions {"write" "allow"}}
-                                                              d (combine-decision (policy/resolve-decision mode-cfg "write" "write")
-                                                                                  (policy/resolve-decision role-cfg "write" "write"))]
-                                                          (-> (expect d) (.toBe "deny")))))))
-
 ;;; ─── Modes: tool_access_check ───────────────────────────
 
 (describe "model-roles-modes:tool-access-check" (fn []

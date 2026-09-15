@@ -142,3 +142,50 @@
                                           (-> (expect (fm/file-index dir)) (.not.toContain "later.txt"))
                                           (handler #js [extra] #js {:ui #js {:notify (fn [_m _l] nil)}})
                                           (-> (expect (fm/file-index dir)) (.toContain "later.txt")))))))
+
+
+(describe "@file mentions / edge cases" (fn []
+                                          (it "a binary file (NUL bytes) is skipped with a marker, not pasted"
+                                              (fn []
+                                                (let [dir (fixture)
+                                                      _   (fs/writeFileSync (path/join dir "img.png")
+                                                                            (js/Buffer.from #js [137 80 78 71 0 13 10 26 0 65]))
+                                                      r   (fm/expand-mentions "see @img.png" dir)]
+                                                  (-> (expect (:text r)) (.toBe "see @img.png\n\n<file path=\"img.png\" skipped=\"binary\"/>"))
+                                                  (-> (expect (:skipped r)) (.toEqual ["img.png"]))
+                                                  (-> (expect (:files r)) (.toEqual [])))))
+
+                                          (it "a symlink loop terminates and the mention is left alone"
+                                              (fn []
+                                                (let [dir (fixture)]
+                                                  (fs/symlinkSync (path/join dir "b") (path/join dir "a"))
+                                                  (fs/symlinkSync (path/join dir "a") (path/join dir "b"))
+                                                  (let [r (fm/expand-mentions "read @a and @b" dir)]
+                                                    (-> (expect (:text r)) (.toBe "read @a and @b"))
+                                                    (-> (expect (:files r)) (.toEqual []))))))
+
+                                          (it "a path with spaces is mentioned as @\"a b.txt\""
+                                              (fn []
+                                                (let [dir (fixture)]
+                                                  (fs/writeFileSync (path/join dir "a b.txt") "spaced")
+                                                  (-> (expect (fm/find-mentions "open @\"a b.txt\" now")) (.toEqual ["a b.txt"]))
+                                                  (let [r (fm/expand-mentions "open @\"a b.txt\" now" dir)]
+                                                    (-> (expect (:files r)) (.toEqual ["a b.txt"]))
+                                                    (-> (expect (:text r)) (.toContain "<file path=\"a b.txt\">\nspaced\n</file>"))))))
+
+                                          (it "an unquoted path with spaces stops at the space (only the first word is a mention)"
+                                              (fn []
+                                                (-> (expect (fm/find-mentions "@a b.txt")) (.toEqual ["a"]))))
+
+                                          (it "@ inside a fenced code block stays literal"
+                                              (fn []
+                                                (let [dir (fixture)
+                                                      t   "before @notes.txt\n```py\n@notes.txt\n@src/main.cljs\n```\nafter"
+                                                      r   (fm/expand-mentions t dir)]
+                                                  (-> (expect (fm/find-mentions t)) (.toEqual ["notes.txt"]))
+                                                  (-> (expect (:files r)) (.toEqual ["notes.txt"]))
+                                                  (-> (expect (.startsWith (:text r) t)) (.toBe true)))))
+
+                                          (it "an unterminated fence swallows the rest of the message"
+                                              (fn []
+                                                (-> (expect (fm/find-mentions "@notes.txt\n```\n@src/main.cljs")) (.toEqual ["notes.txt"]))))))
