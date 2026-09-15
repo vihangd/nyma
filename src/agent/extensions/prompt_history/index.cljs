@@ -68,7 +68,7 @@
                        (not= text @last-prompt))
               (reset! last-prompt text)
               ;; Insert into SQLite if storage available
-              (when-let [store (.-__sqlite-store api)]
+              (when-let [store (aget api "__sqlite-store")]
                 ((:insert-prompt store) text nil)))))]
 
     (.on api "input_submit" on-submit)
@@ -76,7 +76,7 @@
     ;; Ctrl+R shortcut — open history search
     (.registerShortcut api "ctrl+r"
                        (fn []
-                         (when-let [store (.-__sqlite-store api)]
+                         (when-let [store (aget api "__sqlite-store")]
                            (let [prompts ((:recent-prompts store) 200)
                                  picker  (create-history-picker prompts
                                                                 (fn [selected]
@@ -93,7 +93,7 @@
                       #js {:description "Search prompt history. Usage: /history [query]"
                            :handler
                            (fn [args ctx]
-                             (if-let [store (.-__sqlite-store api)]
+                             (if-let [store (aget api "__sqlite-store")]
                                (let [query   (str/join " " args)
                                      results (if (empty? query)
                                                ((:recent-prompts store) 20)

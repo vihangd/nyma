@@ -282,6 +282,13 @@
                                                          #js {:available false}))
                                    :enumerable  true
                                    :configurable true})
+    ;; The SQLite store cli.cljs hangs on the base api AFTER extensions
+    ;; activate, under its literal hyphenated name. A getter, for the same
+    ;; reason as .ui above; non-enumerable, for the same reason as below.
+    (js/Object.defineProperty scoped "__sqlite-store"
+                              #js {:get        (fn [] (aget base-api "__sqlite-store"))
+                                   :enumerable false
+                                   :configurable true})
     ;; Non-enumerable: the parity test walks Object.keys and this is not API.
     (js/Object.defineProperty scoped "__disposers"
                               #js {:value disposers :enumerable false})

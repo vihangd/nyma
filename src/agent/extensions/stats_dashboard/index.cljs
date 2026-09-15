@@ -171,7 +171,7 @@
                                    (.notify (.-ui ctx) "No tool calls recorded" "info")
                                    (.notify (.-ui ctx) (format-tool-report metrics) "info")))
                ;; Default: full dashboard
-                               (if-let [store (.-__sqlite-store api)]
+                               (if-let [store (aget api "__sqlite-store")]
                                  (let [totals   ((:get-usage-totals store))
                                        by-model ((:get-usage-by-model store))
                                        by-day   ((:get-usage-by-day store) 14)
