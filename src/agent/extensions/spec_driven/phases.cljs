@@ -294,7 +294,7 @@
    Order matters. Each guard maps to a failure this loop is known to have:
      armed?          — it never runs unless explicitly armed
      max-iterations  — the follow-queue drain is an unbounded recur upstream
-                       (loop.cljs:586-594), so the bound has to live here
+                       (loop.cljs), so the bound has to live here
      verify-pending? — verify_gate enqueues its own fix follow-up; advancing
                        past an unresolved failure is how a loop 'finishes'
                        broken work

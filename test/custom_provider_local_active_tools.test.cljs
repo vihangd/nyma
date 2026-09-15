@@ -2,7 +2,7 @@
   "The tool-call rescue parser validates every rescued call against the active
    tool names — `(contains? available tool-name)` in toolcall_adapter. It was
    fed `Object.keys` of `getAllTools`, which returns an ARRAY of names
-   (extensions.cljs:45), so the set was #{\"0\" \"1\" \"2\" …} and every rescued
+   (extensions.cljs), so the set was #{\"0\" \"1\" \"2\" …} and every rescued
    call was thrown away. The rescue existed, was configured, and produced
    nothing — on exactly the local models it was written for.
 

@@ -45,7 +45,7 @@
 
    Only while a submit is active — otherwise Esc is the editor's and the
    pickers' own key — and only when NO overlay is open. Input listeners run
-   before focus dispatch (pi-tui tui.js:379-394), so without the overlay check
+   before focus dispatch (pi-tui tui.js `handleTerminalInput`), so without the overlay check
    a single Esc did two things: killed the turn AND dismissed the picker. A
    permission prompt is shown precisely while a submit is in flight, so
    cancelling the prompt aborted the very run it was asking about.
@@ -93,7 +93,7 @@
         has (fn [& subs] (boolean (some (fn [x] (.includes m x)) subs)))]
     (str raw
          (cond
-           (has "context" "too long" "maximum context" "context_length")
+           (has "context" "too long" "maximum" "context_length")
            " — run /compact"
 
            (has "401" "invalid api key" "invalid x-api-key" "invalid_api_key"
@@ -102,9 +102,6 @@
 
            (has "429" "rate limit" "rate_limit" "rate-limit")
            (if retrying? " — rate limited; retrying" " — try again")
-
-           (has "maximum")
-           " — run /compact"
 
            :else ""))))
 
@@ -469,20 +466,20 @@
    not a crash. Exposed for tests."
   [agent]
   (let [config  (:config agent)
-        ;; config.model is the whole story: setModel writes it, and the
-        ;; `:runtime-model` state key this also consulted has no writer anywhere.
+        ;; config.model is the whole story: setModel writes it, nothing else does.
         active  (some-> config .-model)]
     (cond
       (nil? active)    "–"
       (string? active) active
       :else            (str (or (.-modelId active) (.-id active) "–")))))
 
-(defn- provider-name [agent]
+(defn- provider-name
   "Return the user-friendly provider label captured at setModel time
    (`anthropic`, `minimax`, `openrouter`, …). Empty string when nyma
    was started with a bare model id (no `provider/` prefix) or when
    the config is uninitialised. Status-bar consumers render
    `<provider>/<model>` only when this is non-empty."
+  [agent]
   (let [config (:config agent)
         v      (and config (aget config "active-provider-name"))]
     (or v "")))
@@ -966,13 +963,8 @@
           ;; the session the way it used to: startup seeded the pane with one
           ;; filter, cli seeded the agent's context with `session->seed-messages`,
           ;; and /resume wrote to the store — which the pane does not subscribe
-          ;; to — so it restored nothing at all.
-          ;;
-          ;; Uses `session->seed-messages`, the same function that builds the
-          ;; model's context, so the two cannot disagree. The old inline filter
-          ;; kept raw user/assistant entries and dropped `compaction` /
-          ;; `branch-summary`, which seed-messages folds into a summary message
-          ;; — on a compacted session the screen showed less than the model saw.
+          ;; to — so it restored nothing at all. `pane-messages` says why it
+          ;; shares the model's seed function.
           seed-pane! (fn []
                        (reset! messages
                                (mapv (fn [m] (assoc m :id (new-id)))
@@ -1064,14 +1056,8 @@
       (sync-status!)
 
       ;; Global Esc → abort the in-flight run (stream + tools listening on
-      ;; the run's AbortSignal). Only while a submit is active so pickers and
-      ;; the editor keep their own Esc behavior when idle.
-      ;;
-      ;; …and only when no overlay is open. Input listeners run BEFORE focus
-      ;; dispatch (tui.js:379-394), so without this check one Esc did two
-      ;; things at once: killed the turn AND dismissed the picker. A permission
-      ;; prompt is shown precisely while a submit is in flight, so cancelling
-      ;; the prompt aborted the run it was asking about.
+      ;; the run's AbortSignal). The gating is `abort-on-escape?`; its
+      ;; docstring says why overlays and idle both opt out.
       (.addInputListener tui
                          (fn [data]
                            (when (abort-on-escape?

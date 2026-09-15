@@ -24,7 +24,7 @@
 
 (defn- reset-stats! []
   (reset! shared/suite-stats
-          {           :kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
+          {:kv-cache         {:turns 0 :cache-hits 0 :cached-tokens 0}
            :repo-map         {:files 0 :symbols 0 :last-index-ms 0}
            :priority-assembly {:turns 0 :messages-pruned 0 :tokens-saved 0}
            :diff-edit          {:hunks-applied 0 :fuzzy-matches 0 :chars-saved 0 :calls 0}
@@ -38,35 +38,35 @@
 ;; ═══════════════════════════════════════════════════════════════
 
 (describe "token-suite shared: head/tail helpers" (fn []
-                                  (it "passes short results unchanged"
-                                      (fn []
-                                        (let [short "line1\nline2\nline3"]
-                                          (-> (expect (shared/truncate-head-tail short 100 50)) (.toBe short)))))
+                                                    (it "passes short results unchanged"
+                                                        (fn []
+                                                          (let [short "line1\nline2\nline3"]
+                                                            (-> (expect (shared/truncate-head-tail short 100 50)) (.toBe short)))))
 
-                                  (it "truncates long text with head+tail"
-                                      (fn []
-                                        (let [lines (clj->js (map #(str "line-" %) (range 300)))
-                                              text  (.join lines "\n")
-                                              result (shared/truncate-head-tail text 10 5)]
-                                          (-> (expect result) (.toContain "line-0"))
-                                          (-> (expect result) (.toContain "line-9"))
-                                          (-> (expect result) (.toContain "line-299"))
-                                          (-> (expect result) (.toContain "truncated")))))
+                                                    (it "truncates long text with head+tail"
+                                                        (fn []
+                                                          (let [lines (clj->js (map #(str "line-" %) (range 300)))
+                                                                text  (.join lines "\n")
+                                                                result (shared/truncate-head-tail text 10 5)]
+                                                            (-> (expect result) (.toContain "line-0"))
+                                                            (-> (expect result) (.toContain "line-9"))
+                                                            (-> (expect result) (.toContain "line-299"))
+                                                            (-> (expect result) (.toContain "truncated")))))
 
-                                  (it "preserves text under threshold"
-                                      (fn []
-                                        (-> (expect (shared/truncate-head-tail "short" 100 50)) (.toBe "short"))))
+                                                    (it "preserves text under threshold"
+                                                        (fn []
+                                                          (-> (expect (shared/truncate-head-tail "short" 100 50)) (.toBe "short"))))
 
-                                  (it "count-lines works correctly"
-                                      (fn []
-                                        (-> (expect (shared/count-lines "a\nb\nc")) (.toBe 3))
-                                        (-> (expect (shared/count-lines "")) (.toBe 0))
-                                        (-> (expect (shared/count-lines "no newlines")) (.toBe 1))))
+                                                    (it "count-lines works correctly"
+                                                        (fn []
+                                                          (-> (expect (shared/count-lines "a\nb\nc")) (.toBe 3))
+                                                          (-> (expect (shared/count-lines "")) (.toBe 0))
+                                                          (-> (expect (shared/count-lines "no newlines")) (.toBe 1))))
 
-                                  (it "has-error-pattern detects errors"
-                                      (fn []
-                                        (-> (expect (shared/has-error-pattern? "TypeError: foo")) (.toBe true))
-                                        (-> (expect (shared/has-error-pattern? "all good")) (.toBe false))))))
+                                                    (it "has-error-pattern detects errors"
+                                                        (fn []
+                                                          (-> (expect (shared/has-error-pattern? "TypeError: foo")) (.toBe true))
+                                                          (-> (expect (shared/has-error-pattern? "all good")) (.toBe false))))))
 
 ;; ═══════════════════════════════════════════════════════════════
 ;; KV Cache Optimization
@@ -155,13 +155,6 @@
                                test-kv-system-array-elements-have-role-system)
                            (it "stable section carries cacheControl providerOptions"
                                test-kv-system-array-stable-section-has-cache-control)
-                           (it "deactivate resets hash state"
-                               (fn []
-                                 (let [agent (make-agent)
-                                       api   (make-api agent)
-                                       deact (kv-cache/activate api)]
-                                   (deact)
-                                   (-> (expect true) (.toBe true)))))
                            (it "stats atom tracks turns"
                                (fn []
                                  (let [agent (make-agent)
@@ -245,16 +238,16 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "return 1;"
-                                             :new_string "return 2;"}]}))]
-          (-> (expect result) (.toContain "1/1"))
-          (-> (expect result) (.toContain "exact"))
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.toContain "return 2;"))))))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "return 1;"
+                                               :new_string "return 2;"}]}))]
+            (-> (expect result) (.toContain "1/1"))
+            (-> (expect result) (.toContain "exact"))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.toContain "return 2;"))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-whitespace-fuzzy []
@@ -264,15 +257,15 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "return 1;"
-                                             :new_string "return 42;"}]}))]
-          (-> (expect result) (.toContain "1/1"))
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.toContain "return 42;"))))))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "return 1;"
+                                               :new_string "return 42;"}]}))]
+            (-> (expect result) (.toContain "1/1"))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.toContain "return 42;"))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-indent-match []
@@ -282,16 +275,16 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
+      (do (-> (expect (some? multi-edit)) (.toBe true))
         ;; Search with no indentation, should match via indent-match
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "fn bar() {\nreturn 1;\n}"
-                                             :new_string "fn bar() {\nreturn 2;\n}"}]}))]
-          (-> (expect result) (.toContain "1/1"))
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.toContain "return 2;"))))))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "fn bar() {\nreturn 1;\n}"
+                                               :new_string "fn bar() {\nreturn 2;\n}"}]}))]
+            (-> (expect result) (.toContain "1/1"))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.toContain "return 2;"))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-multiple-hunks []
@@ -301,17 +294,17 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "line A" :new_string "line X"}
-                                        #js {:old_string "line C" :new_string "line Y"}]}))]
-          (-> (expect result) (.toContain "2/2"))
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.toContain "line X"))
-            (-> (expect updated) (.toContain "line Y"))
-            (-> (expect updated) (.toContain "line B"))))))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "line A" :new_string "line X"}
+                                          #js {:old_string "line C" :new_string "line Y"}]}))]
+            (-> (expect result) (.toContain "2/2"))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.toContain "line X"))
+              (-> (expect updated) (.toContain "line Y"))
+              (-> (expect updated) (.toContain "line B"))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-partial-failure []
@@ -321,14 +314,14 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "line A" :new_string "line X"}
-                                        #js {:old_string "NONEXISTENT" :new_string "line Z"}]}))]
-          (-> (expect result) (.toContain "1/2"))
-          (-> (expect result) (.toContain "not found")))))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "line A" :new_string "line X"}
+                                          #js {:old_string "NONEXISTENT" :new_string "line Z"}]}))]
+            (-> (expect result) (.toContain "1/2"))
+            (-> (expect result) (.toContain "not found")))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-ambiguous-rejected []
@@ -339,17 +332,17 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "x = 1;" :new_string "x = 9;"}]}))]
-          (-> (expect result) (.toContain "AMBIGUOUS"))
-          (-> (expect result) (.toContain "0/1"))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "x = 1;" :new_string "x = 9;"}]}))]
+            (-> (expect result) (.toContain "AMBIGUOUS"))
+            (-> (expect result) (.toContain "0/1"))
           ;; file unchanged — no corruption
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.not.toContain "x = 9;"))
-            (-> (expect (count (.split updated "x = 1;"))) (.toBe 3))))))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.not.toContain "x = 9;"))
+              (-> (expect (count (.split updated "x = 1;"))) (.toBe 3))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-repair-hint []
@@ -361,19 +354,19 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (let [result (js-await
-                      ((.-execute multi-edit)
-                       #js {:path fpath
-                            :edits #js [#js {:old_string "the quick brown cat sits"
-                                             :new_string "REPLACED"}]}))]
-          (-> (expect result) (.toContain "0/1"))
-          (-> (expect result) (.toContain "closest text"))
-          (-> (expect result) (.toContain "the quick brown fox jumps"))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (let [result (js-await
+                        ((.-execute multi-edit)
+                         #js {:path fpath
+                              :edits #js [#js {:old_string "the quick brown cat sits"
+                                               :new_string "REPLACED"}]}))]
+            (-> (expect result) (.toContain "0/1"))
+            (-> (expect result) (.toContain "closest text"))
+            (-> (expect result) (.toContain "the quick brown fox jumps"))
           ;; no corruption — file untouched
-          (let [updated (fs/readFileSync fpath "utf8")]
-            (-> (expect updated) (.toContain "the quick brown fox jumps"))
-            (-> (expect updated) (.not.toContain "REPLACED"))))))
+            (let [updated (fs/readFileSync fpath "utf8")]
+              (-> (expect updated) (.toContain "the quick brown fox jumps"))
+              (-> (expect updated) (.not.toContain "REPLACED"))))))
     (fs/unlinkSync fpath)))
 
 (defn ^:async test-multi-edit-stats []
@@ -383,13 +376,13 @@
         _deact (diff-edit/activate api)
         tools ((:get-active (:tool-registry agent)))]
     (let [multi-edit (get tools "multi_edit")]
-      (when multi-edit
-        (js-await
-         ((.-execute multi-edit)
-          #js {:path fpath
-               :edits #js [#js {:old_string "aaa" :new_string "xxx"}]}))
-        (-> (expect (:calls (:diff-edit @shared/suite-stats))) (.toBe 1))
-        (-> (expect (:hunks-applied (:diff-edit @shared/suite-stats))) (.toBe 1))))
+      (do (-> (expect (some? multi-edit)) (.toBe true))
+          (js-await
+           ((.-execute multi-edit)
+            #js {:path fpath
+                 :edits #js [#js {:old_string "aaa" :new_string "xxx"}]}))
+          (-> (expect (:calls (:diff-edit @shared/suite-stats))) (.toBe 1))
+          (-> (expect (:hunks-applied (:diff-edit @shared/suite-stats))) (.toBe 1))))
     (fs/unlinkSync fpath)))
 
 (describe "ext-diff-edit" (fn []
@@ -410,14 +403,6 @@
                                     (-> (expect (fn? deact)) (.toBe true))
                                     (deact)
                                     (-> (expect (nil? (get ((:get-active (:tool-registry agent))) "multi_edit"))) (.toBe true)))))
-
-                            (it "compress middleware enriches edit result"
-                                (fn []
-                                  (let [agent (make-agent)
-                                        api   (make-api agent)
-                                        _deact (diff-edit/activate api)]
-        ;; The middleware is registered — we just test it doesn't crash
-                                    (-> (expect true) (.toBe true)))))
 
                             (it "levenshtein-similarity computes correctly"
                                 (fn []
@@ -602,20 +587,6 @@
                                            (-> (expect (some? (.-summary evt-ctx))) (.toBe true))
                                            (-> (expect (.includes (str (.-summary evt-ctx)) "User Intent")) (.toBe true)))))
 
-                                   (it "tracks re-reads"
-                                       (fn []
-                                         (let [agent (make-agent)
-                                               api   (make-api agent)
-                                               _deact (smart-compaction/activate api)]
-        ;; First read
-                                           ((:emit (:events agent)) "tool_execution_end"
-                                                                    #js {:toolName "read" :args #js {:path "/src/foo.ts"} :duration 100})
-        ;; Second read of same file
-                                           ((:emit (:events agent)) "tool_execution_end"
-                                                                    #js {:toolName "read" :args #js {:path "/src/foo.ts"} :duration 100})
-        ;; Re-read tracking should increment (even without cache, the history tracks it)
-                                           (-> (expect true) (.toBe true)))))
-
                                    (it "hash-content produces consistent hashes"
                                        (fn []
                                          (let [h1 (shared/hash-content "hello world")
@@ -665,10 +636,12 @@
             {:role "tool_result" :content "some result content here"}
             {:role "assistant" :content "analysis"}])
     (js-await (run agent "follow up"))
-    (-> (expect true) (.toBe true))))
+    ;; The block reason lands as the assistant turn, so the pipeline ran end
+    ;; to end through both extensions' hooks without throwing.
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "ok"))))
 
 (describe "token-suite integration" (fn []
-                                      (it "all 6 extensions activate without conflict"
+                                      (it "all 5 extensions activate without conflict"
                                           (fn []
                                             (let [agent (make-agent)
                                                   api   (make-api agent)

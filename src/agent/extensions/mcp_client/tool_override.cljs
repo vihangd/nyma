@@ -38,7 +38,7 @@
 ;;
 ;; Translators map the native nyma tool's arg shape onto the lean-ctx
 ;; ctx_* tool's arg shape. Earlier versions referenced `file_path`,
-;; which doesn't exist on the native schema (`tools.cljs:17` uses
+;; which doesn't exist on the native schema (`tools.cljs` uses
 ;; `path` + `range`); the result was a `{path: undefined}` request to
 ;; ctx_read, an MCP error, and a silent fallback to native every time.
 ;; The wrapper looked installed but was never actually exercising

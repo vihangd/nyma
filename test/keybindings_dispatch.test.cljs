@@ -77,7 +77,7 @@
                                                                                                    (-> (expect (kb/dispatch-shortcut! shortcuts ctrl-r matchesKey)) (.toBe true)))))
 
                                 (it "a user binding replaces an extension's on the same combo" (fn []
-    ;; Load order: extensions register first (cli.cljs:556), apply-keybindings
+    ;; Load order: extensions register first (cli.cljs), apply-keybindings
     ;; runs after (:620), so the user wins — one map key, last writer. Correct
     ;; precedence, and now a warning rather than a silent swap.
                                                                                  (let [log        (atom [])

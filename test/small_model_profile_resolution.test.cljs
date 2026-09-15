@@ -33,7 +33,7 @@
         ;; the shape that actually occurs: the CLI assigns
         ;; (.-model (:config agent)) directly and never calls setModel, so
         ;; state :model stays nil for the entire run. base-model-spec is what
-        ;; cli.cljs:461 puts in the state atom, and it carries the provider.
+        ;; cli.cljs puts in the state atom, and it carries the provider.
         (fn []
           (let [ks (vec (p/current-model-keys
                          #js {:__state_atom (atom {:base-model-spec

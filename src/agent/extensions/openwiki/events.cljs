@@ -10,7 +10,7 @@
             [agent.tool-metadata :as tool-metadata]))
 
 ;; multi_edit belongs here: it DOES carry a top-level :path
-;; (token_suite/diff_edit.cljs:189 reads `(.-path args)`) — an earlier comment
+;; (token_suite/diff_edit.cljs reads `(.-path args)`) — an earlier comment
 ;; claimed otherwise and dropping it just blanked the status line for the tool
 ;; that does the bulk of wiki edits.
 (def ^:private write-tools #{"write" "edit" "multi_edit"})

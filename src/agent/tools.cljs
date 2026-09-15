@@ -160,13 +160,13 @@
    Consumers previously had to re-parse the payload to learn whether a command
    failed — `tool_result_policy` and `bash_suite/output_handling` both
    do exactly that by hand. `:details` rides the `tool_result` event
-   (`middleware.cljs:154`), so the signal is available without the parsing.
+   (`middleware.cljs`), so the signal is available without the parsing.
 
    Deliberately does NOT set `:isError`. A command that exits non-zero still
    RAN — the tool call succeeded and returned its output; `isError` means the
    call itself failed. Conflating the two is not academic: `claude_hook_bridge`
    dispatches `PostToolUseFailure` instead of `PostToolUse` when `isError` is
-   set (`events/post_tool_use.cljs:54,61`), so flagging every non-zero exit
+   set (`events/post_tool_use.cljs,61`), so flagging every non-zero exit
    silently stops a user's PostToolUse hooks from firing for `grep` with no
    match, `test -f`, `git diff --quiet` — all routine, all exit 1. An earlier
    version of this function set `isError` and would have broken a live hook
@@ -548,6 +548,12 @@
                              (when (= 429 (.-status response)) ". Rate limited — set JINA_API_KEY for higher limits.")))))
     (truncate-result (js-await (.text response)) max-len)))
 
+(defn- tinyfish-key
+  "TINYFISH_API_KEY, else 'tinyfish' from ~/.nyma/credentials.json, else nil."
+  []
+  (or (.. js/process -env -TINYFISH_API_KEY)
+      (read-credential "tinyfish")))
+
 (defn ^:async tinyfish-fetch
   "Fetch via Tinyfish (api.fetch.tinyfish.ai). Headless-browser-rendered,
    handles JS-heavy sites and PDFs. Requires TINYFISH_API_KEY or
@@ -555,8 +561,7 @@
    batched fetches (up to 10 URLs); this helper sends one URL per call
    to match nyma's web_fetch single-URL surface."
   [url fmt max-len]
-  (let [api-key (or (.. js/process -env -TINYFISH_API_KEY)
-                    (read-credential "tinyfish"))]
+  (let [api-key (tinyfish-key)]
     (when-not api-key
       (throw (js/Error. "Tinyfish requires TINYFISH_API_KEY env var or 'tinyfish' in ~/.nyma/credentials.json. Get a key at https://agent.tinyfish.ai/api-keys")))
     (let [tinyfish-fmt (case fmt
@@ -600,9 +605,7 @@
    chain when no key is set — saves an HTTP round-trip on a request
    that would deterministically throw `Tinyfish requires …`."
   []
-  (boolean
-   (or (.. js/process -env -TINYFISH_API_KEY)
-       (read-credential "tinyfish"))))
+  (boolean (tinyfish-key)))
 
 (defn ^:async web-fetch-execute [{:keys [url format max_length provider]}]
   ;; Validate URL
@@ -654,7 +657,7 @@
                                     :max_length (-> (.number z) (.optional)
                                                     (.describe "Maximum output characters (default: 20000)"))
                                     :provider   (-> (.enum z #js ["auto" "direct" "jina" "tinyfish"]) (.optional)
-                                                    (.describe "Fetch provider. auto (default): direct fetch, fall back to Jina Reader on failure. direct: raw fetch only. jina: Jina Reader only (handles JS-rendered pages, anti-bot, PDFs). tinyfish: Tinyfish Fetch API — headless browser, JS rendering, PDF text extraction (requires TINYFISH_API_KEY)."))})
+                                                    (.describe "Fetch provider. auto (default): direct fetch, then Tinyfish when TINYFISH_API_KEY is set, then Jina Reader. direct: raw fetch only. jina: Jina Reader only (handles JS-rendered pages, anti-bot, PDFs). tinyfish: Tinyfish Fetch API — headless browser, JS rendering, PDF text extraction (requires TINYFISH_API_KEY)."))})
         :execute web-fetch-execute}))
 
 ;;; ─── web_search ────────────────────────────────────────────
@@ -789,17 +792,13 @@
                (.join (vec formatted) "\n\n"))
           "No results found.")))))
 
-(defn- resolve-tinyfish-key []
-  (or (.. js/process -env -TINYFISH_API_KEY)
-      (read-credential "tinyfish")))
-
 (defn ^:async tinyfish-search
   "Search via Tinyfish (api.search.tinyfish.ai). Requires TINYFISH_API_KEY
    or 'tinyfish' in ~/.nyma/credentials.json. Search calls don't burn
    credits per Tinyfish docs. Optional :location (ISO country code) and
    :language (language code) for geo-targeted results."
   [query num-results & [{:keys [location language]}]]
-  (let [api-key (resolve-tinyfish-key)]
+  (let [api-key (tinyfish-key)]
     (when-not api-key
       (throw (js/Error. "Tinyfish requires TINYFISH_API_KEY env var or 'tinyfish' in ~/.nyma/credentials.json. Get a key at https://agent.tinyfish.ai/api-keys")))
     (let [params (js/URLSearchParams.)
@@ -881,36 +880,33 @@
       ;; web_fetch's chain so we don't spend a round-trip on a known-
       ;; missing key. Jina works anonymously (rate-limited); ddg is
       ;; the unconditional safety net.
-      (try
-        (if (has-tinyfish-key?)
-          (try
-            (js-await (tinyfish-search query num_results
-                                       {:location location
-                                        :language language}))
-            (catch :default e1
-              (try
-                (js-await (jina-search query num_results))
-                (catch :default e2
-                  (try
-                    (js-await (ddg-search query num_results))
-                    (catch :default e3
-                      (throw (js/Error.
-                              (str "All providers failed.\n"
-                                   "  tinyfish: " (or (.-message e1) (str e1)) "\n"
-                                   "  jina:     " (or (.-message e2) (str e2)) "\n"
-                                   "  ddg:      " (or (.-message e3) (str e3)))))))))))
-          (try
-            (js-await (jina-search query num_results))
-            (catch :default e2
-              (try
-                (js-await (ddg-search query num_results))
-                (catch :default e3
-                  (throw (js/Error.
-                          (str "Both providers failed.\n"
-                               "  jina: " (or (.-message e2) (str e2)) "\n"
-                               "  ddg:  " (or (.-message e3) (str e3))))))))))
-        (catch :default e
-          (throw e))))))
+      (if (has-tinyfish-key?)
+        (try
+          (js-await (tinyfish-search query num_results
+                                     {:location location
+                                      :language language}))
+          (catch :default e1
+            (try
+              (js-await (jina-search query num_results))
+              (catch :default e2
+                (try
+                  (js-await (ddg-search query num_results))
+                  (catch :default e3
+                    (throw (js/Error.
+                            (str "All providers failed.\n"
+                                 "  tinyfish: " (or (.-message e1) (str e1)) "\n"
+                                 "  jina:     " (or (.-message e2) (str e2)) "\n"
+                                 "  ddg:      " (or (.-message e3) (str e3)))))))))))
+        (try
+          (js-await (jina-search query num_results))
+          (catch :default e2
+            (try
+              (js-await (ddg-search query num_results))
+              (catch :default e3
+                (throw (js/Error.
+                        (str "Both providers failed.\n"
+                             "  jina: " (or (.-message e2) (str e2)) "\n"
+                             "  ddg:  " (or (.-message e3) (str e3)))))))))))))
 
 (def web-search-tool
   (tool

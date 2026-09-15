@@ -26,7 +26,7 @@
         api #js {:addMiddleware (fn [m] (reset! mw m))
                  :on            (fn [ev f] (swap! hooks assoc ev f) nil)
                  :off           (fn [& _] nil)
-                 ;; PRODUCTION SHAPE: extensions.cljs:45 returns (clj->js (keys …)),
+                 ;; PRODUCTION SHAPE: extensions.cljs returns (clj->js (keys …)),
                  ;; i.e. a JS ARRAY of names — not an object. Mocking an object
                  ;; here is what let the hallucination bug through: Object.keys
                  ;; on an array yields ["0" "1" "2"], so every real tool name

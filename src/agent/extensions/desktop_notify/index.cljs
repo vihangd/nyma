@@ -18,14 +18,8 @@
   (let [section (.settings api "desktop-notify")
         enabled (:enabled section)
         ms      (:threshold-ms section)]
-    ;; The guards survive the migration: an api without a settings manager
-    ;; (loader smoke, test stubs) hands back an empty section.
-    ;;
-    ;; The 3000 is DELIBERATELY mirrored from extension.json rather than moved
-    ;; out the way todos' 5 was. This branch is reached only when the value is
-    ;; not a number, and a threshold of 0 there would fire a notification on
-    ;; every turn — punishing a typo with spam. A wrong threshold should behave
-    ;; like the default, not like an alarm.
+    ;; 3000 mirrors extension.json on purpose: a non-numeric threshold must
+    ;; behave like the default, not like 0 (a notification on every turn).
     {:enabled      (if (some? enabled) enabled true)
      :threshold-ms (if (number? ms) ms 3000)}))
 
@@ -92,11 +86,11 @@
                                 :body   "Response ready"
                                 :source "desktop-notify"}))))))
 
-        ;; Notify on long-running tool completions (>10s)
+        ;; Notify on tool completions slower than the same threshold
         on-tool-complete
         (fn [data _ctx]
           (let [dur (or (.-duration data) 0)]
-            (when (and (> dur 10000) (check-enabled))
+            (when (and (> dur threshold-ms) (check-enabled))
               (send-notification! "nyma"
                                   (str (.-toolName data) " completed ("
                                        (js/Math.round (/ dur 1000)) "s)")))))

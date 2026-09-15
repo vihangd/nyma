@@ -71,7 +71,7 @@
   "The active tool NAMES as a set, from whatever shape the host hands over.
 
    `api.getAllTools` returns `(clj->js (keys …))` — a JS **array of names**
-   (extensions.cljs:45). Calling `Object.keys` on that yields \"0\", \"1\", \"2\" …,
+   (extensions.cljs). Calling `Object.keys` on that yields \"0\", \"1\", \"2\" …,
    so every real tool name failed the membership check below and every tool
    result was replaced with \"that tool doesn't exist\". The extension scored
    10% against an 80% baseline on the benchmark until this was found.

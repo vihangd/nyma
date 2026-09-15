@@ -365,7 +365,7 @@ the user will approve the plan before execution begins.")
       ;; restore the :plan role's model for the retry
       (restore-role-model! api :plan)
       ;; ...and put it where the RETRY will actually look. st-config is built
-      ;; once per outer loop iteration (loop.cljs:238) and re-sent as-is on
+      ;; once per outer loop iteration (loop.cljs) and re-sent as-is on
       ;; retry, so setModel alone would re-issue on the same dead planner model.
       ;; Tolerates a missing :config — tests call this handler without one.
       (when-let [st-config (.-config data)]

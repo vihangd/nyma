@@ -87,7 +87,7 @@
 
 
 ;; ── the settings MANAGER, not a settings map ─────────────────────
-;; cli.cljs:445 passes `:settings settings`, where settings is the manager
+;; cli.cljs passes `:settings settings`, where settings is the manager
 ;; returned by create-settings-manager — a record of :get / :set-override /
 ;; :apply-overrides. Reading a config key straight off it returns nil, so every
 ;; value fell back to its default and NOTHING a user configured applied:

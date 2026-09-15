@@ -8,7 +8,7 @@
    it arrives, abort mid-token, inject a reminder, and re-run from the same
    point. The correction costs a retry instead of a whole wasted turn.
 
-   nyma already had every moving part. `loop.cljs:449` runs the stream inside a
+   nyma already had every moving part. `loop.cljs` runs the stream inside a
    retry loop bounded at 2 attempts, and a `stream_filter` handler that returns
    `{abort true, reason, inject [messages]}` makes it re-run with those messages
    appended. What was missing was anything that decides *when* to do it.

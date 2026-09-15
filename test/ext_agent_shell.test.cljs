@@ -42,7 +42,7 @@
                                (swap! registered-commands dissoc name))
           :registerFlag      (fn [name opts]
                                (swap! registered-flags assoc name opts))
-          ;; Ungated on the real api (extensions.cljs:405). input_router reads
+          ;; Ungated on the real api (extensions.cljs). input_router reads
           ;; it inside subscribe to skip thought-streaming when the
           ;; thinking-renderer extension is active.
           :getGlobalFlag     (fn [_name] nil)

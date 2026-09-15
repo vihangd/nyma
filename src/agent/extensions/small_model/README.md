@@ -252,7 +252,7 @@ Small models (~8B) cannot reliably choose between returning bare text and callin
 
 1. `before_provider_request` — inject `respond` into the tools map
 2. Middleware `:leave` — when `respond` fires, save the message arg and set a flag
-3. Next `before_provider_request` — return `{:block true, :reason message}`, which the loop (loop.cljs:208–213) stores as a clean assistant message and emits `agent_end`
+3. Next `before_provider_request` — return `{:block true, :reason message}`, which the loop (loop.cljs–213) stores as a clean assistant message and emits `agent_end`
 
 The `respond` tool call is stripped from message storage via `message_before_store`, so from the user's perspective the exchange looks like a normal text response.
 

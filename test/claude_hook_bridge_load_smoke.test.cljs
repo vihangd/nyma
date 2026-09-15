@@ -69,7 +69,7 @@
    The bridge subscribes to the MAIN event bus via api.on / api.off
    at the top level (those are the methods the real
    agent.extensions/create-extension-api exposes — see
-   src/agent/extensions.cljs:28). It also reads api.events for the
+   src/agent/extensions.cljs). It also reads api.events for the
    inter-extension bus, but never .on/.off on it from inside default."
   []
   (let [listeners (atom {})]

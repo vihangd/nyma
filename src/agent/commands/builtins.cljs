@@ -629,11 +629,29 @@
           (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
                            " (" (name scope) "). /reload to apply.")))))))
 
+(defn- replay-session!
+  "Switch the session manager to `file-path` and reseed the store from it.
+
+   Replay is not a new turn, so JSONL re-append is suppressed for its
+   duration; try/finally so a throw mid-replay cannot leave the flag stuck
+   true (which would silently disable all future persistence). Seeds via
+   the shared transform so tool_call/tool_result/compaction are handled
+   identically to the startup resume path."
+  [agent file-path]
+  (let [sm @(:session agent)]
+    ((:switch-file sm) file-path)
+    (swap! (:state agent) assoc :replaying-session? true)
+    (try
+      ((:dispatch! (:store agent)) :messages-cleared {})
+      (doseq [msg (session->seed-messages ((:build-context sm)))]
+        ((:dispatch! (:store agent)) :message-added {:message msg}))
+      (finally
+        (swap! (:state agent) assoc :replaying-session? false)))
+    ((:emit (:events agent)) "session_start"
+                             {:reason "resume" :previousSessionFile file-path})))
+
 (defn register-builtins
-  "Register all built-in slash commands on the agent.
-   Pi-mono-compatible: help, model, clear, exit, new, fork, tree,
-   compact, debug, reload, name, session, copy, hotkeys, export,
-   resume, import, settings, changelog, login, logout, scoped-models."
+  "Register every built-in slash command on the agent; `/help` lists them."
   [agent session resources & [extensions-atom resolve-flags-fn]]
   (swap! (:commands agent) merge
          {"help"
@@ -720,23 +738,23 @@
            (fn [args ctx]
              (let [themes (:themes resources)
                    names  (theme-catalog/all-theme-names themes)
-                   notify (fn [m l] (when-let [ui (.-ui ctx)] (when (.-notify ui) (.notify ui m l))))
+                   say    (fn [m l] (when-let [ui (.-ui ctx)] (when (.-notify ui) (.notify ui m l))))
                    apply! (fn [name]
                             (theme-catalog/apply-theme! name themes default-dark)
-                            (notify (str "Theme: " name) "info"))]
+                            (say (str "Theme: " name) "info"))]
                (cond
                  (seq args)
                  (let [name (str (first args))]
                    (if (some #(= % name) names)
                      (apply! name)
-                     (notify (str "Unknown theme '" name "'. Available: " (clojure.string/join ", " names)) "error")))
+                     (say (str "Unknown theme '" name "'. Available: " (clojure.string/join ", " names)) "error")))
 
                  (and (.-ui ctx) (.-select (.-ui ctx)))
                  (-> (.select (.-ui ctx) "Theme:" (clj->js (vec names)))
                      (.then (fn [choice] (when choice (apply! (str choice))))))
 
                  :else
-                 (notify (str "Themes: " (clojure.string/join ", " names) "\nUsage: /theme <name>") "info"))))}
+                 (say (str "Themes: " (clojure.string/join ", " names) "\nUsage: /theme <name>") "info"))))}
 
           "bash"
           ;; Discovery wrapper over editor bash mode — the `/bash ls`
@@ -911,8 +929,6 @@
                           (toggle-extension! resources extensions-atom sub (second argv) project? ctx)
                           (show-info ctx (extensions-report resources extensions-atom)))))}
 
-     ;; ── New pi-mono-compatible commands ─────────────────────
-
           "name"
           {:group       :session
            :description "Set or show the session display name. Quote it: /name \"Q3 planning\""
@@ -1040,24 +1056,8 @@
                                      (fn [choice]
                                        (when choice
                                          (let [idx  (.indexOf options choice)
-                                               sess (nth sessions idx)
-                                               sm   @(:session agent)]
-                                           ((:switch-file sm) (:path sess))
-                                           ;; Replay is not a new turn — suppress JSONL re-append.
-                                           ;; try/finally so a throw mid-replay can't leave the
-                                           ;; flag stuck true (which would silently disable all
-                                           ;; future persistence). Seed via the shared transform
-                                           ;; so tool_call/tool_result/compaction are handled
-                                           ;; identically to the startup resume path.
-                                           (swap! (:state agent) assoc :replaying-session? true)
-                                           (try
-                                             ((:dispatch! (:store agent)) :messages-cleared {})
-                                             (doseq [msg (session->seed-messages ((:build-context sm)))]
-                                               ((:dispatch! (:store agent)) :message-added {:message msg}))
-                                             (finally
-                                               (swap! (:state agent) assoc :replaying-session? false)))
-                                           ((:emit (:events agent)) "session_start"
-                                                                    {:reason "resume" :previousSessionFile (:path sess)})
+                                               sess (nth sessions idx)]
+                                           (replay-session! agent (:path sess))
                                            (notify ctx (str "Resumed: " (:name sess))))))))))))}
 
           "import"
@@ -1073,23 +1073,8 @@
                           (notify ctx (str "File not found: " file-path) "error")
 
                           :else
-                          (let [sm @(:session agent)]
-                            ((:switch-file sm) file-path)
-                            ;; Replay is not a new turn — suppress JSONL re-append.
-                            ;; try/finally guards the flag; shared seed transform
-                            ;; drops tool_call/tool_result and folds compaction.
-                            (swap! (:state agent) assoc :replaying-session? true)
-                            (try
-                              ((:dispatch! (:store agent)) :messages-cleared {})
-                              (doseq [msg (session->seed-messages ((:build-context sm)))]
-                                ((:dispatch! (:store agent)) :message-added {:message msg}))
-                              (finally
-                                (swap! (:state agent) assoc :replaying-session? false)))
-                            ((:emit (:events agent)) "session_start"
-                                                     {:reason "resume" :previousSessionFile file-path})
-                            (notify ctx (str "Imported session from " file-path))))))}
-
-     ;; ── Session, export, credentials ───────────────────────
+                          (do (replay-session! agent file-path)
+                              (notify ctx (str "Imported session from " file-path))))))}
 
           "settings"
           {:description "View or change settings"

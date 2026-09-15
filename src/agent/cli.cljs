@@ -50,6 +50,18 @@
     ((:emit events) "session_end_summary" stats)
     ((:emit events) "session_end" stats)))
 
+(defn ^:async emit-session-shutdown-async!
+  "Async half of the shutdown sequence (used by the SIGINT handler so
+   extensions awaiting cleanup get a chance to finish). Same event order
+   as `emit-session-shutdown!` but uses `emit-async` for the two
+   summary/end events."
+  [agent reason]
+  (let [stats  (agent-stats agent)
+        events (:events agent)]
+    ((:emit events) "session_shutdown" {:reason reason})
+    (js-await ((:emit-async events) "session_end_summary" stats))
+    (js-await ((:emit-async events) "session_end" stats))))
+
 (defn ^:async finish-one-shot!
   "Shut down and exit after a one-shot mode (-p / --mode json).
 
@@ -65,29 +77,17 @@
 
    Mirrors the SIGINT sequence — async shutdown so extensions awaiting cleanup
    get a chance to finish, then deactivate, then exit."
-  [agent extensions-atom shutdown-done? emit-async-fn deactivate-fn]
+  [agent extensions-atom shutdown-done?]
   (when-not @shutdown-done?
     (reset! shutdown-done? true)
-    (js-await (-> (emit-async-fn agent "exit")
+    (js-await (-> (emit-session-shutdown-async! agent "exit")
                   (.catch (fn [_] nil))))
-    (try (js-await (deactivate-fn @extensions-atom)) (catch :default _ nil)))
+    (try (js-await (deactivate-all @extensions-atom)) (catch :default _ nil)))
   ;; One macrotask so buffered stdout drains before the hard exit — console.log
   ;; to a pipe is not guaranteed synchronous, and truncating the answer would be
   ;; a worse bug than the one being fixed.
   (js-await (js/Promise. (fn [res] (js/setTimeout res 0))))
   (js/process.exit (or (.-exitCode js/process) 0)))
-
-(defn ^:async emit-session-shutdown-async!
-  "Async half of the shutdown sequence (used by the SIGINT handler so
-   extensions awaiting cleanup get a chance to finish). Same event order
-   as `emit-session-shutdown!` but uses `emit-async` for the two
-   summary/end events."
-  [agent reason]
-  (let [stats  (agent-stats agent)
-        events (:events agent)]
-    ((:emit events) "session_shutdown" {:reason reason})
-    (js-await ((:emit-async events) "session_end_summary" stats))
-    (js-await ((:emit-async events) "session_end" stats))))
 
 (def ^:private sigint-window-ms
   "How long the first Ctrl-C's 'press again to exit' offer stands."
@@ -306,9 +306,6 @@ Examples:
   ;; has no package.json to read.
   (js/process.stdout.write (str version "\n")))
 
-(defn- temp-session-path []
-  (str "/tmp/nyma-session-" (js/Date.now) ".jsonl"))
-
 (defn- ^:async read-stdin-string []
   (js/Promise.
    (fn [resolve _reject]
@@ -514,8 +511,8 @@ Examples:
       ;; no marker and fall back to inference (sessions/project.cljs).
       ;;
       ;; Role "session-meta" is invisible to the model: both context builders
-      ;; filter to #{user assistant tool_call tool_result} (context.cljs:5,
-      ;; manager.cljs:105), so this never reaches a prompt or a replayed
+      ;; filter to #{user assistant tool_call tool_result} (context.cljs,
+      ;; manager.cljs), so this never reaches a prompt or a replayed
       ;; transcript.
       (when (and path (not (fs/existsSync path)))
         ((:append session) {:role "session-meta" :metadata {:cwd (js/process.cwd)}}))
@@ -987,13 +984,11 @@ Examples:
                             "json"        (js-await (print-mode/start-result agent p))
                             "stream-json" (js-await (print-mode/start-stream-json agent p))
                             (js-await (print-mode/start agent p)))
-                          (js-await (finish-one-shot! agent extensions-atom shutdown-done?
-                                                      emit-session-shutdown-async! deactivate-all)))
+                          (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           "json"        (let [p (js-await (resolve-one-shot-prompt positionals))]
                           (when-not p (die-no-prompt! "--mode json"))
                           (js-await (print-mode/start-json agent p))
-                          (js-await (finish-one-shot! agent extensions-atom shutdown-done?
-                                                      emit-session-shutdown-async! deactivate-all)))
+                          (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
           "rpc"         (js-await (rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))

@@ -109,7 +109,7 @@
           (fn []
             (it "puts the permission prompt at the bottom"
                 (fn []
-                  ;; Called exactly as middleware.cljs:312 calls it: two
+                  ;; Called exactly as middleware.cljs calls it: two
                   ;; arguments, no options. That omission is why it was centred.
                   (let [{:keys [seen tui]} (recording-tui)
                         ui (install-ui tui)]

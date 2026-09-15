@@ -37,7 +37,7 @@ with every section below present.
  Do NOT paraphrase these quotes. Do NOT invent next steps the user did not state.]
 
 ## Critical Rules
-- File paths must be EXACT (e.g., src/agent/loop.cljs:142, NOT \"the loop file\")
+- File paths must be EXACT (e.g., src/agent/loop.cljs, NOT \"the loop file\")
 - Error messages must be VERBATIM
 - Configuration values must be exact numbers
 - Section 6 MUST contain at least one verbatim quote per pending task")

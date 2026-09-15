@@ -1250,7 +1250,7 @@
   (it "stops at the iteration cap instead of looping forever"
       (fn []
         ;; The follow-queue drain upstream is an unbounded recur
-        ;; (loop.cljs:586-594) — this cap is the only thing that applies.
+        ;; (loop.cljs) — this cap is the only thing that applies.
         (with-tasks
           (fn [_tasks]
             (let [{:keys [run end off]}

@@ -482,8 +482,8 @@
                               ((:emit (:events agent)) event data))
 
        ;; ── Flags ──────────────────────────────────────────────
-       ;; The pending-argv lookup matters: extensions load (cli.cljs:556)
-       ;; BEFORE resolve-ext-flags runs (cli.cljs:601), so an extension that
+       ;; The pending-argv lookup matters: extensions load (cli.cljs)
+       ;; BEFORE resolve-ext-flags runs (cli.cljs), so an extension that
        ;; reads its own flag during activation would otherwise always see nil.
        ;; Applying the parsed argv value here makes getFlag correct as soon as
        ;; the flag is registered.

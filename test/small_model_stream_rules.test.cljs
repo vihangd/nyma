@@ -1,7 +1,7 @@
 (ns small-model-stream-rules.test
   "Correcting a turn while it is still being written.
 
-   `loop.cljs:449` already runs the stream inside a retry loop bounded at 2
+   `loop.cljs` already runs the stream inside a retry loop bounded at 2
    attempts, and a `stream_filter` handler returning `{abort, reason, inject}`
    makes it re-run with those messages appended. Nothing decided *when* to do
    that, which is what these rules add — as a settings table, so shipping no

@@ -70,7 +70,7 @@
           ;; CLI never does — it assigns (.-model (:config agent)) directly,
           ;; and extensions cannot see the agent config. What the CLI DOES put
           ;; in the state atom is :base-model-spec, the "<provider>/<model-id>"
-          ;; it resolved at startup (cli.cljs:461). That is the only place an
+          ;; it resolved at startup (cli.cljs). That is the only place an
           ;; extension can learn the active model, so it is the fallback.
           m    (:model st)
           mid  (cond

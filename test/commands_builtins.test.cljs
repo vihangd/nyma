@@ -57,18 +57,15 @@
                                       (let [agent (make-agent-with-builtins)
                                             cmds  @(:commands agent)
                                             names (set (keys cmds))]
-        ;; Check all expected commands are registered. `cls` is the
-        ;; Phase 18 addition for terminal-clear (distinct from /clear
-        ;; which resets session state).
+        ;; Check all expected commands are registered. `cls` clears the
+        ;; terminal (distinct from /clear which resets session state).
                                         (doseq [cmd ["help" "model" "clear" "cls" "exit" "new" "fork" "tree"
                                                      "compact" "debug" "reload"
                                                      "name" "session" "copy" "hotkeys" "export" "resume" "import"]]
                                           (-> (expect (contains? names cmd)) (.toBe true))))))
 
-  ;; Phase 18: borrowed from cc-kit's command aliases. Nyma's command
-  ;; parser already supports :aliases (phase 10) but the built-ins
-  ;; didn't declare any. These two tests lock the aliases in so a
-  ;; future edit can't silently drop them.
+  ;; These two tests lock the aliases in so a future edit cannot
+  ;; silently drop them.
                                 (it "exit command declares quit/q aliases"
                                     (fn []
                                       (let [agent (make-agent-with-builtins)
@@ -83,7 +80,7 @@
                                             cmd   (get @(:commands agent) "help")]
                                         (-> (expect (contains? (set (:aliases cmd)) "?")) (.toBe true)))))))
 
-;;; ─── /help formatter (Phase 18) ────────────────────────
+;;; ─── /help formatter ──────────────────────────────────
 
 (describe "/help command: alias-inline formatting"
           (fn []
@@ -115,7 +112,7 @@
                       (-> (expect text) (.toContain "/model"))
                       (-> (expect text) (.toContain "/cls"))))))))
 
-;;; ─── /cls command (Phase 18) ──────────────────────────
+;;; ─── /cls command ────────────────────────────────────
 
 (describe "/cls command"
           (fn []
@@ -197,19 +194,7 @@
                                         {:keys [ctx notifications]} (make-ctx)
                                         handler (get-handler agent "copy")]
                                     (handler nil ctx)
-                                    (-> (expect (:msg (first @notifications))) (.toContain "No assistant message")))))
-
-                            (it "finds last assistant message"
-                                (fn []
-                                  (let [agent (make-agent-with-builtins)
-                                        _     (swap! (:state agent) assoc :messages
-                                                     [{:role "user" :content "hello"}
-                                                      {:role "assistant" :content "first reply"}
-                                                      {:role "user" :content "more"}
-                                                      {:role "assistant" :content "second reply"}])
-                                        msgs  (:messages @(:state agent))
-                                        last-asst (last (filter #(= (:role %) "assistant") msgs))]
-                                    (-> (expect (:content last-asst)) (.toBe "second reply")))))))
+                                    (-> (expect (:msg (first @notifications))) (.toContain "No assistant message")))))))
 
 (describe "/hotkeys command" (fn []
                                (it "lists the keys that are really bound"
@@ -237,7 +222,7 @@
                                        (handler nil ctx)
                                        (let [text (first @overlays)]
                                          (-> (expect text) (.toContain "^K"))
-                                         (-> (expect text) (.toContain "Extensions")))))))) 
+                                         (-> (expect text) (.toContain "Extensions"))))))))
 
 (describe "/export command" (fn []
                               (it "generates html by default"
@@ -286,13 +271,18 @@
                                   (fn []
                                     (let [agent (make-agent-with-builtins)
                                           {:keys [ctx notifications]} (make-ctx)
-                                          handler (get-handler agent "resume")]
-        ;; Use a nonexistent dir so list-sessions returns empty
-        ;; The HOME env var sessions dir likely doesn't have test sessions
-        ;; but this exercises the "no sessions" path
-                                      (handler nil ctx)
-        ;; Either shows "No sessions found" or shows selector
-                                      (-> (expect (or (seq @notifications) true)) (.toBeTruthy)))))))
+                                          handler (get-handler agent "resume")
+                                          ;; An empty HOME so ~/.nyma/sessions has nothing to list.
+                                          home    (fs/mkdtempSync (path/join (os/tmpdir) "nyma-resume-"))
+                                          orig    (.. js/process -env -HOME)]
+                                      (aset (.-env js/process) "HOME" home)
+                                      (try
+                                        (handler nil ctx)
+                                        (finally
+                                          (aset (.-env js/process) "HOME" orig)
+                                          (fs/rmSync home #js {:recursive true :force true})))
+                                      (-> (expect (:msg (first @notifications))) (.toBe "No sessions found"))
+                                      (-> (expect (:level (first @notifications))) (.toBe "error")))))))
 
 ;; ── New commands ──────────────────────────────────────────
 
@@ -352,17 +342,17 @@
                                      (-> (expect (get @(:commands agent) "login")) (.toBeDefined)))))))
 
 (describe "/compact command" (fn []
-  (it "returns its promise so the dispatcher can show busy and catch failures"
-      (fn []
-        (let [agent (make-agent-with-builtins)
-              {:keys [ctx]} (make-ctx)
-              handler (get-handler agent "compact")
-              r (handler nil ctx)]
+                               (it "returns its promise so the dispatcher can show busy and catch failures"
+                                   (fn []
+                                     (let [agent (make-agent-with-builtins)
+                                           {:keys [ctx]} (make-ctx)
+                                           handler (get-handler agent "compact")
+                                           r (handler nil ctx)]
           ;; No session → nil; with one it is a thenable that rejects here
           ;; (the harness has no real model) — swallow that, the shape is the
           ;; contract under test.
-          (when (and r (fn? (.-then r))) (.catch r (fn [_] nil)))
-          (-> (expect (or (nil? r) (fn? (.-then r)))) (.toBe true)))))))
+                                       (when (and r (fn? (.-then r))) (.catch r (fn [_] nil)))
+                                       (-> (expect (or (nil? r) (fn? (.-then r)))) (.toBe true)))))))
 
 (defn- make-agent-with-settings
   "Builtins registered against a settings manager whose global file is a

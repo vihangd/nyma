@@ -17,7 +17,7 @@
         plan-steps
         (fn []
           ;; Plan mode's step list, when one is executing. Read through getState
-          ;; (extensions.cljs:79) rather than requiring plan_mode — two state
+          ;; (extensions.cljs) rather than requiring plan_mode — two state
           ;; keys is the whole coupling.
           (let [st (when (.-getState api) (.getState api))]
             (when (:plan-executing st)

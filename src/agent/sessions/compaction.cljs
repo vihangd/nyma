@@ -127,7 +127,7 @@ with every section below present.
  Do NOT paraphrase these quotes. Do NOT invent next steps the user did not state.]
 
 ## Critical Rules
-- File paths must be EXACT (e.g., src/agent/loop.cljs:142, NOT \"the loop file\")
+- File paths must be EXACT (e.g., src/agent/loop.cljs, NOT \"the loop file\")
 - Error messages must be VERBATIM
 - Configuration values must be exact numbers
 - Section 6 MUST contain at least one verbatim quote per pending task")
@@ -275,7 +275,7 @@ with every section below present.
 (defn compacted-messages
   "The live context after a compaction: the summary, then the kept span.
 
-   Mirrors `session->seed-messages` (manager.cljs:30-42), which produces the
+   Mirrors `session->seed-messages` (manager.cljs), which produces the
    same `[Earlier conversation summary]` user message on resume — so the screen,
    the model and a later resume are describing the same conversation.
 
@@ -305,7 +305,7 @@ with every section below present.
 
    THE missing step. `compact` computed the split, appended the summary and
    stopped — it never touched `state :messages`, which is what
-   agent.context/build-context reads on every turn (context.cljs:15). So the
+   agent.context/build-context reads on every turn (context.cljs). So the
    summary only took effect at the next RESUME while the live session kept
    growing: five compactions in one real session, 714k -> 956k tokens, none of
    which shrank anything.
@@ -494,7 +494,7 @@ with every section below present.
 
 (defn resolve-settings
   "`(:settings agent)` is the settings MANAGER, not a settings map — a record of
-   :get/:set-override/:apply-overrides (`settings/manager.cljs:367`). Reading
+   :get/:set-override/:apply-overrides (`settings/manager.cljs`). Reading
    `:compaction` straight off it is always nil, so every option below silently
    fell back to its default and `{\"compaction\": {\"enabled\": false}}` did
    nothing at all. `core.cljs:114-117` guards the same trap for its own reads.
@@ -508,7 +508,7 @@ with every section below present.
 (defn settings->opts
   "Read the `:compaction` settings section into compact's option keys.
 
-   That section (`settings/manager.cljs:12`, `{:enabled true :threshold 0.85}`)
+   That section (`settings/manager.cljs`, `{:enabled true :threshold 0.85}`)
    shipped as a default that NOTHING read — the 0.85 was hardcoded inside
    `compact`, so turning compaction off or retuning it did nothing at all.
    Keyword and string keys are the same string under squint, so a

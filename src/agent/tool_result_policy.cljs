@@ -113,7 +113,7 @@
    In memory, not the session JSONL, because a handle's useful life is ONE
    turn: the truncation notice lives only inside the AI SDK's internal step
    messages and is discarded at the turn boundary (tool results never enter
-   `state :messages` — see `sessions/manager.cljs:27`). Durability across
+   `state :messages` — see `sessions/manager.cljs`). Durability across
    restarts would buy nothing, and an on-disk store would still need this
    fallback for headless `-p`, the gateway, and tests."
   (atom {}))

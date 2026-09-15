@@ -255,7 +255,7 @@
                         ;; text-delta field is `text` (ai/index.d.ts:2818-2822).
                         ;; `textDelta` belongs to the OBJECT stream, so reading
                         ;; it accumulated "" and the sidecar saved nothing. The
-                        ;; UI reads `.text` here too (interactive.cljs:223).
+                        ;; UI reads `.text` here too (interactive.cljs).
                         (swap! acc str (or (and data (.-text data))
                                            (and data (.-textDelta data))
                                            ""))

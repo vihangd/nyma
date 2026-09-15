@@ -143,7 +143,7 @@
                             (it "stops at the iteration cap"
                                 (fn []
         ;; The follow-queue drain upstream is an unbounded recur
-        ;; (loop.cljs:586-594), so this bound is the only one that applies.
+        ;; (loop.cljs), so this bound is the only one that applies.
                                   (let [d (decide {:iteration 25 :max-iterations 25 :progress (prog 5 1)})]
                                     (-> (expect (:action d)) (.toBe "stop"))
                                     (-> (expect (.includes (:reason d) "25/25")) (.toBe true)))))

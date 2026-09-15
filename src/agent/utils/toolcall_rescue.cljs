@@ -419,7 +419,7 @@
   "A zero-arg fn resolving the current active tool-name set.
 
    `getAllTools` hands back `(clj->js (keys …))` — an ARRAY of names
-   (extensions.cljs:45). `Object.keys` on an array returns \"0\", \"1\", \"2\" …,
+   (extensions.cljs). `Object.keys` on an array returns \"0\", \"1\", \"2\" …,
    so every rescued call failed the `(contains? available tool-name)` check and
    the rescue silently produced nothing — on exactly the models it exists for."
   [api]

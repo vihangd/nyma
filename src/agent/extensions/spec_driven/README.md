@@ -249,7 +249,7 @@ running a model. In order:
 | guard | why |
 |---|---|
 | not armed | it only ever runs when you asked |
-| iteration cap | the follow-queue drain upstream is an unbounded `recur` (`loop.cljs:586-594`), so the bound has to live here |
+| iteration cap | the follow-queue drain upstream is an unbounded `recur` (`loop.cljs`), so the bound has to live here |
 | verify is red | **holds** rather than stops — `verify_gate` owns the fix loop and resumes us on `small-model/verify-pass` |
 | no checkboxes in `tasks.md` | `parse-tasks` drops non-checkbox lines, so a corrupted or reformatted file yields zero tasks — which naively reads as *done* |
 | phase not in the profile's order | reachable by switching profiles mid-run; would otherwise announce "all phases complete" |

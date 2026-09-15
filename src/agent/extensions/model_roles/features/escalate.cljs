@@ -112,9 +112,9 @@
 
 ;; Whether a task is in flight used to be derived by scanning `state :messages`
 ;; for a `tool_call` role. Nothing writes that role — `state :messages` only
-;; ever holds user/assistant (sessions/manager.cljs:27) — so the scan always
+;; ever holds user/assistant (sessions/manager.cljs) — so the scan always
 ;; returned false and the no-op-turns branch below could never fire. The signal
-;; lives in the turn_finalize payload instead (`:toolCalls`, loop.cljs:576),
+;; lives in the turn_finalize payload instead (`:toolCalls`, loop.cljs),
 ;; latched across turns in `:escalate-task-in-flight` and cleared at the
 ;; episode boundary by on-user-message.
 

@@ -11,24 +11,10 @@
    Out-of-the-box defaults match the May 2026 ecosystem signal where
    spec-kit is the cross-agent interop format.
 
-   Slash commands:
-     /spec list                       — list specs in repo with progress
-     /spec new <feat> [--kiro]        — scaffold a new spec (default shape,
-                                        or --kiro / --spec-kit)
-     /spec import <feat> <file|dir>   — file: copy as primary doc, scaffold
-                                        the rest. dir: copy every recognized
-                                        file (spec.md/plan.md/tasks.md/
-                                        data-model.md/quickstart.md/
-                                        research.md/contracts/), scaffold
-                                        whatever's missing.
-     /spec scaffold <kind> [<feat>]   — fill in an optional artifact:
-                                        data-model | quickstart | research |
-                                        contracts | constitution. Refuses
-                                        to overwrite existing files.
-     /spec start <feat>               — activate; docs flow into every turn
-     /spec next                       — narrate next unchecked task
-     /spec done <pattern>             — mark task done (edits markdown)
-     /spec end                        — clear active spec
+   Slash command: `/spec <sub>` with sub one of list, start, new, import,
+   scaffold, clarify, analyze, install-skill, run, phase, profile, end,
+   next, done. Usage text for each lives on its branch of the `case sub`
+   dispatcher in `activate`; `/spec` with no sub prints the summary.
 
    When a spec is active, the spec docs are appended to the system
    prompt via the `context_assembly` event so the model has the
@@ -44,7 +30,7 @@
    These ride the existing claude_hook_bridge, providing the same
    pre/post-task lifecycle Kiro users get from the Kiro IDE."
   (:require [agent.utils.home :as home]
-             ["node:path" :as path]
+            ["node:path" :as path]
             ["node:fs"   :as fs]
             ["node:os"   :as os]
             ["ai" :refer [generateText]]
@@ -187,11 +173,8 @@
               spec   (aget parsed "spec")]
           (if (nil? spec)
             defaults
-            {:default-shape    (or (aget spec "default-shape")
-                                   (aget spec "default-shape")
-                                   default-default-shape)
-             :shape-precedence (let [p (or (aget spec "shape-precedence")
-                                           (aget spec "shape-precedence"))]
+            {:default-shape    (or (aget spec "default-shape") default-default-shape)
+             :shape-precedence (let [p (aget spec "shape-precedence")]
                                  (if (and p (.isArray js/Array p))
                                    ;; Sanity-bound: keep only known shape names.
                                    ;; Drops typos silently rather than producing
@@ -492,8 +475,6 @@
            (str "\n### Supporting artifacts" opt-blocks))
          (when (seq dir-blocks)
            (str "\n### Contracts & references" dir-blocks)))))
-
-;; ── Slash command formatting ────────────────────────────────────
 
 ;; ── Scaffolding new specs ──────────────────────────────────────
 
@@ -1227,14 +1208,8 @@
                            "error")
 
                   :else
-                  (let [;; --force replaces the whole spec directory. Say what
-                        ;; that cost when it was not just scaffolding, so a
-                        ;; re-import over real progress is a visible choice
-                        ;; rather than a silent one.
+                  (let [;; --force replaces the whole spec directory.
                         prior   (get specs target)
-                        prior-p (when prior
-                                  (let [raw (read-if-exists (:tasks prior))]
-                                    (phases/progress (parse-tasks raw) raw)))
                         _       (when (and force? prior)
                                   (try (fs/rmSync (:dir prior) #js {:recursive true :force true})
                                        (catch :default _ nil)))
@@ -1520,7 +1495,7 @@
                                    :spec-content content
                                    :spec-path (path/relative cwd (:req spec))})
                             ;; The slash command's ctx (built in
-                            ;; modes/interactive.cljs:96-102) carries the
+                            ;; modes/interactive.cljs) carries the
                             ;; key as a hyphenated string `"append-message"`.
                             ;; Squint's `(.-append-message ctx)` would
                             ;; translate to `ctx.append_message` (underscore)
@@ -2012,7 +1987,7 @@
           ;; (api.dispatch only EMITS an event; dispatchState runs reducers).
           ;;
           ;; Fires BEFORE the follow-up is enqueued, and agent_end runs before
-          ;; the follow-queue drain (loop.cljs:586), so the next turn starts
+          ;; the follow-queue drain (loop.cljs), so the next turn starts
           ;; with just the reset message. Spec docs are re-read from disk by
           ;; context_assembly every turn, which is what carries state across.
           reset-context! (fn []
@@ -2144,7 +2119,7 @@
 
       (.on api "agent_end" on-agent-end)
       ;; verify_gate publishes these on the main bus via emitGlobal; every
-      ;; subscriber picks them up with plain api.on (cf. self_tune.cljs:205).
+      ;; subscriber picks them up with plain api.on (see verify_gate/index.cljs).
       (doseq [[ev h] [["small-model/verify-fail" on-verify-fail]
                       ["small-model/verify-exhausted" on-verify-fail]
                       ["small-model/verify-pass" on-verify-ok]]]
