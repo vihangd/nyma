@@ -61,7 +61,13 @@
    the message could vanish while the skill stayed \"active\" — its grant still
    downgrading a permission ask to an allow, and the `skill` tool still
    answering \"already active; its instructions are in context\" when they were
-   not. Pure; the tool registry is cleaned up by the agent-aware callers."
+   not.
+
+   Pure, so it cannot touch the tool registry. `:skill-tools` is deliberately
+   LEFT IN PLACE for exactly that reason: it is the only record of what a
+   skill's `tools.*` registered, and dropping it here would strand those tools
+   with nothing able to name them. `skills/release-orphaned-tools!` is the
+   agent-aware half that clears them."
   [state]
   (let [present (set (keep :skill (:messages state)))
         gone    (remove present (or (:active-skills state) #{}))]
@@ -69,8 +75,7 @@
       state
       (-> state
           (update :active-skills (fn [a] (set (filter present (or a #{})))))
-          (update :skill-allowed-tools (fn [m] (apply dissoc (or m {}) gone)))
-          (update :skill-tools (fn [m] (apply dissoc (or m {}) gone)))))))
+          (update :skill-allowed-tools (fn [m] (apply dissoc (or m {}) gone)))))))
 
 (def core-reducers
   "Default reducers for agent state transitions."

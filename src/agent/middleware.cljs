@@ -322,7 +322,30 @@
                                     {:tool-name (:tool-name ctx) :exec-id exec-id}))
               (assoc ctx :exec-id exec-id :start-time start-time)))
    :leave (fn [ctx]
-            (tool-tracking-leave events store ctx))})
+            (tool-tracking-leave events store ctx))
+   ;; A THROW unwinds through :error, not :leave, and without this stage the
+   ;; execution was never closed: `:tool-execution-ended` was never dispatched,
+   ;; so the exec id sat in `:active-executions` for the rest of the process.
+   ;; `isIdle` then answered false forever and `waitForIdle` spun a 100ms
+   ;; timeout chain that could never resolve, after any failed or interrupted
+   ;; tool call. Deliberately NOT the full leave path: there is no result to
+   ;; shape, so this closes the execution and tells the UI, nothing more.
+   :error (fn [ctx]
+            (let [duration (- (js/Date.now) (or (:start-time ctx) 0))
+                  err      (:error ctx)
+                  msg      (str (or (some-> err .-message) err "tool failed"))]
+              (when events
+                ((:emit events) "tool_execution_end"
+                                {:toolName (:tool-name ctx)
+                                 :execId   (:exec-id ctx)
+                                 :args     (:args ctx)
+                                 :duration duration
+                                 :result   msg
+                                 :isError  true}))
+              (when store
+                ((:dispatch! store) :tool-execution-ended
+                                    {:exec-id (:exec-id ctx) :duration duration}))
+              ctx))})
 
 (defn categorize-tool
   "Permission category from the tool's safety metadata — one table for

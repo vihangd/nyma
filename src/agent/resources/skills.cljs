@@ -398,6 +398,26 @@
                (update :skill-tools dissoc name)
                (update :messages (fn [ms] (vec (remove #(= (:skill %) name) ms))))))))
 
+(defn release-orphaned-tools!
+  "Unregister tools belonging to skills that are no longer active.
+
+   Compaction and context pruning can drop a skill's `:skill`-tagged message,
+   and `state/prune-skill-state` then ends the skill — but it is pure, so the
+   tools its `tools.*` registered stay in the registry. This is the half that
+   needs the agent."
+  [agent]
+  (let [st     @(:state agent)
+        active (set (or (:active-skills st) #{}))
+        orphan (remove (fn [[n _]] (contains? active n)) (or (:skill-tools st) {}))]
+    (when (seq orphan)
+      (when-let [unregister (:unregister (:tool-registry agent))]
+        (doseq [[_ tools] orphan
+                t         tools]
+          (try (unregister t) (catch :default _e nil))))
+      (swap! (:state agent) update :skill-tools
+             (fn [m] (apply dissoc (or m {}) (map first orphan)))))
+    nil))
+
 (defn deactivate-all-skills!
   "End every active skill, properly — each one's tools unregistered.
 
@@ -688,10 +708,17 @@
   (let [events  (:events agent)
         ;; a vector, oldest first — the window needs an order
         touched (atom [])]
-    (when-let [[on-call on-start] @activation-handlers]
+    (when-let [[on-call on-start on-comp] @activation-handlers]
       ((:off events) "tool_call" on-call)
-      ((:off events) "before_agent_start" on-start))
-    (let [on-call  (fn [d]
+      ((:off events) "before_agent_start" on-start)
+      (when on-comp ((:off events) "compact" on-comp)))
+    (let [on-compact (fn [_d]
+                       ;; Compaction can drop a skill's message; the pure
+                       ;; pruning in `state/prune-skill-state` ends the skill
+                       ;; but cannot reach the tool registry. This is that half.
+                       (release-orphaned-tools! agent)
+                       nil)
+          on-call  (fn [d]
                      (when-let [p (some-> d .-input .-path)]
                        ;; Moving window: a hard stop at the cap froze the set,
                        ;; so path-scoped activation died for every file opened
@@ -702,6 +729,13 @@
                                             (subvec ps (- (count ps) max-touched-paths))
                                             ps))))))
           on-start (fn [d]
+                     ;; Once per turn, drop tools whose skill is gone. Any path
+                     ;; that clears or replaces the message list — compaction,
+                     ;; context pruning, a spec-loop reset — can end a skill
+                     ;; through the pure state pruning, which cannot reach the
+                     ;; registry. Checking here covers all of them for the cost
+                     ;; of one map lookup when there is nothing to do.
+                     (release-orphaned-tools! agent)
                      (let [active (:active-skills @(:state agent))
                            names  (auto-activated skills (prompt-text (.-userMessage d))
                                                   @touched active)]
@@ -710,5 +744,6 @@
                          #js {"volatile-additions" #js [block]})))]
       ((:on events) "tool_call" on-call)
       ((:on events) "before_agent_start" on-start)
-      (reset! activation-handlers [on-call on-start])
+      ((:on events) "compact" on-compact)
+      (reset! activation-handlers [on-call on-start on-compact])
       nil)))

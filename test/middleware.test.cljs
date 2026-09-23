@@ -848,3 +848,45 @@
             (.toContain "$ pwd"))))
   (it "Allow for this session skips the next prompt and writes nothing"
       test-ask-for-session-skips-next-prompt)))
+
+;;; ─── a throwing tool must release its slot ────────────────────
+;;;
+;;; The interceptor unwind runs each interceptor's `:error` stage when the
+;;; context carries one, and `tool-tracking` had only `:enter` and `:leave`.
+;;; So a tool that threw never dispatched `:tool-execution-ended`: its exec id
+;;; sat in `:active-executions` for the rest of the process, `isIdle` answered
+;;; false forever, and `waitForIdle` spun a 100ms timeout chain that could
+;;; never resolve — after any failed or interrupted tool call.
+
+(defn- active-count [agent]
+  (count (:active-executions @(:state agent))))
+
+(defn ^:async test-throwing-tool-releases-slot []
+  (let [agent (create-agent {:model "m" :system-prompt "s"})
+        pipe  (create-pipeline (:events agent) (:store agent))
+        tools (wrap-tools-with-middleware
+               {"ok"   #js {:description "ok"   :execute (fn [_] (js/Promise.resolve "fine"))}
+                "boom" #js {:description "boom" :execute (fn [_] (js/Promise.reject (js/Error. "boom")))}}
+               pipe (:events agent))]
+    (-> (expect (active-count agent)) (.toBe 0))
+    (js-await ((.-execute (get tools "ok")) #js {}))
+    (-> (expect (active-count agent)) (.toBe 0))
+    (js-await ((.-execute (get tools "boom")) #js {}))
+    (-> (expect (active-count agent)) (.toBe 0))))
+
+(defn ^:async test-throwing-tool-still-reports-end []
+  (let [agent (create-agent {:model "m" :system-prompt "s"})
+        seen  (atom [])
+        pipe  (create-pipeline (:events agent) (:store agent))
+        tools (wrap-tools-with-middleware
+               {"boom" #js {:description "boom" :execute (fn [_] (js/Promise.reject (js/Error. "boom")))}}
+               pipe (:events agent))]
+    ((:on (:events agent)) "tool_execution_end" (fn [d] (swap! seen conj d) nil))
+    (js-await ((.-execute (get tools "boom")) #js {}))
+    ;; the UI needs the close, and it needs to know it failed
+    (-> (expect (count @seen)) (.toBe 1))
+    (-> (expect (.-isError (first @seen))) (.toBe true))))
+
+(describe "tool execution tracking on the error path" (fn []
+  (it "a tool that throws releases its execution slot" test-throwing-tool-releases-slot)
+  (it "a tool that throws still reports tool_execution_end" test-throwing-tool-still-reports-end)))

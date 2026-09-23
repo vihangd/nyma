@@ -199,3 +199,43 @@
                                           (skills/deactivate-skill "s" agent)
                                           (-> (expect (contains? ((:all reg)) "skill_tool")) (.toBe false))
                                           (-> (expect (get (:skill-tools @(:state agent)) "s")) (.toBeUndefined)))))))
+
+;;; ─── orphaned tools ───────────────────────────────────────────
+
+(describe "skills:orphaned tools" (fn []
+  (it "releases tools whose skill was ended by pruning"
+      (fn []
+        ;; prune-skill-state is pure, so compaction and context pruning end the
+        ;; skill but cannot reach the registry. Without the agent-aware half
+        ;; the model kept being offered a gone skill's tools all session.
+        (let [agent (create-agent {:model "m" :system-prompt "s"})
+              reg   (:tool-registry agent)]
+          ((:register reg) "skill_tool" #js {:description "x"})
+          (swap! (:state agent) assoc
+                 :active-skills #{}
+                 :skill-tools {"gone" #{"skill_tool"}})
+          (skills/release-orphaned-tools! agent)
+          (-> (expect (contains? ((:all reg)) "skill_tool")) (.toBe false))
+          (-> (expect (get (:skill-tools @(:state agent)) "gone")) (.toBeUndefined)))))
+
+  (it "leaves an active skill's tools alone"
+      (fn []
+        (let [agent (create-agent {:model "m" :system-prompt "s"})
+              reg   (:tool-registry agent)]
+          ((:register reg) "live_tool" #js {:description "x"})
+          (swap! (:state agent) assoc
+                 :active-skills #{"live"}
+                 :skill-tools {"live" #{"live_tool"}})
+          (skills/release-orphaned-tools! agent)
+          (-> (expect (contains? ((:all reg)) "live_tool")) (.toBe true)))))
+
+  (it "pruning keeps the tool record so the sweep can still name them"
+      (fn []
+        ;; dropping :skill-tools in the pure prune would strand the tools with
+        ;; nothing able to identify them
+        (let [out (state/prune-skill-state
+                   {:messages []
+                    :active-skills #{"deploy"}
+                    :skill-tools {"deploy" #{"t"}}})]
+          (-> (expect (contains? (:active-skills out) "deploy")) (.toBe false))
+          (-> (expect (get (:skill-tools out) "deploy")) (.toBeDefined)))))))
