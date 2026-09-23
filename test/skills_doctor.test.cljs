@@ -81,6 +81,20 @@
                                          (-> (expect (.includes (:body s) "description:")) (.toBe false))
                                          (-> (expect (.includes (:body s) "Body line")) (.toBe true)))))
 
+                                 (it "an empty or comment-only frontmatter block is valid, not malformed"
+                                     (fn []
+          ;; Bun.YAML.parse("") returns null, which is not a parse failure
+                                       (-> (expect (has-finding? (skill-dir! "empty" "---\n\n---\nBody") "not valid YAML")) (.toBe false))
+                                       (-> (expect (has-finding? (skill-dir! "cmt" "---\n# just a comment\n---\nBody") "not valid YAML")) (.toBe false))))
+
+                                 (it "a frontmatter name that no longer resolves points at the directory"
+                                     (fn []
+                                       (let [s (skill-dir! "my-deploy" "---\nname: deploy\ndescription: d\n---\nB")
+                                             hint (skills/alias-hint {"my-deploy" s} "deploy")]
+          ;; keying by directory silently renamed these for existing users
+                                         (-> (expect (.includes hint "my-deploy")) (.toBe true))
+                                         (-> (expect (skills/alias-hint {"my-deploy" s} "nothing-like-it")) (.toBeNil)))))
+
                                  (it "license, compatibility and metadata survive into the doctor row"
                                      (fn []
                                        (let [s (skill-dir! "meta"
@@ -111,13 +125,17 @@
                                          (-> (expect (:scope g)) (.toBe "global"))
                                          (-> (expect (:truncated? g)) (.toBe false)))))
 
-                                 (it "counts explicit and automatic activations separately"
+                                 (it "counts user, model and automatic activations separately"
                                      (fn []
+          ;; the model calling the `skill` tool used to be counted as explicit,
+          ;; collapsing the one distinction the column exists for
                                        (skills/count-activation! "a" :explicit)
+                                       (skills/count-activation! "a" :model)
                                        (skills/count-activation! "a" :auto)
                                        (skills/count-activation! "a" :auto)
                                        (let [r (first (skills/doctor-rows {"a" {:name "a" :description "d"}}))]
                                          (-> (expect (:explicit r)) (.toBe 1))
+                                         (-> (expect (:model r)) (.toBe 1))
                                          (-> (expect (:auto r)) (.toBe 2)))))
 
                                  (it "rows are sorted by name"

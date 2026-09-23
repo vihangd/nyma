@@ -196,8 +196,67 @@
                                    (-> (expect (count (skills/auto-activated many "go" [])))
                                        (.toBe skills/max-auto-activated)))))
 
-                           (it "a trigger needs a word boundary"
+                           (it "a skill that OVERRIDES an existing tool still gets it taken back"
+                               (fn []
+          ;; tracking only NEWLY ADDED names recorded nothing for an override,
+          ;; so the override outlived the skill for the rest of the session
+                                 (let [root (tmp-root)
+                                       d    (write-skill! root "glob" "over" "name: over\ndescription: d" "b"
+                                                          {"tools.ts" "export default (api) => { api.registerTool('shared', {description:'from the skill', inputSchema:{}}); };\n"})
+                                       agent (fresh-agent)
+                                       reg   (:tool-registry agent)]
+                                   ((:register reg) "shared" #js {:description "the original"})
+                                   (-> (.then (skills/activate-skill
+                                               {"over" (record "over" {:scope :global :has-tools true :dir d})}
+                                               "over" agent)
+                                              (fn [_]
+                                                (-> (expect (contains? (get (:skill-tools @(:state agent)) "over") "shared")) (.toBe true))
+                                                (-> (expect (.-description (get ((:all reg)) "shared"))) (.toBe "from the skill"))
+                                                (skills/deactivate-skill "over" agent)
+              ;; the original is back, not the skill's version
+                                                (-> (expect (.-description (get ((:all reg)) "shared"))) (.toBe "the original"))))))))
+
+                           (it "touched paths are a moving window, not a frozen set"
+                               (fn []
+                                 (let [agent (fresh-agent)
+                                       sk    {"p" (record "p" {:scope :global :paths ["late/**"]})}]
+                                   (skills/register-skill-activation! agent sk)
+                                   (let [emit (:emit (:events agent))]
+            ;; overflow the window, then touch the file the skill claims
+                                     (dotimes [i (+ skills/max-touched-paths 50)]
+                                       (emit "tool_call" #js {:input #js {:path (str "early/" i ".ts")}}))
+                                     (emit "tool_call" #js {:input #js {:path "late/x.ts"}}))
+                                   (let [out ((:emit-collect (:events agent)) "before_agent_start"
+                                              #js {:userMessage #js {:content "anything"}})]
+                                     (-> (.then (js/Promise.resolve out)
+                                                (fn [r]
+                                                  (-> (expect (.includes (str (js/JSON.stringify r)) "Body of p")) (.toBe true))))))))) 
+
+                           (it "when capping, a path match outranks a trigger match"
+                               (fn []
+          ;; a plain alphabetical cap could drop "you are editing a file this
+          ;; skill claims" in favour of an earlier-sorting phrase match
+                                 (let [sk {"aaa" (record "aaa" {:scope :global :triggers ["go"]})
+                                           "bbb" (record "bbb" {:scope :global :triggers ["go"]})
+                                           "ccc" (record "ccc" {:scope :global :triggers ["go"]})
+                                           "zzz" (record "zzz" {:scope :global :paths ["src/**"]})}
+                                       out (skills/auto-activated sk "go" ["src/a.ts"])]
+                                   (-> (expect (count out)) (.toBe skills/max-auto-activated))
+                                   (-> (expect (.includes (clj->js out) "zzz")) (.toBe true)))))
+
+                           (it "a trigger matches at a word start, mid-word never"
                                (fn []
                                  (let [glob {"g" (record "g" {:scope :global :triggers ["the"]})}]
                                    (-> (expect (skills/auto-activated glob "change the theme" [])) (.toEqual (clj->js ["g"])))
-                                   (-> (expect (skills/auto-activated glob "themes only" [])) (.toEqual (clj->js []))))))))
+          ;; no word starts with "the" here — this is the case a bare substring
+          ;; match got wrong
+                                   (-> (expect (skills/auto-activated glob "aesthetic choices" [])) (.toEqual (clj->js []))))))
+
+                           (it "a trigger still matches an inflected word"
+                               (fn []
+                                 (let [glob {"g" (record "g" {:scope :global :triggers ["review"]})}]
+          ;; requiring a boundary on BOTH sides made every stem-shaped trigger
+          ;; stop firing, which is how people actually write them
+                                   (-> (expect (skills/auto-activated glob "start reviewing it" [])) (.toEqual (clj->js ["g"])))
+                                   (-> (expect (skills/auto-activated glob "a review now" [])) (.toEqual (clj->js ["g"])))
+                                   (-> (expect (skills/auto-activated glob "preview only" [])) (.toEqual (clj->js []))))))))

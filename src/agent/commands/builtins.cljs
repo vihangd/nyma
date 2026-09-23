@@ -1294,7 +1294,9 @@
                  (notify ctx "Usage: /skill <name>  or  /skills to browse" "error")
 
                  (not (get all-skills skill-name))
-                 (notify ctx (str "Unknown skill: \"" skill-name "\". Use /skills to see available.") "error")
+                 (notify ctx (str "Unknown skill: \"" skill-name "\"."
+                                  (or (skills/alias-hint all-skills skill-name) "")
+                                  " Use /skills to see available.") "error")
 
                  (contains? (:active-skills @(:state agent)) skill-name)
                  (notify ctx (str "Skill \"" skill-name "\" is already active") "info")
@@ -1325,7 +1327,13 @@
                  ;; has actually fired, and any spec violation. The instrument
                  ;; for deciding which skills earn their tokens.
                  (= "doctor" (first args))
-                 (let [rows (skills/doctor-rows all-skills)]
+                 ;; Same budget the loader's "Available Skills" block applies,
+                 ;; or the numbers this command exists to report are wrong for
+                 ;; anyone who changed the setting.
+                 (let [budget (when-let [st (:settings resources)]
+                                (when (fn? (:get st))
+                                  (:max-description-length (:skills ((:get st))))))
+                       rows   (skills/doctor-rows all-skills budget)]
                    (if (empty? rows)
                      (notify ctx "No skills found.")
                      (notify ctx
@@ -1346,11 +1354,11 @@
                                                           (if (:grants-gated r)
                                                             "  grants:BLOCKED"
                                                             (str "  grants:" (str/join "," (:grants r)))))
-                                                        "  used:" (:explicit r) "/" (:auto r)
+                                                        "  used:" (:explicit r) "/" (:model r) "/" (:auto r)
                                                         (when (seq (:findings r))
                                                           (str "\n    ! " (str/join "\n    ! " (:findings r))))))
                                                  rows))
-                                  "\n\nused: explicit/auto. [project] skills are instructions-only:"
+                                  "\n\nused: you/model/auto. [project] skills are instructions-only:"
                                   " their tools and tool grants are refused."))))
 
                  (empty? skill-list)

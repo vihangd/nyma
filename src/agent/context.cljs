@@ -8,11 +8,25 @@
       ;; the entry was filtered out here and the body never reached the
       ;; provider: `/skill` applied the skill's `allowed-tools` grant and
       ;; delivered none of its instructions, and only the `skill` TOOL appeared
-      ;; to work, because it also returns the body as its tool result. The loop
-      ;; already passes `allowSystemInMessages` for exactly this kind of entry.
+      ;; to work, because it also returns the body as its tool result.
       ;; Keyed on the `:skill` tag, not on role "system", so nothing else that
       ;; happens to be stored as a system message starts reaching the model.
       (some? (:skill entry))))
+
+(defn- provider-role
+  "A skill's entry is STORED as `role \"system\"` — that is what the UI and
+   `deactivate-skill` key on — but it is SENT as a user turn.
+
+   A skill activates mid-conversation, so its entry sits after user turns, and
+   a system message there is not portable: @ai-sdk/google clears
+   `systemMessagesAllowed` at the first user message and then throws
+   `UnsupportedFunctionalityError` (\"system messages are only supported at the
+   beginning of the conversation\"), which would fail every turn after a
+   `/skill` on Gemini. Anthropic needs an opt-in beta header for it and
+   OpenAI-compatible relays vary. The content is identical either way — it is
+   already wrapped in a `<skill name=…>` envelope that says what it is."
+  [entry]
+  (if (:skill entry) (assoc entry :role "user") entry))
 
 (defn- llm-visible?
   "A message participates in the LLM context unless it is tagged
@@ -32,6 +46,7 @@
     (->> messages
          (filter message-entry?)
          (filter llm-visible?)
+         (map provider-role)
          vec)))
 
 (defn get-active-tools

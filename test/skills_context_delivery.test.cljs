@@ -70,6 +70,24 @@
                                                        {:role "system" :skill "x" :content "hidden body" :local-only true})
                                                 (-> (expect (.includes (context-text agent) "hidden body")) (.toBe false)))))
 
+                                        (it "the entry is SENT as a user turn, though stored as system"
+                                            (fn []
+            ;; A skill activates mid-conversation, so its entry sits after user
+            ;; turns. @ai-sdk/google throws UnsupportedFunctionalityError on a
+            ;; system message there, which would fail every turn after /skill
+            ;; on Gemini; Anthropic needs an opt-in beta for it and relays vary.
+                                              (let [agent (fresh-agent)]
+                                                (swap! (:state agent) update :messages conj {:role "user" :content "hi"})
+                                                (-> (.then (skills/activate-skill test-skills "deploy" agent)
+                                                           (fn [_]
+                                                             (let [sent (first (filter :skill (build-context agent)))
+                                                                   held (first (filter :skill (:messages @(:state agent))))]
+                                                               (-> (expect (:role sent)) (.toBe "user"))
+                                                               (-> (expect (:role held)) (.toBe "system"))
+                                                               (-> (expect (.includes (str (:content sent)) "deploy checklist")) (.toBe true))
+                    ;; and no system entry survives into the request at all
+                                                               (-> (expect (count (filter #(= "system" (:role %)) (build-context agent)))) (.toBe 0)))))))))
+
                                         (it "activating twice injects one copy"
                                             (fn []
                                               (let [agent (fresh-agent)]

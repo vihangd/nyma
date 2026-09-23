@@ -989,9 +989,9 @@ Use `emit-async` when handlers need to complete before the caller proceeds:
 
 ### Skills
 
-Two frontmatter fields auto-activate a skill for one turn: `triggers` (phrases matched
-against the user's prompt, case-insensitively and on word boundaries, so `the` does not
-match `theme`) and `paths` (globs matched against files the session has touched via tool
+Two frontmatter fields auto-activate a skill for one turn: `triggers` (phrases matched against the
+user's prompt, case-insensitively and anchored to a word start, so `review` fires on
+"reviewing" but not on "preview") and `paths` (globs matched against files the session has touched via tool
 calls). The skill's body is injected after the cache boundary as `volatile-additions`; a
 turn without a match costs nothing. Skills marked `disable-model-invocation: true` never
 auto-activate, at most three bodies are injected per turn, and a skill already activated

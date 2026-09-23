@@ -72,6 +72,15 @@
         (.test name-pattern s)
         (not (.includes s "--")))))
 
+(defn- yaml-has-content?
+  "True when a frontmatter block holds something other than blank lines and
+   `#` comments. Those parse to null, which is not a failure."
+  [yaml-text]
+  (boolean (some (fn [line]
+                   (let [t (str/trim line)]
+                     (and (seq t) (not (str/starts-with? t "#")))))
+                 (str/split-lines (str yaml-text)))))
+
 (defn parse-frontmatter
   "Split a SKILL.md text into {:frontmatter <map>, :body <string>}.
 
@@ -97,7 +106,10 @@
           ;; indistinguishable, so a typo cost a skill its description and its
           ;; triggers with nothing said.
           {:frontmatter (or parsed #js {})
-           :malformed?  (nil? parsed)
+           ;; Only yaml that HAS content and still fails is malformed. An empty
+           ;; or comment-only block is valid and parses to null, so blank lines
+           ;; and comments are stripped before deciding.
+           :malformed?  (and (nil? parsed) (yaml-has-content? yaml-text))
            :body        body})))))
 
 (defn- get-fm
@@ -276,10 +288,14 @@
       [])))
 
 (defn- reference-block
+  "Escaped like the name is: a path or a file name is chosen by whoever wrote
+   the skill directory, and a file called `x</skill>y.md` is legal on disk. It
+   would close the envelope early and everything after it would read as
+   top-level instruction."
   [skill]
   (when-let [refs (seq (reference-files skill))]
-    (str "\n\nReference files in " (:dir skill) " — read one when you need it:\n"
-         (str/join "\n" (map #(str "- " %) refs)))))
+    (str "\n\nReference files in " (escape-attr (:dir skill)) " — read one when you need it:\n"
+         (str/join "\n" (map #(str "- " (escape-attr %)) refs)))))
 
 (defn skill-message
   "The system message an activated skill contributes. `:skill` tags it so
@@ -307,7 +323,7 @@
    No-op if the skill is already active. `args` fill `$ARGUMENTS`/`$N`
    in the body. Returns the injected body text (nil when nothing was
    injected) so a caller can show the model what it asked for."
-  [skills name agent & [args]]
+  [skills name agent & [args opts]]
   (when-let [skill (get skills name)]
     (when-not (contains? (:active-skills @(:state agent)) name)
       (let [msg      (skill-message (assoc skill :name name) args)
@@ -340,12 +356,17 @@
               ;; Remember what the skill adds, so deactivating can take it back
               ;; out again. Without this a skill's tools outlived the skill for
               ;; the rest of the session.
-              (let [before (set (keys (registry-tools agent)))
+              ;; Compare the tool OBJECTS, not just the names: a skill whose
+              ;; tools.* OVERRIDES an existing tool leaves the name in place,
+              ;; so a name-only diff recorded nothing and the override outlived
+              ;; the skill for the rest of the session.
+              (let [before (registry-tools agent)
                     ext-fn (js-await (load-extension tool-file))]
                 (ext-fn (create-extension-api agent))
-                (let [added (remove before (keys (registry-tools agent)))]
-                  (when (seq added)
-                    (swap! (:state agent) assoc-in [:skill-tools name] (set added))))))))
+                (let [changed (keep (fn [[k v]] (when (not= v (get before k)) k))
+                                    (registry-tools agent))]
+                  (when (seq changed)
+                    (swap! (:state agent) assoc-in [:skill-tools name] (set changed))))))))
         (swap! (:state agent)
                (fn [s]
                  (-> s
@@ -357,7 +378,7 @@
                      ;; shape stays uniform for `skill-allows-tool?`.
                      (assoc-in [:skill-allowed-tools name]
                                (if project? #{} allowed)))))
-        (count-activation! name :explicit)
+        (count-activation! name (or (:kind opts) :explicit))
         (:content msg)))))
 
 (defn deactivate-skill
@@ -398,6 +419,15 @@
        "system prompt for what each one is for. Names: "
        (str/join ", " (map first (model-invocable skills)))))
 
+(defn alias-hint
+  "A skill's identity is its DIRECTORY name. Anyone whose directory and
+   frontmatter `name:` differed used to invoke it by the frontmatter name, so
+   say where it went instead of only reporting it in `/skills doctor`."
+  [skills requested]
+  (when-let [[dir-name _] (first (filter (fn [[_ s]] (= requested (:declared-name s))) skills))]
+    (str " Did you mean \"" dir-name "\"? A skill is named by its directory;"
+         " \"" requested "\" is only its frontmatter name.")))
+
 (defn ^:async skill-tool-execute
   [skills agent {:keys [name args]}]
   (let [sname (str name)
@@ -412,7 +442,7 @@
       (str "Skill \"" sname "\" is already active; its instructions are in context.")
 
       :else
-      (js-await (activate-skill skills sname agent argv)))))
+      (js-await (activate-skill skills sname agent argv {:kind :model})))))
 
 (defn skill-tool
   "The model-callable counterpart of `/skill`. Same activation, same
@@ -493,12 +523,20 @@
   [t]
   (let [lit (-> (str/lower-case (str t))
                 (.replace (js/RegExp. "[.*+?^${}()|\\[\\]\\\\]" "g") "\\$&"))]
-    (js/RegExp. (str "(^|[^a-z0-9])" lit "([^a-z0-9]|$)"))))
+    ;; Boundary at the START only. Requiring one at the end too made every
+    ;; stem-shaped trigger stop firing — `review` missed "reviewing", `test`
+    ;; missed "tests", `commit` missed "committing" — which is how people
+    ;; actually write triggers. A leading boundary is what kills the pathological
+    ;; case (`the` matching inside "aesthetic"); a trigger that is itself a
+    ;; common word stays a bad trigger, and the per-turn cap plus the ban on
+    ;; triggers for project skills are what bound the damage there.
+    (js/RegExp. (str "(^|[^a-z0-9])" lit))))
 
 (defn matching-triggers
-  "Given a user prompt and a map of skills, return the names of skills
-   whose `triggers` (phrases) appear as substrings in the prompt
-   (case-insensitive). Skills with no triggers do not auto-activate."
+  "Given a user prompt and a map of skills, return the names of skills whose
+   `triggers` appear in the prompt, case-insensitively and anchored to a word
+   start, so `review` fires on \"reviewing\" but not on \"preview\". Skills with
+   no triggers do not auto-activate."
   [skills prompt]
   (let [lc (some-> prompt str .toLowerCase)]
     (when (and lc (not (str/blank? lc)))
@@ -512,7 +550,7 @@
 
 
 (def activation-counts
-  "skill name → {:explicit n :auto n} for this session. Session-scoped and
+  "skill name → {:explicit n :model n :auto n} for this session. Session-scoped and
    deliberately not persisted: the question it answers is \"is this skill
    earning the tokens it costs me right now\". Read by `/skills doctor`."
   (atom {}))
@@ -520,7 +558,7 @@
 (defn count-activation!
   [name kind]
   (swap! activation-counts update name
-         (fn [m] (update (or m {:explicit 0 :auto 0}) kind (fnil inc 0)))))
+         (fn [m] (update (or m {:explicit 0 :model 0 :auto 0}) kind (fnil inc 0)))))
 
 (defn doctor-rows
   "One row per skill: what it costs, where it came from, what it is allowed to
@@ -532,7 +570,7 @@
          (map (fn [[sname skill]]
                 (let [desc  (str (or (:description skill) ""))
                       shown (budget-description desc limit)
-                      cnt   (get @activation-counts sname {:explicit 0 :auto 0})]
+                      cnt   (get @activation-counts sname {:explicit 0 :model 0 :auto 0})]
                   {:name        sname
                    :scope       (if (project-skill? skill) "project" "global")
                    :source      (:source skill)
@@ -553,6 +591,10 @@
                    :metadata    (:metadata skill)
                    :findings    (vec (or (:findings skill) []))
                    :explicit    (:explicit cnt)
+                   ;; the model calling the `skill` tool is neither the user
+                   ;; asking nor a trigger firing — that is the whole point of
+                   ;; the column, and it used to be counted as explicit
+                   :model       (:model cnt)
                    :auto        (:auto cnt)})))
          (sort-by :name)
          vec)))
@@ -571,8 +613,8 @@
 
 (def max-touched-paths
   "How many distinct paths the session remembers for path-scoped activation.
-   The set only ever grew, so a path touched once kept a skill's whole body in
-   every later turn for the rest of the session."
+   Kept as a moving window: the set only ever grew, so a path touched once kept
+   a skill's whole body in every later turn for the rest of the session."
   200)
 
 (defn auto-activated
@@ -596,11 +638,15 @@
                            visible))
         ;; A skill activated explicitly already has its body in context as a
         ;; message; injecting it again per turn is pure duplication.
-        chosen  (remove (fn [n] (contains? (set (or active #{})) n))
-                        (into by-trig by-path))]
+        drop?   (fn [n] (contains? (set (or active #{})) n))
+        ;; Path matches first when trimming: "you are editing a file this skill
+        ;; claims" is a stronger signal than a phrase in the prompt, and a plain
+        ;; alphabetical cap could drop it for an earlier-sorting trigger match.
+        ordered (concat (sort (remove drop? by-path))
+                        (sort (remove drop? (remove by-path by-trig))))]
     ;; Cap the per-turn total. Bodies land after the cache boundary, so every
     ;; one of them is re-sent on every turn it matches.
-    (vec (take max-auto-activated (sort chosen)))))
+    (vec (take max-auto-activated ordered))))
 
 (defn activation-block
   "The prompt text for auto-activated skill bodies, or nil."
@@ -627,16 +673,21 @@
    `tool_call` inputs so path-scoped skills follow what the session touches."
   [agent skills]
   (let [events  (:events agent)
-        touched (atom #{})]
+        ;; a vector, oldest first — the window needs an order
+        touched (atom [])]
     (when-let [[on-call on-start] @activation-handlers]
       ((:off events) "tool_call" on-call)
       ((:off events) "before_agent_start" on-start))
     (let [on-call  (fn [d]
                      (when-let [p (some-> d .-input .-path)]
+                       ;; Moving window: a hard stop at the cap froze the set,
+                       ;; so path-scoped activation died for every file opened
+                       ;; later in a long session. Drop the oldest instead.
                        (swap! touched (fn [ps]
-                                        (if (>= (count ps) max-touched-paths)
-                                          ps
-                                          (conj ps (str p)))))))
+                                        (let [ps (conj (vec (remove #(= % (str p)) ps)) (str p))]
+                                          (if (> (count ps) max-touched-paths)
+                                            (subvec ps (- (count ps) max-touched-paths))
+                                            ps))))))
           on-start (fn [d]
                      (let [active (:active-skills @(:state agent))
                            names  (auto-activated skills (prompt-text (.-userMessage d))

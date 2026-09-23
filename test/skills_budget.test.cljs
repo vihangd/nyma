@@ -93,6 +93,28 @@
           ;; named, never inlined — that is the point of the level
                                              (-> (expect (.includes c "INLINED-CONTENT")) (.toBe false)))))
 
+                                     (it "angle brackets in a reference file name are escaped"
+                                         (fn []
+            ;; escape-attr guarded the NAME; the reference block interpolated
+            ;; the directory and every file name raw into the same wrapper. A
+            ;; file name cannot hold a slash, so it cannot spell `</skill>` on
+            ;; its own — but it can open a tag, and the directory path is
+            ;; attacker-shaped too, so both are escaped rather than reasoned
+            ;; about.
+                                           (let [d (tmp-skill! "docs" ["weird<tag>.md"])
+                                                 c (:content (skills/skill-message {:name "docs" :dir d :body "B"} nil))]
+                                             (-> (expect (.includes c "weird<tag>")) (.toBe false))
+                                             (-> (expect (.includes c "weird&lt;tag&gt;")) (.toBe true))
+              ;; exactly one closing tag, at the end where it belongs
+                                             (-> (expect (count (.split c "</skill>"))) (.toBe 2)))))
+
+                                     (it "a directory path with angle brackets is escaped too"
+                                         (fn []
+                                           (let [c (:content (skills/skill-message
+                                                              {:name "d" :dir "/tmp/a</skill>b" :body "B"} nil))]
+              ;; no references/ dir here, so nothing is appended at all
+                                             (-> (expect (count (.split c "</skill>"))) (.toBe 2)))))
+
                                      (it "a record with no :dir is handled"
                                          (fn []
                                            (-> (expect (skills/reference-files {})) (.toEqual (clj->js [])))))))
