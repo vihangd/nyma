@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.10.0 — 2026-09-23
+
+Research into the apprentice harness, billing groups on New-API relays, and a two-phase
+program to open the seams that were closed by hand-rolled code.
+
+### Breaking
+- A checked-out project's `.nyma/settings.json` can no longer widen permissions. Its
+  `permissions.allow` list, its `permission-mode`, and any `allow` decision in a role's
+  policy or permissions are dropped with a warning; deny and ask are still honoured.
+  Answering "allow always for this project" now writes to your own settings file under
+  `permissions.projects.<project path>.allow`, so a repository you clone cannot pre-approve
+  tools on your behalf. Existing project-level allow lists must be moved there by hand.
+- The `roles` section of settings merges per role instead of replacing the section. Defining
+  one custom role used to erase all twelve built-ins, subagent roles included; it no longer
+  does. A role of the same name as a built-in still replaces that one role whole.
+- The bash tool's JSON result gains a `filesChanged` field when a command edits tracked
+  files. Anything parsing that envelope sees a new key.
+- MCP tool descriptions are truncated to 1200 characters by default, with a note; raise it
+  with `mcp.max-description-length`.
+
+### Added
+- Relay providers take a billing `group`, and `openlux-kiro` / `openlux-codex` ship as
+  presets. Relay model costs are read from the relay's pricing endpoint, so relay models are
+  priced instead of free-looking.
+- Bash results list the files the command changed, with added and removed line counts.
+  Setting `bash.edit-diff`.
+- Skills activate from the `paths` and `triggers` declared in their frontmatter.
+- A `lead` role that may delegate to subagents.
+- `registerCompactionStrategy`: an extension can replace summarisation wholesale.
+- Dev loop: `/reload <ns>` reloads one extension, `/eval <form>` evaluates against the live
+  agent, `/replay` re-reduces the session event log. `bun run dev` reloads extensions on save.
+- `gen:namespaces` and `gen:events-doc` generate the AGENTS.md namespace table and the README
+  event table; CI fails on drift.
+
+### Changed
+- Prompt assembly is ordered for cache reuse, with all per-turn volatile text after a
+  boundary so the cacheable prefix stays byte-identical between turns.
+- A turn that hits its step cap is nudged to continue rather than stopping silently.
+- The interceptor chain is one fold; the event catalogue is one registry map; the scoped
+  extension API's capability gates are a table.
+- Tool parameters are declared once as data and rendered to zod, JSON Schema and docs.
+
+### Fixed
+- Option lookups honour `false` and `0` instead of falling through to the next spelling.
+- Cross-extension events reach their listeners; the bus used to prefix the listener's own
+  namespace on emit, so they never could.
+
 ## 0.9.0 — 2026-09-15
 
 A peer-comparison sweep against Claude Code and pi, then a correctness review of everything
