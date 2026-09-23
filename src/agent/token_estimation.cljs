@@ -71,3 +71,54 @@
             (let [content (or (:content msg) (when (object? msg) (.-content msg)) "")]
               (+ total 4 (estimate-tokens content))))
           0 messages))
+
+;;; ─── Gateway overhead, observed ────────────────────────────────
+;;;
+;;; A relay that injects its own system prompt makes our estimate silently low,
+;;; and the only signal we get is that the provider's reported input tokens
+;;; exceed what our own content should have cost. `:overhead-tokens` on a
+;;; provider entry is the manual compensation for this; it has to be
+;;; hand-measured and no shipped preset sets it. This observes it instead.
+;;;
+;;; Lives here because this namespace has no requires, so both the loop and the
+;;; token_suite command can read it without a cycle.
+
+(def observed-overhead
+  "provider-qualified model key → {:samples n :tokens mean}. Session-scoped:
+   a gateway that changes what it injects should be re-learned, not remembered."
+  (atom {}))
+
+(def overhead-min-samples
+  "Turns to see before the observed figure is used for anything. One sample is
+   indistinguishable from an unlucky estimate."
+  3)
+
+(defn record-overhead!
+  "Fold one turn's residual (what the provider billed minus what we sent) into
+   the running mean for `model-key`. A non-positive residual means our estimate
+   was high, which says nothing about injection, so it is ignored rather than
+   averaged in as zero."
+  [model-key reported-input content-estimate]
+  (let [residual (- (or reported-input 0) (or content-estimate 0))]
+    (when (and (string? model-key) (pos? residual))
+      (swap! observed-overhead update model-key
+             (fn [m]
+               (let [n    (inc (:samples (or m {:samples 0})))
+                     prev (if m (:tokens m) residual)]
+                 {:samples n
+                  :tokens  (js/Math.round (+ prev (/ (- residual prev) n)))})))
+      nil)))
+
+(defn overhead-for
+  "The observed overhead for `model-key`, or nil until there are enough samples
+   to mean anything."
+  [model-key]
+  (let [m (get @observed-overhead model-key)]
+    (when (and m (>= (:samples m) overhead-min-samples))
+      (:tokens m))))
+
+(defn reset-overhead!
+  "Test hook."
+  []
+  (reset! observed-overhead {})
+  nil)

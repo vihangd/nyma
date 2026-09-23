@@ -407,7 +407,41 @@ reported `contextWindow` is left alone — that is the model's real capacity, an
 would misreport the model rather than the gateway.
 
 No preset declares a value. The figure belongs to an account and a moment in time, and a
-stale hardcoded number would be worse than none — measure yours with the check above.
+stale hardcoded number would be worse than none.
+
+### You no longer have to measure it by hand
+
+nyma now observes it. After every turn on a gateway provider it compares what the provider
+billed as input against its own estimate of what was sent — which, since the system prompt
+is finally counted, is a complete figure. The residual is what the upstream injected. It is
+averaged across turns, kept per provider-qualified model, and used once there are enough
+samples to mean anything.
+
+`/token-stats` prints what it has learned, including the number to paste in if you would
+rather pin it:
+
+```
+Gateway overhead:
+  openlux-kiro/claude-sonnet-5: ~6800 tokens/request injected (7 samples) — pin with "overheadTokens": 6800
+```
+
+A declared `overheadTokens` always wins over the observed one. Observation is limited to
+gateway providers, the ones registered as `unpriced`; nothing a first-party provider reports
+can change how nyma budgets for it.
+
+### Caching you pay for and never get back
+
+Kiro-style relays prepend a per-request timestamp to the block they forward upstream, which
+invalidates the prefix cache on every turn. nyma annotates cache breakpoints on the
+Anthropic branch, so `openlux-kiro` gets them and `openlux-codex` does not — and a write
+that is never read still costs more than an ordinary input token (0.221 per million against
+0.018 for a read on that preset).
+
+After a few consecutive turns where breakpoints were written and no read came back, nyma
+stops annotating that provider and model for the rest of the session and says so once.
+`/token-stats` reports it, along with cache reads as a share of input rather than as a count
+of turns. The decision is not persisted: a relay that fixes its timestamp injection starts
+working again on the next run.
 
 ## Known limitations
 

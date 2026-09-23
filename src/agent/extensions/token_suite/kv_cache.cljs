@@ -31,7 +31,22 @@
      slot 3: N-back checkpoint
      slot 4: reserved for future (tool-block caching)"
   (:require [agent.debug :as d]
+            [agent.pricing :as pricing]
             [agent.extensions.token-suite.shared :as shared]))
+
+(def max-unserved
+  "Consecutive turns of \"we annotated breakpoints and got no read back\" before
+   we stop annotating for that provider+model.
+
+   A cache write costs more than an ordinary input token — on the openlux-kiro
+   preset, 0.221 per million against 0.018 for a read — so annotating into a
+   cache that never serves is a recurring premium for nothing. Kiro-style relays
+   prepend a per-request timestamp to the block they forward, which invalidates
+   the prefix every turn, and no amount of retrying fixes it from our side.
+
+   Session-scoped and gateway-only: a relay that stops doing this starts working
+   again on the next run, and a first-party provider is never second-guessed."
+  3)
 
 (defn- split-at-stable-boundary
   "Split system prompt into stable (cacheable) and dynamic sections.
@@ -133,6 +148,18 @@
   (let [config            (shared/load-config)
         kv-config         (:kv-cache config)
         prev-hash         (atom nil)
+        ;; consecutive annotated-but-unserved turns, and the model we gave up on.
+        ;; Keyed by model id because that is all the annotate side has; the
+        ;; gateway test uses the provider-qualified key from the usage event,
+        ;; which is the only place the provider name is available without the
+        ;; `model` capability (that one also grants setModel — too much for a
+        ;; token-accounting extension).
+        unserved          (atom 0)
+        abandoned?        (atom false)
+        abandoned-for     (atom nil)
+        gateway-spec?     (fn [spec]
+                            (let [pname (first (.split (str spec) "/"))]
+                              (contains? @pricing/unpriced-providers (str pname))))
         ;; Did the LAST provider request place breakpoints the cache should
         ;; serve — a Layer-1 prefix stable vs the previous request, or Layer-2
         ;; message breakpoints on a request that ALSO annotated previously?
@@ -152,6 +179,11 @@
           ;; request whose after_provider_request never fired.
           (reset! expected-hit? false)
           (let [model     (.-model config-obj)
+                model-id  (str (some-> model .-modelId))
+                ;; Stop annotating once this model has shown, repeatedly, that our
+                ;; breakpoints are written and never served. Switching models
+                ;; clears it: the next one has not earned the doubt.
+                give-up?  (and @abandoned? (= @abandoned-for model-id))
                 ;; Route on the model's PROVIDER, not its id: a `claude-*` model
                 ;; reached over an OpenAI-compatible endpoint cannot carry
                 ;; cache_control at all, and annotating it burned breakpoints
@@ -160,7 +192,7 @@
                 system    (.-system config-obj)
                 annotated (atom false)]
 
-            (when (and provider (:enabled kv-config))
+            (when (and provider (:enabled kv-config) (not give-up?))
 
               ;; Layer 1: system prompt split (only when string + above threshold)
               (when (and (string? system)
@@ -209,10 +241,31 @@
             (when miss?
               (d/info "kv-cache" (str "cache miss on turn " turn
                                       " — breakpoints annotated but not served")))
+            ;; A gateway that never serves what we wrote is charging us a write
+            ;; premium for nothing. Count consecutive occurrences and stop.
+            (let [spec (str (.-model event))]
+              (when (gateway-spec? spec)
+                (if miss?
+                  (let [n (swap! unserved inc)]
+                    (when (and (>= n max-unserved) (not @abandoned?))
+                      (reset! abandoned? true)
+                      (reset! abandoned-for (last (.split spec "/")))
+                      (d/warn-quiet
+                       "kv-cache"
+                       (str "no cache read served on " spec " after " n
+                            " annotated turns — writing breakpoints there costs more than"
+                            " it saves, so they are off for the rest of this session"))))
+                  (reset! unserved 0))))
             (swap! shared/suite-stats update :kv-cache
                    (fn [s] (-> s
                                (update :turns inc)
                                (update :cached-tokens + (or cached 0))
+                               ;; Read tokens against total input is what "the
+                               ;; cache is working" actually means; hit/miss
+                               ;; turn counts say nothing about proportion.
+                               (update :input-tokens (fnil + 0) (or (.-inputTokens event) 0))
+                               (update :written-tokens (fnil + 0) (or (.-cacheWriteTokens event) 0))
+                               (assoc :abandoned? @abandoned?)
                                (update :cache-misses (fnil + 0) (if miss? 1 0))
                                (update :cache-hits + (if (and cached (pos? cached)) 1 0)))))))]
 

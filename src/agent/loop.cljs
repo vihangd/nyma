@@ -5,7 +5,7 @@
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :as compaction]
-            [agent.pricing :refer [calculate-turn-cost model-cost-key]]
+            [agent.pricing :refer [calculate-turn-cost model-cost-key] :as pricing]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
@@ -319,7 +319,17 @@
                                  entry (when (and reg (seq (str (or pname ""))))
                                          ((:get reg) (str pname)))
                                  n     (:overhead-tokens entry)]
-                             (if (and (number? n) (pos? n)) n 0))]
+                             (cond
+                               ;; A declared figure always wins: an operator who
+                               ;; measured properly is not second-guessed.
+                               (and (number? n) (pos? n)) n
+                               ;; Otherwise use what we have observed, and only
+                               ;; for a gateway. First-party providers keep a
+                               ;; zero, so nothing they report changes how we
+                               ;; budget for them.
+                               (contains? @pricing/unpriced-providers (str (or pname "")))
+                               (or (te/overhead-for model-key) 0)
+                               :else 0))]
 
         ;; Inject messages from extensions
         (when (seq inject-msgs)
@@ -340,11 +350,24 @@
                                                     ;; window: it genuinely occupies context, and
                                                     ;; every consumer of this budget already
                                                     ;; reasons about used-vs-window.
-                                                    :tokensUsed    (+ (te/estimate-messages-tokens messages)
+                                                    ;; The SYSTEM PROMPT counts. The estimator used to
+                                                    ;; be applied to `messages` alone, so every
+                                                    ;; consumer of this budget was told it had the
+                                                    ;; whole system prompt's worth of room spare —
+                                                    ;; in this repo AGENTS.md alone is ~10k tokens,
+                                                    ;; before the skills listing and the section
+                                                    ;; injectors. priority_assembly sized its
+                                                    ;; working set against that and under-pruned;
+                                                    ;; headroom compressed late. Compaction was
+                                                    ;; never affected: it prefers the provider's
+                                                    ;; own count of the last request.
+                                                    :tokensUsed    (+ (te/estimate-tokens effective-prompt)
+                                                                      (te/estimate-messages-tokens messages)
                                                                       overhead)
                                                     ;; Broken out so a consumer can tell how much
                                                     ;; of `tokensUsed` is not its own content.
                                                     :overheadTokens overhead
+                                                    :systemTokens  (te/estimate-tokens effective-prompt)
                                                     :model         model-id}}))
 
               ;; Apply replacements from context_assembly
@@ -392,6 +415,14 @@
               tools-this-turn (atom 0)
               ;; Model steps this run (tool call + response cycles).
               steps-this-run  (atom 0)
+
+              ;; What we are about to send, by our own reckoning. Recorded after
+              ;; every replacement hook has had its say, so it describes the
+              ;; request that actually goes out. The provider's reported input
+              ;; tokens minus this is what a gateway injected on top.
+              _content-est    (swap! state assoc :last-content-estimate
+                                     (+ (te/estimate-tokens effective-prompt)
+                                        (te/estimate-messages-tokens messages)))
 
               st-config #js {:model           active-model
                              :system          effective-prompt
@@ -664,7 +695,19 @@
                           ;; Triggering off the tree meant firing on a 956k
                           ;; estimate while the requests themselves fit fine.
                             (when (and input-tokens (pos? input-tokens))
-                              (swap! state assoc :last-input-tokens input-tokens))
+                              (swap! state assoc :last-input-tokens input-tokens)
+                              ;; Learn what a GATEWAY injects. `unpriced-providers`
+                              ;; is the existing marker for "this is a relay, its
+                              ;; rates and ids are its own"; first-party providers
+                              ;; are left alone, so nothing they report can change
+                              ;; how we budget for them.
+                              (when (contains? @pricing/unpriced-providers
+                                               (str (aget (:config agent) "active-provider-name")))
+                                ;; Same key the lookup uses, or the two halves
+                                ;; never meet: `model-cost-key` is a pricing key,
+                                ;; `model-key` is the provider-qualified one.
+                                (te/record-overhead! model-key input-tokens
+                                                     (:last-content-estimate @state))))
                           ;; after_provider_request — inform extensions of usage/cache metrics
                             (emit "after_provider_request"
                                   #js {:usage        #js {:inputTokens  input-tokens
@@ -674,6 +717,11 @@
                                        ;; AI SDK v7 reports cache reads under
                                        ;; usage.inputTokenDetails.cacheReadTokens
                                        ;; (there is no top-level cachedTokens).
+                                       ;; Cache WRITES were read above for the cost
+                                       ;; line and then dropped here, so nothing
+                                       ;; downstream could see what a miss cost.
+                                       :cacheWriteTokens cache-write
+                                       :inputTokens  input-tokens
                                        :cachedTokens (or (some-> usage .-inputTokenDetails .-cacheReadTokens)
                                                          (.-cachedTokens usage))
                                        :turnCount    (or (:turn-count @state) 0)})))
