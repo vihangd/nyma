@@ -21,6 +21,12 @@
    ;; Per-prompt cap on agentic tool-call → response cycles. Reaching
    ;; this stops the AI SDK loop mid-task; bump it for projects where
    ;; the agent legitimately needs more iterations.
+   ;; Skill descriptions are listed in the system prompt on EVERY request, so
+   ;; one chatty pack can spend thousands of tokens per turn before the model
+   ;; has read a word of the task. Cap each; the spec's own ceiling is 1024 and
+   ;; a description that needs more than this is not doing its job. Same shape
+   ;; as mcp.max-description-length.
+   :skills         {:max-description-length 500}
    :max-steps      100
    ;; When the step cap fires, spend ONE more tool-less call asking the model
    ;; to report what it found or changed, instead of ending in silence. Not an

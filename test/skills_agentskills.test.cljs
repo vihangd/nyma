@@ -185,10 +185,14 @@
                     (-> (.execute t #js {:name "hidden"})
                         (.then (fn [_] (throw (js/Error. "expected a rejection")))
                                (fn [e] (-> (expect (.-message e)) (.toContain "Unknown skill"))))))))
-            (it "description lists only model-invocable skills"
+            (it "description lists only model-invocable skills, by NAME only"
                 (fn []
                   (let [desc (skills/skill-tool-description test-skills)]
-                    (-> (expect desc) (.toContain "- deploy — Ship it"))
+                    (-> (expect desc) (.toContain "deploy"))
+                    ;; The description text itself lives in the system prompt's
+                    ;; "Available Skills" block. Repeating it here sent every
+                    ;; skill's description twice in every request.
+                    (.toContain (.-not (expect desc)) "Ship it")
                     (.toContain (.-not (expect desc)) "hidden"))))
 
             (it "a skill added after launch is known to the tool once it is registered again (/reload)"
@@ -200,7 +204,7 @@
                     (skills/register-skill-tool! agent test-skills)
                     (skills/register-skill-tool! agent later)
                     (let [t (get ((:all reg)) "skill")]
-                      (-> (expect (.-description t)) (.toContain "newer — Arrived later"))
+                      (-> (expect (.-description t)) (.toContain "newer"))
                       (-> (expect (contains? ((:get-active reg)) "skill")) (.toBe true))
                       (-> (.execute t #js {:name "newer"})
                           (.then (fn [out]

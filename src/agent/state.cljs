@@ -58,7 +58,8 @@
    ;; its allowed-tools allowance must not outlive /new or /clear.
    :messages-cleared (fn [state _data] (assoc state :messages []
                                               :active-skills #{}
-                                              :skill-allowed-tools {}))
+                                              :skill-allowed-tools {}
+                                              :skill-tools {}))
    ;; Wholesale replacement (context relief pruning). Goes through the store
    ;; so subscribers see it, instead of a raw swap! on the shared atom.
    :messages-replaced (fn [state data] (assoc state :messages (vec (:messages data))))

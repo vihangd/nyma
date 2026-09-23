@@ -1,7 +1,7 @@
 (ns agent.resources.loader
   "Resource discovery."
   (:require [agent.utils.home :as home]
-             ["node:path" :as path]
+            ["node:path" :as path]
             ["node:fs" :as fs]
             [clojure.string :as str]
             [agent.resources.skills :as skills]
@@ -245,20 +245,25 @@ When multiple independent tool calls are needed, make them in parallel.
    can show which directory a skill came from."
   [home-dir cwd]
   (let [resolve   (fn [base sub] (path/join base sub))
-        from-dir  (fn [d source]
+        ;; `:source` is a display label ("project:.cursor/skills"); `:scope` is
+        ;; the machine-readable half. Skills under the CWD are untrusted — a
+        ;; cloned repo must not be able to pre-approve tools or run code just
+        ;; because you opened it — and activate-skill reads `:scope` rather
+        ;; than pattern-matching a string meant for humans.
+        from-dir  (fn [d source scope]
                     (when-let [m (skills/discover-skills d source)]
                       (->> m
-                           (map (fn [[k v]] [k (assoc v :source source)]))
+                           (map (fn [[k v]] [k (assoc v :source source :scope scope)]))
                            (into {}))))
         ;; Lowest → highest precedence:
         global-cv (->> cross-vendor-skill-roots
-                       (map #(from-dir (resolve home-dir %) (str "global:" %)))
+                       (map #(from-dir (resolve home-dir %) (str "global:" %) :global))
                        (reduce merge {}))
-        global-nyma (or (from-dir (resolve home-dir ".nyma/skills") "global:.nyma/skills") {})
+        global-nyma (or (from-dir (resolve home-dir ".nyma/skills") "global:.nyma/skills" :global) {})
         project-cv (->> cross-vendor-skill-roots
-                        (map #(from-dir (resolve cwd %) (str "project:" %)))
+                        (map #(from-dir (resolve cwd %) (str "project:" %) :project))
                         (reduce merge {}))
-        project-nyma (or (from-dir (resolve cwd ".nyma/skills") "project:.nyma/skills") {})]
+        project-nyma (or (from-dir (resolve cwd ".nyma/skills") "project:.nyma/skills" :project) {})]
     (merge global-cv global-nyma project-cv project-nyma)))
 
 (defn discover-prompts
@@ -286,7 +291,7 @@ When multiple independent tool calls are needed, make them in parallel.
    Optionally accepts an events bus to emit resources_discover for extensions,
    and `:context-files` (the setting) naming the files to read as AGENTS.md;
    the loader has no settings manager of its own, so the caller passes it."
-  [& [{:keys [events reason context-files]}]]
+  [& [{:keys [events reason context-files max-skill-description]}]]
   (let [;; Skill discovery walks both nyma's own paths AND the cross-vendor
         ;; paths used by Claude Code, Cursor 2.4, Codex, and the proposed
         ;; agentskills.io standard. Project paths win over global; nyma's
@@ -357,15 +362,20 @@ When multiple independent tool calls are needed, make them in parallel.
              ;; system prompt to save tokens.
              listable    (->> skills
                               (remove (fn [[_ s]] (:disable-model-invocation s))))
+             ;; This block is in the cacheable prefix and is re-sent on every
+             ;; request, so one over-long description is paid for all session.
+             desc-budget (or max-skill-description skills/default-description-budget)
              skills-block (when (seq listable)
                             (str "\n\n## Available Skills\n"
                                  "Call the `skill` tool with a name to load one when its "
                                  "description fits the task; the user can also /skill <name> or /skills.\n"
                                  (->> listable
                                       (map (fn [[sname skill]]
-                                             (let [desc (or (:description skill)
-                                                            (skills/first-skill-line
-                                                             (or (:body skill) (:markdown skill))))]
+                                             (let [desc (skills/budget-description
+                                                         (or (:description skill)
+                                                             (skills/first-skill-line
+                                                              (or (:body skill) (:markdown skill))))
+                                                         desc-budget)]
                                                (str "- " sname (when (seq desc) (str ": " desc))))))
                                       (str/join "\n"))))]
          (str (or system-md default-system-prompt)

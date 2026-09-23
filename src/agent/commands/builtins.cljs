@@ -367,7 +367,11 @@
                                            :reason "reload"
                                            :context-files (when-let [s (:settings resources)]
                                                             (when (fn? (:get s))
-                                                              (:context-files ((:get s)))))}))]
+                                                              (:context-files ((:get s)))))
+                                           :max-skill-description
+                                           (when-let [s (:settings resources)]
+                                             (when (fn? (:get s))
+                                               (:max-description-length (:skills ((:get s))))))}))]
     ;; 4. Rebuild system prompt
     (when-let [build-fn (:build-system-prompt new-resources)]
       (aset (:config agent) "system-prompt" (build-fn)))
@@ -1303,9 +1307,9 @@
                                (notify ctx (str "Failed to activate skill: " (.-message e)) "error")))))))}
 
           "skills"
-          {:description "Browse and activate available skills"
+          {:description "Browse and activate available skills (`/skills doctor` for what they cost)"
            :handler
-           (fn [_args ctx]
+           (fn [args ctx]
              (let [all-skills (:skills resources)
                    active     (:active-skills @(:state agent))
                    skill-list (mapv (fn [[sname skill]]
@@ -1316,6 +1320,39 @@
                                                     (or (:body skill) (:markdown skill))))})
                                     all-skills)]
                (cond
+                 ;; `/skills doctor` — what each skill costs on every request,
+                 ;; what it is allowed to do, where it came from, how often it
+                 ;; has actually fired, and any spec violation. The instrument
+                 ;; for deciding which skills earn their tokens.
+                 (= "doctor" (first args))
+                 (let [rows (skills/doctor-rows all-skills)]
+                   (if (empty? rows)
+                     (notify ctx "No skills found.")
+                     (notify ctx
+                             (str "Skills — cost and trust\n"
+                                  (str/join "\n"
+                                            (map (fn [r]
+                                                   (str (if (contains? active (:name r)) "● " "○ ")
+                                                        (:name r)
+                                                        "  [" (:scope r) "]"
+                                                        "  ~" (:desc-tokens r) " tok/req"
+                                                        (when (:truncated? r) " (truncated)")
+                                                        (when (:hidden? r) "  hidden-from-model")
+                                                        (when (pos? (:references r))
+                                                          (str "  " (:references r) " refs"))
+                                                        (when (:has-tools r)
+                                                          (if (:tools-gated r) "  tools:BLOCKED" "  tools"))
+                                                        (when (seq (:grants r))
+                                                          (if (:grants-gated r)
+                                                            "  grants:BLOCKED"
+                                                            (str "  grants:" (str/join "," (:grants r)))))
+                                                        "  used:" (:explicit r) "/" (:auto r)
+                                                        (when (seq (:findings r))
+                                                          (str "\n    ! " (str/join "\n    ! " (:findings r))))))
+                                                 rows))
+                                  "\n\nused: explicit/auto. [project] skills are instructions-only:"
+                                  " their tools and tool grants are refused."))))
+
                  (empty? skill-list)
                  (notify ctx "No skills found. Place skill directories in ~/.nyma/skills/ or .nyma/skills/")
 

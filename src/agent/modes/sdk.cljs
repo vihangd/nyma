@@ -39,7 +39,8 @@
    the extensions this session loaded; call it when the session is done."
   [opts]
   (let [settings  (create-settings-manager)
-        resources (js-await (discover {:context-files (:context-files ((:get settings)))}))
+        resources (js-await (discover {:context-files (:context-files ((:get settings)))
+                                     :max-skill-description (:max-description-length (:skills ((:get settings))))}))
         session   (create-session-manager (or (:session-path opts)
                                               (temp-session-path)))
         agent     (create-agent

@@ -1772,6 +1772,50 @@ landed the same day, one full suite per item, 5010 tests green at the end.
   pinning (no widening from `.nyma/settings.json`), skill auto-activation from `triggers`/`paths`
   (the "parsed but unwired" item), `/reload <ns>`, `NYMA_WATCH_EXTENSIONS`, `/eval`, `/replay`.
 
+### Skills: trust, cost and conformance (2026-09-23)
+
+A SOTA review of the skills feature against agentskills.io and the 2026 literature, then the
+gaps it turned up. Retrieval at scale was explicitly left out: research puts the breakdown of
+a flat description listing past 10-20 skills, and there are no embeddings in the tree to
+build on. Revisit when a real library outgrows the description budget.
+
+- **`/skill` never delivered its instructions.** `activate-skill` stores the body as a
+  `role "system"` entry tagged `:skill`; `build-context` filtered those out, so the body never
+  reached the provider. The `skill` TOOL only appeared to work because it also returns the
+  body as its tool result. `/skill` applied the skill's `allowed-tools` grant and delivered
+  none of its instructions. Broken since the feature shipped, unnoticed because every test
+  asserted against `:messages` rather than through `build-context`.
+- **Project skills are instructions-only.** A skill under the CWD had its `allowed-tools`
+  honoured (which downgrades a permission ask to an allow) and its `tools.cljs` loaded with
+  the FULL extension API — both reachable by the model on its own through the `skill` tool.
+  Now gated on a `:scope` stamped at discovery, with a warning naming the escape hatch. Same
+  policy as the settings-pinning work; this closes the skills half of the deferred
+  project-trust item, the `.mcp.json` half is still open.
+- **Name shadowing.** Discovery keyed skills by their FRONTMATTER name, so any directory could
+  declare `name: <a-skill-you-trust>` and, because the project tier merges last, replace it.
+  Keyed by directory name now, per the spec; a disagreeing frontmatter name is a finding.
+- **Auto-activation** ignored trust entirely and matched triggers as bare substrings, so a
+  project skill with `triggers: [the]` injected its body on nearly every turn, chosen by
+  neither user nor model. Project skills may now auto-activate on `paths` only; triggers match
+  on word boundaries; the touched-path set is capped; at most three bodies per turn; a skill
+  already explicitly active is not re-injected.
+- **Cost.** Every description was sent twice per request (system prompt + the `skill` tool's
+  own description) and neither was capped. The tool description lists names only, and the
+  listing applies `skills.max-description-length` (default 500) with the MCP bridge's
+  truncation marker.
+- **Level 3 disclosure**: a skill's `references/` files are now named on activation and read
+  on demand. Previously the docs described the directory and no code looked at it.
+- **Conformance and accounting**: `valid-name?` is finally called (it had no caller but tests),
+  the name/directory mismatch, over-long descriptions and malformed YAML are collected as
+  `:findings`, CRLF `SKILL.md` files parse (they used to lose their whole frontmatter and
+  inject it as body text), and `/skills doctor` reports per-skill cost, scope, gating,
+  findings and activation counts. `license`/`compatibility`/`metadata` stop being dead fields.
+- **Lifecycle**: activation loads a skill's tools BEFORE mutating state, so a throwing
+  `tools.*` no longer leaves the skill active with its grant applied; deactivation unregisters
+  the tools activation registered, which it never did.
+- Still open: the behavioural eval harness (C11's three-condition comparison) — `/skills doctor`
+  is the instrument that says which skills are worth running it on.
+
 **Phase 2 (structural)**
 - `interceptors/execute`: 110 lines, four nested loops → enter + one unwind fold (~25 lines).
 - `events.cljs`: one `event-registry` with :kind and :doc per event; `core-event-types` and

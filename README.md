@@ -989,16 +989,28 @@ Use `emit-async` when handlers need to complete before the caller proceeds:
 
 ### Skills
 
-Two frontmatter fields auto-activate a skill for one turn: `triggers` (phrase substrings
-matched against the user's prompt, case-insensitive) and `paths` (globs matched against
-files the session has touched via tool calls). The skill's body is injected after the
-cache boundary as `volatile-additions`; a turn without a match costs nothing. Skills
-marked `disable-model-invocation: true` never auto-activate.
+Two frontmatter fields auto-activate a skill for one turn: `triggers` (phrases matched
+against the user's prompt, case-insensitively and on word boundaries, so `the` does not
+match `theme`) and `paths` (globs matched against files the session has touched via tool
+calls). The skill's body is injected after the cache boundary as `volatile-additions`; a
+turn without a match costs nothing. Skills marked `disable-model-invocation: true` never
+auto-activate, at most three bodies are injected per turn, and a skill already activated
+explicitly is not injected again.
 
-Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/` (the cross-vendor `.claude/skills/`, `.agents/skills/`, `.cursor/skills/` and `.codex/skills/` paths are scanned too). Skills follow the [agentskills.io](https://agentskills.io/specification) layout: YAML frontmatter, then the instructions. Activating one injects the body (not the frontmatter) as a system message and loads an optional `tools.cljs`.
+Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/` (the cross-vendor `.claude/skills/`, `.agents/skills/`, `.cursor/skills/` and `.codex/skills/` paths are scanned too). Skills follow the [agentskills.io](https://agentskills.io/specification) layout: YAML frontmatter, then the instructions. Activating one injects the body (not the frontmatter) as a system message and loads an optional `tools.cljs`. A skill's identity is its **directory name**, per the spec; a `name:` in frontmatter that disagrees is reported by `/skills doctor` and ignored.
+
+**Skills from a checked-out repository are instructions-only.** A skill found under the
+working directory — in `.nyma/skills/` or any of the cross-vendor paths — contributes its
+body and nothing else: its `allowed-tools` is ignored and its `tools.cljs`/`tools.ts` is
+never loaded, each refusal warned at activation. A repository you cloned must not be able
+to pre-approve `bash` or run code just because you opened it. It may also auto-activate on
+a `paths` match, where you are demonstrably working in a file it claims, but not on a
+`triggers` match, where the phrase is the skill author's choice. To trust a skill fully,
+move it to `~/.nyma/skills/`.
 
 **Activating skills:**
 - `/skills` — opens a fuzzy picker to browse and activate available skills
+- `/skills doctor` — what each skill costs per request, where it came from, whether its tools and grants are gated, how often it has fired this session, and any spec violations
 - `/skill <name> [args]` or `/skill:<name> [args]` — activate by name; `args` fill `$ARGUMENTS`, `$1`…`$9` and `${N:-default}` in the body
 - the `skill` tool — the model activates a skill itself when its description fits the task, and reads the body as the tool result
 
@@ -1006,8 +1018,20 @@ Frontmatter fields that change behaviour:
 - `description` — shown in `/skills`, the system prompt's skill list and the `skill` tool
 - `allowed-tools` — space-separated tool names the skill may call **without a permission prompt** while it is active (a deny from a permission handler still wins)
 - `disable-model-invocation: true` — hidden from the model: not listed in the prompt, not reachable through the `skill` tool, `/skill <name>` only
+- `license`, `compatibility`, `metadata` — preserved per the spec and shown by `/skills doctor`
+
+A `references/` directory is the spec's third disclosure level: its files are **named** in
+the skill's body on activation and read only if the model asks for one, so bundled
+reference material costs nothing until it is wanted.
+
+Descriptions are listed in the system prompt on every request, so each is capped at
+`skills.max-description-length` (default 500) with a marker saying how much was cut. The
+`skill` tool's own description lists names only — it used to repeat every description, so
+each one was sent twice per request.
 
 Active skills are tracked in agent state (`:active-skills`) to prevent duplicate injection.
+Deactivating a skill removes its injected message, its tool grants and any tools its
+`tools.cljs` registered.
 
 ```
 ~/.nyma/skills/

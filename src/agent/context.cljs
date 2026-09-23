@@ -1,9 +1,18 @@
 (ns agent.context
-  "Message filtering, context building."
-  )
+  "Message filtering, context building.")
 
 (defn- message-entry? [entry]
-  (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry)))
+  (or (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry))
+      ;; An activated skill's instructions are stored as a `role "system"`
+      ;; entry tagged `:skill` (resources/skills `skill-message`). Without this
+      ;; the entry was filtered out here and the body never reached the
+      ;; provider: `/skill` applied the skill's `allowed-tools` grant and
+      ;; delivered none of its instructions, and only the `skill` TOOL appeared
+      ;; to work, because it also returns the body as its tool result. The loop
+      ;; already passes `allowSystemInMessages` for exactly this kind of entry.
+      ;; Keyed on the `:skill` tag, not on role "system", so nothing else that
+      ;; happens to be stored as a system message starts reaching the model.
+      (some? (:skill entry))))
 
 (defn- llm-visible?
   "A message participates in the LLM context unless it is tagged
