@@ -1,6 +1,6 @@
 {
   "namespace": "custom-provider-relay",
-  "description": "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona)",
+  "description": "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: openlux, openlux-claude, openlux-kiro, openlux-codex, velona); a New API billing `group` prices the catalogue from the relay's own sheet",
   "capabilities": [
     "providers",
     "model"

@@ -31,6 +31,35 @@
   (js-delete js/process.env "NYMA_NO_MODEL_DISCOVERY")
   nil)
 
+(defn- settled-fetch!
+  "Install `handler` as the fetch stub and return a promise that resolves one
+   macrotask after the first call — background discovery has finished its
+   parse/register by then. A fixed 50 ms sleep was the previous shape: long
+   enough on a quiet machine, a flake under load."
+  [handler]
+  (js/Promise. (fn [res _]
+                 (let [done (atom false)]
+                   (aset js/globalThis "fetch"
+                         (fn [url opts]
+                           (when-not @done
+                             (reset! done true)
+                             (js/setTimeout res 0))
+                           (handler url opts)))))))
+
+(def ^:private fetch-called (atom nil))
+
+(defn- stub-fetch-settled!
+  "Like `(aset js/globalThis \"fetch\" f)`, and remembers a promise that
+   resolves one macrotask after f's first call; `await-fetch!` awaits it."
+  [f]
+  (reset! fetch-called (settled-fetch! f)))
+
+(defn- ^:async await-fetch! []
+  (when-let [p @fetch-called] (js-await p)))
+
+(defn- next-macrotask []
+  (js/Promise. (fn [res _] (js/setTimeout res 0))))
+
 (defn- restore! []
   (aset js/process.env "HOME" real-home)
   (aset js/globalThis "fetch" real-fetch)
@@ -389,7 +418,7 @@
   (temp-home!)
   (allow-discovery!)
   (aset js/process.env "OPENLUX_API_KEY" "sk-test")
-  (aset js/globalThis "fetch"
+  (stub-fetch-settled!
         (fn [_url _opts]
           (js/Response. (js/JSON.stringify
                          #js {:data #js [#js {:id "gpt-5.2"
@@ -402,7 +431,7 @@
         api     (create-extension-api agent "relay")
         cleanup ((aget relay "default") api)
         resolve-model (fn [id] ((:resolve (:provider-registry agent)) "openlux" id))]
-    (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+    (js-await (await-fetch!))
     ;; The endpoint types discovered at runtime, not the entry's `api`, decide
     ;; which wire protocol each model speaks.
     (-> (expect (.-provider (resolve-model "gpt-5.2"))) (.toBe "openai.chat"))
@@ -415,7 +444,7 @@
   (temp-home!)
   (allow-discovery!)
   (aset js/process.env "OPENLUX_API_KEY" "sk-test")
-  (aset js/globalThis "fetch"
+  (stub-fetch-settled!
         (fn [_url _opts]
           (js/Response. (js/JSON.stringify
                          #js {:data #js [#js {:id "claude-opus-5"}
@@ -433,7 +462,7 @@
     (-> (expect (contains? (specs) "openlux-claude/claude-opus-5")) (.toBe true))
     (-> (expect (contains? (specs) "openlux-claude/claude-newly-launched")) (.toBe false))
     ;; Let the background refresh settle.
-    (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+    (js-await (await-fetch!))
     ;; Re-registering is enough: the registry is a plain assoc and the catalogue
     ;; reads :models at call time, so /model sees this without a restart.
     (-> (expect (contains? (specs) "openlux-claude/claude-newly-launched")) (.toBe true))
@@ -443,11 +472,11 @@
   (temp-home!)
   (allow-discovery!)
   (aset js/process.env "OPENLUX_API_KEY" "sk-test")
-  (aset js/globalThis "fetch" (fn [_url _opts] (js/Response. "" #js {:status 500})))
+  (stub-fetch-settled! (fn [_url _opts] (js/Response. "" #js {:status 500})))
   (let [agent   (create-agent {:model "test" :system-prompt "x"})
         api     (create-extension-api agent "relay")
         cleanup ((aget relay "default") api)]
-    (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+    (js-await (await-fetch!))
     ;; A gateway that can't answer must degrade to the seed list, not to nothing.
     (let [specs (set (map :spec (catalog/list-all-models
                                  ((:list (:provider-registry agent)))
@@ -468,7 +497,7 @@
     (let [agent   (create-agent {:model "test" :system-prompt "x"})
           api     (create-extension-api agent "relay")
           cleanup ((aget relay "default") api)]
-      (js-await (js/Promise. (fn [res] (js/setTimeout res 50))))
+      (js-await (next-macrotask))
       (-> (expect @calls) (.toBe 0))
       (cleanup))))
 

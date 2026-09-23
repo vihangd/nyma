@@ -77,6 +77,7 @@ replace it.
 | `api` | `openai-compatible` | Or `anthropic` (Messages API), or `openai-responses`. |
 | `discover` | `true` | Fetch the model list from `GET <baseUrl>/models`. |
 | `catalogUrl` | *(none)* | Absolute URL of a richer catalog to discover from instead. See below. |
+| `group` | *(none)* | New API billing group the token was minted in (`Kiro-Claude-1`). Prices the catalogue from the relay's public `/api/pricing` and narrows it to what the group serves. See [billing groups](#openlux-billing-groups-kiro--codex). |
 | `endpointTypes` | *(any)* | Required `supported_endpoint_types`, any-of. |
 | `types` | *(any)* | Required `type`, any-of — keeps image/embedding models out of the picker. |
 | `paidOnly` | `false` | Drop models the catalog prices at zero on both sides. |
@@ -158,7 +159,58 @@ context window nor pricing. Two consequences:
   recognise fall back to the 100k default; declare `contextWindow` in `models` to fix one.
 - **Price** deliberately does *not* fall back. A relay charges its own rates, so showing the
   first-party number would be worse than showing none. `/model` leaves the column blank
-  unless you declare `cost` explicitly.
+  unless you declare `cost` explicitly — or the entry names a `group`, in which case the
+  relay's own pricing sheet supplies every rate (next section).
+
+## openlux billing groups (Kiro / Codex)
+
+On a New API relay a **token belongs to a group**, chosen when the token is minted
+(Console → Tokens → Add → 分组). A group is an upstream route with its own multiplier:
+`Kiro-Claude-1` and `Codex-Gpt-1` ride the Kiro and Codex subscription CLIs and serve the
+same model ids as the official-route groups (`Anthropic-Claude-1`, `Openai-Gpt-1`) at a
+twelfth to a sixteenth of the price. The group is not selectable per request, so each one
+is its own provider with its own token:
+
+```
+/login openlux-kiro          # or OPENLUX_KIRO_API_KEY=…
+/model openlux-kiro/claude-sonnet-5
+
+/login openlux-codex         # or OPENLUX_CODEX_API_KEY=…
+/model openlux-codex/gpt-5.6-terra
+```
+
+Two presets ship. Neither shares the `openlux` credential: a shared token is a token in the
+wrong group.
+
+| Preset | Group | Wire | Serves (sheet, 2026-09-23) | USD per 1M in / out |
+| --- | --- | --- | --- | --- |
+| `openlux-kiro` | `Kiro-Claude-1` (×0.088) | anthropic | claude-sonnet-5, haiku-4-5, opus-5, opus-4-5…4-8, sonnet-4-5/4-6, fable-5, fable-5-1 | sonnet-5 0.18 / 0.88 · haiku 0.09 / 0.44 · opus-5 0.44 / 2.21 |
+| `openlux-codex` | `Codex-Gpt-1` (×0.037) | openai (+responses) | gpt-5.6-terra, gpt-5.6-sol, gpt-5.5, gpt-5-codex, gpt-6-astra | terra 0.07 / 0.44 · gpt-5-codex 0.05 / 0.37 · sol 0.18 / 1.10 |
+
+What `group` does at discovery: it fetches the relay's public `GET /api/pricing` (no key is
+sent — the sheet is unauthenticated), prices every model the group serves as
+`model_ratio × group_ratio × $2` per 1M input, `× completion_ratio` output, and cache read /
+write from `cache_ratio` / `cache_creation_5m_ratio`; and it **keeps only the ids in the
+group's `enable_groups`** — a group token's `/v1/models` lists the whole catalogue, and the
+sheet is the only statement of which of those the token will actually be served. Prices
+land in the model cache (keyed `<name>@<group>`, so changing or dropping the group is a cache
+miss, not 24 hours of the wrong list), and the next start shows them before any refresh. A
+sheet that is unavailable or does not know the group is warned about and degrades to ordinary
+discovery: unfiltered, unpriced, never nothing.
+
+To price the plain `openlux` / `openlux-claude` presets, tell nyma which group *your* token
+is in — nyma cannot read it off the wire:
+
+```json
+{ "providers": [{ "name": "openlux-claude", "baseUrl": "https://api.openlux.ai/v1",
+                  "api": "anthropic", "apiKeyEnv": "OPENLUX_API_KEY",
+                  "endpointTypes": ["anthropic"], "group": "Anthropic-Claude-1" }] }
+```
+
+Caveats. Capacity is the subscription's: the `429 当前分组上游负载已饱和` note above is likelier
+in these groups, and there is no retry-after. Prompt caching and thinking work as far as the
+upstream CLI passes them through; the official route is the reference. Seed prices in the
+presets are the sheet as of 2026-09-23; discovery overwrites them.
 
 ## Where the context windows come from
 

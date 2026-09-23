@@ -14,7 +14,8 @@
      - exactly one credential header;
      - a cache that survives a failed refresh, so a flaky gateway degrades to
        the previous list rather than to nothing."
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.data :as data]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.debug :as d]
             [clojure.string :as str]))
@@ -42,8 +43,13 @@
 
 (defn- cached-cost [m]
   (when-let [c (aget m "cost")]
-    (let [i (aget c "input") o (aget c "output")]
-      (when (and (number? i) (number? o)) {:input i :output o}))))
+    (let [i  (aget c "input") o (aget c "output")
+          cr (data/key-get c "cache-read" "cacheRead")
+          cw (data/key-get c "cache-write" "cacheWrite")]
+      (when (and (number? i) (number? o))
+        (cond-> {:input i :output o}
+          (number? cr) (assoc :cache-read cr)
+          (number? cw) (assoc :cache-write cw))))))
 
 (defn- cached-type [m]
   (let [t (aget m "type")]
@@ -257,6 +263,9 @@
   [payload]
   (when-let [data (payload-models payload)]
     (->> (vec data)
+         ;; A null row is not a model, and `.-id` on one throws — which,
+         ;; uncaught, would abort the whole entry's discovery.
+         (filter object?)
          (keep (fn [m]
                  (let [id  (.-id m)
                        eps (aget m "supported_endpoint_types")
@@ -286,6 +295,57 @@
       (= (.-origin x) (.-origin y)))
     (catch :default _ false)))
 
+(defn ^:async fetch-json
+  "GET `url`, optionally with one bearer header, and return the parsed JSON
+   body or nil. The safety half of discovery lives here, shared by the model
+   catalogue and the pricing sheet:
+
+     - short timeout, so it never delays startup;
+     - redirects treated as failure — one would carry the credential to
+       wherever it points;
+     - exactly one credential header, sent only when `api-key` is non-blank;
+     - never throws, never retries (gateways throttle repeated auth failures:
+       yunwu answers a bad key with a 120-second 429)."
+  [url api-key]
+  (try
+    (let [send-key? (seq (str (or api-key "")))
+          resp (js-await
+                (js/fetch url
+                          #js {:method   "GET"
+                               :redirect "manual"
+                               :signal   (js/AbortSignal.timeout timeout-ms)
+                               :headers  (if send-key?
+                                           #js {"Authorization" (str "Bearer " api-key)}
+                                           #js {})}))]
+      (cond
+        (or (zero? (.-status resp)) (and (>= (.-status resp) 300) (< (.-status resp) 400)))
+        (do (d/warn "model-fetch" (str "refusing to follow a redirect from " url)) nil)
+
+        (not (.-ok resp))
+        ;; The status alone is not actionable. yunwu answered every request with
+        ;; 403 and a body reading "Your account has been migrated to OpenLux.
+        ;; Please sign in at https://api.openlux.ai" — the fix, discarded. On a
+        ;; 4xx the provider is usually telling you exactly what is wrong, so say
+        ;; it. Capped, because a body can be an HTML error page. 4xx only: a
+        ;; 5xx is the gateway being unwell and the body is usually an HTML
+        ;; page, so skip the extra read there — this runs on every startup.
+        (do (let [msg (try
+                        (when (< (.-status resp) 500)
+                          (let [t (js-await (.text resp))]
+                            (when (seq t)
+                              (let [parsed (data/parse-json t)
+                                    m (some-> parsed .-error .-message)]
+                                (str " — " (subs (str (or m t)) 0 300))))))
+                        (catch :default _ nil))]
+              (d/warn "model-fetch" (str url " returned " (.-status resp) (or msg ""))))
+            nil)
+
+        :else
+        (js-await (.json resp))))
+    (catch :default e
+      (d/warn "model-fetch" (str "fetch failed for " url ": " (.-message e)))
+      nil)))
+
 (defn ^:async fetch-models
   "GET the gateway's catalog. Returns [{:id :name …}] or nil.
 
@@ -298,82 +358,113 @@
    An override must share an origin with `base-url`, and is refused otherwise.
    Two reasons, and the second is the one that is easy to miss: a `catalogUrl`
    naming another host would be handed this provider's credential (the leak the
-   redirect refusal below exists to prevent, reached directly instead of through
-   a 302) — and, key or no key, whatever that host returns would be registered
-   as this provider's context windows and prices. A 4096-token window makes
-   compaction thrash every turn; a fabricated rate makes cost accounting lie.
-   Withholding the key alone closes the first hole and leaves the second.
+   redirect refusal in fetch-json exists to prevent, reached directly instead
+   of through a 302) — and, key or no key, whatever that host returns would be
+   registered as this provider's context windows and prices. A 4096-token
+   window makes compaction thrash every turn; a fabricated rate makes cost
+   accounting lie. Withholding the key alone closes the first hole and leaves
+   the second.
 
    Never throws: every failure path returns nil so a caller can fall back to
-   its cache. Also never retries — gateways commonly throttle repeated auth
-   failures (yunwu answers a bad key with a 120-second 429), so a retry loop
-   turns one bad key into a two-minute outage."
+   its cache."
   [base-url api-key catalog-url]
+  (let [override  (str (or catalog-url ""))
+        override? (seq override)
+        url       (if override?
+                    override
+                    (str (str/replace (str base-url) #"/+$" "") "/models?limit=1000"))]
+    (if (and override? (not (same-origin? url base-url)))
+      (do (d/warn "model-fetch"
+                  (str "refusing an off-origin catalogUrl: " url
+                       " does not share an origin with " base-url))
+          nil)
+      (when-let [payload (js-await (fetch-json url api-key))]
+        (parse-models payload)))))
+
+;; ── New API pricing sheet ────────────────────────────────────
+;;
+;; New API relays (openlux, ex-yunwu) publish `GET /api/pricing` with no auth:
+;; every model's ratios and the multiplier of every billing GROUP. A group is
+;; an upstream route with its own price — `Kiro-Claude-1` is the same
+;; claude-sonnet-5 as `Anthropic-Claude-1` at a twelfth of the rate — and it
+;; is a property of the TOKEN, chosen when the token is minted, so nyma cannot
+;; read it off the wire; the settings entry has to name it. Given the group,
+;; the sheet is exact: USD per 1M input = model_ratio × group_ratio × 2 (one
+;; ratio unit is $0.002 per 1K tokens), output = input × completion_ratio,
+;; cache read = input × cache_ratio, cache write = input ×
+;; cache_creation_5m_ratio. Per-call rows (quota_type 1, image and video) are
+;; not token-priced and are skipped, as is the tiered `step_ratios` surcharge
+;; past a model's base window.
+
+(defn pricing-url
+  "`/api/pricing` next to a New API base URL: the API surface lives under
+   `/v1`, the sheet at the app root beside it — so the trailing version
+   segment comes off and the rest of the path stays, for a relay mounted
+   under a prefix. Same origin by construction, so no credential question
+   arises — and none is sent."
+  [base-url]
   (try
-    (let [override  (str (or catalog-url ""))
-          override? (seq override)
-          url       (if override?
-                      override
-                      (str (str/replace (str base-url) #"/+$" "") "/models?limit=1000"))
-          send-key? (seq (str (or api-key "")))
-          resp (when (and override? (not (same-origin? url base-url)))
-                 (d/warn "model-fetch"
-                         (str "refusing an off-origin catalogUrl: " url
-                              " does not share an origin with " base-url))
-                 :refused)
-          resp (if (= :refused resp)
-                 resp
-                 (js-await
-                (js/fetch url
-                          #js {:method   "GET"
-                               :redirect "manual"
-                               :signal   (js/AbortSignal.timeout timeout-ms)
-                               :headers  (if send-key?
-                                           #js {"Authorization" (str "Bearer " api-key)}
-                                           #js {})})))]
-      (cond
-        (= :refused resp) nil
+    (let [u    (js/URL. (str base-url))
+          root (-> (.-pathname u)
+                   (str/replace #"/+$" "")
+                   (str/replace #"/v\d+$" ""))]
+      (str (.-origin u) root "/api/pricing"))
+    (catch :default _ nil)))
 
-        ;; A redirect would carry the credential to wherever it points.
-        (or (zero? (.-status resp)) (and (>= (.-status resp) 300) (< (.-status resp) 400)))
-        (do (d/warn "model-fetch" (str "refusing to follow a redirect from " url)) nil)
+(defn ^:async fetch-pricing
+  "The parsed pricing sheet, or nil."
+  [base-url]
+  (when-let [url (pricing-url base-url)]
+    (js-await (fetch-json url nil))))
 
-        (not (.-ok resp))
-        ;; The status alone is not actionable. yunwu answered every request with
-        ;; 403 and a body reading "Your account has been migrated to OpenLux.
-        ;; Please sign in at https://api.openlux.ai" — the fix, discarded. On a
-        ;; 4xx the provider is usually telling you exactly what is wrong, so say
-        ;; it. Capped, because a body can be an HTML error page.
-        ;; 4xx only: a client error carries an actionable message ("account
-        ;; migrated", "invalid token"). A 5xx is the gateway being unwell and
-        ;; the body is usually an HTML page, so skip the extra read there —
-        ;; discovery runs on every startup for every relay entry.
-        (do (let [msg (try
-                        (when (< (.-status resp) 500)
-                          (let [t (js-await (.text resp))]
-                            (when (seq t)
-                              (let [parsed (try (js/JSON.parse t) (catch :default _ nil))
-                                    m (some-> parsed .-error .-message)]
-                                (str " — " (subs (str (or m t)) 0 300))))))
-                        (catch :default _ nil))]
-              (d/warn "model-fetch" (str url " returned " (.-status resp) (or msg ""))))
-            nil)
-
-        :else
-        (parse-models (js-await (.json resp)))))
-    (catch :default e
-      (d/warn "model-fetch" (str "discovery failed for " base-url ": " (.-message e)))
-      nil)))
+(defn group-costs
+  "{model-id {:input :output :cache-read? :cache-write?}} in USD per 1M for the
+   token-priced chat rows a billing `group` serves, or nil when the sheet does
+   not know the group. Keys are exactly the models the group can run — a group
+   token's `/v1/models` may list the whole catalogue, and the sheet is the only
+   statement of which of those the token will actually be served."
+  [pricing group]
+  (let [ratios (when pricing (aget pricing "group_ratio"))
+        gr     (when ratios (aget ratios (str group)))
+        rows   (when pricing (aget pricing "data"))
+        num    (fn [v] (when (and (number? v) (js/isFinite v) (>= v 0)) v))]
+    (when (and (num gr) (pos? gr) (js/Array.isArray rows))
+      (into {}
+            (keep (fn [r]
+                    (let [id     (when (object? r) (aget r "model_name"))
+                          groups (aget r "enable_groups")
+                          mr     (num (aget r "model_ratio"))
+                          cr     (num (aget r "completion_ratio"))]
+                      (when (and (string? id) (seq id)
+                                 (js/Array.isArray groups)
+                                 (some #(= (str %) (str group)) groups)
+                                 (= 0 (or (aget r "quota_type") 0))
+                                 (not (false? (aget r "available")))
+                                 mr cr)
+                        (let [in    (* mr gr 2)
+                              cache (num (aget r "cache_ratio"))
+                              write (num (or (aget r "cache_creation_5m_ratio")
+                                             (aget r "cache_creation_ratio")))]
+                          [id (cond-> {:input in :output (* in cr)}
+                                cache (assoc :cache-read (* in cache))
+                                write (assoc :cache-write (* in write)))]))))
+                  ;; A null row would throw on the first aget and abort
+                  ;; the whole entry's discovery; skip it like parse-models.
+                  (filter object? rows))))))
 
 ;; ── Orchestration ────────────────────────────────────────────
 
 (defn ^:async refresh!
-  "Fetch, filter, cache. Returns the new model list, or nil when unavailable.
-   Callers use nil to mean \"keep whatever you already registered\"."
-  [provider-name base-url api-key pred catalog-url]
+  "Fetch, filter, decorate, cache. Returns the new model list, or nil when
+   unavailable. Callers use nil to mean \"keep whatever you already registered\".
+
+   `decorate`, when given, maps over the kept list BEFORE the cache write, so
+   whatever it adds (a billing group's prices) is what the next start reads."
+  [provider-name base-url api-key pred catalog-url & [decorate]]
   (let [fetched (js-await (fetch-models base-url api-key catalog-url))]
     (when (seq fetched)
-      (let [kept (filterv pred fetched)]
+      (let [kept (cond-> (filterv pred fetched)
+                   decorate (->> (mapv decorate)))]
         (write-cache! provider-name kept)
         kept))))
 

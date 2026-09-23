@@ -43,6 +43,7 @@
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.toolcall-rescue :as rescue]
             [agent.utils.credentials :as credentials]
+            [agent.utils.data :as data]
             [agent.utils.reasoning-stream :as rs]
             [agent.utils.reasoning-request :as rr]))
 
@@ -175,33 +176,75 @@
     :endpoint-types ["anthropic"]
     :models    [{:id "claude-opus-5"}
                 {:id "claude-sonnet-5"}
-                {:id "claude-haiku-4-5-20251001"}]}])
+                {:id "claude-haiku-4-5-20251001"}]}
+   ;; ── openlux billing groups ──────────────────────────────────
+   ;; A New API token belongs to a GROUP, chosen in the dashboard when the
+   ;; token is minted (Console → Tokens → Add → 分组). A group is an upstream
+   ;; route with its own multiplier: `Kiro-Claude-1` and `Codex-Gpt-1` ride
+   ;; the Kiro / Codex subscription CLIs and price the same model ids at a
+   ;; twelfth to a sixteenth of the official-route groups (`Anthropic-Claude-1`
+   ;; 1.1, `Openai-Gpt-1` 0.588, against 0.088 and 0.037). Not selectable per
+   ;; request, so each group is its own provider with its own token:
+   ;;
+   ;;   /login openlux-kiro      or   OPENLUX_KIRO_API_KEY=…
+   ;;   /model openlux-kiro/claude-sonnet-5
+   ;;
+   ;; `:group` does two things at discovery: prices every model from the
+   ;; public pricing sheet (model-fetch/group-costs), and keeps only the ids
+   ;; the group serves — a group token's /v1/models lists the whole catalogue,
+   ;; and the sheet's `enable_groups` is the only statement of what the token
+   ;; will actually get. Deliberately NOT `:credential-name "openlux"` and no
+   ;; `yunwu` fallback: a shared token is a token in the wrong group.
+   ;;
+   ;; Caveats: capacity is the subscription's. The saturation 429 noted on
+   ;; `openlux` above is likelier here, and caching / thinking parity with the
+   ;; official route is what the upstream CLI happens to pass through.
+   ;;
+   ;; Seed costs are the sheet as of 2026-09-23 (USD per 1M); discovery
+   ;; overwrites them (merge-declared: discovery wins).
+   {:name      "openlux-kiro"
+    :base-url  "https://api.openlux.ai/v1"
+    :api-key-env "OPENLUX_KIRO_API_KEY"
+    :api       "anthropic"
+    :discover  true
+    :endpoint-types ["anthropic"]
+    :group     "Kiro-Claude-1"
+    :models    [{:id "claude-sonnet-5" :context-window 1000000
+                 :cost {:input 0.176 :output 0.882 :cache-read 0.018 :cache-write 0.221}}
+                {:id "claude-haiku-4-5-20251001" :context-window 200000
+                 :cost {:input 0.088 :output 0.441 :cache-read 0.009 :cache-write 0.110}}
+                {:id "claude-opus-5"
+                 :cost {:input 0.441 :output 2.206 :cache-read 0.044 :cache-write 0.551}}]}
+   {:name      "openlux-codex"
+    :base-url  "https://api.openlux.ai/v1"
+    :api-key-env "OPENLUX_CODEX_API_KEY"
+    :api       "openai-compatible"
+    :discover  true
+    ;; gpt-5-codex is /responses-only; pick-protocol dispatches per model.
+    :endpoint-types ["openai" "openai-response"]
+    :group     "Codex-Gpt-1"
+    :models    [{:id "gpt-5.6-terra"
+                 :cost {:input 0.074 :output 0.441 :cache-read 0.007 :cache-write 0.092}}
+                {:id "gpt-5-codex"
+                 :cost {:input 0.046 :output 0.368 :cache-read 0.005}}
+                {:id "gpt-5.6-sol"
+                 :cost {:input 0.184 :output 1.103 :cache-read 0.018 :cache-write 0.230}}]}])
 
 ;; ── Settings ─────────────────────────────────────────────────
 
 (defn- entry-get
   "Read `k` from a settings entry that may be a CLJS map, a JS object with
-   camelCase keys, or a JS object with kebab-case keys."
-  [e camel kebab]
-  (or (get e (keyword kebab))
-      (when (object? e) (or (aget e camel) (aget e kebab)))
-      (get e camel)
-      (get e kebab)))
+   camelCase keys, or a JS object with kebab-case keys. The `camel` argument
+   is kept for the call sites; `data/conf-get` derives every spelling."
+  [e _camel kebab]
+  (data/conf-get e kebab))
 
 (defn- entry-get-bool
   "`entry-get` for a flag, where a literal `false` is a VALUE and not an
-   absence. `entry-get` cannot express that: it chains candidates with `or`,
-   which collapses `false` into the next one and finally into nil — so a
-   `\"discover\": false` in settings read as \"not set\" and defaulted back to
-   true. Returns `default` only when the key is genuinely absent."
-  [e camel kebab default]
-  (let [cands [(get e (keyword kebab))
-               (when (object? e) (aget e camel))
-               (when (object? e) (aget e kebab))
-               (get e camel)
-               (get e kebab)]
-        v     (first (remove nil? cands))]
-    (if (nil? v) default (boolean v))))
+   absence — `data/conf-bool` keeps it. Returns `default` only when the key
+   is genuinely absent."
+  [e _camel kebab default]
+  (data/conf-bool e kebab default))
 
 (defn- ->vec [x]
   (cond
@@ -236,6 +279,10 @@
    ;; Absolute URL of a richer catalog than <baseUrl>/models. See
    ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
    :catalog-url (entry-get e "catalogUrl" "catalog-url")
+   ;; New API billing group the token was minted in. Prices the catalogue from
+   ;; the relay's public pricing sheet and narrows it to what the group serves.
+   :group       (let [g (entry-get e "group" "group")]
+                  (when (and (string? g) (seq g)) g))
    :overhead-tokens (let [n (entry-get e "overheadTokens" "overhead-tokens")]
                       (when (and (number? n) (pos? n)) n))
    :models      (mapv (fn [m]
@@ -446,8 +493,14 @@
   (let [o #js {:id (str (:id m)) :name (str (or (:name m) (:id m)))}]
     (when (:context-window m) (aset o "contextWindow" (:context-window m)))
     (when-let [c (:cost m)]
-      (aset o "cost" #js {:input  (or (get c "input") (:input c) 0)
-                          :output (or (get c "output") (:output c) 0)}))
+      (let [cost #js {:input  (or (get c "input") (:input c) 0)
+                      :output (or (get c "output") (:output c) 0)}
+            ;; key-get, not `or`: a declared 0 (free cache reads) must survive.
+            cr   (data/key-get c "cache-read" "cacheRead")
+            cw   (data/key-get c "cache-write" "cacheWrite")]
+        (when (number? cr) (aset cost "cacheRead" cr))
+        (when (number? cw) (aset cost "cacheWrite" cw))
+        (aset o "cost" cost)))
     o))
 
 (defn register!
@@ -481,6 +534,15 @@
                           :models      (clj->js (mapv ->js-model models))}))
 
 ;; ── Entry point ──────────────────────────────────────────────
+
+(defn cache-key
+  "Model-cache name for an entry: the provider name, suffixed with the billing
+   group when there is one, so changing or dropping `group` is a cache miss
+   rather than 24 hours of the wrong list."
+  [entry]
+  (if-let [g (:group entry)]
+    (str (:name entry) "@" g)
+    (:name entry)))
 
 (defn- declared-by-id [entry]
   (into {} (map (fn [m] [(str (:id m)) m]) (:models entry))))
@@ -527,16 +589,43 @@
   [api entry alive? endpoints-box]
   (let [pred     (model-fetch/make-filter entry)
         declared (declared-by-id entry)
-        cached   (model-fetch/cached-models (:name entry) pred)]
+        ;; The group is part of the cache identity: its prices and its
+        ;; narrowing are applied at refresh, so a list cached under another
+        ;; group (or none) is the wrong list, however fresh.
+        ckey     (cache-key entry)
+        cached   (model-fetch/cached-models ckey pred)]
     (when (and (alive?) (seq (:models cached)))
       (register! api entry (merge-declared (:models cached) declared) endpoints-box))
     (when (and (not (:fresh? cached)) (not (discovery-disabled?)))
       (when-let [key (resolve-key entry)]
-        (when-let [fresh (js-await (model-fetch/refresh!
-                                    (:name entry) (:base-url entry) key pred
-                                    (:catalog-url entry)))]
-          (when (alive?)
-            (register! api entry (merge-declared fresh declared) endpoints-box)))))))
+        ;; A billing group prices the catalogue and narrows it to what the
+        ;; group serves. The sheet is public and fetched without the key. When
+        ;; it is unavailable or does not know the group, discovery proceeds as
+        ;; for any relay: unfiltered, unpriced — never nothing.
+        (let [costs (when-let [g (:group entry)]
+                      (let [sheet (js-await (model-fetch/fetch-pricing (:base-url entry)))
+                            c     (when sheet (model-fetch/group-costs sheet g))]
+                        (cond
+                          (nil? sheet)
+                          (d/warn "relay-provider"
+                                  (str (:name entry) ": pricing sheet unavailable at "
+                                       (model-fetch/pricing-url (:base-url entry))
+                                       " — listing the whole catalogue, unpriced"))
+                          (empty? c)
+                          (d/warn "relay-provider"
+                                  (str (:name entry) ": pricing sheet has no billing group " g
+                                       " — listing the whole catalogue, unpriced")))
+                        (when (seq c) c)))
+              pred* (if costs
+                      (fn [m] (and (pred m) (contains? costs (str (:id m)))))
+                      pred)
+              price (when costs
+                      (fn [m] (if-let [c (get costs (str (:id m)))] (assoc m :cost c) m)))]
+          (when-let [fresh (js-await (model-fetch/refresh!
+                                      ckey (:base-url entry) key pred*
+                                      (:catalog-url entry) price))]
+            (when (alive?)
+              (register! api entry (merge-declared fresh declared) endpoints-box))))))))
 
 (defn ^:export default [api]
   (reset! level-fn-atom (when (.-getThinkingLevel api)
