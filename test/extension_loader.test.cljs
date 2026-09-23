@@ -121,18 +121,35 @@
                       (-> (expect (count sorted)) (.toBe 2)))
                     (set! js/console.warn orig))))
 
-            (it "DUPLICATE NAMESPACES — current behaviour: silently deduplicates via by-ns map"
+            (it "a duplicate namespace yields ONE entry, the last listed"
                 (fn []
-                  ;; This pins the bug class. Two entries with the same
-                  ;; namespace collapse to a single entry in the result.
-                  ;; If you change topo-sort to detect duplicates and warn
-                  ;; or throw, update this test accordingly.
-                  (let [entries [{:namespace "dup" :deps [] :path "/a"}
-                                 {:namespace "dup" :deps [] :path "/b"}]
-                        sorted  (topo-sort entries)
-                        nses    (set (map :namespace sorted))]
-                    (-> (expect (count nses)) (.toBe 1))
-                    (-> (expect (contains? nses "dup")) (.toBe true)))))))
+                  ;; The ready queue is seeded from every entry's namespace, so
+                  ;; a repeated one used to be queued and emitted twice and the
+                  ;; extension activated twice: listeners registered twice,
+                  ;; activation side effects run twice. The old assertion here
+                  ;; took `set` of the namespaces first and so never saw it.
+                  (let [orig js/console.warn]
+                    (set! js/console.warn (fn [& _]))
+                    (let [entries [{:namespace "dup" :deps [] :path "/a"}
+                                   {:namespace "dup" :deps [] :path "/b"}]
+                          sorted  (topo-sort entries)]
+                      (-> (expect (count sorted)) (.toBe 1))
+                      (-> (expect (:path (first sorted))) (.toBe "/b")))
+                    (set! js/console.warn orig))))
+
+            (it "deduplicating a duplicate still resolves its dependents"
+                (fn []
+                  (let [orig js/console.warn]
+                    (set! js/console.warn (fn [& _]))
+                    (let [entries [{:namespace "dup"      :deps []      :path "/a"}
+                                   {:namespace "dup"      :deps []      :path "/b"}
+                                   {:namespace "consumer" :deps ["dup"] :path "/c"}]
+                          sorted  (topo-sort entries)
+                          order   (mapv :namespace sorted)]
+                      (-> (expect (count sorted)) (.toBe 2))
+                      (-> (expect (.indexOf (clj->js order) "dup"))
+                          (.toBeLessThan (.indexOf (clj->js order) "consumer"))))
+                    (set! js/console.warn orig))))))
 
 ;; --- discover-and-load with real filesystem ---
 

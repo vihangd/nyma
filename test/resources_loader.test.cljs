@@ -125,3 +125,45 @@
                                               (it "returns expected shape with all keys" test-discover-returns-expected-shape)
                                               (it "build-system-prompt includes environment block" test-build-system-prompt-includes-env)
                                               (it "handles missing directories gracefully" test-discover-handles-missing-dirs)))
+
+;; ── extension-dirs: the global and project dirs can be the same folder ──
+;;
+;; `project-dir` is the relative ".nyma", so running nyma from the home
+;; directory makes the project extension dir and the global one one and the
+;; same. Both were scanned, so every user extension was reported as a
+;; duplicate of itself and activated twice.
+
+(defn ^:async test-extension-dirs-deduped-at-home []
+  (let [root (fs/mkdtempSync (path/join (os/tmpdir) "nyma-extdirs-"))
+        home (.-HOME (.-env js/process))
+        cwd  (js/process.cwd)]
+    (fs/mkdirSync (path/join root ".nyma" "extensions") #js {:recursive true})
+    (set! (.-HOME (.-env js/process)) root)
+    (js/process.chdir root)
+    (try
+      (let [dirs (:extension-dirs (js-await (discover)))]
+        (-> (expect (count dirs)) (.toBe 1)))
+      (finally
+        (js/process.chdir cwd)
+        (set! (.-HOME (.-env js/process)) home)
+        (fs/rmSync root #js {:recursive true :force true})))))
+
+(defn ^:async test-extension-dirs-distinct-when-elsewhere []
+  (let [root (fs/mkdtempSync (path/join (os/tmpdir) "nyma-extdirs2-"))
+        home (.-HOME (.-env js/process))
+        cwd  (js/process.cwd)]
+    (fs/mkdirSync (path/join root "home") #js {:recursive true})
+    (fs/mkdirSync (path/join root "repo") #js {:recursive true})
+    (set! (.-HOME (.-env js/process)) (path/join root "home"))
+    (js/process.chdir (path/join root "repo"))
+    (try
+      (let [dirs (:extension-dirs (js-await (discover)))]
+        (-> (expect (count dirs)) (.toBe 2)))
+      (finally
+        (js/process.chdir cwd)
+        (set! (.-HOME (.-env js/process)) home)
+        (fs/rmSync root #js {:recursive true :force true})))))
+
+(describe "agent.resources.loader/extension-dirs" (fn []
+                                                    (it "collapses to one dir when cwd is the home directory" test-extension-dirs-deduped-at-home)
+                                                    (it "keeps both dirs when the project is not the home directory" test-extension-dirs-distinct-when-elsewhere)))

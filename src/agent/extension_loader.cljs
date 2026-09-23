@@ -144,13 +144,22 @@
 (defn topo-sort
   "Topological sort of extension entries by dependsOn.
    Falls back to original order on cycles. Public for direct testing."
-  [entries]
-  (let [ns-set  (set (map :namespace entries))
-        _       (doseq [[ns-str es] (group-by :namespace entries)]
+  [all-entries]
+  (let [_       (doseq [[ns-str es] (group-by :namespace all-entries)]
                   (when (> (count es) 1)
                     (d/warn (str "Duplicate extension namespace \"" ns-str "\" — "
                                  (.join (clj->js (mapv :path es)) " vs ")
                                  "; the last one listed loads"))))
+        ;; Keep only that last one. Without this the ready queue is seeded
+        ;; from every entry's namespace, so a repeated namespace is queued
+        ;; and emitted twice and the extension activates twice — listeners
+        ;; registered twice, activation side effects run twice.
+        entries (let [last-idx (reduce (fn [m [i e]] (assoc m (:namespace e) i))
+                                       {} (map-indexed vector all-entries))]
+                  (vec (keep-indexed (fn [i e]
+                                       (when (= i (get last-idx (:namespace e))) e))
+                                     all-entries)))
+        ns-set  (set (map :namespace entries))
         by-ns   (into {} (map (fn [e] [(:namespace e) e]) entries))
         ;; Filter deps to only known namespaces
         deps-of (fn [e] (filterv #(contains? ns-set %) (or (:deps e) [])))

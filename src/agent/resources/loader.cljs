@@ -14,6 +14,21 @@
   (path/join (home/dir) ".nyma"))
 (def project-dir ".nyma")
 
+(defn- distinct-dirs
+  "Drop directories that name the same folder twice. `project-dir` is the
+   relative \".nyma\", so running nyma from the home directory makes the
+   project extension dir and the global one the same folder: every user
+   extension was then scanned twice and reported as a duplicate of itself."
+  [dirs]
+  (let [seen (atom #{})]
+    (vec (keep (fn [d]
+                 (let [k (try (fs/realpathSync d)
+                              (catch :default _e (path/resolve d)))]
+                   (when-not (contains? @seen k)
+                     (swap! seen conj k)
+                     d)))
+               dirs))))
+
 ;; Builtins are no longer discovered by scanning dist/agent/extensions: that path
 ;; resolves INSIDE a single-file binary, where it does not exist, so a bundled
 ;; nyma loaded 2 of 40 extensions and nothing reported it. They come from
@@ -363,8 +378,8 @@ When multiple independent tool calls are needed, make them in parallel.
      ;; machine running nyma, so scanning them works from a source tree and from
      ;; a binary alike.
      :extension-dirs
-     [(path/join (global-dir) "extensions")
-      (path/join project-dir "extensions")]
+     (distinct-dirs [(path/join (global-dir) "extensions")
+                     (path/join project-dir "extensions")])
 
      ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them
      ;; off wholesale — it was the only thing the old dir-list branch did.
