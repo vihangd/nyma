@@ -291,10 +291,42 @@ export function aggregate(results) {
       // the agent never acted
       noToolCall:      pc(noToolCall),
     },
+    // What a run COST, which the per-task records have always carried and
+    // nothing ever summed. Comparing two harness configurations meant opening
+    // both result files and adding the column up by hand.
+    //
+    // Per-task figures use `attempted` as the denominator, matching `pct`: a
+    // skipped task spent nothing and ran nothing, so counting it would make a
+    // run look cheaper for having less toolchain installed.
+    //
+    // cacheReadShare is here because a token total alone cannot tell "we sent
+    // less" from "we stopped hitting the cache", and those have opposite
+    // meanings when tuning how much context to cut.
+    cost: costSummary(results, attempted),
+  };
+}
+
+function costSummary(results, attempted) {
+  const sum = (k) => results.reduce((n, r) => n + (Number(r[k]) || 0), 0);
+  const tokens    = sum("tokens");
+  const costUsd   = sum("costUsd");
+  const cacheRead = sum("cacheRead");
+  const inputTok  = sum("inputTokens");
+  const per = (n) => (attempted === 0 ? null : Math.round(n / attempted));
+  return {
+    totalTokens:     tokens,
+    tokensPerTask:   per(tokens),
+    totalCostUsd:    round4(costUsd),
+    costPerTask:     attempted === 0 ? null : round4(costUsd / attempted),
+    cacheReadTokens: cacheRead,
+    // share of INPUT served from cache; null when the route reports no input
+    // tokens at all, which is not the same as a 0% hit rate
+    cacheReadShare:  inputTok === 0 ? null : round1((100 * cacheRead) / inputTok),
   };
 }
 
 const round1 = (n) => Math.round(n * 10) / 10;
+const round4 = (n) => Math.round(n * 10000) / 10000;
 
 /**
  * Per-task reliability across repeated trials.

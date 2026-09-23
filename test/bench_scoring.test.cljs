@@ -261,3 +261,56 @@
           (let [t (.join #js ["{\"role\":\"tool_call\",\"metadata\":{\"tool-name\":\"bash\"}}"
                               "{\"role\":\"tool_ca"] "\n")]
             (-> (expect (.-toolCalls (b/summarizeTrace t))) (.toBe 1)))))))
+
+;;; ─── cost and token summary ───────────────────────────────────
+;;;
+;;; Every per-task record has carried tokens, costUsd, cacheRead and
+;;; inputTokens since the harness was written, and `aggregate` never summed
+;;; any of them — so comparing two configurations meant opening both result
+;;; files and adding a column up by hand. Strands' whole claim is a token
+;;; claim, so this is the number the comparison is made of.
+
+(def ^:private priced
+  #js [#js {:status "pass" :tokens 1000 :costUsd 0.5  :cacheRead 600 :inputTokens 800}
+       #js {:status "fail" :tokens 500  :costUsd 0.25 :cacheRead 200 :inputTokens 400}
+       #js {:status "skip"}])
+
+(describe "bench/aggregate — cost" (fn []
+
+  (it "sums tokens and cost across tasks"
+      (fn []
+        (let [c (.-cost (b/aggregate priced))]
+          (-> (expect (.-totalTokens c)) (.toBe 1500))
+          (-> (expect (.-totalCostUsd c)) (.toBe 0.75)))))
+
+  (it "divides per task by ATTEMPTED, not by total"
+      (fn []
+        ;; a skipped task spent nothing and ran nothing; counting it would make
+        ;; a run look cheaper for having less toolchain installed
+        (let [c (.-cost (b/aggregate priced))]
+          (-> (expect (.-tokensPerTask c)) (.toBe 750))
+          (-> (expect (.-costPerTask c)) (.toBe 0.375)))))
+
+  (it "reports cache read as a share of input tokens"
+      (fn []
+        (-> (expect (.-cacheReadShare (.-cost (b/aggregate priced)))) (.toBe 66.7))))
+
+  (it "a route that reports no input tokens gives nil, not a 0% hit rate"
+      (fn []
+        ;; those are different claims: one is 'we do not know', the other is
+        ;; 'caching is not serving', and only the second is a finding
+        (let [c (.-cost (b/aggregate #js [#js {:status "pass" :tokens 10}]))]
+          (-> (expect (.-cacheReadShare c)) (.toBeNull))
+          (-> (expect (.-totalTokens c)) (.toBe 10)))))
+
+  (it "an all-skipped run divides by nothing"
+      (fn []
+        (let [c (.-cost (b/aggregate #js [#js {:status "skip"}]))]
+          (-> (expect (.-tokensPerTask c)) (.toBeNull))
+          (-> (expect (.-costPerTask c)) (.toBeNull)))))
+
+  (it "missing fields count as zero rather than NaN"
+      (fn []
+        (let [c (.-cost (b/aggregate #js [#js {:status "pass"} #js {:status "fail" :tokens 40}]))]
+          (-> (expect (.-totalTokens c)) (.toBe 40))
+          (-> (expect (.-totalCostUsd c)) (.toBe 0)))))))
