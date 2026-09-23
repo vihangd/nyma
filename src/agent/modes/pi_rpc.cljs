@@ -449,7 +449,22 @@
 
         "set_model"
         (do (when-let [m (.-modelId cmd)]
-              (set! (.-model (:config agent)) m))
+              (set! (.-model (:config agent)) m)
+              ;; A client may send a model without a provider. Leaving the
+              ;; PREVIOUS provider name attached to the NEW id produced a
+              ;; provider-qualified key for a pair that never existed, and
+              ;; pricing, the context window, compaction and the gateway
+              ;; overhead all key off it. Keep the old name only if the
+              ;; registry actually knows that pair; otherwise drop it and let
+              ;; the key degrade to a bare id, which is merely ambiguous
+              ;; rather than wrong.
+              (when-not (.-provider cmd)
+                (let [prov (aget (:config agent) "active-provider-name")
+                      mr   (:model-registry agent)
+                      known? (and mr (seq (str (or prov "")))
+                                  (some? ((:get mr) (str prov "/" m))))]
+                  (when-not known?
+                    (aset (:config agent) "active-provider-name" nil)))))
             (when-let [p (.-provider cmd)]
               (aset (:config agent) "active-provider-name" p))
             (write-response! cmd (model-obj agent)))

@@ -8,6 +8,7 @@
             ["node:path" :as npath]
             ["node:readline" :as readline]
             [agent.core :refer [create-agent]]
+            [agent.model-info :as model-info]
             [agent.loop :refer [run]]
             [agent.resources.loader :refer [discover]]
             [agent.resources.skills :as skills]
@@ -806,8 +807,14 @@ Examples:
                   {:session-file (str (or (when-let [s @(:session agent)]
                                             (when (fn? (:session-file s)) ((:session-file s))))
                                           ""))
+                   ;; PROVIDER-QUALIFIED, matching the key the cost beside it
+                   ;; was priced with. A bare id merged Anthropic-direct and
+                   ;; relayed spend for the same model name into one row,
+                   ;; totalled from two different rate tables, and nothing in
+                   ;; the usage report could say where the money went.
                    :model        (let [m (:model (:config agent))]
-                                   (if (string? m) m (or (and m (.-modelId m)) "")))
+                                   (or (model-info/config-model-key (:config agent))
+                                       (if (string? m) m (or (and m (.-modelId m)) ""))))
                    :input-tokens (:input-tokens data)
                    :output-tokens (:output-tokens data)
                    :cost         (:cost data)})
