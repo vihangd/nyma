@@ -200,3 +200,55 @@
                                                  test-slow-promise-handler-delays-emit-collect)
                                              (it "a nil-returning handler does not delay emit-collect"
                                                  test-nil-returning-handler-does-not-delay-emit-collect)))
+
+;;; ─── collect handlers thread what they rewrite ────────────────
+;;;
+;;; `context_assembly` handlers each rewrite the message list — priority_assembly
+;;; prunes at 70, headroom compresses at 10 — and every one read `event.messages`
+;;; and returned a NEW array. `messages` is neither a collection nor a precedence
+;;; key, so the merge was last-writer-wins: the LOWEST-priority handler discarded
+;;; everything the others did. With headroom enabled, pruning never reached the
+;;; provider.
+
+(defn ^:async test-later-handler-sees-earlier-output []
+  (let [bus  (create-event-bus)
+        seen (atom nil)]
+    ((:on bus) "context_assembly" (fn [_d] #js {:messages #js ["PRUNED"]}) 70)
+    ((:on bus) "context_assembly"
+               (fn [d] (reset! seen (vec (.-messages d)))
+                 #js {:messages #js ["COMPRESSED"]}) 10)
+    (let [out (js-await ((:emit-collect bus) "context_assembly"
+                         #js {:messages #js ["a" "b" "c"]}))]
+      ;; the low-priority handler works on what the high-priority one produced
+      (-> (expect @seen) (.toEqual (clj->js ["PRUNED"])))
+      (-> (expect (vec (.-messages out))) (.toEqual (clj->js ["COMPRESSED"]))))))
+
+(defn ^:async test-single-handler-sees-the-original []
+  (let [bus  (create-event-bus)
+        seen (atom nil)]
+    ((:on bus) "context_assembly" (fn [d] (reset! seen (vec (.-messages d))) nil) 50)
+    (js-await ((:emit-collect bus) "context_assembly" #js {:messages #js ["a" "b"]}))
+    (-> (expect @seen) (.toEqual (clj->js ["a" "b"])))))
+
+(defn ^:async test-a-handler-returning-nothing-does-not-clear []
+  (let [bus  (create-event-bus)
+        seen (atom nil)]
+    ((:on bus) "context_assembly" (fn [_d] #js {:messages #js ["PRUNED"]}) 70)
+    ((:on bus) "context_assembly" (fn [_d] nil) 50)
+    ((:on bus) "context_assembly" (fn [d] (reset! seen (vec (.-messages d))) nil) 10)
+    (let [out (js-await ((:emit-collect bus) "context_assembly" #js {:messages #js ["a"]}))]
+      (-> (expect @seen) (.toEqual (clj->js ["PRUNED"])))
+      (-> (expect (vec (.-messages out))) (.toEqual (clj->js ["PRUNED"]))))))
+
+(defn ^:async test-other-keys-still-last-writer []
+  (let [bus (create-event-bus)]
+    ((:on bus) "context_assembly" (fn [_d] #js {:somethingElse "first"}) 70)
+    ((:on bus) "context_assembly" (fn [_d] #js {:somethingElse "second"}) 10)
+    (let [out (js-await ((:emit-collect bus) "context_assembly" #js {:messages #js []}))]
+      (-> (expect (.-somethingElse out)) (.toBe "second")))))
+
+(describe "context_assembly threads the list it rewrites" (fn []
+  (it "a later handler receives what an earlier one produced" test-later-handler-sees-earlier-output)
+  (it "one handler alone still sees the original" test-single-handler-sees-the-original)
+  (it "a handler returning nothing does not clear the chain" test-a-handler-returning-nothing-does-not-clear)
+  (it "keys that are not threaded stay last-writer-wins" test-other-keys-still-last-writer)))

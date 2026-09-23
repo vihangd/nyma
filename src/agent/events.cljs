@@ -265,6 +265,23 @@
           (d/error
            (str "[nyma] Async handler error on '" event "':") e))))))
 
+(def ^:private threaded-keys
+  "Keys a later handler must see the CURRENT value of rather than the original.
+
+   `context_assembly` handlers each rewrite the message list — priority_assembly
+   prunes at priority 70, headroom compresses at 10 — and every one of them read
+   `event.messages` and returned a NEW array without mutating the event. Since
+   `messages` is neither a collection nor a precedence key, the merge below is
+   last-writer-wins, so the LOWEST-priority handler silently discarded every
+   earlier handler's work: with headroom enabled, priority_assembly's pruning
+   never reached the provider at all, and headroom chose whether to run at all
+   from the pre-pruning token count.
+
+   Threading them makes the priority order mean what both extensions' own
+   documentation already claims it means: each handler receives what the one
+   before it produced."
+  #{"messages" "system"})
+
 (defn ^:async run-handlers-collect
   "Run handlers in priority order, collect non-nil returns, merge them.
    Returns the merged result map (empty map if no handler returned anything)."
@@ -273,13 +290,19 @@
         results (atom [])]
     (doseq [{:keys [handler]} hs]
       (try
-        (let [result (handler data)]
+        (let [keep! (fn [r]
+                      (swap! results conj r)
+                      ;; Hand the next handler what this one produced.
+                      (when (object? r)
+                        (doseq [k threaded-keys]
+                          (let [v (aget r k)]
+                            (when (some? v) (aset data k v))))))
+              result (handler data)]
           (when (and result (.-then result))
             (let [resolved (js-await result)]
-              (when (some? resolved)
-                (swap! results conj resolved))))
+              (when (some? resolved) (keep! resolved))))
           (when (and (some? result) (not (.-then result)))
-            (swap! results conj result)))
+            (keep! result)))
         (catch :default e
           (d/error
            (str "[nyma] Collect handler error on '" event "':") e))))
