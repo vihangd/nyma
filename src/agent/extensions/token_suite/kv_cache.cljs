@@ -154,9 +154,12 @@
         ;; which is the only place the provider name is available without the
         ;; `model` capability (that one also grants setModel — too much for a
         ;; token-accounting extension).
-        unserved          (atom 0)
-        abandoned?        (atom false)
-        abandoned-for     (atom nil)
+        ;; Per model, both of them. One counter and one flag for the whole
+        ;; session meant switching models carried the previous one's misses
+        ;; over, and — because the give-up guard tested that single flag — once
+        ;; anything was abandoned nothing else ever could be.
+        unserved          (atom {})
+        given-up          (atom #{})
         gateway-spec?     (fn [spec]
                             (let [pname (first (.split (str spec) "/"))]
                               (contains? @pricing/unpriced-providers (str pname))))
@@ -183,7 +186,7 @@
                 ;; Stop annotating once this model has shown, repeatedly, that our
                 ;; breakpoints are written and never served. Switching models
                 ;; clears it: the next one has not earned the doubt.
-                give-up?  (and @abandoned? (= @abandoned-for model-id))
+                give-up?  (contains? @given-up model-id)
                 ;; Route on the model's PROVIDER, not its id: a `claude-*` model
                 ;; reached over an OpenAI-compatible endpoint cannot carry
                 ;; cache_control at all, and annotating it burned breakpoints
@@ -243,19 +246,27 @@
                                       " — breakpoints annotated but not served")))
             ;; A gateway that never serves what we wrote is charging us a write
             ;; premium for nothing. Count consecutive occurrences and stop.
-            (let [spec (str (.-model event))]
+            ;; Split on the FIRST slash only: the key is "<provider>/<id>" and a
+            ;; relayed id carries slashes of its own ("anthropic/claude-sonnet-5",
+            ;; "qwen/qwen3.8-27b" both ship in presets). Taking the last segment
+            ;; produced a model id that never matched the one the annotate side
+            ;; sees, so the warning fired and annotation carried on at full
+            ;; write cost.
+            (let [spec  (str (.-model event))
+                  slash (.indexOf spec "/")
+                  mid   (if (neg? slash) spec (.slice spec (inc slash)))]
               (when (gateway-spec? spec)
                 (if miss?
-                  (let [n (swap! unserved inc)]
-                    (when (and (>= n max-unserved) (not @abandoned?))
-                      (reset! abandoned? true)
-                      (reset! abandoned-for (last (.split spec "/")))
+                  (let [n (inc (get @unserved mid 0))]
+                    (swap! unserved assoc mid n)
+                    (when (and (>= n max-unserved) (not (contains? @given-up mid)))
+                      (swap! given-up conj mid)
                       (d/warn-quiet
                        "kv-cache"
                        (str "no cache read served on " spec " after " n
                             " annotated turns — writing breakpoints there costs more than"
                             " it saves, so they are off for the rest of this session"))))
-                  (reset! unserved 0))))
+                  (swap! unserved dissoc mid))))
             (swap! shared/suite-stats update :kv-cache
                    (fn [s] (-> s
                                (update :turns inc)
@@ -265,7 +276,7 @@
                                ;; turn counts say nothing about proportion.
                                (update :input-tokens (fnil + 0) (or (.-inputTokens event) 0))
                                (update :written-tokens (fnil + 0) (or (.-cacheWriteTokens event) 0))
-                               (assoc :abandoned? @abandoned?)
+                               (assoc :abandoned? (boolean (seq @given-up)))
                                (update :cache-misses (fnil + 0) (if miss? 1 0))
                                (update :cache-hits + (if (and cached (pos? cached)) 1 0)))))))]
 

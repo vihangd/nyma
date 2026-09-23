@@ -12,6 +12,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.core :refer [create-agent]]
+            [agent.state :as state]
             [agent.resources.skills :as skills]))
 
 (def ^:private dirs (atom []))
@@ -142,6 +143,46 @@
                                      (fn []
                                        (-> (expect (mapv :name (skills/doctor-rows {"c" {} "a" {} "b" {}})))
                                            (.toEqual (clj->js ["a" "b" "c"])))))))
+
+(describe "skills:lifecycle holes" (fn []
+
+                                     (it "a grant cannot outlive the instructions it came with"
+                                         (fn []
+          ;; compaction and pruning replace :messages wholesale, which can drop
+          ;; the skill's own message. The skill stayed \"active\" with its
+          ;; allowed-tools still lifting permission prompts, and the skill tool
+          ;; went on reporting instructions that were no longer there.
+                                           (let [st {:messages [{:role "user" :content "hi"}]
+                                                     :active-skills #{"deploy"}
+                                                     :skill-allowed-tools {"deploy" #{"bash"}}
+                                                     :skill-tools {"deploy" #{"t"}}}
+                                                 out (state/prune-skill-state st)]
+                                             (-> (expect (contains? (:active-skills out) "deploy")) (.toBe false))
+                                             (-> (expect (get (:skill-allowed-tools out) "deploy")) (.toBeUndefined)))))
+
+                                     (it "a skill whose message survived is left alone"
+                                         (fn []
+                                           (let [st {:messages [{:role "system" :skill "deploy" :content "B"}]
+                                                     :active-skills #{"deploy"}
+                                                     :skill-allowed-tools {"deploy" #{"bash"}}}
+                                                 out (state/prune-skill-state st)]
+                                             (-> (expect (contains? (:active-skills out) "deploy")) (.toBe true))
+                                             (-> (expect (contains? (get (:skill-allowed-tools out) "deploy") "bash")) (.toBe true)))))
+
+                                     (it "clearing the conversation releases the skill's tools"
+                                         (fn []
+          ;; :messages-cleared wipes the bookkeeping, so a clear that did not
+          ;; go through here left the tools registered with the record of them
+          ;; already gone — and a later re-activation would store that stale
+          ;; object as the \"original\" to restore, so it could never be removed.
+                                           (let [agent (create-agent {:model "m" :system-prompt "s"})
+                                                 reg   (:tool-registry agent)]
+                                             ((:register reg) "skill_tool" #js {:description "x"})
+                                             (swap! (:state agent) assoc-in [:skill-tools "s"] #{"skill_tool"})
+                                             (swap! (:state agent) update :active-skills conj "s")
+                                             (skills/deactivate-all-skills! agent)
+                                             (-> (expect (contains? ((:all reg)) "skill_tool")) (.toBe false))
+                                             (-> (expect (count (:active-skills @(:state agent)))) (.toBe 0)))))))
 
 (describe "skills:tool cleanup" (fn []
                                   (afterEach (fn [] (reset! skills/activation-counts {}) nil))

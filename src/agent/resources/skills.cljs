@@ -398,6 +398,19 @@
                (update :skill-tools dissoc name)
                (update :messages (fn [ms] (vec (remove #(= (:skill %) name) ms))))))))
 
+(defn deactivate-all-skills!
+  "End every active skill, properly — each one's tools unregistered.
+
+   The `:messages-cleared` reducer wipes the skill bookkeeping, so a `/clear`
+   that did not come through here left the tools a skill had registered live in
+   the registry with the record needed to remove them already gone. Worse, a
+   later re-activation would then store the stale object as the \"original\" to
+   restore, so the tool could never be removed at all."
+  [agent]
+  (doseq [n (vec (:active-skills @(:state agent)))]
+    (deactivate-skill n agent))
+  nil)
+
 ;;; ─── The `skill` tool ──────────────────────────────────────────
 
 (defn model-invocable

@@ -6,6 +6,7 @@
             ["node:os" :as os]
             [clojure.string :as str]
             [agent.tool-metadata :as tool-metadata]
+            [agent.state :as state]
             [agent.token-estimation :as te]
             [agent.debug :as d]
             [agent.model-info :as model-info]
@@ -316,10 +317,18 @@ with every section below present.
   [state-atom summary-text kept]
   (when state-atom
     (let [msgs (compacted-messages summary-text kept)]
-      (swap! state-atom assoc
-             :messages msgs
-             ;; Where the next "30 new messages" is measured from.
-             :compacted-at-count (count msgs)))
+      (swap! state-atom
+             (fn [st]
+               ;; A skill's instructions live in a `:skill`-tagged message, so
+               ;; compaction can drop them. Without this the skill stayed
+               ;; "active" with its allowed-tools grant still lifting permission
+               ;; prompts, and the `skill` tool went on reporting its
+               ;; instructions as being in context.
+               (state/prune-skill-state
+                (assoc st
+                       :messages msgs
+                       ;; Where the next "30 new messages" is measured from.
+                       :compacted-at-count (count msgs))))))
     true))
 
 (def ^:private min-new-summary-chars

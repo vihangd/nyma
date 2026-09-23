@@ -250,18 +250,31 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; cloned repo must not be able to pre-approve tools or run code just
         ;; because you opened it — and activate-skill reads `:scope` rather
         ;; than pattern-matching a string meant for humans.
+        ;;
+        ;; Every root is visited once, by resolved path. Run nyma from your home
+        ;; directory and the project roots ARE the global roots; because the
+        ;; project tier merges last, every one of the user's own skills was
+        ;; stamped `:project` and then quietly stripped of its allowed-tools,
+        ;; refused its tools.*, and denied trigger activation. Keeping the FIRST
+        ;; visit means the global, trusted reading wins that tie.
+        seen      (atom #{})
         from-dir  (fn [d source scope]
-                    (when-let [m (skills/discover-skills d source)]
-                      (->> m
-                           (map (fn [[k v]] [k (assoc v :source source :scope scope)]))
-                           (into {}))))
-        ;; Lowest → highest precedence:
+                    (let [k (try (fs/realpathSync d)
+                                 (catch :default _e (path/resolve d)))]
+                      (when-not (contains? @seen k)
+                        (swap! seen conj k)
+                        (when-let [m (skills/discover-skills d source)]
+                          (->> m
+                               (map (fn [[k v]] [k (assoc v :source source :scope scope)]))
+                               (into {}))))))
+        ;; Lowest → highest precedence. Evaluation order matters now that
+        ;; `from-dir` is stateful, so these stay separate bindings.
         global-cv (->> cross-vendor-skill-roots
-                       (map #(from-dir (resolve home-dir %) (str "global:" %) :global))
+                       (mapv #(from-dir (resolve home-dir %) (str "global:" %) :global))
                        (reduce merge {}))
         global-nyma (or (from-dir (resolve home-dir ".nyma/skills") "global:.nyma/skills" :global) {})
         project-cv (->> cross-vendor-skill-roots
-                        (map #(from-dir (resolve cwd %) (str "project:" %) :project))
+                        (mapv #(from-dir (resolve cwd %) (str "project:" %) :project))
                         (reduce merge {}))
         project-nyma (or (from-dir (resolve cwd ".nyma/skills") "project:.nyma/skills" :project) {})]
     (merge global-cv global-nyma project-cv project-nyma)))

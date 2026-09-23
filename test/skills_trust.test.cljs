@@ -76,6 +76,29 @@
                                      (-> (expect (:scope (get all "p-nyma"))) (.toBe :project))
                                      (-> (expect (:source (get all "p-cv"))) (.toBe "project:.cursor/skills"))))))
 
+                           (it "running from the home directory does not demote your own skills"
+                               (fn []
+          ;; The project roots ARE the global roots when cwd is home, and the
+          ;; project tier merges last, so every one of the user's own skills was
+          ;; stamped :project and then stripped of its allowed-tools, refused
+          ;; its tools.*, and denied trigger activation.
+                                 (let [root (tmp-root)]
+                                   (write-skill! root ".nyma/skills" "mine" "name: mine\ndescription: d" "b")
+                                   (write-skill! root ".claude/skills" "cv" "name: cv\ndescription: d" "b")
+                                   (let [all (discover-all-skills root root)]
+                                     (-> (expect (:scope (get all "mine"))) (.toBe :global))
+                                     (-> (expect (:scope (get all "cv"))) (.toBe :global))))))
+
+                           (it "a genuine project skill is still project-scoped"
+                               (fn []
+                                 (let [root (tmp-root)
+                                       cwd  (path/join root "repo")]
+                                   (write-skill! root ".nyma/skills" "mine" "name: mine\ndescription: d" "b")
+                                   (write-skill! cwd  ".nyma/skills" "theirs" "name: theirs\ndescription: d" "b")
+                                   (let [all (discover-all-skills root cwd)]
+                                     (-> (expect (:scope (get all "mine"))) (.toBe :global))
+                                     (-> (expect (:scope (get all "theirs"))) (.toBe :project))))))
+
   ;; ── shadowing ───────────────────────────────────────────────
 
                            (it "a project skill cannot take a global skill's name"

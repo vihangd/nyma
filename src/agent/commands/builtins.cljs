@@ -675,6 +675,7 @@
     ((:switch-file sm) file-path)
     (swap! (:state agent) assoc :replaying-session? true)
     (try
+      (skills/deactivate-all-skills! agent)
       ((:dispatch! (:store agent)) :messages-cleared {})
       (doseq [msg (session->seed-messages ((:build-context sm)))]
         ((:dispatch! (:store agent)) :message-added {:message msg}))
@@ -731,7 +732,8 @@
           {:group       :session
            :description "Reset the context in THIS session file — the transcript and the model's context, nothing on disk"
            :handler (fn [_args ctx]
-                      ((:dispatch! (:store agent)) :messages-cleared {})
+                      (skills/deactivate-all-skills! agent)
+      ((:dispatch! (:store agent)) :messages-cleared {})
                       ((:emit (:events agent)) "session_clear" {})
                       (notify ctx "Messages cleared"))}
 
@@ -870,7 +872,8 @@
           {:group       :session
            :description "Start a FRESH session file — the old one stays on disk and is resumable"
            :handler (fn [_args ctx]
-                      ((:dispatch! (:store agent)) :messages-cleared {})
+                      (skills/deactivate-all-skills! agent)
+      ((:dispatch! (:store agent)) :messages-cleared {})
                       ((:emit (:events agent)) "session_start" {:reason "new"})
                       (notify ctx "New session started"))}
 

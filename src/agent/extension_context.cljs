@@ -121,6 +121,14 @@
 
     (aset base "newSession"
           (fn [_opts]
+            ;; Release the tools any active skill registered before the
+            ;; reducer wipes the record of them. Done inline rather than via
+            ;; resources.skills, which reaches this namespace through
+            ;; agent.extensions and would cycle.
+            (when-let [unregister (:unregister (:tool-registry agent))]
+              (doseq [[_ tools] (:skill-tools @(:state agent))
+                      t         tools]
+                (try (unregister t) (catch :default _e nil))))
             ((:dispatch! (:store agent)) :messages-cleared {})
             nil))
 

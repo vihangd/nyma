@@ -51,6 +51,27 @@
      :swap  (fn [f] (swap! state f))
      :reset (fn [v] (reset! state v))}))
 
+(defn prune-skill-state
+  "Drop the bookkeeping for any skill whose injected message is no longer in
+   `:messages`.
+
+   A skill's instructions live in a `:skill`-tagged message, and its
+   `allowed-tools` grant lives in `:skill-allowed-tools`, which the permission
+   gate reads. Compaction and pruning replace the message list wholesale, so
+   the message could vanish while the skill stayed \"active\" — its grant still
+   downgrading a permission ask to an allow, and the `skill` tool still
+   answering \"already active; its instructions are in context\" when they were
+   not. Pure; the tool registry is cleaned up by the agent-aware callers."
+  [state]
+  (let [present (set (keep :skill (:messages state)))
+        gone    (remove present (or (:active-skills state) #{}))]
+    (if (empty? gone)
+      state
+      (-> state
+          (update :active-skills (fn [a] (set (filter present (or a #{})))))
+          (update :skill-allowed-tools (fn [m] (apply dissoc (or m {}) gone)))
+          (update :skill-tools (fn [m] (apply dissoc (or m {}) gone)))))))
+
 (def core-reducers
   "Default reducers for agent state transitions."
   {:message-added    (fn [state data] (update state :messages conj (:message data)))
@@ -62,7 +83,9 @@
                                               :skill-tools {}))
    ;; Wholesale replacement (context relief pruning). Goes through the store
    ;; so subscribers see it, instead of a raw swap! on the shared atom.
-   :messages-replaced (fn [state data] (assoc state :messages (vec (:messages data))))
+   :messages-replaced (fn [state data]
+                        (prune-skill-state
+                         (assoc state :messages (vec (:messages data)))))
    :tools-changed    (fn [state data] (assoc state :active-tools (:active-tools data)))
    :model-changed    (fn [state data] (assoc state :model (:model data)))
    ;; Cache tokens are accumulated alongside the rest because they are the

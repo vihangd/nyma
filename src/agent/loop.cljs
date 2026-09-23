@@ -420,9 +420,18 @@
               ;; every replacement hook has had its say, so it describes the
               ;; request that actually goes out. The provider's reported input
               ;; tokens minus this is what a gateway injected on top.
+              ;;
+              ;; TOOL SCHEMAS count: they are part of every request and can run
+              ;; to thousands of tokens, so leaving them out made the residual
+              ;; look like injection when it was our own payload. Functions do
+              ;; not survive JSON, which is what we want — this weighs the
+              ;; descriptions and input schemas that actually go on the wire.
               _content-est    (swap! state assoc :last-content-estimate
                                      (+ (te/estimate-tokens effective-prompt)
-                                        (te/estimate-messages-tokens messages)))
+                                        (te/estimate-messages-tokens messages)
+                                        (te/estimate-tokens
+                                         (try (js/JSON.stringify (clj->js tools))
+                                              (catch :default _e "")))))
 
               st-config #js {:model           active-model
                              :system          effective-prompt
@@ -701,8 +710,17 @@
                               ;; rates and ids are its own"; first-party providers
                               ;; are left alone, so nothing they report can change
                               ;; how we budget for them.
-                              (when (contains? @pricing/unpriced-providers
-                                               (str (aget (:config agent) "active-provider-name")))
+                              ;;
+                              ;; SINGLE-STEP RUNS ONLY. `usage` here is
+                              ;; `totalUsage`, the sum across every step of the
+                              ;; run, while the estimate above describes the FIRST
+                              ;; request. Comparing them on a five-step tool turn
+                              ;; reported about five times the content as
+                              ;; injection. A one-step turn is the only one where
+                              ;; both halves describe the same request.
+                              (when (and (= 1 @steps-this-run)
+                                         (contains? @pricing/unpriced-providers
+                                                    (str (aget (:config agent) "active-provider-name"))))
                                 ;; Same key the lookup uses, or the two halves
                                 ;; never meet: `model-cost-key` is a pricing key,
                                 ;; `model-key` is the provider-qualified one.

@@ -44,13 +44,21 @@
         ;; residuals 4000 / 6000 / 5000
                                                   (-> (expect (te/overhead-for "relay/m")) (.toBe 5000))))
 
-                                            (it "ignores a turn where our estimate came out high"
+                                            (it "clamps a turn where our estimate came out high, and still counts it"
                                                 (fn []
-        ;; a non-positive residual says our estimator was off, not that the
-        ;; gateway injected nothing — averaging it in as zero would be a lie
+        ;; the content estimate is a heuristic and lands on both sides of the
+        ;; truth; keeping only the turns where it undershot could only ever
+        ;; drift the figure up
                                                   (te/record-overhead! "relay/m" 900 1000)
                                                   (te/record-overhead! "relay/m" 1000 1000)
-                                                  (-> (expect (get @te/observed-overhead "relay/m")) (.toBeUndefined))))
+                                                  (te/record-overhead! "relay/m" 3000 1000)
+        ;; residuals 0 / 0 / 2000
+                                                  (-> (expect (te/overhead-for "relay/m")) (.toBe 667))))
+
+                                            (it "a provider that injects nothing converges on nothing"
+                                                (fn []
+                                                  (dotimes [_ 5] (te/record-overhead! "clean/m" 1000 1000))
+                                                  (-> (expect (te/overhead-for "clean/m")) (.toBe 0))))
 
                                             (it "keys per provider-qualified model, so two relays do not blend"
                                                 (fn []
@@ -81,8 +89,9 @@
   "Activate kv-cache, then run `turns` of: annotate, then report a turn that
    served no cache read. Returns the final config so the caller can see whether
    annotation still happens."
-  [provider-name turns]
-  (let [agent  (create-agent {:model #js {:modelId "claude-sonnet-4-6"}
+  [provider-name turns & [model-id]]
+  (let [mid    (or model-id "claude-sonnet-4-6")
+        agent  (create-agent {:model #js {:modelId mid}
                               :system-prompt "s"})
         api    (create-extension-api agent)
         _d     (kv-cache/activate api)
@@ -92,10 +101,10 @@
     (loop [i 0 cfg nil]
       (if (>= i turns)
         cfg
-        (let [c (make-config "claude-sonnet-4-6")]
+        (let [c (make-config mid)]
           (js-await (emit-c "before_provider_request" c))
           (js-await (emit "after_provider_request"
-                          #js {:model (str provider-name "/claude-sonnet-4-6")
+                          #js {:model (str provider-name "/" mid)
                                :cachedTokens 0
                                :cacheWriteTokens 900
                                :inputTokens 1000
@@ -121,6 +130,17 @@
                                                         (.then (fn [cfg]
                                                                  (-> (expect (annotated? cfg)) (.toBe true))
                                                                  (-> (expect (:abandoned? (:kv-cache @shared/suite-stats))) (.toBeFalsy)))))))
+
+                                              (it "works for a relayed id that contains slashes of its own"
+                                                  (fn []
+            ;; "<provider>/<id>" where the id is itself "anthropic/claude-sonnet-5".
+            ;; Splitting on the LAST slash gave "claude-sonnet-5", which never
+            ;; matched the model the annotate side sees, so the warning fired and
+            ;; annotation carried on at full write cost.
+                                                    (reset! pricing/unpriced-providers #{"openlux"})
+                                                    (-> (drive "openlux" (+ 3 kv-cache/max-unserved) "anthropic/claude-sonnet-5")
+                                                        (.then (fn [cfg]
+                                                                 (-> (expect (annotated? cfg)) (.toBe false)))))))
 
                                               (it "records the write cost and the read ratio"
                                                   (fn []

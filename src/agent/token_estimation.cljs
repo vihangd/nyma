@@ -95,12 +95,16 @@
 
 (defn record-overhead!
   "Fold one turn's residual (what the provider billed minus what we sent) into
-   the running mean for `model-key`. A non-positive residual means our estimate
-   was high, which says nothing about injection, so it is ignored rather than
-   averaged in as zero."
+   the running mean for `model-key`.
+
+   A negative residual is clamped to zero and STILL averaged in. Dropping those
+   turns instead made the mean one-sided: our content estimate is a heuristic,
+   so it lands on both sides of the truth, and keeping only the turns where it
+   undershot could only ever drift the figure up. A provider that injects
+   nothing should converge on nothing."
   [model-key reported-input content-estimate]
-  (let [residual (- (or reported-input 0) (or content-estimate 0))]
-    (when (and (string? model-key) (pos? residual))
+  (let [residual (max 0 (- (or reported-input 0) (or content-estimate 0)))]
+    (when (and (string? model-key) (pos? (or reported-input 0)))
       (swap! observed-overhead update model-key
              (fn [m]
                (let [n    (inc (:samples (or m {:samples 0})))
