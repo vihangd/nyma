@@ -1,4 +1,5 @@
 (ns agent.commands.share
+  "Session export to Markdown and HTML."
   (:require [clojure.string :as str]))
 
 (defn- escape-html

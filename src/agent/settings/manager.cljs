@@ -1,6 +1,7 @@
 (ns agent.settings.manager
+  "Two-scope settings."
   (:require [agent.utils.home :as home]
-             ["node:path" :as path]
+            ["node:path" :as path]
             ["node:fs" :as fs]
             [agent.debug :as d]
             [agent.utils.validation :as v]
@@ -21,6 +22,11 @@
    ;; this stops the AI SDK loop mid-task; bump it for projects where
    ;; the agent legitimately needs more iterations.
    :max-steps      100
+   ;; When the step cap fires, spend ONE more tool-less call asking the model
+   ;; to report what it found or changed, instead of ending in silence. Not an
+   ;; auto-continue: the work stops, the user gets a summary. Subagent children
+   ;; inherit it, so a capped child returns a report rather than mid-work text.
+   :step-cap-report true
    ;; Session logs compress to about 13% of their size (0.82MB -> 0.11MB in 2ms,
    ;; measured), so an old sessions directory is mostly air. Off by default:
    ;; archive-after-days 0 means never, and any positive number compresses
@@ -87,9 +93,10 @@
    ;; Every :allowed-tools list below carries `retrieve_result` because every
    ;; one of them allows `read`, and any capped tool result can hand the model a
    ;; truncation handle. A role that allowed the tool but not the recall would
-   ;; leave the model holding an id it cannot spend. NOTE: a user :roles map
-   ;; REPLACES this one rather than merging, so a custom role that narrows tools
-   ;; has to carry `retrieve_result` itself.
+   ;; leave the model holding an id it cannot spend. `:roles` is a per-key
+   ;; section (`merge-policies`): a user who defines one custom role keeps
+   ;; every built-in below; a user role of the SAME name replaces that one
+   ;; role whole, so a custom `plan` still has to carry its own tool list.
    :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
                      :policy {"write" "ask" "exec" "ask" "network" "ask"}}
            :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
@@ -105,6 +112,10 @@
                      :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
            :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"
                      :allowed-tools ["read" "bash" "glob" "grep" "edit" "write" "retrieve_result"]}
+           ;; `lead` (delegation-only primary, `/role lead`) is NOT here on
+           ;; purpose: the model_roles extension owns it, prompt and all, in
+           ;; its `default-roles` — one place, like `escalate`. A copy here
+           ;; would shadow the extension's on merge and drift from its prompt.
            ;; --- Subagent roles (used by the `subagent` tool) ---
            ;; Read-only by default: the evidence boundary for coding agents
            ;; is single-threaded edits + isolated read-only exploration.
@@ -268,7 +279,7 @@
 
 ;; Maps whose KEYS are data (identifiers, ids) rather than config names.
 ;; Normalizing these corrupts them — see normalize-keys.
-(def ^:private data-keyed-maps #{"model-profiles" "model-routing"})
+(def ^:private data-keyed-maps #{"model-profiles" "model-routing" "projects"})
 
 (defn- normalize-values
   "Normalize the VALUES of a data-keyed map, leaving its keys untouched."
@@ -391,6 +402,76 @@
             {} (js/Object.keys js-settings))
     {}))
 
+;; ── Merge policy ─────────────────────────────────────────────
+;; Settings layer as defaults < global < project < overrides. A section not
+;; listed here is REPLACED whole by the last layer that has it (a project's
+;; `compaction` map is the compaction config). The sections here merge PER
+;; KEY across layers instead: a project that disables one extension must not
+;; re-enable everything the global file switched off, and a user who writes
+;; one custom role must not lose the twelve built-in ones — which is what the
+;; whole-section rule silently did to `:roles` until 2026-09-23. A user entry
+;; of the same key still replaces that entry whole (a custom `plan` carries its
+;; own tool list). Extension-declared defaults merge per section under all of
+;; this; see `:get`.
+(def per-key-sections [:extensions :roles])
+
+;; ── Settings-source pinning ──────────────────────────────────
+;; A checked-out repository's `.nyma/settings.json` is untrusted input: a
+;; malicious or merely careless project must not be able to widen what the
+;; agent may do on the machine that opened it. Keys that grant permission are
+;; honoured only from the user's own file (`~/.nyma/settings.json`) or the CLI;
+;; from a project file they are dropped with a warning. Narrowing (deny, ask)
+;; from a project is fine and kept. Same rule as Claude Code's settings-source
+;; pinning for sandbox and allowlists.
+(def ^:private widening-decisions #{"allow" "allow_always_project"})
+
+(defn strip-project-widening
+  "`project` settings with permission-widening entries removed. Returns
+   [stripped warnings]. Pure."
+  [project]
+  (if-not (map? project)
+    [project []]
+    (let [warns (atom [])
+          drop! (fn [what] (swap! warns conj what))
+          roles (:roles project)
+          roles* (when (map? roles)
+                   (into {}
+                         (map (fn [[rname cfg]]
+                                (if-not (map? cfg)
+                                  [rname cfg]
+                                  (let [scrub (fn [m label]
+                                                (when (map? m)
+                                                  (into {} (remove (fn [[k v]]
+                                                                     (when (contains? widening-decisions (str v))
+                                                                       (drop! (str "roles." (name rname) "." label "." (name k) " = " v))
+                                                                       true))
+                                                                   m))))
+                                        cfg (cond-> cfg
+                                              (:policy cfg)      (assoc :policy (scrub (:policy cfg) "policy"))
+                                              (:permissions cfg) (assoc :permissions (scrub (:permissions cfg) "permissions")))]
+                                    [rname cfg])))
+                              roles)))
+          perms (:permissions project)
+          perms* (when (and (map? perms) (contains? perms :allow))
+                   (drop! "permissions.allow")
+                   (dissoc perms :allow))
+          out (cond-> project
+                (contains? project :permission-mode)
+                (as-> p (do (drop! (str "permission-mode = " (:permission-mode p))) (dissoc p :permission-mode)))
+                roles* (assoc :roles roles*)
+                perms* (assoc :permissions perms*))]
+      [out @warns])))
+
+(defn- load-project-json
+  "`load-json` for the project file, with permission-widening keys stripped
+   and named in one warning."
+  [path]
+  (let [[stripped warns] (strip-project-widening (load-json path))]
+    (when (seq warns)
+      (d/warn "settings" (str path " may not widen permissions; ignored: " (str/join ", " warns)
+                             " — set these in ~/.nyma/settings.json or on the command line")))
+    stripped))
+
 (defn create-settings-manager
   "Two-scope settings: global + project. Project overrides global.
    Supports :reload to re-read files from disk without restarting.
@@ -402,26 +483,26 @@
    (let [global-path   (or global-path (path/join (home/dir) ".nyma" "settings.json"))
          project-path  (or project-path ".nyma/settings.json")
          global-settings  (atom (load-json global-path))
-         project-settings (atom (load-json project-path))
+         project-settings (atom (load-project-json project-path))
          overrides        (atom {})
          ;; Defaults declared by extension manifests, registered by the loader
-         ;; before activation. Merged PER SECTION under the user's values, so
-         ;; a user who sets one key of a section keeps the rest — unlike the
-         ;; top-level shallow merge, which `:roles` relies on being a REPLACE.
+         ;; before activation. Merged per section under the user's values
+         ;; (see `merge-policies`).
          ext-defaults     (atom {})]
 
      {:get (fn []
-             (let [merged (merge defaults
-                                 (or @global-settings {})
-                                 (or @project-settings {})
-                                 @overrides
-                                 ;; Per key: a project that disables one
-                                 ;; extension must not silently re-enable
-                                 ;; everything the global file switched off.
-                                 {:extensions (merge {}
-                                                     (:extensions @global-settings)
-                                                     (:extensions @project-settings)
-                                                     (:extensions @overrides))})]
+             (let [layers [defaults
+                           (or @global-settings {})
+                           (or @project-settings {})
+                           @overrides]
+                   merged (apply merge layers)
+                   ;; Sections whose ENTRIES merge across layers instead of the
+                   ;; whole section being replaced by the last layer that has it.
+                   merged (reduce (fn [m k] (assoc m k (apply merge {} (map #(get % k) layers))))
+                                  merged
+                                  per-key-sections)]
+               ;; Extension-declared defaults sit UNDER the user's values, per
+               ;; section, so setting one key keeps the rest.
                (reduce (fn [m k] (assoc m k (merge (get @ext-defaults k) (get m k))))
                        merged
                        (keys @ext-defaults))))
@@ -449,7 +530,7 @@
 
       :reload (fn []
                 (reset! global-settings (load-json global-path))
-                (reset! project-settings (load-json project-path)))
+                (reset! project-settings (load-project-json project-path)))
 
       ;; The in-memory map follows the file, so `:get` answers with what was
       ;; just written instead of waiting for a restart or `:reload`.
@@ -464,33 +545,38 @@
                         (save-json project-path m)))
 
       :tool-allowed? (fn [tool-name]
-                      ;; Union of project + global allow-lists.
-                      ;; Settings are plain JS objects from JSON.parse.
-                       (let [js-allow (fn [s]
-                                        (when s
-                                          (let [perms (.-permissions s)]
-                                            (when perms
-                                              (.-allow perms)))))
-                             global-allow  (or (js-allow @global-settings) #js [])
-                             project-allow (or (js-allow @project-settings) #js [])
+                      ;; Union of the user's global allow-list and the user's
+                      ;; per-PROJECT allow-list — both in ~/.nyma/settings.json.
+                      ;; The project file's own `permissions.allow` is pinned
+                      ;; out (`strip-project-widening`): a checked-out repo must
+                      ;; not be able to pre-approve its own shell.
+                       (let [gs            @global-settings
+                             global-allow  (or (some-> gs .-permissions .-allow) #js [])
+                             project-allow (or (some-> gs .-permissions .-projects (aget (js/process.cwd)) .-allow) #js [])
                              all-allowed   (into #{} (concat (js/Array.from global-allow)
                                                              (js/Array.from project-allow)))]
                          (contains? all-allowed tool-name)))
 
       :append-allow-tool! (fn [tool-name]
-                           ;; Add tool-name to project permissions.allow (idempotent).
-                           ;; Settings are plain JS objects; build/merge without js->clj.
-                            (let [ps        @project-settings
-                                  perms     (when ps (.-permissions ps))
-                                  current   (if (and perms (.-allow perms))
-                                              (js/Array.from (.-allow perms))
-                                              [])
-                                  as-set    (into #{} current)]
-                              (when-not (contains? as-set tool-name)
-                                (let [new-allow  (clj->js (conj current tool-name))
-                                      new-perms  (doto (js/Object.assign #js {} (or perms #js {}))
-                                                   (aset "allow" new-allow))
-                                      updated    (doto (js/Object.assign #js {} (or ps #js {}))
-                                                   (aset "permissions" new-perms))]
-                                  (save-json project-path updated)
-                                  (reset! project-settings (load-json project-path))))))})))
+                           ;; "Allow always for this project": recorded in the
+                           ;; USER's file under permissions.projects.<cwd>.allow,
+                           ;; not in .nyma/settings.json — the project file cannot
+                           ;; grant, so a grant the user makes must live where a
+                           ;; checked-out repo cannot forge it. Idempotent.
+                            (let [gs       (or @global-settings #js {})
+                                  cwd      (js/process.cwd)
+                                  perms    (or (.-permissions gs) #js {})
+                                  projects (or (.-projects perms) #js {})
+                                  mine     (or (aget projects cwd) #js {})
+                                  current  (if (.-allow mine) (js/Array.from (.-allow mine)) [])]
+                              (when-not (contains? (into #{} current) tool-name)
+                                (let [mine*     (doto (js/Object.assign #js {} mine)
+                                                  (aset "allow" (clj->js (conj current tool-name))))
+                                      projects* (doto (js/Object.assign #js {} projects)
+                                                  (aset cwd mine*))
+                                      perms*    (doto (js/Object.assign #js {} perms)
+                                                  (aset "projects" projects*))
+                                      updated   (doto (js/Object.assign #js {} gs)
+                                                  (aset "permissions" perms*))]
+                                  (save-json global-path updated)
+                                  (reset! global-settings (load-json global-path))))))})))

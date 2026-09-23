@@ -81,7 +81,7 @@
     :manifest  #js {"namespace" "ast-tools" "description" "Tree-sitter–backed code search and editing tools" "capabilities" #js ["tools" "exec"]}}
    {:namespace "bash-suite"
     :module    ext-bash-suite
-    :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
+    :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed)" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "edit-diff" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
    {:namespace "budget"
     :module    ext-budget
     :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
@@ -120,7 +120,7 @@
     :manifest  #js {"namespace" "custom-provider-qwen-cli" "description" "Qwen models via local CLI provider" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-relay"
     :module    ext-custom-provider-relay
-    :manifest  #js {"namespace" "custom-provider-relay" "description" "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona)" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-relay" "description" "Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: openlux, openlux-claude, openlux-kiro, openlux-codex, velona); a New API billing `group` prices the catalogue from the relay's own sheet" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "desktop-notify"
     :module    ext-desktop-notify
     :manifest  #js {"namespace" "desktop-notify" "description" "System desktop notifications on turn completion" "capabilities" #js ["events" "flags"] "dependsOn" #js [] "settings" #js {"desktop-notify" #js {"enabled" true "threshold-ms" 3000}}}}
@@ -135,13 +135,13 @@
     :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"}}}
    {:namespace "mcp-client"
     :module    ext-mcp-client
-    :manifest  #js {"namespace" "mcp-client" "description" "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
+    :manifest  #js {"namespace" "mcp-client" "description" "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`, with a per-tool description budget (`mcp.max-description-length`)" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}
    {:namespace "memory"
     :module    ext-memory
     :manifest  #js {"namespace" "memory" "description" "Agent-maintained `MEMORY.md`, injected each run" "capabilities" #js ["events" "tools"] "dependsOn" #js [] "settings" #js {"memory" #js {"dir" "memory" "max-lines" 200}}}}
    {:namespace "model-roles"
     :module    ext-model-roles
-    :manifest  #js {"namespace" "model-roles" "description" "Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
+    :manifest  #js {"namespace" "model-roles" "description" "Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts" "tools"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
    {:namespace "openwiki"
     :module    ext-openwiki
     :manifest  #js {"namespace" "openwiki" "description" "AI-maintained, git-aware living documentation for the repo (off by default)" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js [] "settings" #js {"openwiki" #js {"enabled" false "dir" "openwiki" "sections" #js ["architecture" "workflows" "domain" "operations" "testing"]}}}}

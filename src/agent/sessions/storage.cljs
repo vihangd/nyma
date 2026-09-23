@@ -1,4 +1,5 @@
 (ns agent.sessions.storage
+  "SQLite-backed session entry store with usage tracking."
   (:require ["bun:sqlite" :refer [Database]]))
 
 (def ^:private schema-sql

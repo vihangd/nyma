@@ -51,6 +51,15 @@
    (create-settings-manager {:project-path (tmp-project-path)
                              :global-path  (tmp-global-path)})))
 
+(defn- read-global-json []
+  (when (fs/existsSync (tmp-global-path))
+    (js/JSON.parse (fs/readFileSync (tmp-global-path) "utf8"))))
+
+(defn- project-allow
+  "The per-project allow list the user's file holds for THIS cwd."
+  [data]
+  (some-> data .-permissions .-projects (aget (js/process.cwd)) .-allow js/Array.from vec))
+
 (defn- read-project-json []
   (when (fs/existsSync (tmp-project-path))
     (js/JSON.parse (fs/readFileSync (tmp-project-path) "utf8"))))
@@ -64,47 +73,51 @@
 
 (describe "append-allow-tool!"
           (fn []
-            (it "writes tool name to project permissions.allow"
+            ;; "Allow always for this project" is the USER's grant, so it lives
+            ;; in the user's file keyed by project path — never in the project
+            ;; file, which a checked-out repo controls and which is pinned out.
+            (it "writes tool name to the user's permissions.projects.<cwd>.allow"
                 (fn []
                   (let [mgr (make-manager)]
                     ((:append-allow-tool! mgr) "bash")
-                    (let [data (read-project-json)]
+                    (let [data (read-global-json)]
                       (-> (expect (some? data)) (.toBe true))
-                      (-> (expect (some #(= % "bash")
-                                        (js/Array.from (.. data -permissions -allow))))
-                          (.toBe true))))))
+                      (-> (expect (some #(= % "bash") (project-allow data))) (.toBe true))
+                      ;; and nothing landed in the project file
+                      (-> (expect (some-> (read-project-json) .-permissions)) (.toBeFalsy))))))
 
             (it "is idempotent — calling twice does not duplicate"
                 (fn []
                   (let [mgr (make-manager)]
                     ((:append-allow-tool! mgr) "bash")
                     ((:append-allow-tool! mgr) "bash")
-                    (let [data  (read-project-json)
-                          allow (vec (js/Array.from (.. data -permissions -allow)))]
+                    (let [allow (project-allow (read-global-json))]
                       (-> (expect (count (filter #(= % "bash") allow))) (.toBe 1))))))
 
-            (it "preserves existing allow entries"
+            (it "preserves existing per-project allow entries and the global list"
                 (fn []
-                  (let [mgr (make-manager {:permissions {:allow ["read"]}})]
+                  (let [mgr (make-manager nil {:permissions {:allow ["ls"]
+                                                             :projects {(js/process.cwd) {:allow ["read"]}}}})]
                     ((:append-allow-tool! mgr) "write")
-                    (let [data  (read-project-json)
-                          allow (vec (js/Array.from (.. data -permissions -allow)))]
+                    (let [data  (read-global-json)
+                          allow (project-allow data)]
                       (-> (expect (some #(= % "read") allow)) (.toBe true))
-                      (-> (expect (some #(= % "write") allow)) (.toBe true))))))
+                      (-> (expect (some #(= % "write") allow)) (.toBe true))
+                      (-> (expect (vec (js/Array.from (.. data -permissions -allow)))) (.toEqual (clj->js ["ls"])))))))
 
-            (it "creates settings file when none exists"
+            (it "creates the user's settings file when none exists"
                 (fn []
                   (let [mgr (make-manager)]
-                    (-> (expect (fs/existsSync (tmp-project-path))) (.toBe false))
+                    (-> (expect (fs/existsSync (tmp-global-path))) (.toBe false))
                     ((:append-allow-tool! mgr) "bash")
-                    (-> (expect (fs/existsSync (tmp-project-path))) (.toBe true)))))
+                    (-> (expect (fs/existsSync (tmp-global-path))) (.toBe true)))))
 
-            (it "preserves other project settings when appending"
+            (it "leaves the project file alone and keeps other user settings"
                 (fn []
-                  (let [mgr (make-manager {:model "claude-opus-4-20250514"})]
+                  (let [mgr (make-manager {:model "claude-opus-4-20250514"} {:thinking "high"})]
                     ((:append-allow-tool! mgr) "bash")
-                    (let [data (read-project-json)]
-                      (-> (expect (.-model data)) (.toBe "claude-opus-4-20250514"))))))))
+                    (-> (expect (.-model (read-project-json))) (.toBe "claude-opus-4-20250514"))
+                    (-> (expect (.-thinking (read-global-json))) (.toBe "high")))))))
 
 ;;; ─── tool-allowed? ───────────────────────────────────────────
 
@@ -115,9 +128,15 @@
                   (let [mgr (make-manager)]
                     (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe false)))))
 
-            (it "returns true when tool is in project allow-list"
+            (it "ignores a project file's allow-list (pinned: a repo cannot pre-approve itself)"
                 (fn []
                   (let [mgr (make-manager {:permissions {:allow ["bash" "write"]}})]
+                    (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe false))
+                    (-> (expect ((:tool-allowed? mgr) "write")) (.toBe false)))))
+
+            (it "returns true when tool is in the user's per-project allow-list"
+                (fn []
+                  (let [mgr (make-manager nil {:permissions {:projects {(js/process.cwd) {:allow ["bash" "write"]}}}})]
                     (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe true))
                     (-> (expect ((:tool-allowed? mgr) "write")) (.toBe true))
                     (-> (expect ((:tool-allowed? mgr) "read")) (.toBe false)))))
@@ -128,10 +147,11 @@
                     (-> (expect ((:tool-allowed? mgr) "read")) (.toBe true))
                     (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe false)))))
 
-            (it "unions project and global allow-lists"
+            (it "unions the per-project and global allow-lists"
                 (fn []
-                  (let [mgr (make-manager {:permissions {:allow ["bash"]}}
-                                          {:permissions {:allow ["read"]}})]
+                  (let [mgr (make-manager nil
+                                          {:permissions {:allow ["read"]
+                                                         :projects {(js/process.cwd) {:allow ["bash"]}}}})]
                     (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe true))
                     (-> (expect ((:tool-allowed? mgr) "read")) (.toBe true))
                     (-> (expect ((:tool-allowed? mgr) "write")) (.toBe false)))))
@@ -153,7 +173,7 @@
                         perm-fired   (atom false)
                         _            ((:on events) "permission_request"
                                                    (fn [_] (reset! perm-fired true)))
-                        mgr          (make-manager {:permissions {:allow ["bash"]}})
+                        mgr          (make-manager nil {:permissions {:projects {(js/process.cwd) {:allow ["bash"]}}}})
                         pipeline     (create-pipeline events nil nil mgr)
                         tool         #js {:execute (fn [_] "ok")}]
                     (-> ((:execute pipeline) "bash" tool {})
@@ -192,12 +212,10 @@
                                  (-> (expect (:cancelled ctx)) (.toBeFalsy))
                        ;; Tool should be in allow-list now
                                  (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe true))
-                       ;; Settings file should exist with the tool listed
-                                 (let [data (read-project-json)]
+                       ;; The user's file should hold it under this project
+                                 (let [data (read-global-json)]
                                    (-> (expect (some? data)) (.toBe true))
-                                   (-> (expect (some #(= % "bash")
-                                                     (js/Array.from (.. data -permissions -allow))))
-                                       (.toBe true)))))))))
+                                   (-> (expect (some #(= % "bash") (project-allow data))) (.toBe true)))))))))
 
             (it "second call skips prompt because tool is now pre-allowed"
                 (fn []

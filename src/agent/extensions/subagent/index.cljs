@@ -15,7 +15,9 @@
      - child gets its own event bus  → parent extensions never fire on it
      - child :session stays nil       → no writes to parent JSONL/SQLite
      - only the final summary returns → child tool calls stay in the child"
-  (:require [agent.core :refer [create-agent]]
+  (:require [agent.utils.data :as data]
+            [agent.schema :as schema]
+            [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions.subagent.concurrency :as conc]
@@ -69,7 +71,11 @@ intermediate tool calls, so put everything that matters in the summary.")
    {keyword-or-string -> role-config}."
   [settings-mgr]
   (let [settings ((:get settings-mgr))
-        roles    (or (:roles settings) {})
+        ;; settings.roles also holds the PRIMARY's roles. The model-less ones
+        ;; — permission modes, and `lead`, whose whole job is calling this
+        ;; tool — cannot be run as a child, so they must not be offered as one.
+        roles    (into {} (filter (fn [[_ cfg]] (or (:model cfg) (get cfg "model")))
+                                  (or (:roles settings) {})))
         md       (agents-md/load-agents)]
     (merge default-subagent-roles roles md)))
 
@@ -80,11 +86,10 @@ intermediate tool calls, so put everything that matters in the summary.")
   (or (get agents nm) (get agents (str nm))))
 
 (defn- cfg-get
-  "Read a key from a role-config, tolerating CLJS keyword (== string in
-   Squint) and JS-object string keys. `kw` is the keyword, `kstr` the
-   plain string form (avoid (name kw) — bare `name` is undefined here)."
-  [cfg kw kstr]
-  (or (get cfg kw) (get cfg kstr)))
+  "Read a key from a role-config in any spelling (`data/conf-get`). The
+   second argument is kept for the call sites; it is the same key."
+  [cfg kw _kstr]
+  (data/conf-get cfg kw))
 
 (defn final-text
   "Extract the last ASSISTANT message's text from a child's messages.
@@ -185,11 +190,39 @@ intermediate tool calls, so put everything that matters in the summary.")
   [base agent-name task model-override]
   [(js-await (run-single base agent-name task model-override))])
 
+(defn steps-arg
+  "A caller-supplied step budget as a positive integer, else nil (the
+   role default applies). Borrowed from apprentice's `turns` argument: the
+   parent sizes the budget to the task, and a child out of steps still
+   reports what it has (loop step-cap-report)."
+  [v & [ceiling]]
+  (let [n (js/Number v)]
+    (when (and (js/Number.isFinite n) (pos? n))
+      (let [n (js/Math.floor n)]
+        (if (and (number? ceiling) (pos? ceiling)) (min n ceiling) n)))))
+
+(defn steps-ceiling
+  "The most steps a caller may hand a child: `subagent.max-steps` if set, else
+   the run's own `max-steps` (default 100). The value comes from the model,
+   so it is bounded by something the USER set — a hallucinated or injected
+   `steps: 100000` must not buy a child a budget the parent never had."
+  [settings]
+  (let [sub (:subagent settings)]
+    (or (:max-steps sub) (and sub (get sub "max-steps"))
+        (:max-steps settings) 100)))
+
+(defn- with-item-steps
+  "A per-item `steps` overrides the call-level budget already in `base`."
+  [base t]
+  (if-let [n (steps-arg (or (.-steps t) (get t "steps")) (:steps-ceiling base))]
+    (assoc base :max-steps n)
+    base))
+
 (defn ^:async run-parallel-item
   "Run one fan-out task. Top-level (Squint: no inline async fns)."
   [base t _i]
   (js-await (run-isolated-agent
-             (assoc base
+             (assoc (with-item-steps base t)
                     :agent-name (or (.-agent t) (get t "agent"))
                     :task (or (.-task t) (get t "task"))))))
 
@@ -215,7 +248,7 @@ intermediate tool calls, so put everything that matters in the summary.")
           raw  (or (.-task step) (get step "task"))
           t    (str/replace (str raw) "{previous}" prev)
           r    (js-await (run-isolated-agent
-                          (assoc base :agent-name a :task t)))]
+                          (assoc (with-item-steps base step) :agent-name a :task t)))]
       (if (:ok r)
         (js-await (run-chain-step base items (inc i) (:text r) (conj acc r)))
         (conj acc r)))))
@@ -261,25 +294,32 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; Tool
 ;; ---------------------------------------------------------------------------
 
+(def ^:private task-item
+  "One {agent, task, steps?} entry of a fan-out or chain."
+  {:type "object"
+   :properties {:agent {:type "string"} :task {:type "string"} :steps {:type "integer"}}})
+
+(def tool-fields
+  "The subagent tool's parameters as `agent.schema` data (all optional: the
+   mode is picked by which keys are present)."
+  {:agent  [:string {:optional true :doc "Subagent role name for single mode (e.g. scout, planner, reviewer, researcher)."}]
+   :task   [:string {:optional true :doc "Task to delegate (single mode)."}]
+   :tasks  [:array {:optional true :items :object
+                    :doc "Parallel fan-out: array of {agent, task, steps?}. Use for INDEPENDENT read-only work."}]
+   :chain  [:array {:optional true :items :object
+                    :doc "Sequential: array of {agent, task, steps?}; '{previous}' in a task is replaced by the prior step's output."}]
+   :steps  [:integer {:optional true
+                      :doc "Tool-call budget per subagent (default 20). Size it to the task: 3-4 for a lookup or a question about one file, 8-12 for a change spanning several. A subagent out of steps still reports what it has."}]
+   :action [:enum ["run" "status"] {:optional true :doc "run (default) or status (list background jobs)."}]
+   :async  [:boolean {:optional true :doc "Run in background; result is delivered as a follow-up message."}]
+   :model  [:string {:optional true :doc "Optional model id override (single mode)."}]})
+
 (def ^:private tool-parameters
-  (clj->js
-   {:type "object"
-    :properties
-    {:agent  {:type "string" :description "Subagent role name for single mode (e.g. scout, planner, reviewer, researcher)."}
-     :task   {:type "string" :description "Task to delegate (single mode)."}
-     :tasks  {:type "array"
-              :description "Parallel fan-out: array of {agent, task}. Use for INDEPENDENT read-only work."
-              :items {:type "object"
-                      :properties {:agent {:type "string"} :task {:type "string"}}}}
-     :chain  {:type "array"
-              :description "Sequential: array of {agent, task}; '{previous}' in a task is replaced by the prior step's output."
-              :items {:type "object"
-                      :properties {:agent {:type "string"} :task {:type "string"}}}}
-     :action {:type "string" :enum ["run" "status"]
-              :description "run (default) or status (list background jobs)."}
-     :async  {:type "boolean" :description "Run in background; result is delivered as a follow-up message."}
-     :model  {:type "string" :description "Optional model id override (single mode)."}}
-    :required []}))
+  ;; The item shape of tasks/chain is richer than the data form says
+  ;; (nested object properties), so it is patched in after rendering.
+  (clj->js (-> (schema/->json-schema tool-fields)
+               (assoc-in [:properties "tasks" :items] task-item)
+               (assoc-in [:properties "chain" :items] task-item))))
 
 (defn ^:async tool-execute [api args]
   ;; action=status is a pure in-memory read — short-circuit BEFORE touching
@@ -289,7 +329,11 @@ intermediate tool calls, so put everything that matters in the summary.")
     (jobs-status)
     (let [settings-mgr (create-settings-manager)
           agents       (all-agents settings-mgr)
-          base         {:api api :settings-mgr settings-mgr :agents agents}
+          ceiling      (steps-ceiling ((:get settings-mgr)))
+          base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
+                                :steps-ceiling ceiling}
+                         (steps-arg (.-steps args) ceiling)
+                         (assoc :max-steps (steps-arg (.-steps args) ceiling)))
           async?       (let [s    ((:get settings-mgr))
                              sub  (:subagent s)
                              dflt (boolean (or (:async-by-default sub)
@@ -297,28 +341,28 @@ intermediate tool calls, so put everything that matters in the summary.")
                          (if (nil? (.-async args)) dflt (boolean (.-async args))))]
       (cond
       ;; parallel fan-out
-      (.-tasks args)
-      (let [thunk (fn [] (run-parallel base (.-tasks args)))]
-        (if async?
-          (js-await (start-async-job api thunk "parallel"))
-          (format-results (js-await (thunk)))))
+        (.-tasks args)
+        (let [thunk (fn [] (run-parallel base (.-tasks args)))]
+          (if async?
+            (js-await (start-async-job api thunk "parallel"))
+            (format-results (js-await (thunk)))))
 
       ;; sequential chain
-      (.-chain args)
-      (let [thunk (fn [] (run-chain base (.-chain args)))]
-        (if async?
-          (js-await (start-async-job api thunk "chain"))
-          (format-results (js-await (thunk)))))
+        (.-chain args)
+        (let [thunk (fn [] (run-chain base (.-chain args)))]
+          (if async?
+            (js-await (start-async-job api thunk "chain"))
+            (format-results (js-await (thunk)))))
 
       ;; single
-      (and (.-agent args) (.-task args))
-      (let [thunk (fn [] (run-single-list base (.-agent args) (.-task args) (.-model args)))]
-        (if async?
-          (js-await (start-async-job api thunk (.-agent args)))
-          (format-results (js-await (thunk)))))
+        (and (.-agent args) (.-task args))
+        (let [thunk (fn [] (run-single-list base (.-agent args) (.-task args) (.-model args)))]
+          (if async?
+            (js-await (start-async-job api thunk (.-agent args)))
+            (format-results (js-await (thunk)))))
 
-      :else
-      "subagent: provide {agent, task}, or tasks:[...], or chain:[...], or action:\"status\"."))))
+        :else
+        "subagent: provide {agent, task}, or tasks:[...], or chain:[...], or action:\"status\"."))))
 
 ;; ---------------------------------------------------------------------------
 ;; /agents command
@@ -349,7 +393,13 @@ intermediate tool calls, so put everything that matters in the summary.")
              "Modes: single {agent, task}; parallel {tasks:[{agent,task}]} for INDEPENDENT "
              "read-only work; chain {chain:[{agent,task}]} ('{previous}' = prior output). "
              "Only the subagent's final summary returns; its intermediate tool calls stay "
-             "isolated. async:true runs in the background. action:\"status\" lists jobs.")
+             "isolated. A subagent starts with NO memory of this conversation and nothing "
+             "carries over between calls: make every task self-contained (absolute paths, "
+             "exactly what to find or change, any context it needs) and never refer back "
+             "to an earlier call. Ask for findings with file paths and line numbers, not "
+             "narration. Send independent tasks together, but never give two of them the "
+             "same file to edit. `steps` sizes each subagent's tool budget to the task. "
+             "async:true runs in the background. action:\"status\" lists jobs.")
         :parameters tool-parameters
         :execute (fn [args] (tool-execute api args))})
 

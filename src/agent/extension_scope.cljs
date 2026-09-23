@@ -1,4 +1,5 @@
 (ns agent.extension-scope
+  "Namespaced + capability-gated extension API."
   (:require [agent.debug :as d]
             [agent.permissions :refer [check]]
             [agent.extension-state :refer [create-state-api]]))
@@ -32,6 +33,57 @@
             (d/warn (str "[" (.-namespace scoped) "] dispose error: " (.-message e)))
             (catch :default _ nil)))))
     (reset! ds [])))
+
+;; ── The plain surface, as data ───────────────────────────────
+;; Methods that pass straight through to the base API behind one capability
+;; check. Everything that prefixes a name, records a disposer or wraps a
+;; handler stays hand-written below. Being data, this is what
+;; `test/scope_table.test.cljs` checks against the base API and the
+;; capability list — the seam where "scoped API forgot to forward a method"
+;; (roadmap §3b) used to live.
+(def passthrough-gates
+  "method → capability it needs."
+  {   :getActiveTools :tools
+   :getAllTools :tools
+   :getTool :tools
+   :setActiveTools :tools
+   :getCommands :commands
+   :sendMessage :messages
+   :sendUserMessage :messages
+   :removeMiddleware :middleware
+   :exec :exec
+   :spawn :spawn
+   :appendEntry :session
+   :setSessionName :session
+   :getSessionName :session
+   :getSessionFile :session
+   :unregisterStatusSegment :ui
+   :unregisterProvider :providers
+   :setModel :model
+   :getActiveModelSpec :model
+   :getThinkingLevel :model
+   :setThinkingLevel :model
+   :getTokenBudget :context
+   :unregisterCompactionStrategy :context
+   :resolveModel :model
+   :emitGlobal :events
+   :getState :state
+   :dispatch :state
+   :dispatchState :state})
+
+(def ungated-passthroughs
+  "Read-only utilities every extension gets."
+  [:getModelInfo :registerModelInfo :estimateTokens :getSettings :settings :getGlobalFlag])
+
+(defn- gated-passthroughs
+  "A JS object with every passthrough method installed."
+  [base-api capabilities]
+  (let [o #js {}]
+    (doseq [[m cap] passthrough-gates]
+      (aset o (name m) (gate capabilities cap (aget base-api (name m)))))
+    (doseq [m ungated-passthroughs]
+      (aset o (name m) (aget base-api (name m))))
+    o))
 
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.
@@ -101,7 +153,14 @@
                         (untrack! event safe)
                         (.off base-api event safe)))
         inter-bus   (.-events base-api)
-        scoped #js {:on               (gate capabilities :events safe-on)
+        ;; A listener name that already carries a namespace (`ns__event`) is
+        ;; another extension's event; a bare one is this extension's.
+        qualify     (fn [event]
+                      (let [e (str event)]
+                        (if (.includes e "__") e (prefix e))))
+        scoped (js/Object.assign
+                (gated-passthroughs base-api capabilities)
+                #js {:on               (gate capabilities :events safe-on)
                     :off              (gate capabilities :events safe-off)
                     ;; Tool management
                     :registerTool     (gate capabilities :tools
@@ -145,10 +204,7 @@
                                                 nil)))
                     :unoverrideTool   (gate capabilities :tools-override
                                             (fn [name] (.unregisterTool base-api name)))
-                    :getActiveTools   (gate capabilities :tools (.-getActiveTools base-api))
-                    :getAllTools       (gate capabilities :tools (.-getAllTools base-api))
-                    :getTool          (gate capabilities :tools (.-getTool base-api))
-                    :setActiveTools   (gate capabilities :tools (.-setActiveTools base-api))
+
                     ;; Commands
                     :registerCommand  (gate capabilities :commands
                                             (fn [name opts]
@@ -157,7 +213,7 @@
                                               nil))
                     :unregisterCommand (gate capabilities :commands
                                              (fn [name] (.unregisterCommand base-api (prefix name))))
-                    :getCommands      (gate capabilities :commands (.-getCommands base-api))
+
                     ;; Shortcuts (keys are not namespaced — pre-existing)
                     :registerShortcut (gate capabilities :shortcuts
                                             (fn [key handler opts]
@@ -170,8 +226,7 @@
                     :unregisterShortcut (gate capabilities :shortcuts
                                               (fn [key] (.unregisterShortcut base-api key)))
                     ;; Messaging
-                    :sendMessage      (gate capabilities :messages (.-sendMessage base-api))
-                    :sendUserMessage  (gate capabilities :messages (.-sendUserMessage base-api))
+
                     ;; Middleware — removable only by :name; an anonymous
                     ;; interceptor is unremovable by construction, say so once.
                     :addMiddleware    (gate capabilities :middleware
@@ -181,15 +236,11 @@
                                                 (track! (fn [] (.removeMiddleware base-api n)))
                                                 (d/warn (str "[" ns-str "] addMiddleware without :name — cannot be removed at unload")))
                                               nil))
-                    :removeMiddleware (gate capabilities :middleware (.-removeMiddleware base-api))
+
                     ;; Shell
-                    :exec             (gate capabilities :exec (.-exec base-api))
-                    :spawn            (gate capabilities :spawn (.-spawn base-api))
+
                     ;; Session
-                    :appendEntry      (gate capabilities :session (.-appendEntry base-api))
-                    :setSessionName   (gate capabilities :session (.-setSessionName base-api))
-                    :getSessionName   (gate capabilities :session (.-getSessionName base-api))
-                    :getSessionFile   (gate capabilities :session (.-getSessionFile base-api))
+
                     ;; Status line segments — extensions can contribute segments
                     ;; that appear in the status line above the editor.
                     ;; (ids are not namespaced — pre-existing)
@@ -198,45 +249,52 @@
                                                      (.registerStatusSegment base-api id cfg)
                                                      (track! (fn [] (.unregisterStatusSegment base-api id)))
                                                      nil))
-                    :unregisterStatusSegment (gate capabilities :ui (.-unregisterStatusSegment base-api))
+
                     ;; Provider management
                     :registerProvider   (gate capabilities :providers
                                               (fn [name cfg]
                                                 (.registerProvider base-api name cfg)
                                                 (track! (fn [] (.unregisterProvider base-api name)))
                                                 nil))
-                    :unregisterProvider (gate capabilities :providers (.-unregisterProvider base-api))
+
                     ;; Model/thinking control
-                    :setModel         (gate capabilities :model (.-setModel base-api))
-                    :getActiveModelSpec (gate capabilities :model (.-getActiveModelSpec base-api))
-                    :getThinkingLevel (gate capabilities :model (.-getThinkingLevel base-api))
-                    :setThinkingLevel (gate capabilities :model (.-setThinkingLevel base-api))
-                    ;; Inter-extension events (namespace-prefixed)
+
+                    ;; Inter-extension events. `emit` ALWAYS prefixes with the
+                    ;; emitter's own namespace, so an event names who sent it and
+                    ;; nobody can speak as another extension. `on`/`off` take
+                    ;; either a bare name (own namespace) or a qualified
+                    ;; `other-ns__event` to hear another extension. Until
+                    ;; 2026-09-23 all three prefixed with the CALLER's namespace,
+                    ;; so A's emit landed on `a__x` while B listened on `b__x` —
+                    ;; the bus could not deliver across extensions at all, and
+                    ;; nineteen `emitGlobal` sites grew as the workaround.
                     :events           (gate capabilities :events
                                             #js {:on   (fn [event handler & [priority]]
-                                                         (let [full (prefix event)]
+                                                         (let [full (qualify event)]
                                                            (.on inter-bus full handler priority)
                                                            (track! (fn [] (.off inter-bus full handler)) full handler)
                                                            nil))
                                                  :off  (fn [event handler]
-                                                         (let [full (prefix event)]
+                                                         (let [full (qualify event)]
                                                            (untrack! full handler)
                                                            (.off inter-bus full handler)))
                                                  :emit (fn [event data]
                                                          (.emit inter-bus (prefix event) data))})
+                    ;; Compaction strategy — recorded, so /reload takes it back.
+                    :registerCompactionStrategy (gate capabilities :context
+                                                      (fn [name cfg]
+                                                        (.registerCompactionStrategy base-api name cfg)
+                                                        (track! (fn [] (.unregisterCompactionStrategy base-api name)))
+                                                        nil))
                     ;; Context providers (gated)
-                    :getTokenBudget            (gate capabilities :context (.-getTokenBudget base-api))
+
                     ;; Model info & token estimation (ungated — read-only utilities)
-                    :getModelInfo      (.-getModelInfo base-api)
-                    :registerModelInfo (.-registerModelInfo base-api)
-                    :estimateTokens    (.-estimateTokens base-api)
-                    :resolveModel      (gate capabilities :model (.-resolveModel base-api))
+
                     ;; Settings access (ungated — read-only)
-                    :getSettings       (.-getSettings base-api)
-                    :settings          (.-settings base-api)
+
                     ;; Emit to main agent event bus (gated — lets extensions
                     ;; broadcast to other extensions that subscribed via api.on)
-                    :emitGlobal        (gate capabilities :events (.-emitGlobal base-api))
+
                     ;; Flags (namespace-prefixed)
                     :registerFlag     (gate capabilities :flags
                                             (fn [name config]
@@ -249,14 +307,11 @@
                                             (fn [name]
                                               (.getFlag base-api (prefix name))))
                     ;; Global flag reading (ungated — read-only, no namespace prefix)
-                    :getGlobalFlag    (.-getGlobalFlag base-api)
 
                     ;; Agent-state read / dispatch — gated on :state.
                     ;; Distinct from the per-extension persistent :state slot
                     ;; below: these touch the running agent's live state.
-                    :getState         (gate capabilities :state (.-getState base-api))
-                    :dispatch         (gate capabilities :state (.-dispatch base-api))
-                    :dispatchState    (gate capabilities :state (.-dispatchState base-api))
+
                     :onStateChange    (gate capabilities :state
                                             (fn [listener]
                                               (let [unsub (.onStateChange base-api listener)]
@@ -273,7 +328,7 @@
                                              :delete (fn [_] (throw (js/Error. "Extension missing capability: :state")))
                                              :keys   (fn [] (throw (js/Error. "Extension missing capability: :state")))
                                              :clear  (fn [] (throw (js/Error. "Extension missing capability: :state")))})
-                    :namespace        ns-str}]
+                    :namespace        ns-str})]
     ;; Define .ui as a GETTER so it reads the latest value from base-api.
     ;; base-api.ui is set by useEffect AFTER extensions activate — a static
     ;; snapshot would capture undefined/stale value.

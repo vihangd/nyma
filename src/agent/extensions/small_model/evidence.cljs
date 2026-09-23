@@ -110,7 +110,8 @@
         on-before-start
         (fn [_data _ctx]
           (when-let [block (evidence-block (:evidence @state))]
-            #js {:systemPromptAddition block}))]
+            ;; Grows as evidence is recorded: volatile.
+            #js {:volatile-additions #js [block]}))]
 
     ;; Register tools
     (doseq [[name td] tools]

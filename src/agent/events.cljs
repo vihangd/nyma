@@ -1,4 +1,5 @@
 (ns agent.events
+  "Typed event bus (sync + async)."
   (:require [agent.debug :as d]))
 
 (def pi-compat-event-types
@@ -11,85 +12,120 @@
   ["session_before_tree" "session_tree" "session_directory"
    "branch_summarized" "context"])
 
-(def core-event-types
-  "Event names nyma emits. The lint requires a producer for every one."
-  ["session_start" "session_end" "session_before_switch" "session_switch"
-   "session_before_fork" "session_shutdown"
+(def event-registry
+  "Every event nyma emits, in one table: name → {:kind :doc}. Kinds:
+     :emit     fire-and-forget, sync
+     :async    awaited (`emit-async`) — a post-turn boundary handlers may block
+     :collect  emit-collect: the handlers' RETURN is the point
+   `:wire? false` marks collect hooks a JSON line on stdout cannot answer, so
+   rpc mode does not advertise them (`wire-event-types`).
+
+   The lint requires a producer for every name here; the README's event
+   table and `docs/event-map.md` are generated from it (`bun run
+   gen:events-doc`), so a name with no `:doc` shows as \"—\" in both — the
+   nudge to write one."
+  [["session_start"         {:kind :emit :doc "Session attached (startup, /resume, /fork)"}]
+   ["session_end"           {:kind :emit :doc "Session closing"}]
+   ["session_before_switch" {:kind :emit :doc "About to switch to another session"}]
+   ["session_switch"        {:kind :emit :doc "Switched session"}]
+   ["session_before_fork"   {:kind :emit :doc "About to fork the session"}]
+   ["session_shutdown"      {:kind :emit :doc "Process shutting down (SIGINT, /exit)"}]
    ;; A request to leave, not a report that it happened: `/exit` emits it and
    ;; cli.cljs runs the async shutdown (the same one SIGINT takes). `/exit`
    ;; used to call process.exit itself, which killed MCP and LSP mid-socket.
-   "exit"
+   ["exit"                  {:kind :emit :doc "A request to leave: cli.cljs runs the same async shutdown SIGINT takes"}]
    ;; Everything loaded, session attached, model resolved — the one point
    ;; where ui.available is guaranteed true. Fires at startup AND after
    ;; /reload, so anything set up on it comes back after a reload.
-   "session_ready"
-   ;; Stats snapshot just before session_end (desktop_notify reads it).
-   "session_end_summary"
-   "agent_start" "agent_end"
-   "turn_start" "turn_end"
+   ["session_ready"         {:kind :async :doc "Everything loaded, session attached, model resolved; the one point where ui.available is guaranteed. Fires at startup AND after /reload"}]
+   ["session_end_summary"   {:kind :emit :doc "Stats snapshot just before session_end (desktop_notify reads it)"}]
+   ["agent_start"           {:kind :async :doc "A run begins; awaited, so an extension can finish registering tools before the first turn"}]
+   ["agent_end"             {:kind :emit :doc "A turn's provider call finished: `{text, usage, finishReason}`"}]
+   ["turn_start"            {:kind :emit :doc "A provider call is about to start"}]
+   ["turn_end"              {:kind :emit :doc "One model step finished (AI SDK StepResult)"}]
    ;; Awaited post-turn boundary (emit-async). Fires after agent_end on the
    ;; normal + abort exit paths, BEFORE the follow-queue drain, so a handler
    ;; (e.g. plan-mode's approval gate) can enqueue a follow-up that the drain
    ;; then picks up. Distinct from agent_end (sync, fire-and-forget) so slow
    ;; external handlers like Stop hooks never block the loop.
-   "turn_finalize"
-   "message_start" "message_update" "message_end"
-   "tool_call" "tool_result"
-   "tool_execution_start" "tool_execution_update" "tool_execution_end"
-   "before_tool_call"
-   "before_provider_request"
+   ["turn_finalize"         {:kind :async :doc "Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason}`"}]
+   ["message_start"         {:kind :emit :doc "A streamed text block begins"}]
+   ["message_update"        {:kind :emit :doc "A streamed text delta"}]
+   ["message_end"           {:kind :emit :doc "A streamed text block ends"}]
+   ["tool_call"             {:kind :emit :doc "The model requested a tool call"}]
+   ["tool_result"           {:kind :emit :doc "A tool call returned"}]
+   ["tool_execution_start"  {:kind :emit :doc "Middleware: a tool began executing"}]
+   ["tool_execution_update" {:kind :emit :doc "Middleware: progress from a long-running tool"}]
+   ["tool_execution_end"    {:kind :emit :doc "Middleware: a tool finished"}]
+   ["before_tool_call"      {:kind :collect :doc "Before a tool runs — set `ctx.cancelled = true` to block, or return `{skip: true, result}` to short-circuit"}]
+   ["before_provider_request" {:kind :collect :doc "Receives the mutable streamText config; mutate in place or return `{block: true, reason}` to skip the LLM call"}]
    ;; Provider pipeline hooks (all emit-collect from loop.cljs). Emitted for
    ;; a long time without being declared here, so they were invisible to the
    ;; emitter lint, the event map, and rpc mode's advertised channel list.
-   "model_resolve" "before_message_send" "provider_error" "stream_filter"
-   "message_before_store"
+   ["model_resolve"         {:kind :collect :wire? false :doc "Pick which model to use for this turn; return `{model}` to override the agent default"}]
+   ["before_message_send"   {:kind :collect :wire? false :doc "Final transform after `context_assembly` and before the LLM call; same return shape"}]
+   ["provider_error"        {:kind :collect :wire? false :doc "Fires on LLM call failure; return `{retry: true}` to retry once"}]
+   ["stream_filter"         {:kind :collect :wire? false :doc "Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries)"}]
+   ["message_before_store"  {:kind :collect :wire? false :doc "Last chance to rewrite assistant content before it lands in the store"}]
    ;; Another extension asking model_roles (the owner of :active-role) to
    ;; switch: spec_driven's phase binding, agent_shell's plan handoff.
-   "role_change"
-   "before_agent_start" "input"
-   "compact" "before_compact"
-   "before_branch_switch"
-   "resources_discover" "model_select" "user_bash" "reload"
-   "context_assembly" "after_provider_request"
+   ["role_change"           {:kind :emit :doc "Ask model_roles (owner of :active-role) to switch role"}]
+   ["before_agent_start"    {:kind :collect :doc "First step of each run; return `{systemPromptAddition, system-prompt-additions, prompt-sections, volatile-additions, inject-messages}` to shape the run. `volatile-additions` is per-turn text: it lands after a `---` boundary at the END of the system prompt so the stable prefix stays byte-identical for the provider's prompt cache"}]
+   ["input"                 {:kind :collect :doc "User input before it becomes a turn"}]
+   ["compact"               {:kind :emit :doc "Compaction happened"}]
+   ["before_compact"        {:kind :async :doc "Compaction about to run; a handler may set `ctx.summary`"}]
+   ["before_branch_switch"  {:kind :emit :doc "Session tree branch about to change"}]
+   ["resources_discover"    {:kind :emit :doc "Resources (skills, prompts, themes) rediscovered"}]
+   ["model_select"          {:kind :emit :doc "The active model changed"}]
+   ["user_bash"             {:kind :emit :doc "A `!command` typed in the editor ran"}]
+   ["reload"                {:kind :emit :doc "/reload finished"}]
+   ["context_assembly"      {:kind :collect :doc "After messages are built; return `{messages, system}` to replace either"}]
+   ["after_provider_request" {:kind :emit :doc "Fired after a successful LLM call with `{usage, model, cachedTokens, turnCount}`"}]
    ;; ACP agent shell events
-   "acp_connect" "acp_disconnect" "acp_message"
-   "acp_tool_start" "acp_tool_update"
-   "acp_usage" "acp_mode_change"
-   "acp_thought" "acp_plan" "acp_commands_update"
+   ["acp_connect"           {:kind :emit :doc "ACP agent connected"}]
+   ["acp_disconnect"        {:kind :emit :doc "ACP agent disconnected"}]
+   ["acp_message"           {:kind :emit :doc "ACP agent message"}]
+   ["acp_tool_start"        {:kind :emit :doc "ACP agent tool call started"}]
+   ["acp_tool_update"       {:kind :emit :doc "ACP agent tool call updated"}]
+   ["acp_usage"             {:kind :emit :doc "ACP agent usage report"}]
+   ["acp_mode_change"       {:kind :emit :doc "ACP agent mode changed"}]
+   ["acp_thought"           {:kind :emit :doc "ACP agent thought block"}]
+   ["acp_plan"              {:kind :emit :doc "ACP agent plan update"}]
+   ["acp_commands_update"   {:kind :emit :doc "ACP agent commands changed"}]
    ;; Native provider reasoning events (AI SDK interleaved-thinking)
-   "reasoning_start" "reasoning_delta" "reasoning_end"
+   ["reasoning_start"       {:kind :emit :doc "Provider reasoning block begins"}]
+   ["reasoning_delta"       {:kind :emit :doc "Provider reasoning delta"}]
+   ["reasoning_end"         {:kind :emit :doc "Provider reasoning block ends"}]
    ;; UI events. Seven more sat here — overlay_open/dismiss,
    ;; autocomplete_open/close/select, keybinding_activated, acp_permission —
    ;; with no emitter, no listener and no mention in pi, so extensions could
    ;; subscribe to them forever and rpc mode advertised them as channels that
    ;; could never carry traffic. The permission flow's real future name is
    ;; acp_permission_request (roadmap §7c).
-   "editor_change"
-   "notification"
-   ;; Session lifecycle
-   "session_clear"
-   ;; Editor-mode execution events
-   "user_eval"
-   ;; Extended tool lifecycle
-   "tool_complete" "permission_request"
-   ;; emit-collect: handlers return {:allowed [...]}, merged by intersection.
-   "tool_access_check"
-   ;; Input pipeline
-   "input_submit"
+   ["editor_change"         {:kind :emit :doc "User typing in editor — `{text: string}` payload"}]
+   ["notification"          {:kind :emit :doc "A notification was shown"}]
+   ["session_clear"         {:kind :emit :doc "`/clear` invoked — extensions may reset their agent sessions"}]
+   ["user_eval"             {:kind :emit :doc "A `$expr` typed in the editor ran"}]
+   ["tool_complete"         {:kind :emit :doc "A tool call completed with its result (stats, checkpoints)"}]
+   ["permission_request"    {:kind :collect :doc "Per-tool approval; return `{decision: \"allow\"|\"deny\"|\"ask\"}`"}]
+   ["tool_access_check"     {:kind :collect :doc "Filter the tool list for the next call; return `{allowed: [name, ...]}` (merged by intersection)"}]
+   ["input_submit"          {:kind :emit :doc "Editor submit"}]
    ;; An extension asking for a turn to START. `sendUserMessage` only ever
    ;; QUEUES (steer or follow-up) and neither begins one, so anything that
    ;; wanted to kick off work — /spec run arming the loop, an import's
    ;; decomposition seed — had to tell the user to "send any message". The
    ;; interactive mode owns the submit path (lock, streaming state, UI
    ;; wiring), so it subscribes and dispatches; nothing else can.
-   "turn_request"])
+   ["turn_request"          {:kind :emit :doc "An extension asking for a turn to start: `{text, echo}`; interactive mode dispatches it"}]])
+
+(def core-event-types
+  "Event names nyma emits. The lint requires a producer for every one."
+  (mapv first event-registry))
 
 (def collect-hook-event-types
-  "emit-collect hooks whose RETURN is the point. A JSON line on stdout cannot
-   answer, and two of them carry the whole context (`before_message_send`:
-   every message; `stream_filter`: the full accumulated text per chunk)."
-  ["model_resolve" "before_message_send" "provider_error" "stream_filter"
-   "message_before_store"])
+  "emit-collect hooks whose RETURN is the point and that a JSON line on stdout
+   cannot answer (`:wire? false`), so rpc mode does not advertise them."
+  (vec (keep (fn [[n m]] (when (false? (:wire? m)) n)) event-registry)))
 
 (def all-event-types
   "Everything an extension may subscribe to: the events nyma produces, plus the
@@ -106,7 +142,7 @@
 
 ;; ── Collection keys are concatenated ─────────────────────────────
 (def ^:private collection-keys
-  #{"inject-messages" "system-prompt-additions" "paths"
+  #{"inject-messages" "system-prompt-additions" "volatile-additions" "paths"
     "skillPaths" "promptPaths" "themePaths" "prompt-sections"})
 
 ;; ── Precedence keys: rules pre-empt policy, order-independent (NOT last-writer) ──

@@ -1,5 +1,7 @@
 (ns agent.sessions.listing
-  (:require ["node:fs" :as fs]
+  "Scans `.jsonl` session files, returns sorted metadata."
+  (:require [agent.utils.data :as data]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.sessions.project :as project]
@@ -21,7 +23,7 @@
   [content]
   (->> (.split (.trim content) "\n")
        (filter seq)
-       (map (fn [line] (try (js/JSON.parse line) (catch :default _ nil))))
+       (map (fn [line] (data/parse-json line)))
        (filter some?)
        vec))
 

@@ -1,6 +1,7 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require [clojure.string :as str]
+  (:require [agent.utils.data :as data]
+            [clojure.string :as str]
             [agent.ui.themes :refer [icon]]
             ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
             [agent.utils.ansi :as ansi :refer [fg]]
@@ -173,7 +174,7 @@
   [result]
   (let [flat (str/replace (str result) "\n" "")]
     (when-let [[obj-text rest] (leading-json-object flat)]
-      (let [obj (try (js/JSON.parse obj-text) (catch :default _ nil))]
+      (let [obj (data/parse-json obj-text)]
         (when (and obj (object? obj) (or (js-in "stdout" obj) (js-in "stderr" obj)))
           {:obj obj :rest (str/trim rest)})))))
 

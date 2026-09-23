@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.index
   (:require [agent.extensions.bash-suite.shared :as shared]
+            [agent.extensions.bash-suite.edit-diff :as edit-diff]
             [agent.extensions.bash-suite.security-analysis :as security-analysis]
             [agent.extensions.bash-suite.permissions :as permissions]
             [agent.extensions.bash-suite.output-handling :as output-handling]
@@ -57,6 +58,11 @@ Commands are analyzed for safety. Destructive operations (rm -rf /, dd, fork bom
     (swap! deactivators conj (cwd-manager/activate api))
     (swap! deactivators conj (timeout-classifier/activate api))
     (swap! deactivators conj (background-jobs/activate api))
+    ;; BEFORE output-handling: leave stages unwind right-to-left, so the later
+    ;; registration's leave runs first. Registered here, edit-diff's leave runs
+    ;; after output-handling has parsed and truncated the envelope, and adds
+    ;; its `filesChanged` field to a payload that is still valid JSON.
+    (swap! deactivators conj (edit-diff/activate api))
     (swap! deactivators conj (output-handling/activate api))
 
     ;; Register /bash-stats command

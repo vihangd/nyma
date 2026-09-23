@@ -39,11 +39,20 @@
    in the first 80% of the text to find the stable/dynamic boundary."
   [system-text]
   (let [len         (count system-text)
+        ;; The loop marks its per-turn tail with an explicit `---` boundary
+        ;; (agent.loop/volatile-boundary). When present, that is THE split:
+        ;; everything before it is stable by construction, however long the
+        ;; tail is — the 80% heuristic below would put the breakpoint too
+        ;; early for a short tail and too late for a long one.
+        explicit    (.lastIndexOf system-text "\n\n---\n\n")
         boundary    (js/Math.floor (* len 0.8))
         search-text (.substring system-text 0 boundary)
         last-sep    (max (.lastIndexOf search-text "\n---\n")
                          (.lastIndexOf search-text "\n## "))
-        split-idx   (if (> last-sep 100) (+ last-sep 1) boundary)]
+        split-idx   (cond
+                      (> explicit 100)  (+ explicit 2)
+                      (> last-sep 100)  (+ last-sep 1)
+                      :else             boundary)]
     {:stable  (.substring system-text 0 split-idx)
      :dynamic (.substring system-text split-idx)}))
 

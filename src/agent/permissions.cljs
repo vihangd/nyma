@@ -1,4 +1,5 @@
 (ns agent.permissions
+  "Extension capability system."
   (:require [agent.debug :as d]))
 
 (def all-capabilities

@@ -26,7 +26,8 @@
    {\"enabled\": true}}}, which appeared nowhere in the code. It could not have
    worked from there: an extension has no hook that reaches a provider's fetch.
   "
-  (:require [agent.debug :as d]
+  (:require [agent.utils.data :as data]
+            [agent.debug :as d]
             [clojure.string :as str]))
 
 ;; ── Think-tag stripping ──────────────────────────────────────────
@@ -104,7 +105,7 @@
   (let [t (.trim (str v))]
     (if (or (and (.startsWith t "[") (.endsWith t "]"))
             (and (.startsWith t "{") (.endsWith t "}")))
-      (try (js/JSON.parse t) (catch :default _ v))
+      (data/parse-json t v)
       v)))
 
 (defn- parse-qwen-xml [text available]

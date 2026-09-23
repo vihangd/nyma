@@ -34,7 +34,8 @@
           ;; local models least able to absorb contradictory instructions.
           (when-not (seq (plan-steps))
             (when-let [block (shared/render-ledger @ledger)]
-              #js {:system-prompt-additions #js [block]})))]
+              ;; Changes every turn: volatile, so it sits after the cache boundary.
+              #js {:volatile-additions #js [block]})))]
 
     (.on api "before_agent_start" on-before-start)
 

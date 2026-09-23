@@ -127,6 +127,17 @@ This runs two processes concurrently:
 1. **`squint watch`** — watches `src/` and `test/` for `.cljs` changes, compiles to `dist/`
 2. **`bun --watch`** — watches compiled output and auto-restarts the agent
 
+Extensions on disk (`~/.nyma/extensions`, `.nyma/extensions`) need no restart at all:
+`/reload <namespace>` deactivates and re-imports just that one (`/reload` alone still
+does everything), and with `NYMA_WATCH_EXTENSIONS=1` (or settings `dev.watch-extensions`)
+a saved file under an extension's directory reloads it in place, session intact.
+Builtins are compiled into the process; `bun run dev` restarts for those.
+
+Two more dev-only commands: `/eval <form>` compiles a ClojureScript form with the
+extension loader's squint and runs it against the live agent (`js/globalThis.__nyma`;
+`NYMA_DEV=1` or settings `dev.eval` to enable), and `/replay [n]` prints the tail of the
+event-sourced store's log with per-type counts.
+
 ### Build
 
 ```bash
@@ -599,6 +610,8 @@ before relying on a value here.
   "compaction": { "enabled": true, "threshold": 0.85 },
   "retry": { "enabled": true, "max-retries": 5 },
   "max-steps": 100,
+  "step-cap-report": true,
+  "dev": { "watch-extensions": false, "eval": false },
   "extensions": {},
   "context-files": ["AGENTS.md", "CLAUDE.md"],
   "steering-mode": "one-at-a-time",
@@ -620,8 +633,33 @@ before relying on a value here.
 ```
 
 Larger maps omitted above because they are long, not because they are optional:
-`roles` (11 model/permission presets), `plan-mode`, `subagent`. Read them in
+`roles` (12 model/permission/tool-shape presets), `plan-mode`, `subagent`. Read them in
 `manager.cljs`.
+
+Project settings cannot widen permissions: `permission-mode` and any `allow` decision in a
+role's `policy`/`permissions` are ignored (with a warning) when they come from
+`.nyma/settings.json`, and honoured only from `~/.nyma/settings.json` or the command line.
+Narrowing (`deny`, `ask`) from a project file is kept, and so is its `permissions.deny`;
+its `permissions.allow` is ignored. A checked-out repository must not be able to grant
+itself shell. Your own "allow always for this project" answers are therefore stored in
+`~/.nyma/settings.json` under `permissions.projects.<absolute project path>.allow`, never
+in the project file.
+
+`compaction.strategy` names a summarisation strategy an extension registered with
+`api.registerCompactionStrategy(name, {systemPrompt, buildUserPrompt(opts)})` (capability
+`context`); absent or `"default"` keeps the built-in six-section prompts. The split,
+validation and one fix-retry stay in core — a strategy changes what the summariser is
+asked, not how the loop trusts the answer.
+
+`bash-suite.edit-diff` (default on) appends "Files changed by this command" with
+`+added/-removed` per file to every bash result, from a git snapshot around the command —
+so a `sed -i`, a formatter or an `npm install` is no longer invisible.
+`mcp.max-description-length` (default 1200) caps each MCP tool description.
+
+`step-cap-report` (default `true`): when a run hits `max-steps`, spend one more
+tool-less call asking the model to report what it found or changed, instead of
+ending in silence. It is not an auto-continue — the work stops there — and it
+is what turns a step-capped subagent's mid-work text into a usable report.
 
 One exception to "source of truth is `manager.cljs`": `escalate` keeps its
 defaults in the extension that owns it
@@ -707,7 +745,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `agent_shell` | `agent-shell` | Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.) |
 | `agent_state` | `agent-state` | Reports what nyma is doing (idle, streaming, tool, waiting) to a supervisor process via a command hook |
 | `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
-| `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling |
+| `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed) |
 | `budget` | `budget` | Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set) |
 | `checkpoints` | `checkpoints` | Snapshots a file's pre-turn state; `/rewind` restores it |
 | `claude_hook_bridge` | `claude-hook-bridge` | Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt |
@@ -720,12 +758,12 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `custom_provider_opencode_zen` | `custom-provider-opencode-zen` | opencode-zen models via OpenAI-compatible API |
 | `custom_provider_openrouter` | `custom-provider-openrouter` | OpenRouter models via OpenAI-compatible API |
 | `custom_provider_qwen_cli` | `custom-provider-qwen-cli` | Qwen models via local CLI provider |
-| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: yunwu, velona) |
+| `custom_provider_relay` | `custom-provider-relay` | Any remote OpenAI- or Anthropic-compatible gateway as a provider (presets: openlux, openlux-claude, openlux-kiro, openlux-codex, velona); a New API billing `group` prices the catalogue from the relay's own sheet |
 | `desktop_notify` | `desktop-notify` | System desktop notifications on turn completion |
 | `handoff` | `handoff` | `/handoff` writes a purpose-built brief of the session to `.nyma/handoff.md` |
 | `headroom` | `headroom` | ML context compression via the Headroom proxy (off by default) |
 | `lsp_suite` | `lsp-suite` | Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics |
-| `mcp_client` | `mcp-client` | MCP server integration — third-party tools from `.mcp.json` / `settings.mcp` |
+| `mcp_client` | `mcp-client` | MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`, with a per-tool description budget (`mcp.max-description-length`) |
 | `memory` | `memory` | Agent-maintained `MEMORY.md`, injected each run |
 | `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain |
 | `openwiki` | `openwiki` | AI-maintained, git-aware living documentation for the repo (off by default) |
@@ -866,28 +904,73 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 - **`emit`** — fire-and-forget; handlers run in priority order, return values ignored
 - **`emit-collect`** — awaits every handler and merges their JS object returns into a single result map; lets extensions transform the data the caller is about to use
 
+<!-- generated: events (bun run gen:events-doc) -->
 | Event | Kind | When |
 |-------|------|------|
-| `agent_start` / `agent_end` | emit | Agent lifecycle |
-| `turn_start` / `turn_end` | emit | Each conversation turn |
-| `message_start` / `message_update` / `message_end` | emit | Streaming messages |
-| `tool_call` / `tool_result` | emit | Tool execution |
-| `before_tool_call` | emit | Before tool runs — set `ctx.cancelled = true` to block, or return `{skip: true, result}` to short-circuit |
-| `session_start` / `session_end` / `session_switch` | emit | Session lifecycle |
-| `session_clear` | emit | `/clear` invoked — extensions may reset their agent sessions |
-| `before_compact` / `compact` | emit | Context compaction |
-| `editor_change` | emit | User typing in editor — `{text: string}` payload |
-| `before_agent_start` | emit-collect | First step of each run; return `{systemPromptAddition, system-prompt-additions, prompt-sections, inject-messages}` to shape the run |
-| `model_resolve` | emit-collect | Pick which model to use for this turn; return `{model}` to override the agent default |
-| `context_assembly` | emit-collect | After messages are built; return `{messages, system}` to replace either |
-| **`before_message_send`** | emit-collect | Final transform after `context_assembly` and before the LLM call; same return shape |
+| `session_start` | emit | Session attached (startup, /resume, /fork) |
+| `session_end` | emit | Session closing |
+| `session_before_switch` | emit | About to switch to another session |
+| `session_switch` | emit | Switched session |
+| `session_before_fork` | emit | About to fork the session |
+| `session_shutdown` | emit | Process shutting down (SIGINT, /exit) |
+| `exit` | emit | A request to leave: cli.cljs runs the same async shutdown SIGINT takes |
+| `session_ready` | emit-async | Everything loaded, session attached, model resolved; the one point where ui.available is guaranteed. Fires at startup AND after /reload |
+| `session_end_summary` | emit | Stats snapshot just before session_end (desktop_notify reads it) |
+| `agent_start` | emit-async | A run begins; awaited, so an extension can finish registering tools before the first turn |
+| `agent_end` | emit | A turn's provider call finished: `{text, usage, finishReason}` |
+| `turn_start` | emit | A provider call is about to start |
+| `turn_end` | emit | One model step finished (AI SDK StepResult) |
+| `turn_finalize` | emit-async | Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason}` |
+| `message_start` | emit | A streamed text block begins |
+| `message_update` | emit | A streamed text delta |
+| `message_end` | emit | A streamed text block ends |
+| `tool_call` | emit | The model requested a tool call |
+| `tool_result` | emit | A tool call returned |
+| `tool_execution_start` | emit | Middleware: a tool began executing |
+| `tool_execution_update` | emit | Middleware: progress from a long-running tool |
+| `tool_execution_end` | emit | Middleware: a tool finished |
+| `before_tool_call` | emit-collect | Before a tool runs — set `ctx.cancelled = true` to block, or return `{skip: true, result}` to short-circuit |
 | `before_provider_request` | emit-collect | Receives the mutable streamText config; mutate in place or return `{block: true, reason}` to skip the LLM call |
-| `after_provider_request` | emit | Fired after a successful LLM call with `{usage, model, cachedTokens, turnCount}` |
-| **`stream_filter`** | emit-collect | Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries) |
+| `model_resolve` | emit-collect | Pick which model to use for this turn; return `{model}` to override the agent default |
+| `before_message_send` | emit-collect | Final transform after `context_assembly` and before the LLM call; same return shape |
 | `provider_error` | emit-collect | Fires on LLM call failure; return `{retry: true}` to retry once |
+| `stream_filter` | emit-collect | Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries) |
 | `message_before_store` | emit-collect | Last chance to rewrite assistant content before it lands in the store |
-| `tool_access_check` | emit-collect | Filter the tool list for the next call; return `{allowed: [name, ...]}` |
+| `role_change` | emit | Ask model_roles (owner of :active-role) to switch role |
+| `before_agent_start` | emit-collect | First step of each run; return `{systemPromptAddition, system-prompt-additions, prompt-sections, volatile-additions, inject-messages}` to shape the run. `volatile-additions` is per-turn text: it lands after a `---` boundary at the END of the system prompt so the stable prefix stays byte-identical for the provider's prompt cache |
+| `input` | emit-collect | User input before it becomes a turn |
+| `compact` | emit | Compaction happened |
+| `before_compact` | emit-async | Compaction about to run; a handler may set `ctx.summary` |
+| `before_branch_switch` | emit | Session tree branch about to change |
+| `resources_discover` | emit | Resources (skills, prompts, themes) rediscovered |
+| `model_select` | emit | The active model changed |
+| `user_bash` | emit | A `!command` typed in the editor ran |
+| `reload` | emit | /reload finished |
+| `context_assembly` | emit-collect | After messages are built; return `{messages, system}` to replace either |
+| `after_provider_request` | emit | Fired after a successful LLM call with `{usage, model, cachedTokens, turnCount}` |
+| `acp_connect` | emit | ACP agent connected |
+| `acp_disconnect` | emit | ACP agent disconnected |
+| `acp_message` | emit | ACP agent message |
+| `acp_tool_start` | emit | ACP agent tool call started |
+| `acp_tool_update` | emit | ACP agent tool call updated |
+| `acp_usage` | emit | ACP agent usage report |
+| `acp_mode_change` | emit | ACP agent mode changed |
+| `acp_thought` | emit | ACP agent thought block |
+| `acp_plan` | emit | ACP agent plan update |
+| `acp_commands_update` | emit | ACP agent commands changed |
+| `reasoning_start` | emit | Provider reasoning block begins |
+| `reasoning_delta` | emit | Provider reasoning delta |
+| `reasoning_end` | emit | Provider reasoning block ends |
+| `editor_change` | emit | User typing in editor — `{text: string}` payload |
+| `notification` | emit | A notification was shown |
+| `session_clear` | emit | `/clear` invoked — extensions may reset their agent sessions |
+| `user_eval` | emit | A `$expr` typed in the editor ran |
+| `tool_complete` | emit | A tool call completed with its result (stats, checkpoints) |
 | `permission_request` | emit-collect | Per-tool approval; return `{decision: "allow"\|"deny"\|"ask"}` |
+| `tool_access_check` | emit-collect | Filter the tool list for the next call; return `{allowed: [name, ...]}` (merged by intersection) |
+| `input_submit` | emit | Editor submit |
+| `turn_request` | emit | An extension asking for a turn to start: `{text, echo}`; interactive mode dispatches it |
+<!-- /generated: events -->
 
 ### Tool extension context (`ctx.modelId`)
 
@@ -905,6 +988,12 @@ Use `emit-async` when handlers need to complete before the caller proceeds:
 ## Resources
 
 ### Skills
+
+Two frontmatter fields auto-activate a skill for one turn: `triggers` (phrase substrings
+matched against the user's prompt, case-insensitive) and `paths` (globs matched against
+files the session has touched via tool calls). The skill's body is injected after the
+cache boundary as `volatile-additions`; a turn without a match costs nothing. Skills
+marked `disable-model-invocation: true` never auto-activate.
 
 Place a directory with a `SKILL.md` file in `~/.nyma/skills/` or `.nyma/skills/` (the cross-vendor `.claude/skills/`, `.agents/skills/`, `.cursor/skills/` and `.codex/skills/` paths are scanned too). Skills follow the [agentskills.io](https://agentskills.io/specification) layout: YAML frontmatter, then the instructions. Activating one injects the body (not the frontmatter) as a system message and loads an optional `tools.cljs`.
 

@@ -70,7 +70,8 @@
             (when (and reminder-text-fn
                        (>= @counter every-n-steps))
               (when-let [text (reminder-text-fn)]
-                #js {"system-prompt-additions" #js [text]})))]
+                ;; Present on some turns and not others: volatile.
+                #js {"volatile-additions" #js [text]})))]
 
       ((:on events) "turn_start" on-turn-start)
       ((:on events) "before_agent_start" on-before-agent-start)

@@ -20,7 +20,8 @@
    v1 is deterministic only. The signals below are what actually found real
    bugs by hand; a model step to phrase them more sharply is deliberately
    deferred until the raw report proves insufficient."
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.data :as data]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.debug :as d]
@@ -74,7 +75,7 @@
   (try
     (->> (str/split-lines (str (fs/readFileSync p "utf8")))
          (filter seq)
-         (keep (fn [l] (try (js/JSON.parse l) (catch :default _ nil))))
+         (keep (fn [l] (data/parse-json l)))
          vec)
     (catch :default _ nil)))
 

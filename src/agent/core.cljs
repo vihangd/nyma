@@ -1,4 +1,5 @@
 (ns agent.core
+  "Agent state, `create-agent` factory."
   (:require ["ai" :refer [streamText generateText]]
             [agent.events :refer [create-event-bus]]
             [agent.tools :refer [builtin-tools]]
@@ -10,8 +11,7 @@
             [agent.model-info :refer [create-model-registry]]
             [agent.tool-metadata :as tool-metadata]
             [agent.keybinding-registry :as kbr]
-            [agent.thinking :as thinking-util]
-))
+            [agent.thinking :as thinking-util]))
 
 (defn- filter-tools-by-policy
   "Filter a tools map using capability/mode constraints.
@@ -121,6 +121,10 @@
                                                              (if (number? n) n 8000))
                                      :temperature          (let [t (get merged-settings :temperature)]
                                                              (if (number? t) t 0.2))
+                                     ;; After a step cap, one tool-less call so
+                                     ;; the run ends with a report, not silence.
+                                     :step-cap-report      (let [v (get merged-settings :step-cap-report)]
+                                                             (if (some? v) (boolean v) true))
                                      :max-retries          (let [r (get merged-settings :retry)
                                                                  on? (let [e (get r :enabled)]
                                                                        (if (some? e) (boolean e) true))

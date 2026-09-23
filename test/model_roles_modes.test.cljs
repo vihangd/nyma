@@ -445,10 +445,13 @@
          ;; model-less modes are NOT model roles
          (-> (expect (.includes models "full-auto")) (.toBe false))
          (-> (expect (.includes models "accept-edits")) (.toBe false))
-         (-> (expect (.includes models "(inherits model)")) (.toBe false))
          ;; and real model roles still are
          (-> (expect (.includes models "fast")) (.toBe true))
          (-> (expect (.includes models "deep")) (.toBe true))
+         ;; a model-less TOOL-SHAPE role is a /role, listed as inheriting the
+         ;; model — the one "(inherits model)" line the section may carry
+         (-> (expect (.includes models "lead → (inherits model)")) (.toBe true))
+         (-> (expect (count (.split models "(inherits model)"))) (.toBe 2))
          ;; the modes section says what each one actually does
          (-> (expect (.includes out "write allow, exec allow, network allow")) (.toBe true)))))))
 

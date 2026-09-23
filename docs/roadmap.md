@@ -2,6 +2,10 @@
 
 A living document for anything that's been **built but not yet wired up**, or **deliberately deferred**, so nothing falls through the cracks between sessions. Distinct from `plan-*.md` files, which are per-feature plans. This is the "don't forget" ledger.
 
+Facts here go stale — nothing guards this file the way `gen:builtins` guards the README table.
+Before acting on a claim ("X is unused", "Y has no consumer"), `grep` it: on 2026-09-23 §1f said
+`mk-tool-ctx` had no adopters while three test files imported it.
+
 Last updated: 2026-08-18 (after escalation + /refine).
 
 ---
@@ -92,7 +96,7 @@ Original entry, for context:
 ### 1f. `mk-tool-ctx` / `mk-api-mock` test fixtures
 
 - **What's ready:** `test/tool_ctx_fixture.cljs` with `mk-tool-ctx` (a full ext-ctx with middleware enrichment) and `mk-api-mock` (extension activation API with command/notify/event capture atoms). Full coverage in `test/tool_ctx_fixture.test.cljs` (14 tests).
-- **What's wired:** nothing yet — existing tests still build their own `#js {:ui ...}` stubs inline.
+- **What's wired:** three adopters (`test/ext_effort_switcher.test.cljs`, `test/workspace_config.test.cljs`, `test/extension_activation.test.cljs`) as of 2026-09-23; the rest still build their own `#js {:ui ...}` stubs inline.
 - **Why we stopped:** fixture landed standalone; migrating existing tests is mechanical churn that would bloat this phase's diff.
 - **When to do it:** anytime. Low-risk migration, shrinks every touched file.
 - **Migration targets (grep)**:
@@ -1673,3 +1677,134 @@ Known, deliberately left:
   `agent.utils.home/dir` reads `process.env.HOME`; `home_dir_lint` keeps `os/homedir`
   out of src.
 
+
+## 2026-09-18 — what apprentice had that nyma did not
+
+[skarnati20/apprentice](https://github.com/skarnati20/apprentice) is a 2.7k-line Common Lisp
+harness (models / tools / anchors / loops). Read in full. Most of it nyma already has in a
+stronger form — permissions, the bash classifier, subagents, sessions, MCP, hooks — but five
+mechanisms were missing and cheap, and all five landed:
+
+- **Force final answer on the step cap** (`step-cap-report`, loop.cljs). The cap fired in
+  silence; a capped *subagent* handed its parent whatever text it had mid-work. Now one more
+  call with the tools taken away and a "report what you have" nudge. Deliberately NOT the
+  auto-continue declined on 2026-09-15: one tool-less call, the work stops.
+- **`steps` on the subagent tool** + parent-facing guidance that a child has no memory, tasks
+  must be self-contained, and two parallel children never edit the same file. The plumbing
+  (`run-isolated-agent :max-steps`) existed; nothing passed it.
+- **`lead` role**: delegation-only primary (glob/grep/ls/subagent, no read/edit/write/bash).
+  Pure role config + prompt; model-less. Made possible by a generic change — the active role's
+  `system-prompt` now reaches the primary via `before_agent_start`, which no role's did before.
+  Apprentice's "widen to the full kit after N subagent calls" skipped: `/role reset` is that.
+- **Thinking-overflow retry** (small_model/thinking_budget): a `length` cut-off with no tool
+  call now runs the loop's continue-nudge with thinking off, level restored at the next
+  `agent_end`. Before, only a provider *error* string triggered it, and the retry never
+  restored the level.
+- **Edit result shows the edited region numbered** (±3 lines), so the model need not `read`
+  after every edit. The TUI renders its own diff and ignores the text, so this is model-only.
+
+Not borrowed, with reasons:
+- Dense-vector anchor (semantic search over chunk embeddings via a local llama.cpp embedding
+  server): needs a second server; lean-ctx / semble MCPs give the same from outside. Would be
+  a `search` extension with an embeddings provider if ever wanted.
+- Anchors as a concept (pre-chat persisted repo index in `.apprentice/`): openwiki + context
+  files cover the need.
+- `drop-turns` / `show-turns` — dropping messages from context by index or range. Compaction
+  and `/rewind` (files only) cover most of it; a `/drop N` would need message indices in the
+  TUI. Maybe, if manual context surgery is ever asked for.
+- `:checks` declarative tool preconditions and the bash prefix whitelist: middleware cancel and
+  bash_suite's classifier are stronger.
+
+## 2026-09-23 — openlux billing groups are not models
+
+"Kiro-Claude-1" / "Codex-Gpt-1" on openlux are New API billing GROUPS: an upstream route
+(the Kiro / Codex subscription CLIs) with a multiplier, bound to the token when it is
+minted, not selectable per request. Same model ids as the official-route groups at
+0.088 / 0.037 against 1.1 / 0.588. Landed: relay entry key `group`; presets `openlux-kiro`
+(anthropic wire) and `openlux-codex` (openai + responses) on their own credentials; at
+discovery a `group` entry fetches the relay's public `/api/pricing`, prices every model
+(`model_ratio × group_ratio × $2`, `× completion_ratio`, cache read/write ratios) and keeps
+only the ids in the group's `enable_groups` — a group token's `/v1/models` lists the whole
+catalogue. Prices ride the model cache, keyed `<name>@<group>` so a group change is a miss.
+`->js-model` now carries cacheRead/cacheWrite, which `registerProvider` already accepted.
+A review pass on the same day fixed: the step-cap report option now rides the follow-up
+message (`:turn`) and is consumed at drain time, so no other queued follow-up or later prompt
+can inherit the tool-less turn, and the report turn is exempt from the cut-off nudge and the
+no-op counter; `steps` is clamped to `subagent.max-steps` / `max-steps`; a null catalogue or
+sheet row is skipped rather than aborting discovery; thinking_budget restores the level on an
+error finalize; `lead` is owned by model_roles alone and hidden from `/agents`, and `/role`
+warns when a role allows an unregistered tool.
+
+Left, named:
+- Seed costs in the two presets are the 2026-09-23 sheet; discovery overwrites them, but the
+  §3j seed-drift note applies (a `bin/check-seeds.mjs` would catch a renamed id or ratio).
+- `step_ratios` (tiered surcharge past a model's base window, e.g. gpt-5.6-terra ×2 input
+  past 272k) is ignored; a long-context turn on such a model is under-reported.
+- The plain `openlux` / `openlux-claude` presets stay unpriced: the token's group is not
+  readable off the wire (`/api/user/self` needs a session, not an sk- token). Users add
+  `"group"` to their settings entry to price them.
+
+
+## 2026-09-23 — improvement program: Clojure leverage, maintainability, pluggability
+
+Research (internal audit, SOTA survey of ten agents + 2026 papers, this ledger) → two phases
+landed the same day, one full suite per item, 5010 tests green at the end.
+
+**Phase 1 (small, high-leverage)**
+- AGENTS.md said `defmulti` does not compile; four provider `defmethod`s said otherwise.
+  Rewritten as the open-dispatch pattern, with when-to-use-an-atom-registry instead.
+- `agent.utils.data`: `key-get` / `conf-get` / `conf-bool` (false- and 0-safe, every spelling)
+  and `parse-json`. Replaced `entry-get`+`entry-get-bool`, `cfg-get`, the `registerProvider`
+  ladders, `normalize-config`'s six hand `if`s (now an alias table) and nine inline tolerant
+  `JSON.parse`s. Two IO-wrapping parses stay as they were on purpose.
+- Settings merge is a declared table (`per-key-sections [:extensions :roles]`); a user who adds
+  one role no longer erases the twelve built-ins. Tested.
+- Inter-extension bus works: `emit` prefixes the sender, `on`/`off` accept `ns__event`. The
+  19 `emitGlobal` workaround sites were NOT migrated (they work; the names are documented);
+  `emitGlobal` now refuses the gate events (`permission_request`, `tool_access_check`).
+- Cache-aware prompt layout: `volatile-additions` land after a `---` boundary at the end of
+  the system prompt; todos, self_reminder, evidence and plan-mode's remaining steps use it;
+  kv_cache splits at the boundary; the loader's per-second timestamp in the system prompt
+  (a cache-buster on every turn) is now day-only. `/stats-session` shows the cache-read %.
+  The number the 2026-09 prompt-cache entry asked for is now measurable; not yet measured on
+  a real 10-turn session.
+- bash edit-diff (git snapshot around each command), MCP description budget, project-settings
+  pinning (no widening from `.nyma/settings.json`), skill auto-activation from `triggers`/`paths`
+  (the "parsed but unwired" item), `/reload <ns>`, `NYMA_WATCH_EXTENSIONS`, `/eval`, `/replay`.
+
+**Phase 2 (structural)**
+- `interceptors/execute`: 110 lines, four nested loops → enter + one unwind fold (~25 lines).
+- `events.cljs`: one `event-registry` with :kind and :doc per event; `core-event-types` and
+  `collect-hook-event-types` derived; README event table generated (`gen:events-doc`). The
+  four merge-key sets were NOT folded into the registry — they are per-KEY semantics, not
+  per-event, and live fine where they are.
+- Scoped API: 26 gated + 6 ungated passthroughs are a table checked against the base API and
+  the capability list (`scope_table.test.cljs`). Bespoke wrappers (prefixing, disposers) stay
+  hand-written.
+- `agent.schema`: one data form → zod / JSON Schema / doc rows. All 13 core tools and the
+  `subagent` tool migrated; ten raw-JSON extension tools remain (migrate on touch).
+- `registerCompactionStrategy` / `compaction.strategy`: extensions supply the prompts; split,
+  validation, retry stay in core. token_suite's compaction features were NOT rewritten as
+  strategies yet — they still nudge via `before_compact`.
+- AGENTS.md "Key Namespaces" generated from ns docstrings (`gen:namespaces`); 30 docstrings
+  backfilled from the old hand table; 6 namespaces still show "—".
+- Deflaked: relay discovery tests await a fetch-settled promise instead of 50 ms; the hook-bridge
+  rejection wait is one macrotask. Kept: the abort-at-100ms race in tools.test and the
+  100 ms kill in stream_drain — those measure real subprocess timing and are correct at 5s/100ms.
+
+Left, named: Phase 3 of the plan (OAuth login, macOS sandbox, worktree subagents, ACP server,
+mega-function decomposition, corrections→enforcement, extension eval). `loop/run` is still 593
+lines; the per-stage split is the precondition for a pluggable loop.
+
+Review pass the same day (12 findings, all fixed): project pinning now also drops the project
+file's `permissions.allow`, and "allow always for this project" moved to the user's file under
+`permissions.projects.<cwd>.allow`; `lead` allows `subagent__subagent` (the registry name);
+loader entries keep `:module`/`:entry` so `/reload <ns>` of a builtin re-activates instead of
+importing `builtin:<ns>`, and a failed reload keeps the entry so the next save retries; edit-diff
+registers before output-handling, adds a `filesChanged` field to the bash envelope instead of
+breaking its JSON, resolves paths against `git rev-parse --show-toplevel`, and reports only files
+gone from disk as deleted (a committed file is not "changed"); `agent.schema` no longer reads an
+array's item type as its doc (squint keywords are strings); thinking_budget disables thinking only
+when `turn_finalize` says a continue-nudge was queued (`:nudged`); `/compact` and `api.compact` go
+through `settings->opts` so `compaction.strategy` applies to every trigger; relay `->js-model` and
+the model cache keep a declared cache-read of 0.

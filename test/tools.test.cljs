@@ -198,8 +198,41 @@
             (it "creates file with content" test-write-content)
             (it "returns byte count message" test-write-byte-count)))
 
+;; Borrowed from apprentice's replace tool: the result hands back the edited
+;; region numbered, so the model need not spend a `read` to check it.
+(defn ^:async test-edit-window []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9")
+    (let [result (js-await (edit-execute {:path tmp-file
+                                          :old_string "l5"
+                                          :new_string "five\nfive-b"}))]
+      (-> (expect result) (.toContain "Edit applied at line 5"))
+      ;; three lines before, the two inserted, two after
+      (-> (expect result) (.toContain "     2\tl2"))
+      (-> (expect result) (.toContain "     5\tfive"))
+      (-> (expect result) (.toContain "     6\tfive-b"))
+      (-> (expect result) (.toContain "     8\tl7"))
+      (-> (expect result) (.not.toContain "l1"))
+      (-> (expect result) (.not.toContain "l8")))
+    (cleanup tmp-dir)))
+
+(defn ^:async test-edit-window-delete []
+  (let [tmp-dir  (make-tmp-dir)
+        tmp-file (.join path tmp-dir "edit.txt")]
+    (.writeFileSync fs tmp-file "a\nb\nc")
+    (let [result (js-await (edit-execute {:path tmp-file
+                                          :old_string "b\n"
+                                          :new_string ""}))]
+      (-> (expect result) (.toContain "Edit applied at line 2"))
+      (-> (expect result) (.toContain "     1\ta"))
+      (-> (expect result) (.toContain "     2\tc")))
+    (cleanup tmp-dir)))
+
 (describe "agent.tools - edit"
           (fn []
+            (it "returns the edited region, numbered" test-edit-window)
+            (it "shows the neighbours after a deletion" test-edit-window-delete)
             (it "replaces exact text" test-edit-replace)
             (it "throws when old_string not found" test-edit-throws)
             (it "throws when old_string is ambiguous" test-edit-ambiguous-throws)
@@ -1359,9 +1392,9 @@
   (let [events   (create-event-bus)
         seen     (atom [])
         _        ((:on events) "tool_result"
-                  (fn [e] (swap! seen conj {:name (.-toolName e)
-                                            :error (boolean (.-isError e))
-                                            :exit  (some-> (.-details e) (.-exitCode))}) nil))
+                               (fn [e] (swap! seen conj {:name (.-toolName e)
+                                                         :error (boolean (.-isError e))
+                                                         :exit  (some-> (.-details e) (.-exitCode))}) nil))
         pipeline (create-pipeline events)
         registry (create-registry builtin-tools)
         active   ((:get-active registry))

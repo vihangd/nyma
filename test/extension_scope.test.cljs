@@ -470,3 +470,64 @@
           (-> (expect (first (first @notes))) (.toContain "shouty"))
           (-> (expect (first (first @notes))) (.toContain "kaboom"))
           (-> (expect (second (first @notes))) (.toBe "error")))))))
+
+
+;;; ─── Inter-extension bus: emit prefixes the sender, on/off may qualify ───
+;;; Until 2026-09-23 all three prefixed with the CALLER's namespace, so A's
+;;; emit landed on `a__x` while B listened on `b__x` — nothing crossed.
+
+(describe "scoped api: inter-extension bus"
+          (fn []
+            (it "B hears A's event by its qualified name; A hears its own bare name"
+                (fn []
+                  (let [agent    (make-test-agent)
+                        base-api (create-extension-api agent)
+                        a        (create-scoped-api base-api "a" #{:all :events})
+                        b        (create-scoped-api base-api "b" #{:all :events})
+                        got-b    (atom nil)
+                        got-a    (atom nil)]
+                    (.on (.-events b) "a__ping" (fn [d] (reset! got-b (.-n d))))
+                    (.on (.-events a) "ping" (fn [d] (reset! got-a (.-n d))))
+                    (.emit (.-events a) "ping" #js {:n 7})
+                    (-> (expect @got-b) (.toBe 7))
+                    (-> (expect @got-a) (.toBe 7)))))
+
+            (it "an emitter cannot speak as another extension"
+                (fn []
+                  (let [agent    (make-test-agent)
+                        base-api (create-extension-api agent)
+                        a        (create-scoped-api base-api "a" #{:all :events})
+                        b        (create-scoped-api base-api "b" #{:all :events})
+                        got      (atom false)]
+                    (.on (.-events b) "a__ping" (fn [_] (reset! got true)))
+                    ;; b tries to emit under a's name: lands on b__a__ping, not a__ping
+                    (.emit (.-events b) "a__ping" #js {})
+                    (-> (expect @got) (.toBe false)))))
+
+            (it "off with a qualified name removes that listener"
+                (fn []
+                  (let [agent    (make-test-agent)
+                        base-api (create-extension-api agent)
+                        a        (create-scoped-api base-api "a" #{:all :events})
+                        b        (create-scoped-api base-api "b" #{:all :events})
+                        n        (atom 0)
+                        h        (fn [_] (swap! n inc))]
+                    (.on (.-events b) "a__ping" h)
+                    (.off (.-events b) "a__ping" h)
+                    (.emit (.-events a) "ping" #js {})
+                    (-> (expect @n) (.toBe 0)))))
+
+            (it "emitGlobal refuses the permission-gate events"
+                (fn []
+                  (let [agent    (make-test-agent)
+                        base-api (create-extension-api agent)
+                        a        (create-scoped-api base-api "a" #{:all :events})
+                        heard    (atom false)]
+                    ((:on (:events agent)) "permission_request" (fn [_] (reset! heard true)))
+                    (.emitGlobal a "permission_request" #js {:decision "allow"})
+                    (.emitGlobal a "tool_access_check" #js {:allowed #js []})
+                    (-> (expect @heard) (.toBe false))
+                    ;; an ordinary global event still goes through
+                    ((:on (:events agent)) "custom_ping" (fn [_] (reset! heard true)))
+                    (.emitGlobal a "custom_ping" #js {})
+                    (-> (expect @heard) (.toBe true)))))))

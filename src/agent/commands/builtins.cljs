@@ -1,6 +1,8 @@
 (ns agent.commands.builtins
-  (:require [agent.model-info :as model-info]
-            [agent.sessions.compaction :refer [compact compaction-receipt]]
+  "Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.)."
+  (:require [agent.utils.data :as data]
+            [agent.model-info :as model-info]
+            [agent.sessions.compaction :refer [compact compaction-receipt settings->opts resolve-settings]]
             [agent.sessions.manager :refer [session->seed-messages]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.themes :refer [default-dark]]
@@ -9,7 +11,7 @@
             [agent.commands.parser :as cmd-parser]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.keybinding-registry :as kbr]
-            [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures last-disabled]]
+            [agent.extension-loader :refer [deactivate-all discover-and-load last-load-failures last-disabled reload-one! eval-expr!]]
             [agent.extension-scope :refer [handler-errors]]
             [agent.resources.loader :refer [discover]]
             [agent.providers.oauth :as oauth]
@@ -323,6 +325,33 @@
                       ((:emit events) "turn_request" #js {:text text :echo true})
                       (follow-up agent {:role "user" :content text}))))})))))
 
+(defn format-eval-value
+  "A value from /eval as text, capped."
+  [v]
+  (let [s (cond
+            (nil? v)    "nil"
+            (string? v) v
+            :else       (try (js/JSON.stringify v nil 1) (catch :default _ (str v))))
+        s (or s (str v))]
+    (if (> (count s) 4000) (str (subs s 0 4000) " …") s)))
+
+(defn ^:async handle-reload-one
+  "Reload ONE extension by namespace: deactivate it, load it again from disk,
+   swap the new entry into the loaded list. The rest of the session — other
+   extensions, settings, the transcript — is untouched."
+  [agent extensions-atom ns ctx]
+  (if-let [old (some #(when (= (:namespace %) ns) %) @extensions-atom)]
+    (let [new (js-await (reload-one! (.-extension-api agent) old))
+          ;; A failed reload keeps its ENTRY (deactivated, scope swept) so the
+          ;; next /reload <ns> or watcher save can try again; dropping it made
+          ;; one syntax error detach the extension until a full /reload.
+          kept (or new (assoc old :deactivate nil :failed? true))]
+      (swap! extensions-atom (fn [es] (mapv #(if (= (:namespace %) ns) kept %) es)))
+      (if new
+        (notify ctx (str "Reloaded extension " ns) "info")
+        (notify ctx (str "Extension " ns " failed to reload and is now OFF; see /extensions") "error")))
+    (notify ctx (str "No loaded extension named " ns ". /extensions lists them") "warning")))
+
 (defn ^:async handle-reload
   "Orchestrate full reload: deactivate → settings → resources → extensions → flags."
   [agent resources extensions-atom resolve-flags-fn ctx]
@@ -359,6 +388,7 @@
     ;; The `skill` tool closes over the skill map it was built with; a skill
     ;; added since launch was `/skill`-able but unknown to the model.
     (skills/register-skill-tool! agent (:skills new-resources))
+    (skills/register-skill-activation! agent (:skills new-resources))
     ;; 7. session_ready again. Extensions set up their world on it — status
     ;;    segments, ACP auto-connect, MCP servers — and it used to fire once at
     ;;    startup only, so /reload deactivated all of that and brought none of
@@ -408,7 +438,7 @@
    IS JSON — whatever round-trips through it is exactly what is legal there."
   [s]
   (let [t (str/trim (str s))]
-    (try (js/JSON.parse t) (catch :default _ t))))
+    (data/parse-json t t)))
 
 (defn ^:async handle-settings
   "Interactive settings viewer/editor.
@@ -884,10 +914,15 @@
                       ;; than the two turns it replaced read as "nothing".
                       (when-let [s @(:session agent)]
                         (-> (compact s (:model (:config agent)) (:events agent)
-                                     {:model-registry (:model-registry agent)
-                                      :state-atom     (:state agent)
-                                      :force?         true
-                                      :model-key      (model-info/config-model-key (:config agent))})
+                                     ;; settings->opts first: compaction.strategy (and the
+                                     ;; thresholds) apply to a manual /compact the same as
+                                     ;; to the automatic one, or one session compacts two
+                                     ;; ways depending on who triggered it.
+                                     (merge (settings->opts (resolve-settings (:settings agent)))
+                                            {:model-registry (:model-registry agent)
+                                             :state-atom     (:state agent)
+                                             :force?         true
+                                             :model-key      (model-info/config-model-key (:config agent))}))
                             (.then (fn [result] (notify ctx (compaction-receipt result)))))))}
 
           "debug"
@@ -907,9 +942,59 @@
                                         "------------------"))))}
 
           "reload"
-          {:description "Reload extensions and configuration"
-           :handler (fn [_args ctx]
-                      (handle-reload agent resources extensions-atom resolve-flags-fn ctx))}
+          {:description "Reload extensions and configuration; /reload <ns> reloads one extension only"
+           :handler (fn [args ctx]
+                      (let [argv (let [p (positional-args ctx)] (if (some? p) p (vec args)))
+                            ns   (first argv)]
+                        (if (and (seq (str ns)) extensions-atom)
+                          (handle-reload-one agent extensions-atom (str ns) ctx)
+                          (handle-reload agent resources extensions-atom resolve-flags-fn ctx))))}
+
+          "eval"
+          {:description "Dev: evaluate a ClojureScript form against the live agent (js/globalThis.__nyma). Needs NYMA_DEV=1 or settings dev.eval"
+           :handler (fn [args ctx]
+                      (let [settings (when-let [s (:settings resources)] (when (fn? (:get s)) ((:get s))))
+                            allowed  (or (= "1" (str (or (aget js/process.env "NYMA_DEV") "")))
+                                         (boolean (get-in settings [:dev :eval])))
+                            form     (str/join " " (let [p (positional-args ctx)] (if (some? p) p (vec args))))]
+                        (cond
+                          (not allowed)
+                          (notify ctx "/eval is a dev tool: set NYMA_DEV=1 or {\"dev\": {\"eval\": true}} to enable" "warning")
+
+                          (str/blank? form)
+                          (notify ctx "Usage: /eval <form> — e.g. /eval (count (:messages @(:state js/globalThis.__nyma)))" "info")
+
+                          :else
+                          (do (aset js/globalThis "__nyma" agent)
+                              (-> (eval-expr! form)
+                                  (.then (fn [v] (notify ctx (str "=> " (format-eval-value v)) "info")))
+                                  (.catch (fn [e] (notify ctx (str "eval error: " (.-message e)) "error"))))))))}
+
+          "replay"
+          {:description "Dev: show the event-sourced store's log tail; /replay <n> for the last n events (default 20)"
+           :handler (fn [args ctx]
+                      (let [argv  (let [p (positional-args ctx)] (if (some? p) p (vec args)))
+                            n     (let [x (js/parseInt (str (first argv)))] (if (js/isNaN x) 20 (max 1 x)))
+                            store (:store agent)
+                            hist  (if (and store (:history store)) ((:history store)) [])]
+                        (if (empty? hist)
+                          (notify ctx "No events recorded in this session" "info")
+                          (let [tail   (take-last n hist)
+                                counts (frequencies (map #(str (:type %)) hist))
+                                t0     (or (:timestamp (first hist)) 0)]
+                            (notify ctx
+                                    (str "Event log: " (count hist) " events (ring-capped)\n"
+                                         (str/join "  " (map (fn [[t c]] (str t "×" c)) (sort-by second > counts)))
+                                         "\n\nLast " (count tail) ":\n"
+                                         (str/join "\n"
+                                                   (map (fn [e]
+                                                          (str "  +" (js/Math.round (/ (- (or (:timestamp e) t0) t0) 1000)) "s  "
+                                                               (:type e)
+                                                               (when-let [d (:data e)]
+                                                                 (let [s (try (js/JSON.stringify (clj->js d)) (catch :default _ (str d)))]
+                                                                   (str "  " (subs (str s) 0 (min 80 (count (str s)))))))))
+                                                        tail)))
+                                    "info")))))}
 
           "extensions"
           {:description "List extensions; /extensions disable|enable <ns> [--project] switches one off or on in settings"

@@ -1,5 +1,8 @@
 (ns agent.extensions
-  (:require [agent.loop :refer [steer follow-up]]
+  "Extension API factory."
+  (:require [agent.utils.data :as data]
+            [agent.loop :refer [steer follow-up]]
+            [agent.sessions.compaction :as compaction]
             [agent.extension-context :refer [create-extension-context]]
             [agent.token-estimation :as te]
             [agent.providers.registry :as registry-utils :refer [build-provider-entry]]
@@ -64,6 +67,11 @@
     (= type "number")  (js/Number raw)
     (= type "string")  (or raw "")
     :else raw))
+
+;; Collect events whose answer IS the permission decision. An extension may
+;; subscribe to them (that is how model_roles applies a policy); it may not
+;; emit them, or it could grant itself anything by asking and answering.
+(def gate-only-events #{"permission_request" "tool_access_check"})
 
 (defn create-extension-api
   "Build the API object that extensions receive.
@@ -294,22 +302,19 @@
                                     stream-fn (.-streamFn config)
                                   ;; Build CLJ config from JSON-safe fields
                                     cfg {:create-model  create-fn
-                                         :base-url      (or (.-baseUrl cfg-raw) (aget cfg-raw "base-url"))
-                                         :api-key-env   (or (.-apiKeyEnv cfg-raw) (aget cfg-raw "api-key-env"))
+                                         :base-url      (data/conf-get cfg-raw :base-url)
+                                         :api-key-env   (data/conf-get cfg-raw :api-key-env)
                                          :api           (.-api cfg-raw)
                                        ;; Tokens this provider adds to every
                                        ;; request that nyma cannot see — a
                                        ;; gateway's injected system prompt, say.
-                                         :overhead-tokens (or (.-overheadTokens cfg-raw)
-                                                              (aget cfg-raw "overhead-tokens"))
+                                         :overhead-tokens (data/conf-get cfg-raw :overhead-tokens)
                                          :stream-fn     stream-fn
                                          :oauth         (when oauth-obj
                                                           {:name          (.-name oauth-obj)
                                                            :login         (.-login oauth-obj)
-                                                           :refresh-token (or (.-refreshToken oauth-obj)
-                                                                              (aget oauth-obj "refresh-token"))
-                                                           :get-api-key   (or (.-getApiKey oauth-obj)
-                                                                              (aget oauth-obj "get-api-key"))})}
+                                                           :refresh-token (data/conf-get oauth-obj :refresh-token)
+                                                           :get-api-key   (data/conf-get oauth-obj :get-api-key)})}
                                   ;; Extract model list
                                     models-arr (.-models config)
                                     models (when models-arr
@@ -320,24 +325,20 @@
                                                           ;; worse than none, because compaction plans
                                                           ;; against it. Left nil, the model registry
                                                           ;; falls through to the vendor's own entry.
-                                                          :context-window (or (.-contextWindow m)
-                                                                              (aget m "context-window"))
-                                                          :max-tokens     (or (.-maxTokens m) (aget m "max-tokens"))
+                                                          :context-window (data/conf-get m :context-window)
+                                                          :max-tokens     (data/conf-get m :max-tokens)
                                                           :reasoning      (.-reasoning m)
                                                           :input          (when (.-input m) (vec (.-input m)))
                                                           :cost           (when (.-cost m)
                                                                             {:input  (.-input (.-cost m))
                                                                              :output (.-output (.-cost m))
                                                                              ;; Optional: lets a provider price
-                                                                             ;; cached input separately. `or` would coerce a declared
-                                                                             ;; rate of 0 to the fallback and then to nil, so a provider
-                                                                             ;; advertising FREE cache reads looked like one that never
-                                                                             ;; declared them — and its cached tokens were billed at the
-                                                                             ;; full input rate.
-                                                                             :cache-read  (let [a (.-cacheRead (.-cost m))]
-                                                                                            (if (some? a) a (aget (.-cost m) "cache_read")))
-                                                                             :cache-write (let [a (.-cacheWrite (.-cost m))]
-                                                                                            (if (some? a) a (aget (.-cost m) "cache_write")))})})
+                                                                             ;; cached input separately. conf-get keeps
+                                                                             ;; a declared 0 (an `or` would coerce it to
+                                                                             ;; nil, and a provider advertising FREE cache
+                                                                             ;; reads billed them at the full input rate).
+                                                                             :cache-read  (data/conf-get (.-cost m) :cache-read)
+                                                                             :cache-write (data/conf-get (.-cost m) :cache-write)})})
                                                        models-arr)))
                                     cfg (if models (assoc cfg :models models) cfg)
                                   ;; Remove nil create-model so build-provider-entry can auto-generate
@@ -478,8 +479,26 @@
        ;; Complements api.on/api.off which subscribe to the main bus.
        ;; Use api.emitGlobal to fire events that other extensions
        ;; subscribed to via api.on rather than api.events.on.
+       ;; ── Compaction strategies ───────────────────────────
+       ;; An extension supplies the PROMPTS compaction summarises with; the
+       ;; split, validation and retry stay in core. Selected by settings
+       ;; `compaction.strategy`. JS shape: {systemPrompt, buildUserPrompt(opts)}.
+         :registerCompactionStrategy   (fn [name cfg]
+                                         (compaction/register-strategy!
+                                          name
+                                          {:system-prompt     (when cfg (or (.-systemPrompt cfg) (aget cfg "system-prompt")))
+                                           :build-user-prompt (when cfg (or (.-buildUserPrompt cfg) (aget cfg "build-user-prompt")))}))
+         :unregisterCompactionStrategy (fn [name] (compaction/unregister-strategy! name))
+
          :emitGlobal        (fn [event data]
-                              ((:emit (:events agent)) event data))
+                              ;; The gate's own collect events decide what the
+                              ;; model may do; an extension emitting one would be
+                              ;; answering the question it is supposed to be
+                              ;; asked. Refused, loudly.
+                              (if (contains? gate-only-events (str event))
+                                (dbg/warn "extensions" (str "emitGlobal refused: `" event
+                                                          "` is a permission-gate event only the core may emit"))
+                                ((:emit (:events agent)) event data)))
 
        ;; ── Flags ──────────────────────────────────────────────
        ;; The pending-argv lookup matters: extensions load (cli.cljs)

@@ -1,4 +1,5 @@
 (ns agent.pricing
+  "Token cost table + `calculate-turn-cost` for all supported models."
   (:require [agent.model-info :as model-info]))
 
 ;; Model pricing in USD per 1M tokens:

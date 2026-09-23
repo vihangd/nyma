@@ -1,4 +1,5 @@
 (ns agent.tool-registry
+  "Active/inactive tool management."
   (:require ["ai" :refer [jsonSchema]]))
 
 (defn- raw-json-schema?

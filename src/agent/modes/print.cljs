@@ -1,4 +1,5 @@
 (ns agent.modes.print
+  "Print mode."
   (:require [agent.loop :refer [run]]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [agent.utils.event-json :refer [step-usage]]

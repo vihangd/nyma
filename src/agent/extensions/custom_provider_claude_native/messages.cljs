@@ -1,6 +1,7 @@
 (ns agent.extensions.custom-provider-claude-native.messages
   "Convert LanguageModelV3Prompt → Anthropic Messages API request body."
-  (:require [clojure.string :as str]))
+  (:require [agent.utils.data :as data]
+            [clojure.string :as str]))
 
 (def ^:private default-max-tokens 8192)
 
@@ -13,7 +14,7 @@
   ;; V3 ToolCallPart.input is `unknown` — could be a JSON string or an already-parsed object.
   (let [raw   (.-input part)
         input (cond
-                (string? raw) (try (js/JSON.parse raw) (catch :default _ #js {}))
+                (string? raw) (data/parse-json raw #js {})
                 (nil? raw)    #js {}
                 :else         raw)]  ; already an object — pass through
     #js {:type  "tool_use"

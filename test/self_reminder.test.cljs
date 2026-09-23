@@ -60,7 +60,7 @@
                     (let [p ((:emit-collect bus) "before_agent_start" #js {})]
                       (.then p
                              (fn [result]
-                               (let [adds (get result "system-prompt-additions")]
+                               (let [adds (get result "volatile-additions")]
                                  (-> (expect (or (nil? adds) (= 0 (count adds)))) (.toBe true))))))
                     (cleanup))))
 
@@ -79,7 +79,7 @@
                       (.then (js/Promise.resolve nil)
                              (fn [_]
                                (when-let [r @result-atom]
-                                 (let [adds (get r "system-prompt-additions")]
+                                 (let [adds (get r "volatile-additions")]
                                    (-> (expect (some? adds)) (.toBe true))
                                    (-> (expect (pos? (count adds))) (.toBe true))
                                    (-> (expect (first adds)) (.toBe "do the thing")))))))
@@ -139,13 +139,13 @@
                     ;; before_agent_start: counter = 2, below threshold → no reminder
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (get result "system-prompt-additions")]
+                             (let [adds (get result "volatile-additions")]
                                (-> (expect (or (nil? adds) (= 0 (count adds)))) (.toBe true)))))
                     ;; One more turn — counter = 3, reaches threshold
                     (fire-turn-start bus 1)
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (get result "system-prompt-additions")]
+                             (let [adds (get result "volatile-additions")]
                                (-> (expect (some? adds)) (.toBe true)))))
                     (cleanup))))
 
@@ -164,7 +164,7 @@
                     (fire-turn-start bus 5)
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (get result "system-prompt-additions")]
+                             (let [adds (get result "volatile-additions")]
                                (-> (expect (some? adds)) (.toBe true)))))
                     (cleanup))))))
 
@@ -182,7 +182,7 @@
                     (fire-turn-start bus 1)
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (get result "system-prompt-additions")]
+                             (let [adds (get result "volatile-additions")]
                                (-> (expect (or (nil? adds) (= 0 (count adds)))) (.toBe true)))))
                     (cleanup))))))
 
@@ -211,7 +211,7 @@
                     (fire-turn-start bus 2)
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (or (get result "system-prompt-additions") #js [])]
+                             (let [adds (or (get result "volatile-additions") #js [])]
                                ;; r1 should appear, r2 should not
                                (-> (expect (some #(= % "r1") (vec adds))) (.toBeTruthy))
                                (-> (expect (some #(= % "r2") (vec adds))) (.toBeFalsy)))))
@@ -242,7 +242,7 @@
                     ;; Now: reminder1 counter = 0, reminder2 counter = 4 (still above threshold)
                     (.then ((:emit-collect bus) "before_agent_start" #js {})
                            (fn [result]
-                             (let [adds (vec (or (get result "system-prompt-additions") #js []))]
+                             (let [adds (vec (or (get result "volatile-additions") #js []))]
                                ;; r2 should still fire (counter 4 >= 3)
                                (-> (expect (some #(= % "r2") adds)) (.toBeTruthy))
                                ;; r1 should NOT fire (counter reset to 0)

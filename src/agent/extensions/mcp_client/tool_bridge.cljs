@@ -16,7 +16,8 @@
    `:inputSchema` is wrapped via ai-sdk's `jsonSchema` helper so the
    LLM sees the server's JSON Schema verbatim (no zod conversion
    needed in either direction)."
-  (:require ["ai" :refer [tool jsonSchema]]
+  (:require [agent.debug :as d]
+            ["ai" :refer [tool jsonSchema]]
             [clojure.string :as str]
             [agent.multimodal :as mm]
             [agent.extensions.mcp-client.client :as client]
@@ -72,8 +73,15 @@
   "Convert a single MCP `{:name :description :input-schema}` tool
    to an AI-SDK `tool(...)` def, with a server-aware execute fn.
    Param `cli` (not `client`) avoids shadowing the namespace alias."
-  [server-name cli mcp-tool]
-  (let [base-desc (or (:description mcp-tool) "")
+  [server-name cli mcp-tool & [opts]]
+  (let [raw-desc  (or (:description mcp-tool) "")
+        ;; One chatty server can spend thousands of tokens of EVERY request
+        ;; on tool descriptions. Cap each; the tail is rarely load-bearing,
+        ;; and the note tells the model there was more.
+        limit     (:max-description-length opts)
+        base-desc (if (and (number? limit) (pos? limit) (> (count raw-desc) limit))
+                    (str (subs raw-desc 0 limit) " …[truncated; " (count raw-desc) " chars]")
+                    raw-desc)
         desc      (str base-desc
                        (when (seq base-desc) " ")
                        "[via MCP server: " server-name "]")
@@ -95,8 +103,9 @@
    Servers that aren't :running are skipped — their tools simply
    appear later when restart succeeds (which triggers
    `tool_bridge.refresh!` from index.cljs)."
-  [api manager]
-  (let [registered (atom [])]
+  [api manager & [opts]]
+  (let [registered (atom [])
+        per-server (atom {})]
     ;; Destructure key renamed to :cli to avoid shadowing the
     ;; `client` namespace alias (squint compiles `client/state` in
     ;; the body to a free `client` lookup that the local would
@@ -107,7 +116,8 @@
         (when (= :running (client/state cli))
           (doseq [t (client/list-tools cli)]
             (let [full-name (nyma-tool-name name (:name t))
-                  tool-def  (build-tool-def name cli t)]
+                  tool-def  (build-tool-def name cli t opts)]
+              (swap! per-server update name (fnil + 0) (count (or (:description t) "")))
               ;; Use overrideTool (unprefixed) so the registered name
               ;; stays the canonical CC-shape `mcp__server__tool`
               ;; rather than `mcp-client__mcp__server__tool`. The
@@ -115,6 +125,8 @@
               ;; — `mcp__` already marks these as MCP-sourced.
               (.overrideTool api full-name tool-def)
               (swap! registered conj full-name))))))
+    (doseq [[name chars] @per-server]
+      (d/debug "mcp-client" (str name ": " chars " chars of tool descriptions before the cap")))
     @registered))
 
 (defn unregister-all!

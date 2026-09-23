@@ -8,7 +8,8 @@
     "state",
     "ui",
     "messages",
-    "shortcuts"
+    "shortcuts",
+    "tools"
   ],
   "dependsOn": [],
   "settings": {

@@ -1,4 +1,5 @@
 (ns agent.modes.sdk
+  "Programmatic SDK mode."
   (:require [agent.core :refer [create-agent]]
             [agent.loop :refer [run steer follow-up]]
             [agent.resources.loader :refer [discover]]

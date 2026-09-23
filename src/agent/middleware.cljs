@@ -1,4 +1,5 @@
 (ns agent.middleware
+  "Middleware pipeline for tool execution."
   (:require [agent.tool-metadata :as tool-metadata]
             [agent.interceptors :as ic]
             [agent.extension-context :refer [create-extension-context]]

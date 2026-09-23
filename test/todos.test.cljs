@@ -81,8 +81,8 @@
     (->> hs
          (keep (fn [h] (let [r (h nil nil)]
                          (when r
-                           (let [a (or (aget r "system-prompt-additions")
-                                       (:system-prompt-additions r))]
+                           (let [a (or (aget r "volatile-additions")
+                                       (:volatile-additions r))]
                              (when (and a (pos? (count a))) (str/join " " (vec a))))))))
          (str/join " ")
          (#(when (seq %) %)))))

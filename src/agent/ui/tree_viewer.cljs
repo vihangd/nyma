@@ -1,4 +1,5 @@
 (ns agent.ui.tree-viewer
+  "Session tree browser for `ctx.ui.custom()`."
   (:require [agent.ui.picker-frame :refer [truncate-to]]
             [agent.utils.ansi :refer [terminal-width string-width]]))
 

@@ -1,4 +1,6 @@
-(ns agent.state)
+(ns agent.state
+  "Event-sourced state store."
+  )
 
 (defn create-store
   "Event-sourced state store. All mutations go through dispatch!.

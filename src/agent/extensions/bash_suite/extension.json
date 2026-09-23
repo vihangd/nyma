@@ -1,6 +1,6 @@
 {
   "namespace": "bash-suite",
-  "description": "Shell execution helpers, security analysis, output handling",
+  "description": "Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed)",
   "capabilities": [
     "events",
     "tools",
@@ -16,6 +16,7 @@
       "security-analysis": null,
       "permissions": null,
       "output-handling": null,
+      "edit-diff": null,
       "env-filter": null,
       "cwd-manager": null,
       "background-jobs": null,

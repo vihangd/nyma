@@ -1,4 +1,5 @@
 (ns agent.modes.rpc
+  "JSONL stdio RPC mode."
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
             [agent.events :refer [wire-event-types]]))

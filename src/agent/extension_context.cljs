@@ -1,7 +1,7 @@
 (ns agent.extension-context
   (:require [agent.utils.js-interop :as ji]
             [agent.model-info :as model-info]
-            [agent.sessions.compaction :refer [compact]]
+            [agent.sessions.compaction :refer [compact settings->opts resolve-settings]]
             [agent.token-estimation :as te]))
 
 (defn create-extension-context
@@ -56,7 +56,8 @@
                                  ;; fell back to a hardcoded 100000 and ignored
                                  ;; the model's real window entirely.
                                  (compact session (:model (:config agent)) (:events agent)
-                                          (merge {:model-registry (:model-registry agent)
+                                          (merge (settings->opts (resolve-settings (:settings agent)))
+                                                 {:model-registry (:model-registry agent)
                                                    :state-atom     (:state agent)
                                                   :model-key (model-info/config-model-key
                                                               (:config agent))}

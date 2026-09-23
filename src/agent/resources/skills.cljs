@@ -372,3 +372,67 @@
                                       trigs))
                        name))))
            vec))))
+
+
+;;; ─── Auto-activation: triggers and paths ────────────────────────
+;;; `triggers` and `paths` were parsed since the skills format landed and read
+;;; by nothing (roadmap: "parsed but unwired"). A skill's description is always
+;;; listed (level 1); its BODY (level 2) is injected for one turn when the
+;;; user's prompt contains a trigger phrase, or a file the session has touched
+;;; matches one of its path globs. Injected as `volatile-additions`, so it sits
+;;; after the cache boundary and a turn without a match costs nothing.
+
+(defn auto-activated
+  "Names of skills to activate this turn: trigger matches on `prompt` plus
+   path-scoped skills matching any of `touched` paths. Hidden skills
+   (`disable-model-invocation`) never auto-activate. Pure."
+  [skills prompt touched]
+  (let [visible (remove (fn [[_ s]] (:disable-model-invocation s)) skills)
+        by-trig (set (matching-triggers (into {} visible) prompt))
+        by-path (set (keep (fn [[n s]]
+                             (when (and (seq (:paths s))
+                                        (some #(path-matches-skill? s %) touched))
+                               n))
+                           visible))]
+    (vec (sort (into by-trig by-path)))))
+
+(defn activation-block
+  "The prompt text for auto-activated skill bodies, or nil."
+  [skills names]
+  (when (seq names)
+    (str/join "\n\n"
+              (map (fn [n]
+                     (let [s (get skills n)]
+                       (str "## Skill (auto-activated): " n "\n\n" (or (:body s) (:markdown s) ""))))
+                   names))))
+
+(defn- prompt-text [user-message]
+  (let [c (when user-message (or (:content user-message) (.-content user-message)))]
+    (cond
+      (string? c) c
+      (js/Array.isArray c) (str/join " " (keep #(or (.-text %) (get % "text")) c))
+      :else "")))
+
+(def ^:private activation-handlers (atom nil))
+
+(defn register-skill-activation!
+  "Subscribe the auto-activation hooks on `agent` for `skills`, replacing any
+   earlier registration (called again on /reload). Tracks paths from
+   `tool_call` inputs so path-scoped skills follow what the session touches."
+  [agent skills]
+  (let [events  (:events agent)
+        touched (atom #{})]
+    (when-let [[on-call on-start] @activation-handlers]
+      ((:off events) "tool_call" on-call)
+      ((:off events) "before_agent_start" on-start))
+    (let [on-call  (fn [d]
+                     (when-let [p (some-> d .-input .-path)]
+                       (swap! touched conj (str p))))
+          on-start (fn [d]
+                     (let [names (auto-activated skills (prompt-text (.-userMessage d)) @touched)]
+                       (when-let [block (activation-block skills names)]
+                         #js {"volatile-additions" #js [block]})))]
+      ((:on events) "tool_call" on-call)
+      ((:on events) "before_agent_start" on-start)
+      (reset! activation-handlers [on-call on-start])
+      nil)))

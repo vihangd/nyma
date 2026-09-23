@@ -1,5 +1,7 @@
 (ns agent.cli
-  (:require [agent.debug :as d]
+  "Entry point, arg parsing, mode dispatch."
+  (:require [agent.dev.ext-watch :as ext-watch]
+            [agent.debug :as d]
             [clojure.string :as str]
             ["node:util" :refer [parseArgs]]
             ["node:fs" :as fs]
@@ -710,6 +712,7 @@ Examples:
     ;; the allowlist governs it like any built-in. /reload calls the same
     ;; helper with the rediscovered map.
     (skills/register-skill-tool! agent (:skills resources))
+    (skills/register-skill-activation! agent (:skills resources))
 
     ;; Filter active tools if --tools flag was used
     (when active-tools
@@ -819,6 +822,13 @@ Examples:
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
                                                          (:builtin-extensions resources)))
           extensions-atom   (atom loaded-extensions)
+          ;; Dev: save-to-live for extensions on disk (opt-in). Builtins are
+          ;; compiled in and need the restart `bun run dev` already does.
+          _                 (when (ext-watch/enabled? merged)
+                              (ext-watch/watch! api extensions-atom (:extension-dirs resources)
+                                                {:notify (fn [msg lvl]
+                                                           (when-let [ui (.-ui api)]
+                                                             (when (.-notify ui) (.notify ui msg lvl))))}))
           ;; Shared by the SIGINT handler, the `exit` handler and the one-shot
           ;; finisher so shutdown runs exactly once.
           shutdown-done?    (atom false)

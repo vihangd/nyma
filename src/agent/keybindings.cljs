@@ -1,4 +1,5 @@
 (ns agent.keybindings
+  "Loads `~/.nyma/keybindings.json` user key mappings."
   (:require [agent.utils.home :as home]
              [agent.debug :as d]
             ["node:path" :as path]

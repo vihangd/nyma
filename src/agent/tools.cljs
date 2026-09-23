@@ -1,6 +1,8 @@
 (ns agent.tools
-  (:require ["ai" :refer [tool]]
-            ["zod" :as z]
+  "Built-in tools: read, write, edit, bash."
+  (:require [agent.utils.data :as data]
+            ["ai" :refer [tool]]
+            [agent.schema :as schema]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.multimodal :as mm]
@@ -37,13 +39,9 @@
    #js {:description (str "Read file contents with line numbers (cat -n format: `   N\\tcontent`). "
                           "Returns the first " read-default-line-cap " lines unless a range is given. "
                           "When using edit, old_string must be the raw file text — never include the line-number prefix.")
-        :inputSchema  (.object z
-                               #js {:path  (-> (.string z)
-                                               (.describe "File path to read"))
-                                    :range (-> (.array z (.number z))
-                                               (.length 2)
-                                               (.optional)
-                                               (.describe "Line range [start, end], 1-based inclusive"))})
+        :inputSchema  (schema/->zod {
+                                    :path [:string "File path to read"]
+                                    :range [:array :number {:optional true :length 2 :doc "Line range [start, end], 1-based inclusive"}]})
         :execute read-execute}))
 
 (defn ^:async write-execute [{:keys [path content]}]
@@ -53,9 +51,9 @@
 (def write-tool
   (tool
    #js {:description "Write content to a file, creating directories as needed"
-        :inputSchema  (.object z
-                               #js {:path    (.string z)
-                                    :content (.string z)})
+        :inputSchema  (schema/->zod {
+                                    :path [:string]
+                                    :content [:string]})
         :execute write-execute}))
 
 (defn count-occurrences
@@ -66,6 +64,22 @@
     (loop [idx 0 n 0]
       (let [i (.indexOf content s idx)]
         (if (neg? i) n (recur (+ i (count s)) (inc n)))))))
+
+(defn edit-line
+  "1-based line on which the first occurrence of `s` starts in `content`."
+  [content s]
+  (let [pos (.indexOf content s)]
+    (inc (count-occurrences (.slice content 0 (max pos 0)) "\n"))))
+
+(defn edit-window
+  "Numbered lines of `updated` around an edit that began on `line` and
+   inserted `inserted`: three lines of context before, two after."
+  [updated line inserted]
+  (let [lines (.split updated "\n")
+        added (if (empty? inserted) 0 (count (.split inserted "\n")))
+        start (max 1 (- line 3))
+        end   (min (.-length lines) (+ line added 1))]
+    (number-lines (.slice lines (dec start) end) start)))
 
 (defn ^:async edit-execute [{:keys [path old_string new_string replace_all]}]
   (let [content (js-await (.text (js/Bun.file path)))
@@ -89,17 +103,21 @@
         (js-await (js/Bun.write path updated))
         (if (> n 1)
           (str "Edit applied (" n " replacements)")
-          "Edit applied successfully")))))
+          ;; Borrowed from apprentice's replace tool: hand back the edited
+          ;; region, numbered, so the model can check indentation and
+          ;; neighbours without spending a `read` on every edit.
+          (let [line (edit-line content old_string)]
+            (str "Edit applied at line " line " of " path ". It now reads:\n"
+                 (edit-window updated line new_string))))))))
 
 (def edit-tool
   (tool
    #js {:description "Replace exact text in a file. old_string must match exactly once — pass replace_all to replace every occurrence."
-        :inputSchema  (.object z
-                               #js {:path        (.string z)
-                                    :old_string  (.string z)
-                                    :new_string  (.string z)
-                                    :replace_all (-> (.boolean z) (.optional)
-                                                     (.describe "Replace all occurrences instead of requiring a unique match"))})
+        :inputSchema  (schema/->zod {
+                                    :path [:string]
+                                    :old_string [:string]
+                                    :new_string [:string]
+                                    :replace_all [:boolean {:optional true :doc "Replace all occurrences instead of requiring a unique match"}]})
         :execute edit-execute}))
 
 (defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
@@ -181,7 +199,7 @@
    (`ui/editor_bash.cljs`) and the tool tests parse it directly."
   [args & [ext-ctx]]
   (let [payload (js-await (bash-execute args ext-ctx))
-        parsed  (try (js/JSON.parse payload) (catch :default _ nil))
+        parsed  (data/parse-json payload)
         code    (when parsed (aget parsed "exitCode"))
         ;; Rides `tool_result` beside the exit code: a consumer asking "did this
         ;; command succeed?" cannot answer from exitCode alone once a timeout
@@ -193,10 +211,9 @@
 (def bash-tool
   (tool
    #js {:description "Run a shell command. Use only for build, test, git, and install commands. For file operations use the dedicated read/write/edit/ls/glob/grep tools instead."
-        :inputSchema  (.object z
-                               #js {:command (.string z)
-                                    :timeout (-> (.number z) (.optional)
-                                                 (.describe "Timeout in ms, default 30000"))})
+        :inputSchema  (schema/->zod {
+                                    :command [:string]
+                                    :timeout [:number {:optional true :doc "Timeout in ms, default 30000"}]})
         :execute bash-tool-execute}))
 
 ;;; ─── think ─────────────────────────────────────────────────
@@ -207,9 +224,8 @@
 (def think-tool
   (tool
    #js {:description "Use this tool to think through complex problems step-by-step before taking action. Your thought is recorded but no action is taken."
-        :inputSchema  (.object z
-                               #js {:thought (-> (.string z)
-                                                 (.describe "Your reasoning, analysis, or plan"))})
+        :inputSchema  (schema/->zod {
+                                    :thought [:string "Your reasoning, analysis, or plan"]})
         :execute think-execute}))
 
 ;;; ─── ls ────────────────────────────────────────────────────
@@ -259,13 +275,10 @@
 (def ls-tool
   (tool
    #js {:description "List directory contents. Shows files with sizes and directories with trailing /."
-        :inputSchema  (.object z
-                               #js {:path      (-> (.string z) (.optional)
-                                                   (.describe "Directory path (default: current directory)"))
-                                    :recursive (-> (.boolean z) (.optional)
-                                                   (.describe "Recurse into subdirectories"))
-                                    :all       (-> (.boolean z) (.optional)
-                                                   (.describe "Include hidden files (dotfiles)"))})
+        :inputSchema  (schema/->zod {
+                                    :path [:string {:optional true :doc "Directory path (default: current directory)"}]
+                                    :recursive [:boolean {:optional true :doc "Recurse into subdirectories"}]
+                                    :all [:boolean {:optional true :doc "Include hidden files (dotfiles)"}]})
         :execute ls-execute}))
 
 ;;; ─── glob ──────────────────────────────────────────────────
@@ -293,13 +306,10 @@
 (def glob-tool
   (tool
    #js {:description "Find files matching a glob pattern. Returns matching file paths."
-        :inputSchema  (.object z
-                               #js {:pattern (-> (.string z)
-                                                 (.describe "Glob pattern, e.g. '**/*.ts', 'src/**/*.cljs'"))
-                                    :path    (-> (.string z) (.optional)
-                                                 (.describe "Base directory to search in (default: current directory)"))
-                                    :exclude (-> (.string z) (.optional)
-                                                 (.describe "Glob pattern to exclude, e.g. 'test/**'"))})
+        :inputSchema  (schema/->zod {
+                                    :pattern [:string "Glob pattern, e.g. '**/*.ts', 'src/**/*.cljs'"]
+                                    :path [:string {:optional true :doc "Base directory to search in (default: current directory)"}]
+                                    :exclude [:string {:optional true :doc "Glob pattern to exclude, e.g. 'test/**'"}]})
         :execute glob-execute}))
 
 ;;; ─── grep ──────────────────────────────────────────────────
@@ -402,27 +412,17 @@
 (def grep-tool
   (tool
    #js {:description "Search file contents using regex patterns. Always use this instead of running grep/rg in bash. Uses ripgrep if available."
-        :inputSchema  (.object z
-                               #js {:pattern     (-> (.string z)
-                                                     (.describe "Regex pattern to search for"))
-                                    :path        (-> (.string z) (.optional)
-                                                     (.describe "File or directory to search (default: current directory)"))
-                                    :glob        (-> (.string z) (.optional)
-                                                     (.describe "File pattern filter, e.g. '*.ts', '*.cljs'"))
-                                    :ignore_case (-> (.boolean z) (.optional)
-                                                     (.describe "Case-insensitive search"))
-                                    :context     (-> (.number z) (.optional)
-                                                     (.describe "Number of context lines around matches"))
-                                    :output_mode (-> (.enum z #js ["content" "files" "count"]) (.optional)
-                                                     (.describe "Output mode: content (default), files (paths only), count"))
-                                    :max_results (-> (.number z) (.optional)
-                                                     (.describe "Maximum result lines (default: 100)"))
-                                    :multiline   (-> (.boolean z) (.optional)
-                                                     (.describe "Enable multiline matching (rg only, -U --multiline-dotall)"))
-                                    :literal     (-> (.boolean z) (.optional)
-                                                     (.describe "Treat pattern as literal string, not regex (-F)"))
-                                    :type_filter (-> (.string z) (.optional)
-                                                     (.describe "File type filter, e.g. 'ts', 'py', 'rust' (rg --type)"))})
+        :inputSchema  (schema/->zod {
+                                    :pattern [:string "Regex pattern to search for"]
+                                    :path [:string {:optional true :doc "File or directory to search (default: current directory)"}]
+                                    :glob [:string {:optional true :doc "File pattern filter, e.g. '*.ts', '*.cljs'"}]
+                                    :ignore_case [:boolean {:optional true :doc "Case-insensitive search"}]
+                                    :context [:number {:optional true :doc "Number of context lines around matches"}]
+                                    :output_mode [:enum ["content" "files" "count"] {:optional true :doc "Output mode: content (default), files (paths only), count"}]
+                                    :max_results [:number {:optional true :doc "Maximum result lines (default: 100)"}]
+                                    :multiline [:boolean {:optional true :doc "Enable multiline matching (rg only, -U --multiline-dotall)"}]
+                                    :literal [:boolean {:optional true :doc "Treat pattern as literal string, not regex (-F)"}]
+                                    :type_filter [:string {:optional true :doc "File type filter, e.g. 'ts', 'py', 'rust' (rg --type)"}]})
         :execute grep-execute}))
 
 ;;; ─── credentials ──────────────────────────────────────────
@@ -649,15 +649,11 @@
 (def web-fetch-tool
   (tool
    #js {:description "Fetch content from a URL and extract text. Always use this instead of curl in bash. Supports HTML (converts to markdown), JSON, and plain text. Auto fallback chain: direct → Tinyfish (if TINYFISH_API_KEY set) → Jina Reader. Tinyfish and Jina both handle JS-rendered + anti-bot pages."
-        :inputSchema  (.object z
-                               #js {:url        (-> (.string z)
-                                                    (.describe "URL to fetch"))
-                                    :format     (-> (.enum z #js ["text" "markdown" "html"]) (.optional)
-                                                    (.describe "Output format: markdown (default, converts HTML to Markdown), text (strips HTML), or html (raw)"))
-                                    :max_length (-> (.number z) (.optional)
-                                                    (.describe "Maximum output characters (default: 20000)"))
-                                    :provider   (-> (.enum z #js ["auto" "direct" "jina" "tinyfish"]) (.optional)
-                                                    (.describe "Fetch provider. auto (default): direct fetch, then Tinyfish when TINYFISH_API_KEY is set, then Jina Reader. direct: raw fetch only. jina: Jina Reader only (handles JS-rendered pages, anti-bot, PDFs). tinyfish: Tinyfish Fetch API — headless browser, JS rendering, PDF text extraction (requires TINYFISH_API_KEY)."))})
+        :inputSchema  (schema/->zod {
+                                    :url [:string "URL to fetch"]
+                                    :format [:enum ["text" "markdown" "html"] {:optional true :doc "Output format: markdown (default, converts HTML to Markdown), text (strips HTML), or html (raw)"}]
+                                    :max_length [:number {:optional true :doc "Maximum output characters (default: 20000)"}]
+                                    :provider [:enum ["auto" "direct" "jina" "tinyfish"] {:optional true :doc "Fetch provider. auto (default): direct fetch, then Tinyfish when TINYFISH_API_KEY is set, then Jina Reader. direct: raw fetch only. jina: Jina Reader only (handles JS-rendered pages, anti-bot, PDFs). tinyfish: Tinyfish Fetch API — headless browser, JS rendering, PDF text extraction (requires TINYFISH_API_KEY)."}]})
         :execute web-fetch-execute}))
 
 ;;; ─── web_search ────────────────────────────────────────────
@@ -911,17 +907,12 @@
 (def web-search-tool
   (tool
    #js {:description "Search the web for information. Always use this for any web lookup — never use curl to search engines in bash. Auto fallback chain: Tinyfish (if TINYFISH_API_KEY set) → Jina (free, rate-limited) → DuckDuckGo. Tavily and Brave are explicit-only — pass provider=tavily or provider=brave to use them."
-        :inputSchema  (.object z
-                               #js {:query       (-> (.string z)
-                                                     (.describe "Search query"))
-                                    :num_results (-> (.number z) (.optional)
-                                                     (.describe "Number of results (default: 5, max: 20)"))
-                                    :provider    (-> (.enum z #js ["tinyfish" "jina" "duckduckgo" "tavily" "brave"]) (.optional)
-                                                     (.describe "Search provider. Auto chain (default): tinyfish (if key) → jina → duckduckgo. Tavily and Brave require explicit provider= to use; they're not in the auto chain to avoid surprise billing."))
-                                    :location    (-> (.string z) (.optional)
-                                                     (.describe "ISO country code for geo-targeted results (Tinyfish only, e.g. 'US', 'FR'). Ignored by other providers."))
-                                    :language    (-> (.string z) (.optional)
-                                                     (.describe "Language code for results (Tinyfish only, e.g. 'en', 'fr'). Ignored by other providers."))})
+        :inputSchema  (schema/->zod {
+                                    :query [:string "Search query"]
+                                    :num_results [:number {:optional true :doc "Number of results (default: 5, max: 20)"}]
+                                    :provider [:enum ["tinyfish" "jina" "duckduckgo" "tavily" "brave"] {:optional true :doc "Search provider. Auto chain (default): tinyfish (if key) → jina → duckduckgo. Tavily and Brave require explicit provider= to use; they're not in the auto chain to avoid surprise billing."}]
+                                    :location [:string {:optional true :doc "ISO country code for geo-targeted results (Tinyfish only, e.g. 'US', 'FR'). Ignored by other providers."}]
+                                    :language [:string {:optional true :doc "Language code for results (Tinyfish only, e.g. 'en', 'fr'). Ignored by other providers."}]})
         :execute web-search-execute}))
 
 ;;; ─── deep_research ─────────────────────────────────────────
@@ -997,11 +988,9 @@
 (def deep-research-tool
   (tool
    #js {:description "Run an agentic deep-research query — returns a synthesized answer with citations. Use for open-ended research questions where you'd otherwise need many web_search + web_fetch turns. Slow (30-120s). Auto-selects Perplexity Sonar (if PERPLEXITY_API_KEY set) with Jina DeepSearch fallback; otherwise uses Jina DeepSearch (reuses 'jina' credential from ~/.nyma/credentials.json)."
-        :inputSchema  (.object z
-                               #js {:query    (-> (.string z)
-                                                  (.describe "Research question — be specific. Single string, not keywords."))
-                                    :provider (-> (.enum z #js ["auto" "perplexity" "jina"]) (.optional)
-                                                  (.describe "Provider override. auto (default if Perplexity key set): try Perplexity, fall back to Jina DeepSearch. perplexity: Perplexity Sonar Pro only. jina: Jina DeepSearch only."))})
+        :inputSchema  (schema/->zod {
+                                    :query [:string "Research question — be specific. Single string, not keywords."]
+                                    :provider [:enum ["auto" "perplexity" "jina"] {:optional true :doc "Provider override. auto (default if Perplexity key set): try Perplexity, fall back to Jina DeepSearch. perplexity: Perplexity Sonar Pro only. jina: Jina DeepSearch only."}]})
         :execute deep-research-execute}))
 
 ;;; ─── view_image (multimodal) ───────────────────────────────
@@ -1031,7 +1020,8 @@
   (tool
    #js {:description
         "View an image file (PNG/JPG/WebP/GIF) so you can SEE it — a screenshot or a rendered document/slide. Use to VERIFY visual output (does it look right?); for editing prefer structured/text reads. The provider auto-downscales; look sparingly."
-        :inputSchema (.object z #js {:path (-> (.string z) (.describe "Path to the image file"))})
+        :inputSchema (schema/->zod {
+                                    :path [:string "Path to the image file"]})
         :execute view-image-execute
         :toModelOutput mm/tool-model-output}))
 
@@ -1070,13 +1060,10 @@
                           "Use the id and offset from a `retrieve_result(...)` truncation notice. "
                           "Reach for this when the truncated head is not enough to answer — "
                           "it pages, so follow nextOffset until eof.")
-        :inputSchema (.object z
-                              #js {:id     (-> (.string z)
-                                               (.describe "The id from the truncation notice"))
-                                   :offset (-> (.number z) (.optional)
-                                               (.describe "Character offset to resume from; use the notice's offset, then each reply's nextOffset. Default 0."))
-                                   :limit  (-> (.number z) (.optional)
-                                               (.describe (str "Max characters to return (default and max " recall-page-chars ")")))})
+        :inputSchema (schema/->zod {
+                                    :id [:string "The id from the truncation notice"]
+                                    :offset [:number {:optional true :doc "Character offset to resume from; use the notice's offset, then each reply's nextOffset. Default 0."}]
+                                    :limit [:number {:optional true :doc (str "Max characters to return (default and max " recall-page-chars ")")}]})
         :execute retrieve-result-execute}))
 
 ;;; ─── builtin tools map ─────────────────────────────────────

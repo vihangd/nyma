@@ -23,6 +23,8 @@
     "repl": "npx squint repl",
     "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",
     "gen:builtins": "bun scripts/gen-builtin-extensions.mjs && npx squint compile",
+    "gen:namespaces": "bun scripts/gen-namespaces.mjs",
+    "gen:events-doc": "npx squint compile && bun scripts/gen-events-doc.mjs",
     "bundle:linux-x64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-x64-musl --outfile=nyma-linux-x64-musl",
     "bundle:linux-arm64-musl": "bun run build && bun build ./dist/agent/cli.mjs --compile --bytecode --format=esm --minify --target=bun-linux-arm64-musl --outfile=nyma-linux-arm64-musl",
     "gen:version": "bun scripts/gen-version.mjs",

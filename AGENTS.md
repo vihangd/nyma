@@ -27,61 +27,123 @@ user input → loop.cljs → middleware pipeline → tool.execute
 
 ### Key Namespaces
 
+Generated from each namespace's docstring by `bun run gen:namespaces` (drift-checked by
+`test/namespaces_table.test.cljs`). A "—" purpose means the namespace has no docstring yet.
+
+<!-- generated: namespaces (bun run gen:namespaces) -->
 | File | Namespace | Purpose |
 |------|-----------|---------|
-| `src/agent/cli.cljs` | `agent.cli` | Entry point, arg parsing, mode dispatch |
-| `src/agent/core.cljs` | `agent.core` | Agent state, `create-agent` factory |
-| `src/agent/loop.cljs` | `agent.loop` | `run`, `steer`, `follow-up` |
-| `src/agent/events.cljs` | `agent.events` | Typed event bus (sync + async) |
-| `src/agent/tools.cljs` | `agent.tools` | Built-in tools: read, write, edit, bash |
-| `src/agent/tool_registry.cljs` | `agent.tool-registry` | Active/inactive tool management |
-| `src/agent/extensions.cljs` | `agent.extensions` | Extension API factory |
-| `src/agent/extension_loader.cljs` | `agent.extension-loader` | Dual .cljs/.ts loader with scoped APIs |
-| `src/agent/context.cljs` | `agent.context` | Message filtering, context building |
-| `src/agent/interceptors.cljs` | `agent.interceptors` | Pedestal-style interceptor chain engine |
-| `src/agent/middleware.cljs` | `agent.middleware` | Middleware pipeline for tool execution |
-| `src/agent/state.cljs` | `agent.state` | Event-sourced state store |
-| `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system |
-| `src/agent/extension_scope.cljs` | `agent.extension-scope` | Namespaced + capability-gated extension API |
-| `src/agent/extensions/agent_shell/features/effort_switcher.cljs` | `agent.extensions.agent-shell.features.effort-switcher` | `/effort <low\|medium\|high\|max\|auto>` — thinking budget control via ACP |
-| `src/agent/extensions/workspace_config/index.cljs` | `agent.extensions.workspace-config.index` | Workspace config — loads `.nyma/settings.json`, registers `/alias` and `/reload` |
-| `src/agent/extensions/workspace_config/aliases.cljs` | `agent.extensions.workspace-config.aliases` | Custom command aliases — `/alias` CRUD, late-binding dispatch |
-| `src/agent/extensions/token_suite/token_preview.cljs` | `agent.extensions.token-suite.token-preview` | Live token-count preview widget — subscribes to `editor_change`, shows `~N tokens` |
-| `src/agent/resources/skills.cljs` | `agent.resources.skills` | Skill discovery + `activate-skill` (deduped, tracked in `:active-skills`), `deactivate-skill`, `first-skill-line` |
-| `src/agent/ui/skill_picker.cljs` | `agent.ui.skill-picker` | Fuzzy skill picker for `/skills` — same `{render, onInput, dispose}` pattern as model picker |
-| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.) |
-| `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML |
-| `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings |
-| `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models |
-| `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name) |
-| `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories |
-| `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`) |
-| `src/agent/ui/chat_pane.cljs` | `agent.ui.chat-pane` | pi-tui Component for the chat message list (`appendChunk`, `pushMessage`, `setMessages`) |
-| `src/agent/ui/chat_renderer.cljs` | `agent.ui.chat-renderer` | Pure: message map → `string[]` for pi-tui rendering |
-| `src/agent/ui/app_reducers.cljs` | `agent.ui.app-reducers` | Pure message-list reducers for tool start/end/update, `make-submit-guard` |
-| `src/agent/ui/overlay_host.cljs` | `agent.ui.overlay-host` | Adapts `api.ui` overlays (`select`/`confirm`/`input`/`custom`) onto pi-tui's overlay stack |
-| `src/agent/ui/status_bar.cljs` | `agent.ui.status-bar` | pi-tui Component: bottom status bar, renders registered segments |
-| `src/agent/ui/status_line_segments.cljs` | `agent.ui.status-line-segments` | Segment registry + built-in status-line segments |
-| `src/agent/ui/picker_frame.cljs` / `picker_input.cljs` / `picker_math.cljs` | `agent.ui.picker-*` | Shared rendering, key dispatch and window math for filter pickers |
-| `src/agent/ui/fuzzy_scorer.cljs` | `agent.ui.fuzzy-scorer` | Pure fuzzy-matching used by the pickers and `@path` completion |
-| `src/agent/ui/file_mentions.cljs` | `agent.ui.file-mentions` | `@path` completion listing and `<file>`/`<dir>` expansion on submit |
-| `src/agent/ui/editor_bash.cljs` / `editor_eval.cljs` / `editor_exec_util.cljs` | `agent.ui.editor-*` | `!cmd` and `$expr` typed into the editor; shared subprocess/truncation helpers |
-| `src/agent/ui/diff_lines.cljs` | `agent.ui.diff-lines` | LCS line diff for the expanded `edit` view |
-| `src/agent/ui/think_tag_parser.cljs` | `agent.ui.think-tag-parser` | Splits inline `<think>` blocks out of streamed content at render time |
-| `src/agent/ui/themes.cljs` / `theme_catalog.cljs` | `agent.ui.themes`, `agent.ui.theme-catalog` | Default theme, bundled base16 theme pack, `current` atom |
-| `src/agent/ui/tree_viewer.cljs` | `agent.ui.tree-viewer` | Session tree browser for `ctx.ui.custom()` |
-| `src/agent/ui/width_guard.cljs` | `agent.ui.width-guard` | Clamps rendered lines to the terminal width ahead of pi-tui's strict check |
-| `src/agent/ui/crash_recovery.cljs` | `agent.ui.crash-recovery` | Survives a pi-tui render crash (`uncaughtException`) instead of losing the session |
-| `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage |
-| `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction |
-| `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata |
-| `src/agent/sessions/storage.cljs` | `agent.sessions.storage` | SQLite-backed session entry store with usage tracking |
-| `src/agent/resources/loader.cljs` | `agent.resources.loader` | Resource discovery |
-| `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings |
-| `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | TUI mode |
-| `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode |
-| `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode |
-| `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode |
+| `src/agent/cli.cljs` | `agent.cli` | Entry point, arg parsing, mode dispatch. |
+| `src/agent/commands/builtins.cljs` | `agent.commands.builtins` | Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.). |
+| `src/agent/commands/parser.cljs` | `agent.commands.parser` | Pure command-line parsing + suggestion helpers. |
+| `src/agent/commands/resolver.cljs` | `agent.commands.resolver` | Command resolution with namespace-prefix fallback. |
+| `src/agent/commands/share.cljs` | `agent.commands.share` | Session export to Markdown and HTML. |
+| `src/agent/context.cljs` | `agent.context` | Message filtering, context building. |
+| `src/agent/core.cljs` | `agent.core` | Agent state, `create-agent` factory. |
+| `src/agent/debug.cljs` | `agent.debug` | Unified debug logger for nyma. |
+| `src/agent/dev/event_map.cljs` | `agent.dev.event-map` | Generates docs/event-map.md: every core event with its emitters and its listeners, and every extension-API registry with its producers an… |
+| `src/agent/dev/ext_watch.cljs` | `agent.dev.ext-watch` | Save-to-live for extensions on disk. |
+| `src/agent/events.cljs` | `agent.events` | Typed event bus (sync + async). |
+| `src/agent/extension_context.cljs` | `agent.extension-context` | — |
+| `src/agent/extension_loader.cljs` | `agent.extension-loader` | Dual .cljs/.ts loader with scoped APIs. |
+| `src/agent/extension_scope.cljs` | `agent.extension-scope` | Namespaced + capability-gated extension API. |
+| `src/agent/extension_state.cljs` | `agent.extension-state` | Persistent per-extension state stored in .nyma/ext-state/{namespace}.json. |
+| `src/agent/extensions.cljs` | `agent.extensions` | Extension API factory. |
+| `src/agent/file_access.cljs` | `agent.file-access` | File access restrictions via .nymaignore (gitignore-style patterns). |
+| `src/agent/interceptors.cljs` | `agent.interceptors` | Pedestal-style interceptor chain: enter left-to-right, then unwind right-to-left running :leave — or :error while the context carries an… |
+| `src/agent/keybinding_registry.cljs` | `agent.keybinding-registry` | Action-ID keybinding registry. |
+| `src/agent/keybindings.cljs` | `agent.keybindings` | Loads `~/.nyma/keybindings.json` user key mappings. |
+| `src/agent/loop.cljs` | `agent.loop` | `run`, `steer`, `follow-up`. |
+| `src/agent/middleware.cljs` | `agent.middleware` | Middleware pipeline for tool execution. |
+| `src/agent/middleware/self_reminder.cljs` | `agent.middleware.self-reminder` | Self-reminder helper — injects a text block into the system prompt every N turns when a configurable action-predicate has not fired. |
+| `src/agent/model_info.cljs` | `agent.model-info` | — |
+| `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | Pi-tui based interactive mode. |
+| `src/agent/modes/pi_rpc.cljs` | `agent.modes.pi-rpc` | Adapter mode that speaks the pi-coding-agent Emacs frontend's JSONL-over-stdio RPC protocol, so the existing `pi-coding-agent.el` package… |
+| `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode. |
+| `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode. |
+| `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode. |
+| `src/agent/multimodal.cljs` | `agent.multimodal` | Multimodal (image) tool results — let a tool return an image a vision-capable model can SEE. |
+| `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system. |
+| `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models. |
+| `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories. |
+| `src/agent/providers/catalog.cljs` | `agent.providers.catalog` | Enumerate every model nyma knows about, across all registered providers. |
+| `src/agent/providers/model_fetch.cljs` | `agent.providers.model-fetch` | Discover a gateway's model list from its OpenAI-shaped `/v1/models` endpoint, with an on-disk cache. |
+| `src/agent/providers/oauth.cljs` | `agent.providers.oauth` | — |
+| `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name). |
+| `src/agent/resources/loader.cljs` | `agent.resources.loader` | Resource discovery. |
+| `src/agent/resources/skills.cljs` | `agent.resources.skills` | Discovery and activation of `SKILL.md` skill packages. |
+| `src/agent/schema.cljs` | `agent.schema` | One data form for a tool's parameters, rendered three ways. |
+| `src/agent/sessions/archive.cljs` | `agent.sessions.archive` | Compressed session logs. |
+| `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction. |
+| `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata. |
+| `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage. |
+| `src/agent/sessions/partial.cljs` | `agent.sessions.partial` | Keep the in-flight assistant response on disk while it streams. |
+| `src/agent/sessions/project.cljs` | `agent.sessions.project` | Which project does a session belong to? |
+| `src/agent/sessions/storage.cljs` | `agent.sessions.storage` | SQLite-backed session entry store with usage tracking. |
+| `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings. |
+| `src/agent/state.cljs` | `agent.state` | Event-sourced state store. |
+| `src/agent/thinking.cljs` | `agent.thinking` | Turn the session's thinking level into provider request options. |
+| `src/agent/token_estimation.cljs` | `agent.token-estimation` | — |
+| `src/agent/tool_metadata.cljs` | `agent.tool-metadata` | Per-tool safety metadata. |
+| `src/agent/tool_registry.cljs` | `agent.tool-registry` | Active/inactive tool management. |
+| `src/agent/tool_result_policy.cljs` | `agent.tool-result-policy` | Per-tool result normalization and truncation policy. |
+| `src/agent/tools.cljs` | `agent.tools` | Built-in tools: read, write, edit, bash. |
+| `src/agent/ui/app_reducers.cljs` | `agent.ui.app-reducers` | Pure reducers for the interactive TUI state. |
+| `src/agent/ui/chat_pane.cljs` | `agent.ui.chat-pane` | Pi-tui Component for the chat message list. |
+| `src/agent/ui/chat_renderer.cljs` | `agent.ui.chat-renderer` | Pure: message map → string[] for pi-tui rendering. |
+| `src/agent/ui/crash_recovery.cljs` | `agent.ui.crash-recovery` | Survive a pi-tui render crash instead of losing the session to it. |
+| `src/agent/ui/diff_lines.cljs` | `agent.ui.diff-lines` | Line diff for the expanded `edit` view. |
+| `src/agent/ui/editor_bash.cljs` | `agent.ui.editor-bash` | Editor bash mode — executes `!cmd` and `!!cmd` typed directly into the prompt editor. |
+| `src/agent/ui/editor_eval.cljs` | `agent.ui.editor-eval` | Editor eval mode — evaluates `$expr` and `$$expr` typed directly into the prompt editor via a one-shot `bb -e <expr>` subprocess. |
+| `src/agent/ui/editor_exec_util.cljs` | `agent.ui.editor-exec-util` | Shared primitives between editor-bash and editor-eval. |
+| `src/agent/ui/file_mentions.cljs` | `agent.ui.file-mentions` | `@path` in the editor: the autocomplete listing behind it and the expansion that runs on submit. |
+| `src/agent/ui/fuzzy_scorer.cljs` | `agent.ui.fuzzy-scorer` | Pure fuzzy-matching helpers used by the autocomplete provider. |
+| `src/agent/ui/overlay_host.cljs` | `agent.ui.overlay-host` | Backs `api.ui`'s overlay surface with pi-tui's native overlay stack. |
+| `src/agent/ui/picker_frame.cljs` | `agent.ui.picker-frame` | Shared string-rendering for filter-picker components. |
+| `src/agent/ui/picker_input.cljs` | `agent.ui.picker-input` | Shared keyboard-dispatch for filter-picker-style components. |
+| `src/agent/ui/picker_math.cljs` | `agent.ui.picker-math` | Pure boundary math for pickers. |
+| `src/agent/ui/skill_picker.cljs` | `agent.ui.skill-picker` | Fuzzy-searchable skill picker component for ui.custom(). |
+| `src/agent/ui/status_bar.cljs` | `agent.ui.status-bar` | Pi-tui Component: one-line status bar at the bottom of the screen. |
+| `src/agent/ui/status_line_segments.cljs` | `agent.ui.status-line-segments` | Segment registry + 20 built-in segments for the status line. |
+| `src/agent/ui/theme_catalog.cljs` | `agent.ui.theme-catalog` | A bundled theme pack: well-known base16 palettes converted to nyma's theme schema. |
+| `src/agent/ui/themes.cljs` | `agent.ui.themes` | — |
+| `src/agent/ui/think_tag_parser.cljs` | `agent.ui.think-tag-parser` | Parse inline <think>…</think> tags emitted by reasoning models that stream chain-of-thought through the normal content channel (MiniMax M… |
+| `src/agent/ui/tree_viewer.cljs` | `agent.ui.tree-viewer` | Session tree browser for `ctx.ui.custom()`. |
+| `src/agent/ui/width_guard.cljs` | `agent.ui.width-guard` | Last line of defence between nyma's components and pi-tui's width check. |
+| `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`). |
+| `src/agent/utils/credentials.cljs` | `agent.utils.credentials` | Read API keys saved by `/login <provider>`. |
+| `src/agent/utils/data.cljs` | `agent.utils.data` | Two things every namespace kept re-deriving: reading a config key whose spelling depends on who wrote it, and parsing JSON that may not b… |
+| `src/agent/utils/event_json.cljs` | `agent.utils.event-json` | Pure mappers from the AI SDK StepResult nyma hands to `turn_end` into the plain shapes any JSONL consumer (pi-rpc, `-p --output-format st… |
+| `src/agent/utils/git_files.cljs` | `agent.utils.git-files` | Synchronous git shell-outs shared by core and extensions. |
+| `src/agent/utils/home.cljs` | `agent.utils.home` | The one place nyma asks where HOME is. |
+| `src/agent/utils/js_interop.cljs` | `agent.utils.js-interop` | Squint ships `clj->js` but NOT `js->clj`. |
+| `src/agent/utils/jsonl_stdin.cljs` | `agent.utils.jsonl-stdin` | Reading a JSONL protocol channel off a stream. |
+| `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | — |
+| `src/agent/utils/markdown_blocks.cljs` | `agent.utils.markdown-blocks` | Incremental markdown rendering via block-level tokenization. |
+| `src/agent/utils/reasoning_request.cljs` | `agent.utils.reasoning-request` | Translate nyma's thinking level into each provider's REQUEST dialect. |
+| `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |
+| `src/agent/utils/spill_file.cljs` | `agent.utils.spill-file` | Writing model-visible content to disk, safely. |
+| `src/agent/utils/stream_drain.cljs` | `agent.utils.stream-drain` | Draining a subprocess pipe without waiting on processes we do not own. |
+| `src/agent/utils/template_args.cljs` | `agent.utils.template-args` | Positional argument substitution for skill bodies and prompt templates. |
+| `src/agent/utils/time.cljs` | `agent.utils.time` | Shared time formatting helpers. |
+| `src/agent/utils/toolcall_rescue.cljs` | `agent.utils.toolcall-rescue` | Rescue parser — normalize malformed tool-call formats to OpenAI JSON. |
+| `src/agent/utils/ui.cljs` | `agent.utils.ui` | Shared UI-capability predicates. |
+| `src/agent/utils/validation.cljs` | `agent.utils.validation` | Structured validation warnings with suggestions. |
+| `src/agent/version.cljs` | `agent.version` | The version, baked in at build time. |
+| `src/gateway/channels/email.cljs` | `gateway.channels.email` | Email channel adapter using imap-simple (IMAP polling) + nodemailer (SMTP). |
+| `src/gateway/channels/http.cljs` | `gateway.channels.http` | Generic HTTP webhook channel adapter using Bun's built-in HTTP server. |
+| `src/gateway/channels/slack.cljs` | `gateway.channels.slack` | Slack channel adapter using Socket Mode. |
+| `src/gateway/channels/telegram.cljs` | `gateway.channels.telegram` | Telegram Bot API channel adapter. |
+| `src/gateway/config.cljs` | `gateway.config` | Gateway configuration loading and validation. |
+| `src/gateway/core.cljs` | `gateway.core` | Gateway facade — wires channels, session pool, auth pipeline, and agent sessions into a running gateway. |
+| `src/gateway/entry.cljs` | `gateway.entry` | nyma-gateway CLI entry point. |
+| `src/gateway/loop.cljs` | `gateway.loop` | Gateway message loop — wires inbound messages to the agent and maps agent events back to the response context. |
+| `src/gateway/pipelines.cljs` | `gateway.pipelines` | Auth and approval pipelines for the gateway. |
+| `src/gateway/protocols.cljs` | `gateway.protocols` | Protocol definitions for the gateway channel system. |
+| `src/gateway/session_pool.cljs` | `gateway.session-pool` | Per-conversation session pool with serialized execution lanes, policy-based eviction, and event-idempotency dedup cache. |
+| `src/gateway/streaming.cljs` | `gateway.streaming` | Per-channel streaming policies for gateway response contexts. |
+| `src/gateway/tools.cljs` | `gateway.tools` | Gateway-common tools available to the agent in gateway mode. |
+<!-- /generated: namespaces -->
 
 ## Development Workflow
 
@@ -116,6 +178,36 @@ bun run hooks:install
 # REPL
 npx squint repl
 ```
+
+### Per-extension reload, live eval, event log
+
+- `/reload <ns>` — `extension_loader/reload-one!`: deactivate one loaded extension, re-import it
+  from disk (squint recompiles on content change; TS/JS re-imports past the module cache), swap the
+  new entry in. `/reload` alone is the full path (`handle-reload`).
+- `NYMA_WATCH_EXTENSIONS=1` or settings `dev.watch-extensions` — `agent.dev.ext-watch` watches the
+  on-disk extension dirs and reloads the extension whose files changed. Builtins are not watched.
+- `/eval <form>` (`NYMA_DEV=1` or `dev.eval`) — `extension_loader/eval-expr!` compiles a form with the
+  loader's squint and runs it; the live agent is `js/globalThis.__nyma`.
+- `/replay [n]` — tail of the event-sourced store's 500-entry log (`(:history store)`), with counts.
+
+### Tool parameters are data — `agent.schema`
+
+Declare a tool's inputs once as data and render them where needed:
+
+```clojure
+(require '[agent.schema :as schema])
+(def fields {:path  [:string "File path"]
+             :range [:array :number {:length 2 :optional true :doc "Line range"}]
+             :mode  [:enum ["text" "markdown"] {:optional true}]})
+(tool #js {:inputSchema (schema/->zod fields) …})          ; AI-SDK tools
+(clj->js (schema/->json-schema fields))                    ; raw JSON Schema (extension tools)
+(schema/->doc-rows fields)                                  ; README bullets
+```
+
+Every core tool in `tools.cljs` and the `subagent` tool use it; the remaining
+raw-JSON extension tools (memory, todos, ast_tools, lsp_suite, openwiki,
+questionnaire, small_model) migrate on touch. `test/all_tools_schema_validation.test.cljs`
+sweeps every registered tool through the SDK's `asSchema`.
 
 ### Adding a built-in extension
 
@@ -401,11 +493,32 @@ api.addMiddleware({
 api.removeMiddleware("rate-limiter");
 ```
 
-## Squint: no `defmulti`
+## Squint: `defmulti` works — use it for open dispatch
 
-`defmulti`/`defmethod` does **not** work in Squint — it compiles to undefined
-`defmulti()` calls. Use a map of closures (the shape every nyma subsystem
-already returns) or a `cond` dispatch instead.
+`defmulti`/`defmethod` DO compile on the pinned squint. This file used to say the
+opposite, and every registry in nyma became an atom-of-closures because of it.
+The shipping proof is `agent.utils.reasoning-request/reasoning-body`
+(`src/agent/utils/reasoning_request.cljs:39`): one `defmulti` in core, four
+`defmethod`s installed from provider extensions (groq, openrouter, relay,
+kimi). Squint compiles `defmethod` to a mutation of the multimethod object
+imported from the defining namespace, so a method registers the moment its
+module is imported — no explicit registration call, no ordering to get wrong.
+
+When to reach for which:
+
+- **`defmulti`** — a fixed *operation* with an open set of *cases* that other
+  namespaces (extensions) contribute: reasoning dialects per provider, wire
+  formats per protocol, renderers per message type. Dispatch on a value the
+  caller already has.
+- **Atom registry** (`tool_result_policy`, provider registry, status segments)
+  — when entries must be *listed*, *undone* on `/reload`, or carry data beyond
+  a function. A multimethod cannot enumerate or unregister its methods.
+- **`cond` / map of closures** — a closed set that lives in one file.
+
+Limits: `defmethod` is global to the process (two extensions defining the same
+dispatch value: last import wins, silently), and a method installed by an
+extension survives that extension's deactivation. Do not use it for anything
+`/reload` must be able to take back.
 
 ## Event-Sourced State Store
 
@@ -600,7 +713,7 @@ Settings are resolved in priority order:
 | `:on-submit` passed to a fn destructuring `:onSubmit` | one casing on both sides — keyword keys are plain strings |
 | `(js/Bun.spawn ...)` without pipes | Add `#js {:stdout "pipe" :stderr "pipe"}` |
 | `(defn f [& {:keys [a]}] ...)` keyword args | `(defn f [opts] ...)` explicit opts map |
-| `(defmulti ...)` / `(defmethod ...)` | a map of closures or `cond` — multimethods don't compile |
+| `(defmulti ...)` for a set that must be listed or unregistered | an atom registry — multimethods compile fine, but cannot enumerate or undo their methods (see "`defmulti` works") |
 
 ### Extension Development
 

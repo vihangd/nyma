@@ -19,14 +19,16 @@
                                                     (-> (expect (contains? roles :plan)) (.toBe true))
                                                     (-> (expect (contains? roles :commit)) (.toBe true)))))
 
-                                            (it "each role has a model (:provider+:model) OR is a model-less mode (:policy)"
+                                            (it "each role has a model (:provider+:model), is a model-less mode (:policy), or shapes the tool set (:allowed-tools)"
                                                 (fn []
       ;; Permission-mode roles (accept-edits, full-auto) are intentionally
       ;; model-less — they carry only a :policy and preserve the active model.
+      ;; So is :lead, which restricts the tool set and inherits the model.
                                                   (doseq [[_name role-cfg] (:roles defaults)]
                                                     (let [has-model  (and (:provider role-cfg) (:model role-cfg))
-                                                          mode-only? (:policy role-cfg)]
-                                                      (-> (expect (boolean (or has-model mode-only?))) (.toBe true))))))))
+                                                          mode-only? (:policy role-cfg)
+                                                          tool-shape? (seq (:allowed-tools role-cfg))]
+                                                      (-> (expect (boolean (or has-model mode-only? tool-shape?))) (.toBe true))))))))
 
 ;;; ─── Agent state ─────────────────────────────────────────
 

@@ -46,7 +46,7 @@
           r   (js-await (run-command {:command "true"
                                       :stdin-json {:blob big}}))]
       ;; Give a rejection a turn of the loop to surface before we look.
-      (js-await (js/Promise. (fn [res] (js/setTimeout res 100))))
+      (js-await (js/Promise. (fn [res] (js/setTimeout res 0))))
       (.off js/process "unhandledRejection" on-rej)
       (-> (expect (vec @seen)) (.toEqual #js []))
       (-> (expect (outcome r)) (.toBe "exit=0 stderr=")))))

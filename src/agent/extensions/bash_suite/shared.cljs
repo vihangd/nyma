@@ -50,6 +50,9 @@
                      :tail-lines 50
                      :preserve-stderr true
                      :temp-dir nil}
+   ;; Append "Files changed by this command" (+added/-removed per file) to a
+   ;; bash result, from a git working-tree snapshot around the command.
+   :edit-diff {:enabled true}
    :env-filter {:enabled true
                 :strip-vars ["LD_PRELOAD" "LD_LIBRARY_PATH"
                              "DYLD_INSERT_LIBRARIES" "DYLD_LIBRARY_PATH"

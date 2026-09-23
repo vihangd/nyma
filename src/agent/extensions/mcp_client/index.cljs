@@ -139,6 +139,8 @@
                        :max-restarts        3
                        :startup-timeout-ms  30000
                        :call-timeout-ms     30000
+                       ;; Per-tool description cap (chars) — see tool_bridge.
+                       :max-description-length 1200
                        :shadow-tools        default-shadow-map
                        :hidden-tools        default-hidden-tools
                        :tool-overrides      override/default-overrides}]
@@ -153,6 +155,8 @@
                      :max-restarts        (or (aget mcp "max-restarts") (:max-restarts defaults))
                      :startup-timeout-ms  (or (aget mcp "startup-timeout-ms") (:startup-timeout-ms defaults))
                      :call-timeout-ms     (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
+                     :max-description-length (let [n (aget mcp "max-description-length")]
+                                               (if (number? n) n (:max-description-length defaults)))
                      :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
                      :hidden-tools        (parse-hidden-tools (aget mcp "hidden-tools"))
                      :tool-overrides      (override/parse-overrides (aget mcp "tool-overrides"))})))
@@ -293,7 +297,8 @@
               (when (seq configs)
                 (try
                   (js-await (mgr/start-all! @manager-ref configs))
-                  (let [names (bridge/register-all! api @manager-ref)]
+                  (let [names (bridge/register-all! api @manager-ref
+                                                     {:max-description-length (:max-description-length settings)})]
                     (reset! registered-tools names))
                   ;; Subprocess may have stomped the terminal title.
                   (reclaim-terminal-title!)

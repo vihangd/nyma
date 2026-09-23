@@ -1,4 +1,5 @@
 (ns agent.sessions.compaction
+  "Context window compaction."
   (:require ["ai" :refer [generateText]]
             ["node:fs" :as fs]
             ["node:path" :as path]
@@ -357,17 +358,57 @@ with every section below present.
          (or (not carried?)
              (>= (count (str/trim added)) min-new-summary-chars)))))
 
+(def default-strategy
+  "What compaction did before strategies existed: the six-section summary
+   prompt and its user-prompt builder."
+  {:name "default"
+   :system-prompt compact-system-prompt
+   :build-user-prompt build-compact-user-prompt})
+
+(def ^:private strategies
+  "name → {:system-prompt str :build-user-prompt (fn [opts] str)}, contributed
+   by extensions. Until 2026-09-23 the only way to change how compaction
+   summarised was the `before_compact` ctx mutation — a whole summary handed
+   over blind, which is why `extension-summary-usable?` exists. A strategy
+   replaces the PROMPTS and keeps the loop's split, validation and retry."
+  (atom {}))
+
+(defn register-strategy!
+  "Register a compaction strategy under `name`. Either key may be omitted
+   and falls back to the default's."
+  [name {:keys [system-prompt build-user-prompt]}]
+  (swap! strategies assoc (str name)
+         {:name (str name)
+          :system-prompt     (or system-prompt (:system-prompt default-strategy))
+          :build-user-prompt (or build-user-prompt (:build-user-prompt default-strategy))})
+  nil)
+
+(defn unregister-strategy! [name] (swap! strategies dissoc (str name)) nil)
+(defn reset-strategies! [] (reset! strategies {}))
+
+(defn strategy-for
+  "The strategy `compaction.strategy` names, else the default. An unknown
+   name warns once per call and falls back — a typo must not turn
+   compaction off."
+  [name]
+  (if (and (seq (str (or name ""))) (not= (str name) "default"))
+    (or (get @strategies (str name))
+        (do (d/warn "compaction" (str "unknown compaction strategy `" name "` — using default"))
+            default-strategy))
+    default-strategy))
+
 (defn ^:async compact-with-retry
-  "Call generateText with compact-system-prompt + user-prompt. Validate the
-   result and run one fix-retry if validation fails. Always returns a string
-   (uses unvalidated fallback rather than blocking compaction).
+  "Call generateText with the strategy's system prompt + user-prompt. Validate
+   the result and run one fix-retry if validation fails. Always returns a
+   string (uses unvalidated fallback rather than blocking compaction).
    Optional gen-fn replaces generateText (used in tests)."
-  [model user-prompt files-read files-modified & [gen-fn]]
+  [model user-prompt files-read files-modified & [gen-fn strategy]]
   (let [gen          (or gen-fn generateText)
+        sys          (:system-prompt (or strategy default-strategy))
         first-result (js-await
                       (gen
                        #js {:model    model
-                            :system   compact-system-prompt
+                            :system   sys
                             :messages #js [#js {:role "user" :content user-prompt}]}))
         first-text   (.-text first-result)
         first-errors (validate-compaction first-text files-read files-modified user-prompt)]
@@ -378,7 +419,7 @@ with every section below present.
             fix-result (js-await
                         (gen
                          #js {:model    model
-                              :system   compact-system-prompt
+                              :system   sys
                               :messages #js [#js {:role    "user"
                                                   :content (build-fix-user-prompt
                                                             first-text first-errors)}]}))
@@ -520,7 +561,10 @@ with every section below present.
      :threshold (let [v (g :threshold)] (if (number? v) v default-threshold))
      :reserve   (let [v (g :reserve-tokens)] (if (number? v) v default-reserve-tokens))
      :max-working (let [v (g :max-working-context)]
-                    (if (number? v) v default-max-working-context))}))
+                    (if (number? v) v default-max-working-context))
+     ;; Name of a registered strategy (`registerCompactionStrategy`); absent
+     ;; or "default" → the built-in prompts.
+     :strategy  (let [v (g :strategy)] (when (string? v) v))}))
 
 (defn ^:async compact
   "Summarize older messages when context approaches model limits.
@@ -532,7 +576,7 @@ with every section below present.
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
                                    model-key threshold reserve enabled? force? observed-usage
-                                   state-atom max-working]}]]
+                                   state-atom max-working strategy]}]]
   (let [context ((:build-context session))
         ;; Prefer the provider's own count of the last request. The estimate
         ;; below walks the whole session tree; what is actually sent is pruned
@@ -670,14 +714,15 @@ with every section below present.
                     (d/warn-quiet "compaction" "extension summary rejected, using built-in summariser"
                                   #js {:errors (clj->js errors) :length (count rejected)})
                     errors))
-                user-prompt  (build-compact-user-prompt
+                strat        (strategy-for strategy)
+                user-prompt  ((:build-user-prompt strat)
                               {:custom-instructions custom-instructions
                                :previous-summary    (:content prev-compaction)
                                :to-summarize        to-summarize
                                :files-read          files-read
                                :files-modified      files-modified})
                 summary-text (js-await
-                              (compact-with-retry model user-prompt files-read files-modified gen-fn))]
+                              (compact-with-retry model user-prompt files-read files-modified gen-fn strat))]
 
             ((:append session)
              {:role     "compaction"

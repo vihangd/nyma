@@ -1,39 +1,33 @@
 (ns agent.providers.registry
+  "LLM provider registry (register/resolve by name)."
   (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
             ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.providers.oauth :as oauth]
-            [agent.utils.credentials :as credentials]))
+            [agent.utils.credentials :as credentials]
+            [agent.utils.data :as data]))
+
+(def ^:private config-keys
+  "Kebab-case keys a provider config may spell in camelCase. Sub-map keys
+   are listed under their parent."
+  {:top   [:create-model :base-url :api-key-env :max-tokens :overhead-tokens]
+   :oauth [:get-api-key :refresh-token]})
+
+(defn- normalize-keys
+  "Every key in `ks` present under any spelling, written back kebab-case.
+   The kebab spelling wins when both are present."
+  [m ks]
+  (reduce (fn [m k]
+            (let [v (data/conf-get m k)]
+              (if (some? v) (assoc m k v) m)))
+          m ks))
 
 (defn- normalize-config
   "Normalize JS camelCase keys to kebab-case CLJ keys."
   [config]
-  (let [base config
-        base (if (and (not (:create-model base)) (:createModel base))
-               (assoc base :create-model (:createModel base))
-               base)
-        base (if (and (not (:base-url base)) (:baseUrl base))
-               (assoc base :base-url (:baseUrl base))
-               base)
-        base (if (and (not (:api-key-env base)) (:apiKeyEnv base))
-               (assoc base :api-key-env (:apiKeyEnv base))
-               base)
-        base (if (and (not (:max-tokens base)) (:maxTokens base))
-               (assoc base :max-tokens (:maxTokens base))
-               base)
-        base (if (and (not (:overhead-tokens base)) (:overheadTokens base))
-               (assoc base :overhead-tokens (:overheadTokens base))
-               base)
-        ;; Normalize OAuth sub-keys
-        base (if-let [oauth (:oauth base)]
-               (let [oauth (if (and (not (:get-api-key oauth)) (:getApiKey oauth))
-                             (assoc oauth :get-api-key (:getApiKey oauth))
-                             oauth)
-                     oauth (if (and (not (:refresh-token oauth)) (:refreshToken oauth))
-                             (assoc oauth :refresh-token (:refreshToken oauth))
-                             oauth)]
-                 (assoc base :oauth oauth))
-               base)]
-    base))
+  (let [base (normalize-keys config (:top config-keys))]
+    (if-let [oauth (:oauth base)]
+      (assoc base :oauth (normalize-keys oauth (:oauth config-keys)))
+      base)))
 
 (defn resolve-api-key
   "Resolve API key/token for a provider config.

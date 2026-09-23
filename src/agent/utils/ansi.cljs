@@ -1,4 +1,6 @@
-(ns agent.utils.ansi)
+(ns agent.utils.ansi
+  "ANSI-aware text utilities (`truncate-text`, `terminal-width`)."
+  )
 
 (defn terminal-width
   "Returns current terminal width, defaulting to 80 if unavailable."

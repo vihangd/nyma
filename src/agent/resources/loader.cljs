@@ -1,4 +1,5 @@
 (ns agent.resources.loader
+  "Resource discovery."
   (:require [agent.utils.home :as home]
              ["node:path" :as path]
             ["node:fs" :as fs]
@@ -331,7 +332,10 @@ When multiple independent tool calls are needed, make them in parallel.
        (let [env-block (str "\n\n## Environment\n"
                             "- Working directory: " (js/process.cwd) "\n"
                             "- Platform: " (.-platform js/process) " " (.-arch js/process) "\n"
-                            "- Date: " (.toISOString (js/Date.)) "\n")
+                            ;; Day only: a per-second timestamp here changed the
+                            ;; system prompt on every turn and broke the prefix
+                            ;; cache with it (cache-aware layout, 2026-09-23).
+                            "- Date: " (subs (.toISOString (js/Date.)) 0 10) "\n")
              ;; Skills auto-listed for the model: those NOT marked
              ;; `disable-model-invocation: true`. Hidden skills remain
              ;; reachable via `/skill <name>` but are kept out of the

@@ -229,7 +229,8 @@ the user will approve the plan before execution begins.")
       (:plan-executing s)
       (let [remaining (filter #(not (:completed %)) (:plan-todos s))]
         (when (seq remaining)
-          #js {"system-prompt-additions"
+          ;; Shrinks as steps complete: volatile, after the cache boundary.
+          #js {"volatile-additions"
                #js [(str "[EXECUTING PLAN — full tool access]\nRemaining steps:\n"
                          (str/join "\n" (map #(str (:step %) ". " (:text %)) remaining))
                          "\nAfter completing a step, include a [DONE:n] tag in your reply.")]}))

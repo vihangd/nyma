@@ -16,7 +16,8 @@
        treated as plain `additionalContext` text)
      - stderr (used as the reason string when exit-code is 2)
    This module owns the per-hook parse and the cross-hook merge."
-  (:require [clojure.string :as str]))
+  (:require [agent.utils.data :as data]
+            [clojure.string :as str]))
 
 (def ^:private permission-rank
   {"deny"  3
@@ -52,7 +53,7 @@
                          (or (.startsWith trimmed "{")
                              (.startsWith trimmed "[")))
         parsed-json (when looks-json?
-                      (try (js/JSON.parse trimmed) (catch :default _e nil)))
+                      (data/parse-json trimmed))
         ;; Convenience accessor that tolerates the response not being
         ;; an object.
         kget (fn [k] (when (and parsed-json (object? parsed-json))

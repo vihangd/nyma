@@ -41,7 +41,9 @@
 (defn- ui-ctx [notes] #js {:ui #js {:notify (fn [m & [_l]] (swap! notes conj m))}})
 (defn- ^:async prompt-additions [agent]
   (let [r (js-await ((:emit-collect (:events agent)) "before_agent_start" #js {}))]
-    (vec (or (get r "system-prompt-additions") []))))
+    ;; Both keys: per-turn text (a todo ledger) now lands in volatile-additions.
+    (vec (concat (or (get r "system-prompt-additions") [])
+                 (or (get r "volatile-additions") [])))))
 
 (defn- tmpdir [tag] (fs/mkdtempSync (path/join (os/tmpdir) (str "nyma-act-" tag "-"))))
 

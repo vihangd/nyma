@@ -1,4 +1,5 @@
 (ns agent.sessions.manager
+  "JSONL tree session storage."
   (:require [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
             [agent.debug :as d]

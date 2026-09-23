@@ -1,4 +1,5 @@
 (ns agent.loop
+  "`run`, `steer`, `follow-up`."
   (:require ["ai" :refer [streamText stepCountIs]]
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.middleware :refer [wrap-tools-with-middleware]]
@@ -59,6 +60,23 @@
        "cut off before it finished. Continue from where you stopped, and "
        "respond more concisely — take the next concrete action with a tool "
        "rather than restating the plan."))
+
+(def volatile-boundary
+  "Separator between the stable system prompt and the per-turn tail built from
+   `volatile-additions`. A `---` line, so the prompt reads as one document and
+   token_suite/kv_cache can put its cache breakpoint exactly here."
+  "\n\n---\n\n")
+
+(defn step-cap-nudge
+  "Borrowed from apprentice's force-final-answer: the step cap used to end a
+   run in silence, so a capped subagent handed its parent whatever text it
+   had mid-work. One more call with the tools taken away turns that into a
+   report. It is one tool-less call, not an auto-continue — the work itself
+   still stops here."
+  [max-steps]
+  (str "You have used all " max-steps " steps of this turn and cannot call "
+       "any more tools. Answer now with what you already have: report what "
+       "you found or changed so far, and what remains undone."))
 
 (defn- event-type [chunk]
   (get stream-event-types (.-type chunk)))
@@ -202,7 +220,15 @@
     ;; Main loop — re-enters for follow-up messages
     (loop []
       (let [messages  (build-context agent)
-            raw-tools (js-await (get-active-tools-filtered agent))
+            ;; One-shot: the turn after a step cap runs with no tools and a
+            ;; single step, so the model must answer in prose. The option rides
+            ;; the follow-up MESSAGE (:turn) and is moved into state by the
+            ;; drain below, one synchronous step before this read — so it can
+            ;; only ever apply to the nudge that carried it, never to another
+            ;; queued follow-up or to the user's next prompt.
+            final-report? (boolean (:final-report (:turn-opts @state)))
+            _ (when (:turn-opts @state) (swap! state dissoc :turn-opts))
+            raw-tools (if final-report? {} (js-await (get-active-tools-filtered agent)))
             tools     (if middleware
                         (wrap-tools-with-middleware raw-tools middleware events)
                         (wrap-tools-with-before-hook raw-tools events))
@@ -213,12 +239,22 @@
                                          #js {:userMessage  (last messages)
                                               :systemPrompt (:system-prompt config)}))
 
-            ;; Build effective prompt from additions and base
+            ;; Build effective prompt from additions and base. Layout is
+            ;; cache-aware: everything that is the same from turn to turn
+            ;; comes first, and anything that changes per turn (a todo
+            ;; ledger, a step reminder, evidence) goes LAST, after an
+            ;; explicit boundary — so the provider's prefix cache covers the
+            ;; stable part and one changed line does not invalidate the whole
+            ;; system block. Measured elsewhere at 41-80% cost and 13-31%
+            ;; TTFT (arXiv 2601.06007). Extensions declare per-turn text as
+            ;; `volatile-additions`; `token_suite/kv_cache` places its
+            ;; breakpoint at `volatile-boundary`.
             effective-prompt
             (let [base      (:system-prompt config)
                   additions (get before-result "system-prompt-additions")
                   addition  (get before-result "systemPromptAddition")
                   sections  (get before-result "prompt-sections")
+                  volatile  (get before-result "volatile-additions")
                   sections-text
                   (when (seq sections)
                     (let [sorted (sort-by #(- (or (get % "priority") 0)) sections)]
@@ -226,7 +262,8 @@
               (cond-> base
                 addition        (str "\n\n" addition)
                 (seq additions) (str "\n\n" (str/join "\n\n" additions))
-                sections-text   (str "\n\n" sections-text)))
+                sections-text   (str "\n\n" sections-text)
+                (seq volatile)  (str volatile-boundary (str/join "\n\n" volatile))))
 
             ;; Inject messages from extensions
             inject-msgs (get before-result "inject-messages")
@@ -383,7 +420,7 @@
                              ;; without ever calling a tool.
                              :maxOutputTokens (:max-output-tokens config)
                              :maxRetries      (or (:max-retries config) 5)
-                             :stopWhen        (stepCountIs (:max-steps config))
+                             :stopWhen        (stepCountIs (if final-report? 1 (:max-steps config)))
                              ;; Extended thinking is opt-in per request: with no
                              ;; `thinking` field a Claude model returns no
                              ;; reasoning at all, measured against Opus 5.
@@ -423,6 +460,7 @@
           ;; re-surface it. Without this, a flaky planning turn skipped
           ;; turn_finalize and left plan mode silently stuck ON.
           (let [turn-error (atom nil)
+                nudged?    (atom false)
                 ;; The provider's own verdict on how the turn ended, carried out
                 ;; to the finalize block below. "length" means the response was
                 ;; CUT OFF at the output-token cap — a fact, not a heuristic, and
@@ -680,14 +718,18 @@
                 ;; warning and escalate's stall detection to the wrong remedy —
                 ;; swap the model and prune the tail — for a response that was
                 ;; merely too long.
+                ;; A report turn is tool-less BY DESIGN: neither a stall nor,
+                ;; if it runs long, something to continue with tools restored.
                 (cond
+                  final-report?            nil
                   count-stall?             (swap! st update :no-op-turns (fnil inc 0))
                   (pos? @tools-this-turn)  (swap! st assoc :worked? true :no-op-turns 0)
                   :else                    nil)
 
                 ;; The nudge is NOT conditioned on the tool count: a turn that ran
                 ;; five tools and got cut off on the sixth needs it just as much.
-                (when cut-off?
+                (when (and cut-off? (not final-report?))
+                  (reset! nudged? true)
                   (dbg/warn "[loop] response hit the output-token cap and was cut off")
                   (notify! "The model's response hit its output-token limit and was cut off. Asking it to continue more concisely.")
                   (follow-up agent {:role "user" :content cut-off-nudge}))
@@ -698,9 +740,18 @@
                 ;; path can produce too.
                 (when step-capped?
                   (dbg/warn (str "[loop] step limit reached (" (:max-steps config) ") — the model was still working"))
-                  (notify! (str "Step limit reached (" (:max-steps config)
-                                ") with work still in progress. Send a message to continue, "
-                                "or raise `max-steps` in settings.")))
+                  (if (and (:step-cap-report config) (not final-report?))
+                    ;; Queue the tool-less report turn; the follow-up drain
+                    ;; below picks it up. Never re-armed from the report turn
+                    ;; itself (max-steps 1 would otherwise loop).
+                    (do (notify! (str "Step limit reached (" (:max-steps config)
+                                      ") with work still in progress. Asking the model to report "
+                                      "what it has; send a message to continue, or raise `max-steps`."))
+                        (follow-up agent {:role "user" :content (step-cap-nudge (:max-steps config))
+                                          :turn {:final-report true}}))
+                    (notify! (str "Step limit reached (" (:max-steps config)
+                                  ") with work still in progress. Send a message to continue, "
+                                  "or raise `max-steps` in settings."))))
 
                 ;; Only once the session has asked for work: two one-word
                 ;; conversational turns tripped this. Three in a row after a
@@ -715,7 +766,12 @@
                                                  :noOpTurns    (:no-op-turns @(:state agent))
                                                  ;; So a consumer can tell a stall from a
                                                  ;; response that was merely cut off.
-                                                 :finishReason @turn-finish}))
+                                                 :finishReason @turn-finish
+                                                 ;; A continue-nudge WAS queued for this
+                                                 ;; turn: a handler that wants to shape
+                                                 ;; that retry (thinking off) can rely
+                                                 ;; on it running next.
+                                                 :nudged       @nudged?}))
 
            ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
            ;; mid-task is documented to send the model off the rails. Skipped on
@@ -732,6 +788,9 @@
                            (str "drain content: " (.slice (str (:content next)) 0 200)
                                 " | remaining: " (count (rest @(:follow-queue agent)))))
                 (swap! (:follow-queue agent) #(vec (rest %)))
+                ;; Per-turn options ride the message, not the transcript: the
+                ;; loop top reads and clears them before anything else runs.
+                (when-let [t (:turn next)] (swap! state assoc :turn-opts t))
                 (if-let [store (:store agent)]
                   ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
                   (swap! state update :messages conj {:role "user" :content (:content next)}))

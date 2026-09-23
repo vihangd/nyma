@@ -188,14 +188,24 @@
                            :handler
                            (fn [_args ctx]
                              (let [state (.getState api)
-                                   input  (:total-input-tokens state)
+                                   input  (or (:total-input-tokens state) 0)
                                    output (:total-output-tokens state)
                                    cost   (:total-cost state)
-                                   turns  (:turn-count state)]
+                                   turns  (:turn-count state)
+                                   ;; Prompt-cache hit rate: the number that says
+                                   ;; whether the system-prompt layout and the
+                                   ;; kv_cache breakpoints are earning their keep.
+                                   cread  (or (:total-cache-read-tokens state) 0)
+                                   cwrite (or (:total-cache-write-tokens state) 0)]
                                (.notify (.-ui ctx)
                                         (str "Session: " turns " turns | "
                                              (format-tokens input) " in / " (format-tokens output) " out | "
-                                             (format-cost cost)))))})
+                                             (format-cost cost)
+                                             (when (pos? input)
+                                               (str " | cache: " (js/Math.round (* 100 (/ cread input)))
+                                                    "% of input read from cache"
+                                                    (when (pos? cwrite)
+                                                      (str ", " (format-tokens cwrite) " written"))))))))})
 
     ;; Cleanup
     (fn []

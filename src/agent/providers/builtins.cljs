@@ -1,4 +1,5 @@
 (ns agent.providers.builtins
+  "Default Anthropic/OpenAI/Google provider factories."
   (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
             ["@ai-sdk/openai" :refer [createOpenAI]]
             ["@ai-sdk/google" :refer [createGoogleGenerativeAI]]))

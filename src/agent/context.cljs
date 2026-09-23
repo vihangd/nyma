@@ -1,4 +1,6 @@
-(ns agent.context)
+(ns agent.context
+  "Message filtering, context building."
+  )
 
 (defn- message-entry? [entry]
   (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry)))

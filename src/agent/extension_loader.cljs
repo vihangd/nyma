@@ -1,4 +1,5 @@
 (ns agent.extension-loader
+  "Dual .cljs/.ts loader with scoped APIs."
   (:require [agent.debug :as d]
             ["squint-cljs" :refer [compileString]]
             ["node:path" :as path]
@@ -321,11 +322,16 @@
                 (let [result (js-await (ext-fn scoped))]
                   (swap! extensions conj
                          {:path       path
+                          :entry      entry
                           :namespace  namespace
                           :type       (cond module :builtin
                                             (cljs-extension? entry) :squint
                                             :else :ts)
                           :manifest   manifest
+                          ;; Kept for reload-one!: a builtin re-activates from
+                          ;; its static module, never from an import of
+                          ;; "builtin:<ns>".
+                          :module     module
                           :scope      scoped
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
@@ -360,3 +366,72 @@
                 (sweep))))
           extensions))))
 
+
+
+;; ── Single-extension reload ──────────────────────────────────
+
+(defn ^:async deactivate-one!
+  "Run one loaded extension's deactivate, then sweep its scope. Never throws."
+  [{:keys [deactivate scope path]}]
+  (try
+    (let [r (when deactivate (deactivate))]
+      (when (and r (fn? (.-then r))) (js-await r)))
+    (catch :default e
+      (d/error (str "Extension deactivate error (" path "):") e)))
+  (dispose-scope! scope)
+  nil)
+
+(defn ^:async reload-one!
+  "Deactivate `entry` and activate it again from disk. Returns the new entry,
+   or nil (with the failure recorded in `last-load-failures`) when the reload
+   failed — the old registrations are gone either way, so a failed reload is
+   an extension that is OFF, not one running stale code.
+
+   A squint extension recompiles when its source changed (cache by content
+   hash); a TS/JS one is re-imported past the module cache with a query
+   string. A builtin's module is static — its code cannot change without a
+   restart — so reloading one resets its state, nothing more."
+  [api {:keys [path entry namespace manifest module] :as old}]
+  (js-await (deactivate-one! old))
+  (let [scoped-box (atom nil)]
+    (try
+      (when (and manifest (not module))
+        (js-await (resolve-dependencies manifest)))
+      (let [ext-fn (cond
+                     module                  (.-default module)
+                     (cljs-extension? path)  (js-await (load-squint-extension path))
+                     :else                   (.-default (js-await (js/import (str (path/resolve path) "?t=" (js/Date.now))))))
+            caps   (parse-capabilities (when manifest (.-capabilities manifest)) namespace)
+            scoped (create-scoped-api api namespace caps)
+            _      (reset! scoped-box scoped)
+            result (when ext-fn (js-await (ext-fn scoped)))]
+        (swap! last-load-failures dissoc namespace)
+        (assoc old :scope scoped :deactivate (when (fn? result) result)))
+      (catch :default e
+        (swap! last-load-failures assoc namespace (str (.-message e)))
+        (dispose-scope! @scoped-box)
+        (d/error (str "Failed to reload extension (" path "):") e)
+        nil))))
+
+
+;; ── Live eval (dev) ─────────────────────────────────────────
+
+(defn ^:async eval-expr!
+  "Compile one ClojureScript form with the same squint the extension loader
+   uses, import it, run it, return its value (awaited if it is a promise).
+   The form sees the live agent as `js/globalThis.__nyma` — the `/eval`
+   command sets that before calling. Dev tool: no sandbox, no permission
+   gate; it runs with the process's own authority."
+  [form-str]
+  (let [src      (str "(defn ^:export nyma-eval [] " form-str ")")
+        compiled (-> (compileString src #js {:context "expr" :elide-imports false})
+                     (absolutize-imports))
+        p        (str cache-dir "/eval-" (js/Date.now) "-" (.toString (js/Bun.hash src) 16) ".mjs")]
+    (ensure-cache-dir)
+    (js-await (js/Bun.write p compiled))
+    (try
+      (let [mod (js-await (js/import p))
+            v   ((.-nyma_eval mod))]
+        (if (and v (fn? (.-then v))) (js-await v) v))
+      (finally
+        (try (fs/unlinkSync p) (catch :default _ nil))))))

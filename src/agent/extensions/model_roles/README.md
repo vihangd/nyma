@@ -1,10 +1,30 @@
 # model-roles
 
-> Named model presets — `default`, `fast`, `deep`, `plan`, `commit` — for one-keystroke model switching.
+> Named model presets — `default`, `fast`, `deep`, `plan`, `commit`, `lead` — for one-keystroke model switching.
 
 ## What it does
 
-Defines named **roles** that map to provider/model pairs (and optionally `allowed-tools` + per-tool `permissions`). At runtime, `model_roles` hooks `model_resolve` to swap in the role's model, `tool_access_check` to gate the tool list, and `permission_request` to apply the per-role permission map. Built-in defaults cover Anthropic Sonnet / Haiku / Opus; users override via settings.
+Defines named **roles** that map to provider/model pairs (and optionally `allowed-tools` + per-tool `permissions` + a `system-prompt`). At runtime, `model_roles` hooks `model_resolve` to swap in the role's model, `tool_access_check` to gate the tool list, `permission_request` to apply the per-role permission map, and `before_agent_start` to append the role's `system-prompt`. Built-in defaults cover Anthropic Sonnet / Haiku / Opus; users override via settings.
+
+### `lead` — delegation-only primary
+
+`/role lead` turns the main thread into an orchestrator: it keeps `glob`, `grep`,
+`ls`, `think`, `web_search` and `subagent__subagent` (the subagent tool's registry name), and loses `read`, `edit`, `write` and
+`bash`. Every read-in-depth goes to a `scout` subagent and every change to a
+`worker`, so only their reports enter the lead's context — the saving on a long
+run is the children's cheaper models plus a primary transcript that never holds
+a file. Model-less: it inherits whatever model is active. Its prompt tells the
+model to write self-contained tasks (subagents have no memory of the
+conversation), pass `steps` sized to the task, and never hand two subagents the
+same file. Edits need the `worker` subagent role enabled:
+
+```json
+{ "roles": { "worker": { "enabled": true } } }
+```
+
+Borrowed from [apprentice](https://github.com/skarnati20/apprentice)'s loop of the
+same shape. Its "escalate to the full tool kit after N subagent calls" was left
+out: `/role reset` is the escalation.
 
 ## Commands
 
@@ -30,6 +50,7 @@ order — and two registrations made the resolver return nothing at all.
 | `turn_finalize` | Stall detection — 3+ no-op turns *with a task in flight*, or the verify gate running out of fix attempts |
 | `tool_access_check` | Restrict the tool list to `allowed-tools` from the active role config |
 | `permission_request` | Apply the role's per-tool `permissions` map (allow / deny / ask) |
+| `before_agent_start` | Append the active role's `system-prompt`, if it has one (`lead`; any subagent role switched to with `/role`) |
 
 ## Settings
 
@@ -53,7 +74,7 @@ Read from `~/.nyma/settings.json` or `.nyma/settings.json`:
 
 | Key | Type | Description |
 |---|---|---|
-| `roles` | map | Role name → `{provider, model, allowed-tools?, permissions?}` |
+| `roles` | map | Role name → `{provider?, model?, allowed-tools?, permissions?, system-prompt?}`. A role with no model inherits the active one (`lead`); a role with a `policy` and no model is a permission mode |
 | `escalate` | map | Escalation: `mode` (`ask`/`auto`/`off`), `to` (role or `provider/model`), `on`, `prune`, `revert`, `max-per-session`, `fallback` |
 | `cycle-key` | string | Key that cycles to the next role (one-keystroke model switching). Default `ctrl+g`; set `""` to disable. Avoid `ctrl+r` — `prompt_history` owns it. |
 

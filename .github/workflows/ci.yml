@@ -44,8 +44,10 @@ jobs:
         run: |
           bun run gen:builtins
           bun run gen:event-map
+          bun run gen:namespaces
+          bun run gen:events-doc
           if ! git diff --quiet; then
-            echo "::error::generated files are stale — run 'bun run gen:builtins && bun run gen:event-map && bun run build' and commit"
+            echo "::error::generated files are stale — run 'bun run gen:builtins && bun run gen:event-map && bun run gen:namespaces && bun run gen:events-doc && bun run build' and commit"
             git diff --stat
             exit 1
           fi

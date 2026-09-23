@@ -17,7 +17,7 @@
 ;; defaults to allow) — so switching a MODEL role (fast/deep/…) or a read-only
 ;; subagent role never silently denies. accept-edits/full-auto are model-LESS
 ;; so they preserve whatever model is active (on-resolve skips setModel).
-(def ^:private default-roles
+(def default-roles
   {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
              :policy {"write" "ask" "exec" "ask" "network" "ask"}}
    :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
@@ -36,7 +36,45 @@
    :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
              :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
              :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
-   :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}})
+   :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+   ;; :lead — delegation-only primary, borrowed from apprentice's loop of the
+   ;; same shape: the lead can locate things but cannot read files in depth,
+   ;; edit, or run shell; every investigation and change goes through
+   ;; `subagent`, whose reports are all that enters the lead's context. Model-
+   ;; less on purpose (inherits the active model); the savings come from the
+   ;; children running on the cheaper subagent roles. Edits need the `worker`
+   ;; subagent role enabled (`roles.worker.enabled: true`).
+   ;; `subagent__subagent`: the subagent extension registers through the scoped
+   ;; API, which prefixes with its namespace, and allowed-tools match the
+   ;; registry key exactly.
+   :lead    {:allowed-tools ["glob" "grep" "ls" "think" "web_search" "subagent__subagent" "retrieve_result"]
+             :description "Delegation-only lead: locates with glob/grep/ls, delegates every read-in-depth and change to subagents."
+             :system-prompt
+             (str "You are the lead agent on a coding task. You cannot read files in depth, "
+                  "modify them, or run shell commands yourself: you have glob and ls to see "
+                  "structure, grep to find where text and identifiers appear, web_search for "
+                  "information outside the codebase, and subagent to delegate work. Start with "
+                  "glob or ls to get oriented, then locate things with grep, since it hands you "
+                  "the lines themselves. Delegate when something must be traced, judged or "
+                  "changed rather than merely quoted — investigations to scout, every change to "
+                  "worker (if worker is disabled, say so and stop).\n\n"
+                  "A subagent starts with no memory of this conversation, and nothing carries "
+                  "over between calls. Make every task self-contained: absolute file paths, "
+                  "exactly what to find or change, and any context it needs. Never refer back "
+                  "to a file or function from an earlier call; name it again in full.\n\n"
+                  "Tell every subagent to answer briefly — findings and evidence only, no "
+                  "narration. For a change, ask for the file path, the line numbers, and only "
+                  "the lines that changed, quoted. For an investigation, ask for the specific "
+                  "answer with file paths and line numbers. If a reply comes back truncated, ask "
+                  "a narrower question instead of asking for it again in full.\n\n"
+                  "Give each subagent one focused task and split larger work into several. Send "
+                  "independent tasks together in one call so they run at the same time, but "
+                  "never give two of them the same file to edit. Pass steps with every call and "
+                  "size it to the task: three or four for a lookup, eight to twelve for a change "
+                  "spanning several files. A subagent that runs out of steps still reports what "
+                  "it has. Prefer several small tasks over one long one.\n\n"
+                  "When the work is done, answer the user with a summary of what changed, citing "
+                  "the evidence the subagents reported.")}})
 
 ;; Permission-mode names + cycle order live in the policy ns (pure, testable).
 (def ^:private mode-cycle policy/mode-cycle)
@@ -140,18 +178,25 @@
                             (or tools-hint "") marker))))
                  roles)))
 
+(defn- permission-mode?
+  "A permission MODE carries a :policy and no model. A model-less role that
+   shapes the TOOL set instead (:lead) is a /role, not a /mode."
+  [cfg]
+  (boolean (and (:policy cfg) (not (:model cfg)))))
+
 (defn model-roles-only
-  "Pure: the entries of `roles` that actually pin a model. The rest are
-   permission MODES (accept-edits, full-auto) — /roles listed them under
-   \"Model roles\" with \"(inherits model)\" beside them, which reads as a role
-   you can switch to for a model and is the one thing they never do."
+  "Pure: the entries of `roles` you switch to with /role — those that pin a
+   model, plus model-less tool-shape roles. Permission MODES (accept-edits,
+   full-auto) are left out: /roles listed them under \"Model roles\" with
+   \"(inherits model)\" beside them, which reads as a role you can switch to
+   for a model and is the one thing they never do."
   [roles]
-  (into {} (filter (fn [[_ cfg]] (:model cfg)) roles)))
+  (into {} (remove (fn [[_ cfg]] (permission-mode? cfg)) roles)))
 
 (defn policy-roles-only
-  "Pure: the model-LESS entries — the permission modes."
+  "Pure: the permission modes — :policy and no model."
   [roles]
-  (into {} (remove (fn [[_ cfg]] (:model cfg)) roles)))
+  (into {} (filter (fn [[_ cfg]] (permission-mode? cfg)) roles)))
 
 (defn- format-roles-listing
   "The /roles output: model roles, then the permission modes under their own
@@ -246,8 +291,20 @@
               (get roles name)
               (let [role-cfg (get roles name)
                     model-id (:model role-cfg)
-                    provider (:provider role-cfg)]
+                    provider (:provider role-cfg)
+                    ;; A tool-shape role is only as good as the tools it names:
+                    ;; `lead` with the subagent extension off is a prompt that
+                    ;; says "delegate" and nothing to delegate with.
+                    known    (when (.-getAllTools api)
+                               (try (set (js/Array.from (.getAllTools api))) (catch :default _ nil)))
+                    missing  (when known
+                               (remove #(contains? known (str %)) (:allowed-tools role-cfg)))]
                 (swap! (.-__state-atom api) assoc :active-role name :escalated-to nil)
+                (when (seq missing)
+                  (notify (str "Role " name " allows tools that are not registered: "
+                               (str/join ", " missing)
+                               " — is the extension that provides them enabled?")
+                          "warning"))
                 (when (and provider model-id)
                   (.setModel api (str provider "/" model-id)))
                 (notify (str "Role: " name
@@ -331,6 +388,19 @@
 
     (.on api "model_resolve" on-resolve)
 
+    ;; A role's :system-prompt used to reach only subagents spawned in that
+    ;; role; switching the PRIMARY to it changed the model and tools but said
+    ;; nothing. Generic: any active role that carries one is injected, which
+    ;; is what makes a tool-shape role like :lead work at all.
+    (.on api "before_agent_start"
+         (fn [_data]
+           (let [state    (.getState api)
+                 roles    (get-roles api)
+                 role-cfg (get roles (or (:active-role state) :default))
+                 prompt   (:system-prompt role-cfg)]
+             (when (and (string? prompt) (seq prompt))
+               #js {"system-prompt-additions" #js [prompt]}))))
+
     (.on api "tool_access_check" on-tool-access)
 
     (.on api "permission_request" on-permission)
@@ -385,7 +455,7 @@
                            (nth names (mod (inc idx) (count names))))]
              (when next-r
                (activate-role! next-r ui-notify))))
-                       #js {:description "Cycle to the next role (and its model)"})))
+         #js {:description "Cycle to the next role (and its model)"})))
 
     ;; /roles command — list all
     (.registerCommand api "roles"

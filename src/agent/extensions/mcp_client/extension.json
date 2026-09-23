@@ -1,6 +1,6 @@
 {
   "namespace": "mcp-client",
-  "description": "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`",
+  "description": "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`, with a per-tool description budget (`mcp.max-description-length`)",
   "capabilities": [
     "events",
     "tools",
