@@ -109,7 +109,15 @@
         session-name  (atom nil)
         sqlite-store  (:sqlite-store opts)
         events        (:events opts)
-        session-file  (or (:session-file opts) initial-file-path)
+        ;; Read through to the LIVE path. This used to capture the startup file
+        ;; once, and `:switch-file` (/resume, /import, pi_rpc switch_session)
+        ;; resets `file-path` without touching it — so after a switch every
+        ;; SQLite entry and every usage row was filed under the session the
+        ;; process STARTED in, while the transcript and tool persistence wrote
+        ;; to the one you moved to. The resumed session's cost read zero
+        ;; forever and its spend was attributed to the original.
+        session-file-override (:session-file opts)
+        session-file  (fn [] (or session-file-override @file-path))
 
         load-fn
         (fn []
@@ -140,7 +148,7 @@
                 (when sqlite-store
                   (doseq [entry lines]
                     ((:upsert-entry sqlite-store)
-                     (assoc entry :session-file session-file))))))))
+                     (assoc entry :session-file (session-file)))))))))
 
         build-context-fn
         (fn []
@@ -168,7 +176,7 @@
             ;; Mirror to SQLite
             (when sqlite-store
               ((:upsert-entry sqlite-store)
-               (assoc entry :session-file session-file)))
+               (assoc entry :session-file (session-file))))
             id))
 
         branch-fn
@@ -217,7 +225,7 @@
              :get-branch       (fn [] (build-context-fn))
              ;; The file this session persists to — the key usage rows and
              ;; prompt history are grouped by.
-             :session-file     (fn [] session-file)
+             :session-file     (fn [] (session-file))
              :get-leaf-id      (fn [] @leaf-id)
              ;; Runtime session switching (for /resume, /import)
              :get-file-path    (fn [] @file-path)

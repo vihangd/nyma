@@ -662,8 +662,14 @@
           (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
                            " (" (name scope) "). /reload to apply.")))))))
 
-(defn- replay-session!
+(defn replay-session!
   "Switch the session manager to `file-path` and reseed the store from it.
+
+   Public because every session switch needs it, not just the slash commands:
+   the pi/Zed RPC mode's new_session and switch_session used to call
+   `:switch-file` alone, which left the previous conversation in state, kept
+   the previous session's skill grants and skill tools alive, and re-appended
+   those old turns into the NEW session file on the next turn.
 
    Replay is not a new turn, so JSONL re-append is suppressed for its
    duration; try/finally so a throw mid-replay cannot leave the flag stuck

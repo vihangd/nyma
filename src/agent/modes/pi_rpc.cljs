@@ -16,6 +16,7 @@
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.sessions.manager :as sessions]
             [agent.loop :refer [run steer follow-up]]
+            [agent.commands.builtins :as builtins]
             [agent.model-info :as model-info]
             [agent.utils.event-json :refer [step-usage tool-results]]
             [clojure.string :as str]))
@@ -462,13 +463,19 @@
           (reset! (:thinking-level agent) nl)
           (write-response! cmd {:level nl}))
 
+        ;; Both go through the same reseed the slash commands use: switching
+        ;; the file alone left the old conversation in state, kept the old
+        ;; session's skill grants and tools alive, and re-appended those turns
+        ;; into the new file on the next turn.
         "new_session"
-        (if (call-session agent :switch-file (new-session-path))
+        (if (try (builtins/replay-session! agent (new-session-path)) true
+                 (catch :default _e false))
           (write-response! cmd {:cancelled false})
           (write-error! cmd "new_session failed"))
 
         "switch_session"
-        (if (call-session agent :switch-file (.-sessionPath cmd))
+        (if (try (builtins/replay-session! agent (.-sessionPath cmd)) true
+                 (catch :default _e false))
           (write-response! cmd {:cancelled false})
           (write-error! cmd "switch_session failed"))
 

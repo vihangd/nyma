@@ -2,6 +2,7 @@
   (:require [agent.utils.js-interop :as ji]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact settings->opts resolve-settings]]
+            [agent.sessions.manager :as sessions]
             [agent.token-estimation :as te]))
 
 (defn create-extension-context
@@ -80,7 +81,17 @@
                                                 (string? m) m
                                                 :else       (or (.-modelId m) "unknown"))
                                      mr       (:model-registry agent)
-                                     window   (if mr ((:context-window mr) model-id) 100000)
+                                     ;; The PROVIDER-QUALIFIED key, as the api's
+                                     ;; own getTokenBudget uses. Model ids are not
+                                     ;; unique across providers, so a bare one
+                                     ;; resolved to whichever registered last —
+                                     ;; and a gateway registers only qualified
+                                     ;; keys, so on a relay this missed entirely
+                                     ;; and fell back to the 100000 default.
+                                     window   (if mr
+                                                ((:context-window mr)
+                                                 (model-info/config-model-key (:config agent)))
+                                                100000)
                                      state    @(:state agent)
                                      used     (te/estimate-messages-tokens (:messages state))
                                      reserved (js/Math.floor (* window 0.3))]
@@ -97,9 +108,13 @@
                                                (string? m) m
                                                :else       (.-modelId m))
                                              "unknown")
+                                      ;; Same reason: with no explicit id, ask
+                                      ;; about the model we are actually running,
+                                      ;; by the key it was registered under.
+                                      key (if model-id id (model-info/config-model-key (:config agent)))
                                       mr (:model-registry agent)]
                                   (if mr
-                                    (clj->js ((:get mr) id))
+                                    (clj->js ((:get mr) key))
                                     #js {:context-window 100000})))
          :estimateTokens      (fn [text] (te/estimate-tokens text))}))
 
@@ -119,28 +134,53 @@
                                (js/setTimeout check 100)))]
                  (check))))))
 
-    (aset base "newSession"
-          (fn [_opts]
-            ;; Release the tools any active skill registered before the
-            ;; reducer wipes the record of them. Done inline rather than via
-            ;; resources.skills, which reaches this namespace through
-            ;; agent.extensions and would cycle.
+    ;; Release the tools any active skill registered before the reducer wipes
+    ;; the record of them. Done inline rather than via resources.skills, which
+    ;; reaches this namespace through agent.extensions and would cycle.
+    (let [release-skill-tools!
+          (fn []
             (when-let [unregister (:unregister (:tool-registry agent))]
               (doseq [[_ tools] (:skill-tools @(:state agent))
                       t         tools]
-                (try (unregister t) (catch :default _e nil))))
-            ((:dispatch! (:store agent)) :messages-cleared {})
-            nil))
+                (try (unregister t) (catch :default _e nil)))))
+
+          reseed!
+          (fn [session]
+            ;; Moving the leaf changes which messages the session tree yields,
+            ;; and nothing reseeded the live state from it — so an extension
+            ;; navigated to another branch, the interface showed that branch,
+            ;; and the model went on seeing the abandoned one. Replay is not a
+            ;; new turn, so JSONL re-append is suppressed for its duration.
+            (release-skill-tools!)
+            (swap! (:state agent) assoc :replaying-session? true)
+            (try
+              ((:dispatch! (:store agent)) :messages-cleared {})
+              (doseq [msg (sessions/session->seed-messages ((:build-context session)))]
+                ((:dispatch! (:store agent)) :message-added {:message msg}))
+              (finally
+                (swap! (:state agent) assoc :replaying-session? false))))]
+
+      (aset base "newSession"
+            (fn [_opts]
+              (release-skill-tools!)
+              ((:dispatch! (:store agent)) :messages-cleared {})
+              nil))
+
+      (aset base "__reseed" reseed!))
 
     (aset base "fork"
           (fn [entry-id]
             (when-let [session @(:session agent)]
-              ((:branch session) entry-id))))
+              (let [old ((:branch session) entry-id)]
+                ((.-__reseed base) session)
+                old))))
 
     (aset base "navigateTree"
           (fn [target-id _opts]
             (when-let [session @(:session agent)]
-              ((:branch session) target-id))))
+              (let [old ((:branch session) target-id)]
+                ((.-__reseed base) session)
+                old))))
 
     (aset base "reload"
           (fn []

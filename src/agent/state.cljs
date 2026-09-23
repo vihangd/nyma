@@ -82,15 +82,31 @@
   {:message-added    (fn [state data] (update state :messages conj (:message data)))
    ;; A skill's activation lives in the conversation it was activated in;
    ;; its allowed-tools allowance must not outlive /new or /clear.
+   ;; The compaction bookkeeping goes with the messages it described. The
+   ;; auto-compaction gate is `(count messages) - compacted-at-count >= 30`, so
+   ;; a stale count went deeply negative after a clear and switched automatic
+   ;; compaction off until the fresh conversation grew past the OLD length plus
+   ;; thirty. A stale `:last-input-tokens` likewise kept the context meter
+   ;; showing the pre-clear fill and fed the first compaction decision of the
+   ;; new conversation with the previous one's token count.
    :messages-cleared (fn [state _data] (assoc state :messages []
                                               :active-skills #{}
                                               :skill-allowed-tools {}
-                                              :skill-tools {}))
+                                              :skill-tools {}
+                                              :compacted-at-count 0
+                                              :last-input-tokens 0))
    ;; Wholesale replacement (context relief pruning). Goes through the store
    ;; so subscribers see it, instead of a raw swap! on the shared atom.
    :messages-replaced (fn [state data]
-                        (prune-skill-state
-                         (assoc state :messages (vec (:messages data)))))
+                        (let [msgs (vec (:messages data))]
+                          (prune-skill-state
+                           (assoc state
+                                  :messages msgs
+                                  ;; Same reason: the replacement IS the new
+                                  ;; baseline, so the gate measures growth from
+                                  ;; here rather than from a list that is gone.
+                                  :compacted-at-count (min (or (:compacted-at-count state) 0)
+                                                           (count msgs))))))
    :tools-changed    (fn [state data] (assoc state :active-tools (:active-tools data)))
    :model-changed    (fn [state data] (assoc state :model (:model data)))
    ;; Cache tokens are accumulated alongside the rest because they are the
