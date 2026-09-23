@@ -178,6 +178,35 @@
                                                                                 (hooks-for "PostToolUse" (str "sh " script))))
                                                                (-> (expect (fs/readFileSync out "utf8")) (.toBe "hello from the tool")))))))
 
+(defn- ^:async fire-both-shutdown-events!
+  "Register the session handlers, then fire session_shutdown AND session_end,
+   the way the real shutdown sequence does, and return how many times the hook
+   command actually ran."
+  []
+  (let [{:keys [api handlers]} (fake-api)
+        counter (str (capture-file) ".count")
+        hooks   {"SessionEnd" [#js {:hooks #js [#js {:type "command"
+                                                     :command (str "sh -c 'echo x >> " counter "'")}]}]}
+        dispose (session/register! {:api api :hooks-atom (atom hooks) :cwd @tmp})]
+    (when (fs/existsSync counter) (fs/unlinkSync counter))
+    (js-await ((get @handlers "session_shutdown") #js {:reason "exit"}))
+    (js-await ((get @handlers "session_end") #js {:reason "exit"}))
+    (dispose)
+    (let [n (if (fs/existsSync counter)
+              (count (filter seq (.split (fs/readFileSync counter "utf8") "\n")))
+              0)]
+      (when (fs/existsSync counter) (fs/unlinkSync counter))
+      n)))
+
+(describe "SessionEnd fires once per shutdown" (fn []
+  (it "the shutdown sequence emits both events; the hook still runs once"
+      (fn []
+        ;; One handler is bound to session_shutdown AND session_end so it works
+        ;; whichever a mode emits, and the real sequence emits both in a row —
+        ;; so a user's SessionEnd script used to run twice on every exit.
+        (-> (fire-both-shutdown-events!)
+            (.then (fn [n] (-> (expect n) (.toBe 1)))))))))
+
 (describe "SessionStart / SessionEnd payload" (fn []
                                                 (it "SessionStart maps nyma's reason to a CC source (new → startup) and emits no reason"
                                                     (^:async fn []

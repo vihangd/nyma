@@ -67,10 +67,16 @@
                 (swap! errors conj {:path p :message (or (.-message e) (str e))})
                 nil))))
         global-path  (path/join (.. js/process -env -HOME) ".nyma" "settings.json")
-        project-path (path/join (js/process.cwd) ".nyma" "settings.json")]
+        project-path (path/join (js/process.cwd) ".nyma" "settings.json")
+        ;; From the home directory these are the same file. The merged config
+        ;; was unaffected — merging a map with itself — but the error list is
+        ;; per read, so one broken settings file was reported twice.
+        same?        (let [resolve* (fn [x] (try (fs/realpathSync x)
+                                                 (catch :default _e (path/resolve x))))]
+                       (= (resolve* global-path) (resolve* project-path)))]
     {:config (merge default-config
                     (or (load-file global-path) {})
-                    (or (load-file project-path) {}))
+                    (or (when-not same? (load-file project-path)) {}))
      :errors @errors}))
 
 (defn load-config []

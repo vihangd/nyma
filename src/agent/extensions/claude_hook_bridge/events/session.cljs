@@ -73,8 +73,16 @@
                                                               "</system-reminder>")})
                              (catch :default _e nil))))))))
 
+        ;; The shutdown sequence emits `session_shutdown` and then
+        ;; `session_end`, and this one handler is bound to BOTH so it still
+        ;; runs if a mode only emits one of them. Without a guard that meant
+        ;; every exit dispatched SessionEnd twice — a user's SessionEnd script
+        ;; ran twice — and printed the unfired-matcher diagnostic twice.
+        ended?   (atom false)
         end-handler
         (fn [data]
+          (when-not @ended?
+            (reset! ended? true)
           ;; Diagnostic: warn about configured matchers that never
           ;; fired this session. Done before the SessionEnd dispatch
           ;; so any user-configured SessionEnd hook still runs cleanly
@@ -90,7 +98,7 @@
               :discriminator m
               :stdin-payload stdin
               :cwd           cwd
-              :api           api})))]
+              :api           api}))))]
 
     (.on api "session_start" start-handler bridge-priority)
     (.on api "session_end" end-handler bridge-priority)

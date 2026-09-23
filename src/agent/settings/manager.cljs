@@ -488,8 +488,20 @@
   ([{:keys [global-path project-path]}]
    (let [global-path   (or global-path (path/join (home/dir) ".nyma" "settings.json"))
          project-path  (or project-path ".nyma/settings.json")
+         ;; `project-path` is the literal relative ".nyma/settings.json", so
+         ;; running nyma from the home directory makes it the SAME FILE as the
+         ;; global one. Loading it a second time as the project layer meant the
+         ;; user's own file was run through `strip-project-widening`: it warned
+         ;; that their global settings may not widen permissions, degraded any
+         ;; role that granted a tool, and — because `:save-project` writes the
+         ;; stripped copy back — `/extensions disable <ns> --project` silently
+         ;; erased `permission-mode` and the whole `permissions` block from it,
+         ;; permanently. When the two are one file there is no project layer.
+         same-file?    (let [resolve* (fn [p] (try (fs/realpathSync p)
+                                                   (catch :default _e (path/resolve p))))]
+                         (= (resolve* global-path) (resolve* project-path)))
          global-settings  (atom (load-json global-path))
-         project-settings (atom (load-project-json project-path))
+         project-settings (atom (if same-file? {} (load-project-json project-path)))
          overrides        (atom {})
          ;; Defaults declared by extension manifests, registered by the loader
          ;; before activation. Merged per section under the user's values
@@ -536,7 +548,7 @@
 
       :reload (fn []
                 (reset! global-settings (load-json global-path))
-                (reset! project-settings (load-project-json project-path)))
+                (reset! project-settings (if same-file? {} (load-project-json project-path))))
 
       ;; The in-memory map follows the file, so `:get` answers with what was
       ;; just written instead of waiting for a restart or `:reload`.
@@ -546,9 +558,16 @@
                        (save-json global-path m)))
 
       :save-project (fn [settings]
-                      (let [m (merge @project-settings settings)]
-                        (reset! project-settings m)
-                        (save-json project-path m)))
+                      ;; Same file as the global one? Then this IS the global
+                      ;; file, and writing the (empty) project layer over it
+                      ;; would drop everything the user has in it.
+                      (if same-file?
+                        (let [m (merge @global-settings settings)]
+                          (reset! global-settings m)
+                          (save-json global-path m))
+                        (let [m (merge @project-settings settings)]
+                          (reset! project-settings m)
+                          (save-json project-path m))))
 
       :tool-allowed? (fn [tool-name]
                       ;; Union of the user's global allow-list and the user's

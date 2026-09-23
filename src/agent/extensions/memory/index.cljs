@@ -24,8 +24,18 @@
   "Combined, size-capped memory block for injection, or nil when empty."
   [config]
   (let [dir (:dir config)
-        g   (read-file (global-file dir))
-        p   (read-file (project-file dir))
+        gf  (global-file dir)
+        pf  (project-file dir)
+        ;; The project path is built from the cwd, so running nyma from the
+        ;; home directory makes these the same file and the block was joined to
+        ;; itself: the same notes injected twice into the cacheable prefix on
+        ;; every request, with `cap-lines` then truncating at half the content
+        ;; it was meant to carry.
+        same? (let [resolve* (fn [x] (try (fs/realpathSync x)
+                                          (catch :default _e (path/resolve x))))]
+                (= (resolve* gf) (resolve* pf)))
+        g   (read-file gf)
+        p   (when-not same? (read-file pf))
         combined (->> [(when (seq (str/trim (or g ""))) g)
                        (when (seq (str/trim (or p ""))) p)]
                       (filter some?)

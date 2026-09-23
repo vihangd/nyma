@@ -157,3 +157,38 @@
                                                (let [flags (config/load-compat-flags cwd @tmp-home)]
                                                  (-> (expect (:claude flags)) (.toBe true))
                                                  (-> (expect (:agents flags)) (.toBe false))))))))
+
+;;; ─── one file, one source ─────────────────────────────────────
+;;;
+;;; `cwd` is the literal project directory, so running nyma from the home
+;;; directory makes the home and project halves of three pairs name the same
+;;; file. Per-event arrays are merged by CONCATENATION, so every matcher in
+;;; those files was registered twice and every hook command ran twice.
+
+(defn- source-paths [cwd home]
+  (mapv :path (config/default-source-paths cwd #js {:claude true :agents true} home)))
+
+(defn- duplicates [xs]
+  (vec (distinct (filter (fn [x] (> (count (filter #(= % x) xs)) 1)) xs))))
+
+(describe "hook config sources" (fn []
+
+  (it "reads each file once when the project IS the home directory"
+      (fn []
+        (let [ps (source-paths "/Users/v" "/Users/v")]
+          (-> (expect (duplicates ps)) (.toEqual (clj->js [])))
+          ;; the three colliding pairs collapse: 8 sources become 5
+          (-> (expect (count ps)) (.toBe 5)))))
+
+  (it "keeps every distinct source when they are different directories"
+      (fn []
+        (let [ps (source-paths "/repo" "/Users/v")]
+          (-> (expect (duplicates ps)) (.toEqual (clj->js [])))
+          (-> (expect (count ps)) (.toBe 8)))))
+
+  (it "keeps the home reading of a collided pair, not the project one"
+      (fn []
+        (let [ps (source-paths "/Users/v" "/Users/v")]
+          (-> (expect (.includes (clj->js ps) "/Users/v/.claude/settings.json")) (.toBe true))
+          ;; the project-only file is unaffected — it is a different name
+          (-> (expect (.includes (clj->js ps) "/Users/v/.claude/settings.local.json")) (.toBe true)))))))

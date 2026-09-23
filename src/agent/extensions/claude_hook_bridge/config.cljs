@@ -145,7 +145,19 @@
          (when (:agents compat)
            [{:read read-bare-hooks :path (path/join home  ".agents" "hooks.json")}
             {:read read-bare-hooks :path (path/join cwd   ".agents" "hooks.json")}])]
-     (vec (concat nyma-paths claude-paths agents-paths)))))
+     ;; Each FILE once. `cwd` is the literal project directory, so running nyma
+     ;; from your home directory makes three of these pairs name the same file —
+     ;; and because per-event arrays are concatenated, every matcher in them was
+     ;; registered twice and every hook command ran twice. Keep the first
+     ;; (home/global) occurrence; the content is identical either way.
+     (let [seen (atom #{})]
+       (vec (keep (fn [src]
+                    (let [k (try (fs/realpathSync (:path src))
+                                 (catch :default _e (path/resolve (:path src))))]
+                      (when-not (contains? @seen k)
+                        (swap! seen conj k)
+                        src)))
+                  (concat nyma-paths claude-paths agents-paths)))))))
 
 (defn handler-label
   "One-line label for a handler spec, as `/hooks` prints it:

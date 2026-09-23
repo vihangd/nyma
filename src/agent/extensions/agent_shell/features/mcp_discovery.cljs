@@ -55,10 +55,22 @@
    scan and the report it prints cannot drift apart."
   ([project-root] (candidate-paths project-root (home/dir)))
   ([project-root home]
-   [(path/join home ".nyma" "mcp.json")
-    (path/join project-root ".nyma" "mcp.json")
-    (path/join project-root ".cursor" "mcp.json")
-    (path/join project-root ".mcp.json")]))
+   ;; Each FILE once. `project-root` is the cwd, so from the home directory the
+   ;; first two name the same file: it was read and parsed twice, a malformed
+   ;; one was reported to the user twice, and `/mcp list` showed it as two
+   ;; separate config sources. The merged server set was always fine — servers
+   ;; are keyed by name — so this is about the noise, not the result.
+   (let [seen (atom #{})]
+     (vec (keep (fn [p]
+                  (let [k (try (fs/realpathSync p)
+                               (catch :default _e (path/resolve p)))]
+                    (when-not (contains? @seen k)
+                      (swap! seen conj k)
+                      p)))
+                [(path/join home ".nyma" "mcp.json")
+                 (path/join project-root ".nyma" "mcp.json")
+                 (path/join project-root ".cursor" "mcp.json")
+                 (path/join project-root ".mcp.json")])))))
 
 (defn truncate-path-middle
   "Shorten a path to `max` chars by cutting from the MIDDLE, so the parent
