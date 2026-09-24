@@ -249,18 +249,28 @@
     (or (nil? m) (contains? m mode))))
 
 (def gateway-tool-names
-  "Tools whose only purpose is to reach OTHER tools.
+  "Tools that are the ONLY route to something the harness deliberately withheld.
 
-   `mcp_client` defers its bridged tool schemas — 9,993 tokens of the 18,816
-   standing prefix measured here — and offers these two in their place. That
-   makes them load-bearing in a way an ordinary tool is not: drop them and the
-   deferred tools become unreachable rather than merely unlisted.
+   Withholding is a token optimisation in both cases here, and in both cases the
+   tool that reaches the withheld thing is load-bearing in a way an ordinary
+   tool is not — drop it and the content becomes unreachable rather than merely
+   unlisted:
 
-   `tool_access_check` merges by INTERSECTION, so any handler that returns an
+     mcp_search, mcp_call  — `mcp_client` defers its bridged tool schemas
+                             (9,993 tokens of the 18,816-token standing prefix,
+                             measured) and offers these two in their place.
+     retrieve_result       — `tool_result_policy` truncates a large result and
+                             hands back a handle. `settings/manager` already
+                             carries this in every built-in role's allowlist for
+                             exactly this reason: \"a role that allowed the tool
+                             but not the recall would leave the model holding an
+                             id it cannot spend.\" A user-authored allowlist has
+                             no such convention protecting it.
+
+   `tool_access_check` merges by INTERSECTION, so any handler returning an
    explicit allowlist silently removes anything it does not name — and an
-   allowlist written before deferral existed cannot name these. A narrower that
-   is expressing a *capability* preference (which model is good at what) should
-   union these back in. One expressing a *permission* boundary — plan mode,
-   role policy — deliberately should not: there, withholding the route is the
-   point."
-  #{"mcp_search" "mcp_call"})
+   allowlist written before these existed cannot name them. A narrower
+   expressing a *capability* preference (which model is good at what) should
+   union them back in. One expressing a *permission* boundary — plan mode, role
+   policy — deliberately should not: there, withholding the route is the point."
+  #{"mcp_search" "mcp_call" "retrieve_result"})

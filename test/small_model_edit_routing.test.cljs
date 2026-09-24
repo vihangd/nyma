@@ -96,8 +96,21 @@
           (-> (expect (contains? out "edit")) (.toBe false))
           (-> (expect (contains? out "read")) (.toBe true)))))
 
-  (it "the gateway set names exactly the two tools deferral introduces"
+  (it "the set names every tool that is the only route to withheld content"
       (fn []
+        ;; the two deferral introduces, plus the recall for a truncated result
         (-> (expect (contains? tm/gateway-tool-names "mcp_search")) (.toBe true))
         (-> (expect (contains? tm/gateway-tool-names "mcp_call")) (.toBe true))
-        (-> (expect (count tm/gateway-tool-names)) (.toBe 2))))))
+        (-> (expect (contains? tm/gateway-tool-names "retrieve_result")) (.toBe true))
+        (-> (expect (count tm/gateway-tool-names)) (.toBe 3))))
+
+  (it "a profile allowlist that forgets the truncation recall still gets it"
+      (fn []
+        ;; tool_result_policy caps a large result and hands back a handle; an
+        ;; allowlist naming `read` but not the recall leaves the model holding
+        ;; an id it cannot spend. Every built-in role carries it by convention;
+        ;; a user-written profile has no such protection.
+        (let [out (set (profiles/resolve-allowed
+                        ["read" "bash" "retrieve_result" "mcp_search" "mcp_call"]
+                        ["read" "bash"] nil))]
+          (-> (expect (contains? out "retrieve_result")) (.toBe true)))))))
