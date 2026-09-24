@@ -19,7 +19,8 @@
      tool_access_check      — apply allowedTools allowlist
      addMiddleware :leave   — cap tool results to resultCap chars
   "
-  (:require [agent.debug :as d]
+  (:require [agent.tool-metadata :as tool-metadata]
+            [agent.debug :as d]
             [agent.extensions.small-model.shared :as shared]
             [clojure.string :as str]))
 
@@ -104,6 +105,34 @@
 ;;   "whole"        → only whole-file `write` (most stable multi-turn)
 ;;   "fuzzy"/"patch"→ `multi_edit` (fuzzy) + `write`; hide exact `edit`
 ;;   "exact"/unset  → no edit-tool filtering
+(defn resolve-allowed
+  "The allowlist this profile contributes to `tool_access_check`, or nil for
+   \"no opinion\".
+
+   `cands` are the tools on offer this turn, `allowed` the profile's explicit
+   list, `hide` the edit tools the edit-strategy removes.
+
+   The gateway union is the subtle part. A profile allowlist says which tools
+   this model is GOOD at — a capability preference, not a permission boundary.
+   It was written before MCP deferral existed, so it names neither gateway
+   tool, and because this event merges by INTERSECTION, naming neither removes
+   both: the deferred MCP tools end up withheld AND unreachable, which is worse
+   than either deferring or not. So the gateways ride along when they are
+   genuinely on offer. A narrower expressing permission — plan mode, role
+   policy — deliberately does not do this, because there withholding the route
+   is the point."
+  [cands allowed hide]
+  (let [hide  (or hide #{})
+        cands (vec (or cands []))
+        base  (cond (seq allowed) (vec allowed)
+                    (seq hide)    cands
+                    :else         nil)]
+    (when base
+      (let [pruned  (remove #(contains? hide (str %)) base)
+            offered (set (map str cands))
+            gateway (filter offered tool-metadata/gateway-tool-names)]
+        (vec (distinct (concat pruned gateway)))))))
+
 (defn edit-tools-to-hide
   "Edit-tool names to HIDE for a given editStrategy. Exposed for tests."
   [edit-strategy]
@@ -176,10 +205,7 @@
                   ;; candidate tool names from the event (the full active set)
                   cands  (when-let [t (.-tools data)] (vec t))
                   ;; base allowlist: explicit allowedTools if set, else all candidates
-                  base   (cond (seq allowed) (vec allowed)
-                               (seq hide)    cands
-                               :else         nil)
-                  final  (when base (vec (remove #(contains? hide (str %)) base)))]
+                  final  (resolve-allowed cands allowed hide)]
               (when final
                 #js {:allowed (clj->js final)}))))
 
