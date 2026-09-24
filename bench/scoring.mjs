@@ -307,21 +307,35 @@ export function aggregate(results) {
 }
 
 function costSummary(results, attempted) {
-  const sum = (k) => results.reduce((n, r) => n + (Number(r[k]) || 0), 0);
+  const ran = results.filter((r) => r.status !== STATUS.skip);
+  // A timed-out or killed run emits no print-mode JSON, so it reports no usage
+  // at all — and those are precisely the runs that burned the most. Dividing
+  // the tokens we DID see by every attempted task therefore understates the
+  // per-task figure by exactly the expensive tail, in a benchmark whose whole
+  // purpose is measuring token cost.
+  //
+  // So: average over the tasks that actually reported, and say how many did
+  // not. A per-task number with `tasksWithoutUsage: 2` is honest; the same
+  // number with the gap hidden is not.
+  const reported  = ran.filter((r) => r.tokens != null || r.costUsd != null);
+  const n         = reported.length;
+  const sum = (k) => reported.reduce((acc, r) => acc + (Number(r[k]) || 0), 0);
   const tokens    = sum("tokens");
   const costUsd   = sum("costUsd");
   const cacheRead = sum("cacheRead");
   const inputTok  = sum("inputTokens");
-  const per = (n) => (attempted === 0 ? null : Math.round(n / attempted));
   return {
-    totalTokens:     tokens,
-    tokensPerTask:   per(tokens),
-    totalCostUsd:    round4(costUsd),
-    costPerTask:     attempted === 0 ? null : round4(costUsd / attempted),
-    cacheReadTokens: cacheRead,
+    totalTokens:      tokens,
+    tokensPerTask:    n === 0 ? null : Math.round(tokens / n),
+    totalCostUsd:     round4(costUsd),
+    costPerTask:      n === 0 ? null : round4(costUsd / n),
+    cacheReadTokens:  cacheRead,
     // share of INPUT served from cache; null when the route reports no input
     // tokens at all, which is not the same as a 0% hit rate
-    cacheReadShare:  inputTok === 0 ? null : round1((100 * cacheRead) / inputTok),
+    cacheReadShare:   inputTok === 0 ? null : round1((100 * cacheRead) / inputTok),
+    // the denominator above, and what it leaves out
+    tasksWithUsage:    n,
+    tasksWithoutUsage: ran.length - n,
   };
 }
 

@@ -515,6 +515,17 @@ async function main() {
   }
   console.log(`${tasks.length} tasks, ${opts.trials} trial(s), agent: ${agentCmd.join(" ")}` +
               (build.extensionCount ? ` (${build.extensionCount} extensions)` : ""));
+  // Say where the live progress is. Each finished task is appended to this file
+  // as it lands, so a long run is observable while it runs and resumable if it
+  // dies — but nothing announced it, so the obvious way to watch a backgrounded
+  // run was to tail the console output, which a pipe buffers until the end.
+  {
+    const suffix = opts.trials > 1 ? ".t<trial>" : "";
+    const live = opts.resumeFrom
+      || path.join("bench", "results", `${opts.label}${suffix}.partial.jsonl`);
+    console.log(`  live progress: ${live}`);
+    console.log(`  resume with:   --resume-from ${live}`);
+  }
 
   const trials = [];
   const partialPaths = [];

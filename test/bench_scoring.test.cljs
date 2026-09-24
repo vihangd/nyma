@@ -283,13 +283,27 @@
           (-> (expect (.-totalTokens c)) (.toBe 1500))
           (-> (expect (.-totalCostUsd c)) (.toBe 0.75)))))
 
-  (it "divides per task by ATTEMPTED, not by total"
+  (it "divides per task by the tasks that REPORTED usage"
       (fn []
-        ;; a skipped task spent nothing and ran nothing; counting it would make
-        ;; a run look cheaper for having less toolchain installed
+        ;; a skipped task spent nothing and ran nothing
         (let [c (.-cost (b/aggregate priced))]
           (-> (expect (.-tokensPerTask c)) (.toBe 750))
-          (-> (expect (.-costPerTask c)) (.toBe 0.375)))))
+          (-> (expect (.-costPerTask c)) (.toBe 0.375))
+          (-> (expect (.-tasksWithUsage c)) (.toBe 2))
+          (-> (expect (.-tasksWithoutUsage c)) (.toBe 0)))))
+
+  (it "a timeout reports no usage, and is excluded from the average but counted"
+      (fn []
+        ;; A timed-out run emits no result JSON, so it reports nothing — and
+        ;; those are exactly the runs that burned the most. Averaging its
+        ;; silence in as a task understated the per-task figure by precisely
+        ;; the expensive tail. Measured on a real run: 138,638 against 173,298.
+        (let [c (.-cost (b/aggregate
+                         #js [#js {:status "pass" :tokens 1000 :inputTokens 1000}
+                              #js {:status "timeout"}]))]
+          (-> (expect (.-tokensPerTask c)) (.toBe 1000))
+          (-> (expect (.-tasksWithUsage c)) (.toBe 1))
+          (-> (expect (.-tasksWithoutUsage c)) (.toBe 1)))))
 
   (it "reports cache read as a share of input tokens"
       (fn []
@@ -303,11 +317,13 @@
           (-> (expect (.-cacheReadShare c)) (.toBeNull))
           (-> (expect (.-totalTokens c)) (.toBe 10)))))
 
-  (it "an all-skipped run divides by nothing"
+  (it "an all-skipped run divides by nothing and reports no gap"
       (fn []
+        ;; a skip is not a task that failed to report — it never ran
         (let [c (.-cost (b/aggregate #js [#js {:status "skip"}]))]
           (-> (expect (.-tokensPerTask c)) (.toBeNull))
-          (-> (expect (.-costPerTask c)) (.toBeNull)))))
+          (-> (expect (.-costPerTask c)) (.toBeNull))
+          (-> (expect (.-tasksWithoutUsage c)) (.toBe 0)))))
 
   (it "missing fields count as zero rather than NaN"
       (fn []
