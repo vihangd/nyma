@@ -455,3 +455,61 @@ export function checkAgentBuild(extensionCount, { min = 20 } = {}) {
   }
   return { ok: true, extensionCount };
 }
+
+// ── server-sampled prefix cache ────────────────────────────────────────────
+//
+// Some OpenAI-compatible servers report no per-request cache tokens at all.
+// The DGX Spark's vLLM answers `prompt_tokens_details: null` on every request,
+// so `cost.cacheReadShare` comes back 0 — which means "not reported", not a 0%
+// hit rate, and silently removes the one column that distinguishes "we sent
+// less" from "we stopped hitting the cache".
+//
+// vLLM does expose the numbers, as monotonic Prometheus counters. Sampling them
+// either side of a run gives that run's hit rate.
+//
+// Two things this CANNOT do, both of which the caller has to live with: the
+// counters are server-wide, so any other client hitting the same server during
+// a run lands in the same delta; and a server restart resets them. Hence both
+// raw readings are recorded, not just the share, so a contaminated or reset run
+// stays diagnosable after the fact.
+
+/** `{queries, hits}` from a Prometheus text exposition, or null. */
+export function parseVllmCacheMetrics(text) {
+  const grab = (name) => {
+    const m = String(text ?? "").match(
+      new RegExp(`^vllm:${name}_total(?:\\{[^}]*\\})?\\s+(\\S+)`, "m"));
+    const n = m ? Number(m[1]) : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  const queries = grab("prefix_cache_queries");
+  const hits    = grab("prefix_cache_hits");
+  return queries === null || hits === null ? null : { queries, hits };
+}
+
+/**
+ * Percent of block lookups served from cache between two samples, or null when
+ * the answer would be a lie: a missing sample, a counter that went backwards
+ * (the server restarted), or no queries at all (nothing ran).
+ */
+export function prefixCacheShare(before, after) {
+  if (!before || !after) return null;
+  const queries = after.queries - before.queries;
+  const hits    = after.hits - before.hits;
+  if (!(queries > 0) || hits < 0) return null;
+  return round1((100 * hits) / queries);
+}
+
+/**
+ * Base URL for a provider named in settings. Providers live in two arrays —
+ * `providers` for remote, `local-models` for local servers — and only the
+ * second holds the vLLM entry this is for.
+ */
+export function providerBaseUrl(settings, provider) {
+  if (!provider) return null;
+  for (const key of ["providers", "local-models"]) {
+    for (const p of settings?.[key] ?? []) {
+      if (p?.name === provider) return p["base-url"] ?? null;
+    }
+  }
+  return null;
+}

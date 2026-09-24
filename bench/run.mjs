@@ -19,6 +19,7 @@ import {
   STATUS, discoverTasks, selectTasks, readInstructions, langSpec,
   classifyTestRun, aggregate, summarizeTrials, reliability, summarizeTrace, diffRuns, checkAgentBuild, agentFailure,
   agentScriptPath, isDistEntry, EXCLUDED_FROM_COPY, TOOLCHAIN, toolchainReady,
+  parseVllmCacheMetrics, prefixCacheShare, providerBaseUrl,
 } from "./scoring.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -192,6 +193,31 @@ function resolveModelSpec(model) {
     }
   }
   return { ok: false, reason: `role "${model}" not found in settings roles` };
+}
+
+/**
+ * One sample of the provider's server-wide prefix-cache counters, for routes
+ * that report no per-request cache tokens. Best effort in every direction: a
+ * provider with no base URL, a server with no /metrics, a timeout and a parse
+ * failure all return null, and the run carries on without the column rather
+ * than dying for it.
+ */
+async function samplePrefixCache(modelSpec) {
+  const provider = String(modelSpec ?? "").split("/")[0];
+  if (!provider) return null;
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(
+      path.join(os.homedir(), ".nyma", "settings.json"), "utf8"));
+  } catch { return null; }
+  const base = providerBaseUrl(settings, provider);
+  if (!base) return null;
+  try {
+    const url = new URL("/metrics", base).toString();
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    return parseVllmCacheMetrics(await res.text());
+  } catch { return null; }
 }
 
 /**
@@ -504,6 +530,11 @@ async function main() {
   if (!resolved.ok) { console.error(`Refusing to benchmark: ${resolved.reason}`); process.exit(4); }
   opts.modelSpec = resolved.spec;
 
+  // Sampled around the whole run, not per task: the counters are server-wide,
+  // so a per-task delta would attribute another client's traffic to whichever
+  // task happened to be in flight.
+  const cacheBefore = await samplePrefixCache(opts.modelSpec);
+
   const all = discoverTasks(opts.tasksDir);
   const tasks = selectTasks(all, { seed: opts.seed, count: opts.count, only: opts.only });
   if (!tasks.length) { console.error("No runnable tasks selected."); process.exit(2); }
@@ -582,6 +613,8 @@ async function main() {
   for (const pp of partialPaths) {
     try { if (fs.existsSync(pp)) fs.unlinkSync(pp); } catch { /* keep */ }
   }
+  const cacheAfter = await samplePrefixCache(opts.modelSpec);
+
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const gitSha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, timeoutMs: 5000 }))
     .stdout.trim();
@@ -606,6 +639,18 @@ async function main() {
       ? JSON.parse(fs.readFileSync(opts.agentSettings, "utf8")) : null,
     timeoutMs: opts.timeoutMs,
     concurrency: opts.concurrency,
+    // Deliberately NOT folded into trials[].cost. That block's cacheReadShare is
+    // a per-request share of input tokens; this is a server-wide share of block
+    // lookups over the whole run, from a different source with different
+    // contamination risks. Averaging the two would produce a number that means
+    // nothing. Both raw readings are kept so a reset or a second client is
+    // visible after the fact.
+    serverPrefixCache: {
+      before: cacheBefore,
+      after: cacheAfter,
+      sharePct: prefixCacheShare(cacheBefore, cacheAfter),
+      note: "server-wide vLLM prefix-cache counters; null if unavailable, reset, or idle",
+    },
     // Until 2026-08-23 nyma sent no temperature and every run sampled at the
     // provider default, so files without this key are not comparable to files
     // with it. Read from the same settings the agent will read.
@@ -651,6 +696,10 @@ async function main() {
               `over ${s.trials} trial(s) — ` +
               `${a.passed} pass, ${a.failed} fail, ${a.timeout} timeout, ` +
               `${a.error} error, ${a.skipped} skipped`);
+  if (record.serverPrefixCache.sharePct !== null) {
+    console.log(`server-sampled prefix cache: ${record.serverPrefixCache.sharePct}% ` +
+                `(whole-server, not per-request — no other client may use it mid-run)`);
+  }
   if (s.trials === 1) {
     console.log("single trial: no spread measured. Use --trials 3 before " +
                 "comparing this against another run.");

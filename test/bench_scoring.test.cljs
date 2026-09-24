@@ -330,3 +330,61 @@
         (let [c (.-cost (b/aggregate #js [#js {:status "pass"} #js {:status "fail" :tokens 40}]))]
           (-> (expect (.-totalTokens c)) (.toBe 40))
           (-> (expect (.-totalCostUsd c)) (.toBe 0)))))))
+
+;;; ─── server-sampled prefix cache ───────────────────────────────
+
+(def ^:private metrics-text
+  (str "# HELP vllm:prefix_cache_queries_total queries\n"
+       "vllm:prefix_cache_queries_total{engine=\"0\",model_name=\"q\"} 1.2735469e+07\n"
+       "vllm:prefix_cache_hits_total{engine=\"0\",model_name=\"q\"} 9.964256e+06\n"))
+
+(describe "bench/prefix cache — the column a route that reports no cache tokens loses" (fn []
+
+  (it "parses the two counters out of a Prometheus exposition"
+      (fn []
+        ;; the DGX Spark's vLLM answers `prompt_tokens_details: null` on every
+        ;; request, so the per-request share reads 0 — which means "not
+        ;; reported", not a 0% hit rate. These counters are the way back.
+        (let [m (b/parseVllmCacheMetrics metrics-text)]
+          (-> (expect (aget m "queries")) (.toBe 12735469))
+          (-> (expect (aget m "hits")) (.toBe 9964256)))))
+
+  (it "text with no vllm counters in it parses to nil, not to zeros"
+      (fn []
+        (-> (expect (b/parseVllmCacheMetrics "# nothing\n")) (.toBeNull))
+        (-> (expect (b/parseVllmCacheMetrics nil)) (.toBeNull))))
+
+  (it "a delta over the run is the run's hit rate"
+      (fn []
+        (-> (expect (b/prefixCacheShare #js {:queries 1000 :hits 500}
+                                        #js {:queries 2000 :hits 1280}))
+            (.toBe 78.0))))
+
+  (it "a counter that went backwards is a server restart, so nil"
+      (fn []
+        ;; reporting a negative share, or silently clamping it to 0, would both
+        ;; read as "caching collapsed" when the truth is "we cannot tell"
+        (-> (expect (b/prefixCacheShare #js {:queries 1000 :hits 900}
+                                        #js {:queries 10 :hits 5}))
+            (.toBeNull))))
+
+  (it "an idle window has no rate to report"
+      (fn []
+        (-> (expect (b/prefixCacheShare #js {:queries 10 :hits 5}
+                                        #js {:queries 10 :hits 5}))
+            (.toBeNull))))
+
+  (it "a missing sample on either side is nil"
+      (fn []
+        (-> (expect (b/prefixCacheShare nil #js {:queries 10 :hits 5})) (.toBeNull))
+        (-> (expect (b/prefixCacheShare #js {:queries 10 :hits 5} nil)) (.toBeNull))))
+
+  (it "finds a local server's base url, which lives under local-models not providers"
+      (fn []
+        ;; two arrays, and the vLLM entry is only ever in the second
+        (let [s #js {:providers   #js [#js {:name "zai" :base-url "https://z"}]
+                     :local-models #js [#js {:name "vllm" :base-url "http://spark:8000/v1"}]}]
+          (-> (expect (b/providerBaseUrl s "vllm")) (.toBe "http://spark:8000/v1"))
+          (-> (expect (b/providerBaseUrl s "zai")) (.toBe "https://z"))
+          (-> (expect (b/providerBaseUrl s "nope")) (.toBeNull))
+          (-> (expect (b/providerBaseUrl #js {} "vllm")) (.toBeNull)))))))
