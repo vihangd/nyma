@@ -29,6 +29,7 @@
             [agent.extensions.mcp-client.client :as client]
             [agent.extensions.mcp-client.manager :as mgr]
             [agent.extensions.mcp-client.tool-bridge :as bridge]
+            [agent.extensions.mcp-client.deferred :as deferred]
             [agent.extensions.mcp-client.tool-override :as override]
             [agent.extensions.mcp-client.status-segments :as segs]))
 
@@ -143,6 +144,12 @@
                        :max-description-length 1200
                        :shadow-tools        default-shadow-map
                        :hidden-tools        default-hidden-tools
+                       ;; Deferred tools: withhold the bridged MCP schemas and
+                       ;; offer mcp_search/mcp_call instead. `true`/`false` force
+                       ;; it; the default engages only once the catalog is big
+                       ;; enough to be worth a round trip.
+                       :defer-tools         "auto"
+                       :defer-threshold-tokens deferred/default-defer-threshold-tokens
                        :tool-overrides      override/default-overrides}]
      (try
        (if (fs/existsSync project-path)
@@ -159,6 +166,10 @@
                                                (if (number? n) n (:max-description-length defaults)))
                      :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
                      :hidden-tools        (parse-hidden-tools (aget mcp "hidden-tools"))
+                     :defer-tools         (let [v (aget mcp "defer-tools")]
+                                            (if (nil? v) (:defer-tools defaults) v))
+                     :defer-threshold-tokens (let [n (aget mcp "defer-threshold-tokens")]
+                                               (if (number? n) n (:defer-threshold-tokens defaults)))
                      :tool-overrides      (override/parse-overrides (aget mcp "tool-overrides"))})))
          defaults)
        (catch :default e
@@ -212,10 +223,15 @@
   "Everything /mcp-status prints: the connection table, then the config files
    that were consulted and which of them existed. \"No MCP servers configured\"
    on its own never said where nyma had looked."
-  [manager project-root]
-  (str (format-status-table manager)
-       "\n\n"
-       (discovery/candidate-report project-root)))
+  ([manager project-root] (status-report manager project-root nil nil))
+  ([manager project-root deferred-entries estimate]
+   (str (format-status-table manager)
+        (when-let [line (and (seq (or deferred-entries []))
+                             estimate
+                             (deferred/status-line deferred-entries estimate))]
+          (str "\n" line))
+        "\n\n"
+        (discovery/candidate-report project-root))))
 
 (defn- notify [api msg & [level]]
   (when (and (.-ui api) (.-available (.-ui api)))
@@ -246,6 +262,10 @@
         ;; Native tool names whose execute we delegated to MCP via
         ;; tool_override. Restored on shutdown via __original chain.
         applied-overrides  (atom [])
+        ;; The MCP catalog being withheld from the model this session. Empty
+        ;; when deferral is off, which is also how the gate below decides
+        ;; whether it has an opinion at all.
+        deferred-catalog   (atom [])
         ;; Probe configured server count up-front so the startup log
         ;; surfaces whether mcp-client even sees what mcp_discovery
         ;; loaded. Mirrors the hook-bridge convention — a visible
@@ -271,7 +291,9 @@
                             #js {:description "Show MCP server connection state and tool counts"
                                  :handler (fn [_args _ctx]
                                             (notify api (status-report @manager-ref
-                                                                       (js/process.cwd))))})
+                                                                       (js/process.cwd)
+                                                                       @deferred-catalog
+                                                                       #(.estimateTokens api %))))})
 
         ;; The in-flight bring-up, so it can be started without being waited
         ;; for. Measured: five configured servers cost 3–6 s, and awaiting them
@@ -322,6 +344,29 @@
                     (when (seq to-hide)
                       (.setActiveTools api (clj->js new-active))
                       (reset! shadowed-natives to-hide)))
+                  ;; Deferred tools: swap N bridged schemas for two fixed
+                  ;; ones. Measured here at 9,993 tokens of the 18,816-token
+                  ;; standing prefix — 53% — for servers most tasks never
+                  ;; touch. The bridged tools stay REGISTERED so the override
+                  ;; wrappers and mcp_call can still reach them; they are only
+                  ;; withheld from the model, per turn, via tool_access_check.
+                  (let [cat  (deferred/catalog @manager-ref)
+                        mode (:defer-tools settings)
+                        on?  (cond
+                               (= false mode) false
+                               (= true mode)  (seq cat)
+                               :else (deferred/defer? cat
+                                                      #(.estimateTokens api %)
+                                                      (:defer-threshold-tokens settings)))]
+                    (reset! deferred-catalog (if on? cat []))
+                    (when on?
+                      (.registerTool api "mcp_search"
+                                     (deferred/search-tool (fn [] @deferred-catalog)))
+                      (.registerTool api "mcp_call"
+                                     (deferred/call-tool @manager-ref))
+                      (d/info "mcp-client"
+                              (str "deferring " (count cat) " MCP tool schemas behind "
+                                   "mcp_search/mcp_call"))))
                   ;; Unconditional hides: drop tools listed in
                   ;; :hidden-tools (workflow/memory-mgmt MCP tools
                   ;; that cost schema tokens but are rarely called).
@@ -419,6 +464,30 @@
     ;; session_ready: vanilla CLI launch — primary entry point.
     ;; session_start: explicit /new / /fork / /clear.
     ;; session_shutdown / session_end: cleanup on exit.
+    ;; The gate. Re-decided every loop iteration rather than done once with
+    ;; setActiveTools, because `tool-registry/register` unconditionally
+    ;; re-activates a name — any later registration would silently undo a
+    ;; one-shot hide. Returns a VECTOR always: this event merges by set
+    ;; intersection and nil means "no opinion", which would re-admit
+    ;; everything.
+    (.on api "tool_access_check"
+         (fn [ev]
+           (let [cat @deferred-catalog]
+             (when (seq cat)
+               #js {:allowed (clj->js
+                              (deferred/allowed-after-deferral
+                               (vec (.-tools ev)) cat))})))
+         50)
+
+    ;; One line per server in the system prompt — the model has to know there
+    ;; is something to search for. Names the servers and their counts, never
+    ;; their tools, which is the whole point.
+    (.on api "before_agent_start"
+         (fn [_ev]
+           (when-let [block (deferred/server-summary @deferred-catalog)]
+             #js {"system-prompt-additions" #js [block]}))
+         50)
+
     (.on api "session_ready" on-session-ready 50)
     (.on api "session_start" on-session-ready 50)
     (.on api "agent_start" on-agent-start 50)
