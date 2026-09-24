@@ -1,0 +1,111 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "spark-smoke",
+  "gitSha": "fcc3251",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 40,
+  "ablation": null,
+  "envVars": null,
+  "role": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "model": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1200000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "javascript/bowling"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      },
+      "cost": {
+        "totalTokens": 136511,
+        "tokensPerTask": 136511,
+        "totalCostUsd": 0,
+        "costPerTask": 0,
+        "cacheReadTokens": 0,
+        "cacheReadShare": 0,
+        "tasksWithUsage": 1,
+        "tasksWithoutUsage": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "javascript/bowling": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "javascript/bowling",
+        "status": "pass",
+        "durationMs": 343474,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 5,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 136511,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 126641
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "javascript/bowling",
+      "status": "pass",
+      "durationMs": 343474,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 5,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 136511,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 126641
+    }
+  ]
+}

@@ -1,0 +1,1101 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "spark-defer-js25",
+  "gitSha": "fcc3251",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 40,
+  "ablation": null,
+  "envVars": null,
+  "role": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "model": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "mcp": {
+      "defer-tools": true
+    }
+  },
+  "timeoutMs": 600000,
+  "concurrency": 1,
+  "serverPrefixCache": {
+    "before": {
+      "queries": 16241431,
+      "hits": 12837504
+    },
+    "after": {
+      "queries": 18293642,
+      "hits": 14306448
+    },
+    "sharePct": 71.6,
+    "note": "server-wide vLLM prefix-cache counters; null if unavailable, reset, or idle"
+  },
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "javascript/affine-cipher",
+    "javascript/book-store",
+    "javascript/bottle-song",
+    "javascript/bowling",
+    "javascript/food-chain",
+    "javascript/forth",
+    "javascript/grade-school",
+    "javascript/grep",
+    "javascript/house",
+    "javascript/killer-sudoku-helper",
+    "javascript/meetup",
+    "javascript/ocr-numbers",
+    "javascript/parallel-letter-frequency",
+    "javascript/pig-latin",
+    "javascript/queen-attack",
+    "javascript/resistor-color-trio",
+    "javascript/rest-api",
+    "javascript/robot-name",
+    "javascript/say",
+    "javascript/state-of-tic-tac-toe",
+    "javascript/sum-of-multiples",
+    "javascript/tournament",
+    "javascript/transpose",
+    "javascript/wordy",
+    "javascript/zipper"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 25,
+      "attempted": 25,
+      "passed": 25,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      },
+      "cost": {
+        "totalTokens": 2157696,
+        "tokensPerTask": 86308,
+        "totalCostUsd": 0,
+        "costPerTask": 0,
+        "cacheReadTokens": 0,
+        "cacheReadShare": 0,
+        "tasksWithUsage": 25,
+        "tasksWithoutUsage": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 25,
+    "perTask": {
+      "javascript/affine-cipher": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/book-store": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/bottle-song": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/bowling": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/food-chain": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/forth": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/grade-school": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/grep": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/house": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/killer-sudoku-helper": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/meetup": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/ocr-numbers": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/parallel-letter-frequency": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/pig-latin": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/queen-attack": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/resistor-color-trio": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/rest-api": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/robot-name": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/say": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/state-of-tic-tac-toe": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/sum-of-multiples": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/tournament": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/transpose": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/wordy": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      },
+      "javascript/zipper": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "javascript/affine-cipher",
+        "status": "pass",
+        "durationMs": 65535,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 2,
+          "write": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 58671,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 57305
+      },
+      {
+        "id": "javascript/book-store",
+        "status": "pass",
+        "durationMs": 360520,
+        "toolCalls": 8,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 4,
+          "write": 2
+        },
+        "turns": 8,
+        "costUsd": 0,
+        "tokens": 139277,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 128968
+      },
+      {
+        "id": "javascript/bottle-song",
+        "status": "pass",
+        "durationMs": 61486,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 76519,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 75238
+      },
+      {
+        "id": "javascript/bowling",
+        "status": "pass",
+        "durationMs": 575303,
+        "toolCalls": 8,
+        "toolsUsed": {
+          "read": 6,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 9,
+        "costUsd": 0,
+        "tokens": 203731,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 186126
+      },
+      {
+        "id": "javascript/food-chain",
+        "status": "pass",
+        "durationMs": 144183,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 2,
+          "edit": 2
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 107407,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 103511
+      },
+      {
+        "id": "javascript/forth",
+        "status": "pass",
+        "durationMs": 348764,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 5,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 132594,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 121512
+      },
+      {
+        "id": "javascript/grade-school",
+        "status": "pass",
+        "durationMs": 115538,
+        "toolCalls": 4,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 48924,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 45748
+      },
+      {
+        "id": "javascript/grep",
+        "status": "pass",
+        "durationMs": 158290,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 2,
+          "bash": 3,
+          "edit": 2
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 133947,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 130240
+      },
+      {
+        "id": "javascript/house",
+        "status": "pass",
+        "durationMs": 86183,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 3,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 65046,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 62580
+      },
+      {
+        "id": "javascript/killer-sudoku-helper",
+        "status": "pass",
+        "durationMs": 53870,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 2,
+          "write": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 60865,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 59693
+      },
+      {
+        "id": "javascript/meetup",
+        "status": "pass",
+        "durationMs": 61764,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 3,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 75770,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 74494
+      },
+      {
+        "id": "javascript/ocr-numbers",
+        "status": "pass",
+        "durationMs": 83754,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 3,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 58492,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 56279
+      },
+      {
+        "id": "javascript/parallel-letter-frequency",
+        "status": "pass",
+        "durationMs": 97974,
+        "toolCalls": 8,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 5,
+          "write": 1
+        },
+        "turns": 8,
+        "costUsd": 0,
+        "tokens": 109702,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 107496
+      },
+      {
+        "id": "javascript/pig-latin",
+        "status": "pass",
+        "durationMs": 125236,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 78511,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 75132
+      },
+      {
+        "id": "javascript/queen-attack",
+        "status": "pass",
+        "durationMs": 82048,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 3,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 84313,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 82340
+      },
+      {
+        "id": "javascript/resistor-color-trio",
+        "status": "pass",
+        "durationMs": 92466,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 2,
+          "write": 2,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 85193,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 82908
+      },
+      {
+        "id": "javascript/rest-api",
+        "status": "pass",
+        "durationMs": 161267,
+        "toolCalls": 4,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 56432,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 51820
+      },
+      {
+        "id": "javascript/robot-name",
+        "status": "pass",
+        "durationMs": 115673,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 2,
+          "bash": 2,
+          "write": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 61958,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 59221
+      },
+      {
+        "id": "javascript/say",
+        "status": "pass",
+        "durationMs": 66097,
+        "toolCalls": 4,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 1
+        },
+        "turns": 4,
+        "costUsd": 0,
+        "tokens": 44485,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 42720
+      },
+      {
+        "id": "javascript/state-of-tic-tac-toe",
+        "status": "pass",
+        "durationMs": 173487,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 2,
+          "write": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 70169,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 65239
+      },
+      {
+        "id": "javascript/sum-of-multiples",
+        "status": "pass",
+        "durationMs": 42837,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "read": 3,
+          "edit": 1,
+          "bash": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 52266,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 51383
+      },
+      {
+        "id": "javascript/tournament",
+        "status": "pass",
+        "durationMs": 108374,
+        "toolCalls": 5,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 2,
+          "write": 1
+        },
+        "turns": 5,
+        "costUsd": 0,
+        "tokens": 65250,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 62332
+      },
+      {
+        "id": "javascript/transpose",
+        "status": "pass",
+        "durationMs": 330544,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "bash": 2,
+          "read": 4,
+          "write": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 110529,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 101508
+      },
+      {
+        "id": "javascript/wordy",
+        "status": "pass",
+        "durationMs": 182663,
+        "toolCalls": 6,
+        "toolsUsed": {
+          "read": 2,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 6,
+        "costUsd": 0,
+        "tokens": 84128,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 79331
+      },
+      {
+        "id": "javascript/zipper",
+        "status": "pass",
+        "durationMs": 177112,
+        "toolCalls": 7,
+        "toolsUsed": {
+          "read": 3,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 93517,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 89087
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "javascript/affine-cipher",
+      "status": "pass",
+      "durationMs": 65535,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 2,
+        "write": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 58671,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 57305
+    },
+    {
+      "id": "javascript/book-store",
+      "status": "pass",
+      "durationMs": 360520,
+      "toolCalls": 8,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 4,
+        "write": 2
+      },
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 139277,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 128968
+    },
+    {
+      "id": "javascript/bottle-song",
+      "status": "pass",
+      "durationMs": 61486,
+      "toolCalls": 6,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 76519,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 75238
+    },
+    {
+      "id": "javascript/bowling",
+      "status": "pass",
+      "durationMs": 575303,
+      "toolCalls": 8,
+      "toolsUsed": {
+        "read": 6,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 203731,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 186126
+    },
+    {
+      "id": "javascript/food-chain",
+      "status": "pass",
+      "durationMs": 144183,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 2,
+        "edit": 2
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 107407,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 103511
+    },
+    {
+      "id": "javascript/forth",
+      "status": "pass",
+      "durationMs": 348764,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 5,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 132594,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 121512
+    },
+    {
+      "id": "javascript/grade-school",
+      "status": "pass",
+      "durationMs": 115538,
+      "toolCalls": 4,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 48924,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 45748
+    },
+    {
+      "id": "javascript/grep",
+      "status": "pass",
+      "durationMs": 158290,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 2,
+        "bash": 3,
+        "edit": 2
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 133947,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 130240
+    },
+    {
+      "id": "javascript/house",
+      "status": "pass",
+      "durationMs": 86183,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 3,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 65046,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 62580
+    },
+    {
+      "id": "javascript/killer-sudoku-helper",
+      "status": "pass",
+      "durationMs": 53870,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 2,
+        "write": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 60865,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 59693
+    },
+    {
+      "id": "javascript/meetup",
+      "status": "pass",
+      "durationMs": 61764,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 3,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 75770,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 74494
+    },
+    {
+      "id": "javascript/ocr-numbers",
+      "status": "pass",
+      "durationMs": 83754,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 3,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 58492,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 56279
+    },
+    {
+      "id": "javascript/parallel-letter-frequency",
+      "status": "pass",
+      "durationMs": 97974,
+      "toolCalls": 8,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 5,
+        "write": 1
+      },
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 109702,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 107496
+    },
+    {
+      "id": "javascript/pig-latin",
+      "status": "pass",
+      "durationMs": 125236,
+      "toolCalls": 6,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 78511,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 75132
+    },
+    {
+      "id": "javascript/queen-attack",
+      "status": "pass",
+      "durationMs": 82048,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 3,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 84313,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 82340
+    },
+    {
+      "id": "javascript/resistor-color-trio",
+      "status": "pass",
+      "durationMs": 92466,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 2,
+        "write": 2,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 85193,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 82908
+    },
+    {
+      "id": "javascript/rest-api",
+      "status": "pass",
+      "durationMs": 161267,
+      "toolCalls": 4,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 56432,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 51820
+    },
+    {
+      "id": "javascript/robot-name",
+      "status": "pass",
+      "durationMs": 115673,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 2,
+        "bash": 2,
+        "write": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 61958,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 59221
+    },
+    {
+      "id": "javascript/say",
+      "status": "pass",
+      "durationMs": 66097,
+      "toolCalls": 4,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 1
+      },
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 44485,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 42720
+    },
+    {
+      "id": "javascript/state-of-tic-tac-toe",
+      "status": "pass",
+      "durationMs": 173487,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 2,
+        "write": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 70169,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 65239
+    },
+    {
+      "id": "javascript/sum-of-multiples",
+      "status": "pass",
+      "durationMs": 42837,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "read": 3,
+        "edit": 1,
+        "bash": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 52266,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 51383
+    },
+    {
+      "id": "javascript/tournament",
+      "status": "pass",
+      "durationMs": 108374,
+      "toolCalls": 5,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 2,
+        "write": 1
+      },
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 65250,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 62332
+    },
+    {
+      "id": "javascript/transpose",
+      "status": "pass",
+      "durationMs": 330544,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "bash": 2,
+        "read": 4,
+        "write": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 110529,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 101508
+    },
+    {
+      "id": "javascript/wordy",
+      "status": "pass",
+      "durationMs": 182663,
+      "toolCalls": 6,
+      "toolsUsed": {
+        "read": 2,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 84128,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 79331
+    },
+    {
+      "id": "javascript/zipper",
+      "status": "pass",
+      "durationMs": 177112,
+      "toolCalls": 7,
+      "toolsUsed": {
+        "read": 3,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 93517,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 89087
+    }
+  ]
+}
