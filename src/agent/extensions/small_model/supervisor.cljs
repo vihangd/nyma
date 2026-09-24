@@ -24,6 +24,7 @@
      before_tool_call (permission_request) — pre-commit gate
    "
   (:require [agent.extensions.small-model.shared :as shared]
+            [agent.debug :as d]
             [clojure.string :as str]))
 
 ;; ── Destructive tool patterns ────────────────────────────────────
@@ -57,7 +58,16 @@
 ;; :execute. dependsOn ["advisor"] guarantees it's loaded before us.
 
 (defn ^:async call-advisor-tool
-  "Invoke the `advisor` tool via getTool, or fall back if unavailable."
+  "Invoke the `advisor` tool via getTool. Returns the advice, or **nil** when
+   there is none to give.
+
+   nil rather than a message, because whatever comes back here is handed
+   straight to the worker model as guidance. When the advisor was unreachable
+   this returned \"Supervisor: advisor call failed — AI_APICallError: The model
+   service is temporarily unavailable\", and that sentence was injected as an
+   instruction. Observed on a benchmark task: the worker read it twice, then
+   went and read nyma's own settings.json looking for the problem, and timed
+   out. A supervisor with nothing to say must say nothing."
   [api focus-question]
   (try
     (let [;; Tools are registered NAMESPACED — extension_scope prefixes with
@@ -74,19 +84,27 @@
         (let [result (js-await ((.-execute adv-tool)
                                 #js {:focus focus-question}))]
           (str result))
-        (str "Supervisor: advisor tool not available. Focus: " focus-question)))
+        (do (d/warn "small-model" "supervisor: advisor tool unavailable — skipping intervention")
+            nil)))
     (catch :default e
-      (str "Supervisor: advisor call failed — " (or (.-message e) (str e))))))
+      (d/warn "small-model"
+              (str "supervisor: advisor call failed, skipping intervention — "
+                   (or (.-message e) (str e))))
+      nil)))
 
 (defn ^:async do-intervention
   "Run one supervisor intervention: consult the advisor and steer the
    worker with the returned advice."
   [api state focus]
   (let [advice (js-await (call-advisor-tool api focus))]
+    ;; Spent either way. A permanently unreachable advisor would otherwise
+    ;; retry on every every-N tick for the whole run; charging the budget caps
+    ;; the wasted calls at max-interventions.
     (swap! state update :interventions inc)
-    (.sendUserMessage api
-                      (str "🧭 Supervisor guidance:\n\n" advice)
-                      #js {:deliverAs "steer"})
+    (when-not (str/blank? (str (or advice "")))
+      (.sendUserMessage api
+                        (str "🧭 Supervisor guidance:\n\n" advice)
+                        #js {:deliverAs "steer"}))
     advice))
 
 ;; ── Activation ───────────────────────────────────────────────────
