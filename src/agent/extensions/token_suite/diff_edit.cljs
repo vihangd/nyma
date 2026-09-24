@@ -283,17 +283,29 @@
 
 ;; ── Compression Middleware ────────────���────────────────────────
 
-(defn- compress-leave [ctx]
+(defn compress-leave
+  "Shorten a SUCCESSFUL edit/write result. Public because it is the unit worth
+   testing: it used to rewrite every result from the arguments, so a write that
+   never wrote still reported a byte count."
+  [ctx]
   (let [tool-name (or (aget ctx "tool-name") "")
         result (or (.-result ctx) (aget ctx "result") "")
         args (or (.-args ctx) (aget ctx "args") #js {})]
     (cond
-      (= tool-name "edit")
+      ;; Only a result the NATIVE tool reports as success may be replaced.
+      ;; `write-execute` returns "Wrote N bytes to PATH" and `edit` returns
+      ;; "Edit applied …" (src/agent/tools.cljs). Anything else is a refusal, an
+      ;; error, or some other tool's output standing in after an override — and
+      ;; rewriting it from the ARGUMENTS reports a success that never happened.
+      ;; read_guard hands its refusal back as a string rather than throwing, so
+      ;; this silently swallowed it and told the model it had written 915B to a
+      ;; file it had not touched.
+      (and (= tool-name "edit") (.startsWith (str result) "Edit applied"))
       (let [fpath (or (.-path args) (aget args "path") "unknown")]
         (aset ctx "result" (str "Edit applied to " fpath))
         ctx)
 
-      (= tool-name "write")
+      (and (= tool-name "write") (.startsWith (str result) "Wrote "))
       (let [fpath (or (.-path args) (aget args "path") "unknown")
             content-str (or (.-content args) (aget args "content") "")
             lines (shared/count-lines content-str)]
