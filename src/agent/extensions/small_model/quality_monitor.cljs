@@ -99,6 +99,7 @@
         max-turns (or (:max-turns qm-cfg) 40)
         ;; Escalation counters (keyed by violation type)
         counters  (atom {:empty 0 :hallucinated 0 :repeat 0})
+        max-empty-nudges (or (:max-empty-nudges qm-cfg) 2)
 
         ;; ── empty turns: observed on the stream, judged at turn_finalize ──
         ;; This check used to ABORT mid-stream whenever a text delta arrived
@@ -129,10 +130,20 @@
           (let [tool-calls (or (.-toolCalls data) 0)
                 acted?     (or (pos? tool-calls) @text-seen?)]
             (if acted?
+              ;; The only reset. It used to ALSO happen in `on-turn` below, on
+              ;; after_provider_request, which fires before turn_finalize in the
+              ;; same turn (loop.cljs:730 vs :829) — so the counter was cleared
+              ;; before the handler that reads it ever incremented it. `n` was
+              ;; always 1, which made the escalation tiers unreachable and left
+              ;; the nudge with no bound at all.
               (swap! counters assoc :empty 0)
               (let [n (:empty (swap! counters update :empty inc))]
-                (.sendUserMessage api (empty-turn-msg n)
-                                  #js {:deliverAs "followUp"})))
+                ;; Bounded like finalize-warn's: a model that answers an
+                ;; empty-turn nudge with another empty turn is not going to be
+                ;; talked out of it, and each nudge costs a turn.
+                (when (<= n max-empty-nudges)
+                  (.sendUserMessage api (empty-turn-msg n)
+                                    #js {:deliverAs "followUp"}))))
             nil))
 
         ;; ── middleware :leave: hallucination + repeat checks ──────
@@ -199,8 +210,6 @@
         ;; ── after_provider_request: advance turn counter ──────────
         on-turn
         (fn [_data _ctx]
-          ;; Reset empty-turn counter on any successful turn
-          (swap! counters assoc :empty 0)
           ;; No stream-state reset here. This used to `(reset! deltas-seen 0)`,
           ;; a binding that no longer exists — the mid-stream abort it belonged
           ;; to was replaced by the observe-only `text-seen?` above, and the
@@ -209,7 +218,15 @@
           ;; below with it, so max-turns never fired. `on-turn-start` is what
           ;; clears `text-seen?`.
           (let [tc (swap! state update :turn-count inc)]
-            (when (>= (:turn-count tc) max-turns)
+            ;; Latched. The nudge is delivered as a followUp and a followUp is a
+            ;; new turn (loop.cljs:851-863), so the next after_provider_request
+            ;; sees turn-count+1 — still >= max-turns — and warns again, and
+            ;; again. Nothing bounded it: `:turn-count` only ever increments and
+            ;; there was no "already warned" flag. A task that crossed the
+            ;; budget could only end at the outer step or wall-clock cap.
+            (when (and (>= (:turn-count tc) max-turns)
+                       (not (:budget-warned? tc)))
+              (swap! state assoc :budget-warned? true)
               (.sendUserMessage api
                                 (turn-budget-msg max-turns)
                                 #js {:deliverAs "followUp"}))))]

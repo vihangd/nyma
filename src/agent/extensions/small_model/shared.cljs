@@ -88,7 +88,11 @@
          :tool-result-fps {}    ; sig → result fingerprint, so a repeat whose
                                 ; OUTPUT changed is progress, not a loop
          :evidence       []
-         :interventions  0}))
+         :interventions  0
+         ;; The turn-budget nudge is delivered as a followUp, which IS a new
+         ;; turn — so an unlatched `>=` check re-fires on the turn it just
+         ;; created, forever. One warning is the whole point of a budget.
+         :budget-warned? false}))
 
 ;; ── Helpers ──────────────────────────────────────────────────────
 

@@ -161,3 +161,95 @@
                     (turn! h [""] 1)          ;; productive: resets the counter
                     (turn! h [""] 0)
                     (-> (expect (last @(:nudges h))) (.toContain "empty or only whitespace")))))))
+
+;;; ─── the two unlatched follow-ups ──────────────────────────────
+
+(defn- budget-harness [max-turns]
+  (let [hooks (atom {}) nudges (atom []) state (shared/make-state)
+        api #js {:addMiddleware (fn [_] nil)
+                 :on            (fn [ev f] (swap! hooks assoc ev f) nil)
+                 :off           (fn [& _] nil)
+                 :getAllTools   (fn [] #js ["bash" "read" "write"])
+                 :emitGlobal    (fn [& _] nil)
+                 :sendUserMessage (fn [msg & _] (swap! nudges conj (str msg)) nil)}]
+    (qm/activate api {:quality-monitor {:enabled true :max-turns max-turns}} state)
+    {:hooks hooks :nudges nudges :state state}))
+
+(defn- provider-turn! [h]
+  ((get @(:hooks h) "after_provider_request") #js {} nil))
+
+(defn- run-turn!
+  "Production hook order for one turn: turn_start, then after_provider_request
+   (loop.cljs:730), then turn_finalize (loop.cljs:829). The middle one matters —
+   a harness that skips it cannot see a counter being cleared by the handler
+   that runs before the one which reads it."
+  [h tool-calls]
+  (let [hk @(:hooks h)]
+    ((get hk "turn_start") #js {} nil)
+    ((get hk "after_provider_request") #js {} nil)
+    ((get hk "turn_finalize") #js {:toolCalls tool-calls :error false} nil)))
+
+(defn- empty-turn! [h] (run-turn! h 0))
+(defn- busy-turn!  [h] (run-turn! h 1))
+
+(describe "small-model/quality-monitor: the turn budget warns once" (fn []
+
+  (it "fires exactly once no matter how far past the budget the run goes"
+      (fn []
+        ;; The nudge is delivered as a followUp and a followUp IS a new turn,
+        ;; so an unlatched `>=` re-fires on the turn it just created. Ten turns
+        ;; past a budget of 3 used to mean eight nudges and eight turns paying
+        ;; for them; the run could then only end at the outer step or time cap.
+        (let [h (budget-harness 3)]
+          (dotimes [_ 10] (provider-turn! h))
+          (-> (expect (count @(:nudges h))) (.toBe 1))
+          (-> (expect (first @(:nudges h))) (.toContain "turn limit")))))
+
+  (it "stays silent below the budget"
+      (fn []
+        (let [h (budget-harness 5)]
+          (dotimes [_ 4] (provider-turn! h))
+          (-> (expect (count @(:nudges h))) (.toBe 0)))))
+
+  (it "warns on the turn that reaches the budget, not one later"
+      (fn []
+        (let [h (budget-harness 3)]
+          (provider-turn! h) (provider-turn! h)
+          (-> (expect (count @(:nudges h))) (.toBe 0))
+          (provider-turn! h)
+          (-> (expect (count @(:nudges h))) (.toBe 1)))))))
+
+(describe "small-model/quality-monitor: the empty-turn nudge is bounded" (fn []
+
+  (it "stops after its max instead of nudging every empty turn forever"
+      (fn []
+        (let [h (budget-harness 999)]
+          (dotimes [_ 6] (empty-turn! h))
+          (-> (expect (count @(:nudges h))) (.toBe 2)))))
+
+  (it "escalates, which needs a counter that survives the turn"
+      (fn []
+        ;; The reset used to also run on after_provider_request, which fires
+        ;; BEFORE turn_finalize in the same turn — so the counter was cleared
+        ;; before the handler that reads it incremented it, `n` was always 1,
+        ;; and every escalation tier was dead code.
+        (let [h (budget-harness 999)]
+          (empty-turn! h) (empty-turn! h)
+          (-> (expect (first @(:nudges h))) (.not.toBe (second @(:nudges h)))))))
+
+  (it "a turn that acted clears the counter, so a later stall warns again"
+      (fn []
+        (let [h (budget-harness 999)]
+          (dotimes [_ 3] (empty-turn! h))
+          (busy-turn! h)
+          (empty-turn! h)
+          (-> (expect (count @(:nudges h))) (.toBe 3)))))
+
+  (it "a turn that produced only text is not empty"
+      (fn []
+        (let [h  (budget-harness 999)
+              hk @(:hooks h)]
+          ((get hk "turn_start") #js {} nil)
+          ((get hk "stream_filter") #js {:chunk "here is the answer" :delta "x"} nil)
+          ((get hk "turn_finalize") #js {:toolCalls 0 :error false} nil)
+          (-> (expect (count @(:nudges h))) (.toBe 0)))))))
