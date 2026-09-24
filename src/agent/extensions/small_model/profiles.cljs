@@ -121,8 +121,9 @@
    genuinely on offer. A narrower expressing permission — plan mode, role
    policy — deliberately does not do this, because there withholding the route
    is the point."
-  [cands allowed hide]
+  [cands allowed hide & [keep]]
   (let [hide  (or hide #{})
+        keep  (or keep #{})
         cands (vec (or cands []))
         base  (cond (seq allowed) (vec allowed)
                     (seq hide)    cands
@@ -130,8 +131,22 @@
     (when base
       (let [pruned  (remove #(contains? hide (str %)) base)
             offered (set (map str cands))
-            gateway (filter offered tool-metadata/gateway-tool-names)]
-        (vec (distinct (concat pruned gateway)))))))
+            gateway (filter offered tool-metadata/gateway-tool-names)
+            ;; Same reasoning as the gateway union, one step further. The
+            ;; strategy's whole job is to route the model ONTO a tool; hiding
+            ;; `edit` only helps if what it routes to is actually on the wire.
+            ;; An allowlist written before this existed names `edit` and not
+            ;; `multi_edit`, so "patch" pruned the one edit tool that was
+            ;; allowed and could not add the one it wanted: the profile read
+            ;; "patch" and behaved as "whole", leaving `write` as the only way
+            ;; to change a file. Measured as 0 `edit` calls and 2.5x the writes
+            ;; across 25 tasks. Still subject to `hide`, so a later strategy
+            ;; cannot be overridden by an earlier one's target.
+            kept    (->> tool-metadata/gateway-tool-names
+                         (concat keep)
+                         (filter offered)
+                         (remove #(contains? hide (str %))))]
+        (vec (distinct (concat pruned gateway kept)))))))
 
 (defn edit-tools-to-hide
   "Edit-tool names to HIDE for a given editStrategy. Exposed for tests."
@@ -139,6 +154,16 @@
   (case (str edit-strategy)
     "whole"          #{"edit" "multi_edit"}
     ("fuzzy" "patch") #{"edit"}
+    #{}))
+
+(defn edit-tools-to-keep
+  "The edit tools a strategy routes the model ONTO, which must therefore survive
+   a profile allowlist that predates the strategy. Hiding `edit` accomplishes
+   nothing if the fuzzy tool it steers toward was never allowlisted."
+  [edit-strategy]
+  (case (str edit-strategy)
+    "whole"           #{"write"}
+    ("fuzzy" "patch") #{"multi_edit" "write"}
     #{}))
 
 (defn cap-result
@@ -202,10 +227,11 @@
                   edit-strat (or (:editStrategy p)
                                  (:edit-strategy p))
                   hide   (edit-tools-to-hide edit-strat)
+                  keep   (edit-tools-to-keep edit-strat)
                   ;; candidate tool names from the event (the full active set)
                   cands  (when-let [t (.-tools data)] (vec t))
                   ;; base allowlist: explicit allowedTools if set, else all candidates
-                  final  (resolve-allowed cands allowed hide)]
+                  final  (resolve-allowed cands allowed hide keep)]
               (when final
                 #js {:allowed (clj->js final)}))))
 

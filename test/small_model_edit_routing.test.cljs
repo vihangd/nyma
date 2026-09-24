@@ -114,3 +114,71 @@
                         ["read" "bash" "retrieve_result" "mcp_search" "mcp_call"]
                         ["read" "bash"] nil))]
           (-> (expect (contains? out "retrieve_result")) (.toBe true)))))))
+
+;;; ─── the strategy's target must survive the allowlist ─────────
+
+(def ^:private offered-all
+  ["read" "write" "edit" "multi_edit" "bash" "glob" "grep" "mcp_search" "mcp_call"])
+
+(describe "profiles/resolve-allowed — a strategy can reach the tool it routes to" (fn []
+
+  (it "\"patch\" surfaces multi_edit even when the allowlist never named it"
+      (fn []
+        ;; The benchmark profile: edit-strategy "patch", allowlist naming `edit`
+        ;; and not `multi_edit`. "patch" hides `edit`, so the allowlist lost the
+        ;; only edit tool it had and nothing could add the one the strategy
+        ;; wanted — the profile read "patch" and behaved as "whole". Measured as
+        ;; 0 edit calls and 2.5x the writes across 25 tasks.
+        (let [out (set (profiles/resolve-allowed
+                        offered-all
+                        ["read" "write" "edit" "bash" "glob" "grep"]
+                        (profiles/edit-tools-to-hide "patch")
+                        (profiles/edit-tools-to-keep "patch")))]
+          (-> (expect (contains? out "multi_edit")) (.toBe true))
+          (-> (expect (contains? out "edit")) (.toBe false))
+          (-> (expect (contains? out "write")) (.toBe true)))))
+
+  (it "no strategy takes away the last way to change a file"
+      (fn []
+        ;; The allowlist below DOES name a mutation tool, so whatever the
+        ;; strategy hides it must leave something that can write. An allowlist
+        ;; naming none is a different thing — that is the user declining to
+        ;; grant one, not a strategy removing it — so it is not asserted here.
+        (doseq [strat ["whole" "fuzzy" "patch" "exact"]]
+          (let [out (set (profiles/resolve-allowed
+                          offered-all ["read" "bash" "edit"]
+                          (profiles/edit-tools-to-hide strat)
+                          (profiles/edit-tools-to-keep strat)))]
+            (-> (expect (boolean (some out ["write" "edit" "multi_edit"]))) (.toBe true))))))
+
+  (it "\"whole\" still hides both fuzzy tools while keeping write"
+      (fn []
+        (let [out (set (profiles/resolve-allowed
+                        offered-all nil
+                        (profiles/edit-tools-to-hide "whole")
+                        (profiles/edit-tools-to-keep "whole")))]
+          (-> (expect (contains? out "edit")) (.toBe false))
+          (-> (expect (contains? out "multi_edit")) (.toBe false))
+          (-> (expect (contains? out "write")) (.toBe true)))))
+
+  (it "hide still beats keep, so a strategy cannot contradict itself"
+      (fn []
+        (let [out (set (profiles/resolve-allowed
+                        offered-all ["read"] #{"multi_edit"} #{"multi_edit"}))]
+          (-> (expect (contains? out "multi_edit")) (.toBe false)))))
+
+  (it "a tool the strategy wants but the turn does not offer is not invented"
+      (fn []
+        ;; cands is the live active set; adding a name that is not on offer
+        ;; would put a tool in the allowlist that cannot be called
+        (let [out (set (profiles/resolve-allowed
+                        ["read" "write" "bash"] ["read" "bash"]
+                        (profiles/edit-tools-to-hide "patch")
+                        (profiles/edit-tools-to-keep "patch")))]
+          (-> (expect (contains? out "multi_edit")) (.toBe false)))))
+
+  (it "\"exact\" and unset keep the old no-opinion behaviour"
+      (fn []
+        (-> (expect (count (profiles/edit-tools-to-keep "exact"))) (.toBe 0))
+        (-> (expect (count (profiles/edit-tools-to-keep nil))) (.toBe 0))
+        (-> (expect (profiles/resolve-allowed offered-all nil #{} #{})) (.toBeNil))))))
