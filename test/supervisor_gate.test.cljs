@@ -77,18 +77,21 @@
     (-> (expect out) (.toBe "bare advice"))))
 
 (defn ^:async test-says-so-when-really-absent []
+  ;; nil, not a sentence. Whatever comes back here is injected into the worker's
+  ;; context as guidance, so "Supervisor: advisor tool not available" became an
+  ;; instruction the worker tried to act on.
   (let [out (js-await (sup/call-advisor-tool (api-with-tools {}) "q"))]
-    (-> (expect (.includes out "not available")) (.toBe true))))
+    (-> (expect out) (.toBeNil))))
 
 (defn ^:async test-survives-a-throwing-getTool []
   ;; getTool is capability-gated: without :tools it is a thrower, and that must
-  ;; degrade to the fallback rather than take the intervention down.
+  ;; degrade quietly rather than take the intervention down.
   (let [api #js {:getTool (fn [_] (throw (js/Error. "missing capability")))}
         out (js-await (sup/call-advisor-tool api "q"))]
-    (-> (expect (.includes out "not available")) (.toBe true))))
+    (-> (expect out) (.toBeNil))))
 
 (describe "supervisor: advisor lookup" (fn []
   (it "finds the advisor under its namespaced name" test-finds-namespaced-advisor)
   (it "still accepts an unprefixed registration" test-falls-back-to-bare-name)
-  (it "reports absence when there is genuinely no advisor" test-says-so-when-really-absent)
-  (it "degrades instead of throwing when getTool is gated" test-survives-a-throwing-getTool)))
+  (it "returns nothing when there is genuinely no advisor" test-says-so-when-really-absent)
+  (it "returns nothing instead of throwing when getTool is gated" test-survives-a-throwing-getTool)))
