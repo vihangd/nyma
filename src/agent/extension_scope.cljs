@@ -185,19 +185,31 @@
                     :overrideTool     (gate capabilities :tools-override
                                             (fn [name td]
                                               (let [tag (.registerTool base-api name td)]
-                                                ;; :reoverride means someone else
-                                                ;; (or an earlier call of ours) holds
-                                                ;; the original — their unregister
-                                                ;; restores it, ours would delete it.
-                                                ;; Guard: only while an override is
-                                                ;; still on top. :owner cannot use
-                                                ;; identity — a later stub→wrapper
-                                                ;; call replaces td, and the restore
-                                                ;; must still happen. A restored
-                                                ;; native has no __original.
+                                                ;; Every override that DISPLACED
+                                                ;; something owes exactly one pop,
+                                                ;; :reoverride included. The registry
+                                                ;; keeps a stack now, so a pop restores
+                                                ;; the layer underneath rather than
+                                                ;; jumping to the native — which is
+                                                ;; what makes it safe for a later
+                                                ;; overrider to unwind its own layer
+                                                ;; without deleting an earlier one.
+                                                ;; :reoverride used to track nothing,
+                                                ;; on the reasoning that whoever saved
+                                                ;; the original would restore it; with
+                                                ;; two extensions on one tool that left
+                                                ;; the second one's wrapper installed
+                                                ;; forever.
+                                                ;; Guard: only pop while an override is
+                                                ;; still on top. Identity is no use for
+                                                ;; these — a later stub→wrapper call
+                                                ;; replaces td and the restore must
+                                                ;; still happen. A restored native has
+                                                ;; no __original.
                                                 (case tag
-                                                  :owner (track! (fn [] (when (some? (.-__original (or (.getTool base-api name) #js {})))
-                                                                          (.unregisterTool base-api name))))
+                                                  (:owner :reoverride)
+                                                  (track! (fn [] (when (some? (.-__original (or (.getTool base-api name) #js {})))
+                                                                   (.unregisterTool base-api name))))
                                                   :new   (track! (fn [] (when (identical? (.getTool base-api name) td)
                                                                           (.unregisterTool base-api name))))
                                                   nil)

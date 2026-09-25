@@ -266,3 +266,43 @@
                     (ovr/register! api mgr-ref ovr/default-overrides)
                     (let [native (get ((:all reg)) "read")]
                       (-> (expect (.-description native)) (.toBe "Native read"))))))))
+
+;;; ─── two extensions, one native ────────────────────────────────
+;;
+;; The scenario that cost a session-long silent failure. small-model's read-guard
+;; wraps `read` first; mcp_client overrides it later (async, after servers
+;; connect). The registry used to flatten every override into one slot, so the
+;; delegator's `__original` skipped the guard entirely and mcp_client's unregister
+;; deleted it rather than restoring it.
+
+(defn- tagged [tag] #js {:description tag :execute (fn [_] tag)})
+
+(describe "mcp-client/tool-override: layered with another extension's wrapper"
+          (fn []
+
+            (it "delegates through the wrapper underneath, not past it"
+                (^:async fn []
+                  (let [{:keys [reg api]} (mock-api {"read" (tagged "native")})]
+                    ;; another extension got there first
+                    (.overrideTool api "read" (tagged "guard"))
+                    (ovr/register! api (atom (fake-manager "lean-ctx"
+                                                           (fake-client (atom :stopped-error) (fn [_] nil))))
+                                   {"read" {:server "lean-ctx" :mcp-tool "ctx_read"
+                                            :translate (fn [a] a)}})
+                    ;; MCP unhealthy, so it falls back — and the fallback must be
+                    ;; the guard, which is what was actually displaced
+                    (let [out (js-await ((.-execute (get ((:all reg)) "read")) #js {}))]
+                      (-> (expect out) (.toBe "guard"))))))
+
+            (it "unregistering leaves the other extension's wrapper installed"
+                (fn []
+                  (let [{:keys [reg api]} (mock-api {"read" (tagged "native")})]
+                    (.overrideTool api "read" (tagged "guard"))
+                    (let [applied (ovr/register! api
+                                                 (atom (fake-manager "lean-ctx"
+                                                                     (fake-client (atom :running) (fn [_] nil))))
+                                                 {"read" {:server "lean-ctx" :mcp-tool "ctx_read"
+                                                          :translate (fn [a] a)}})]
+                      (ovr/unregister! api applied)
+                      ;; used to restore the NATIVE, silently deleting the guard
+                      (-> (expect (.-description (get ((:all reg)) "read"))) (.toBe "guard")))))) ))

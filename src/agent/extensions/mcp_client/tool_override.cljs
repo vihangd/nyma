@@ -150,7 +150,7 @@
 
 (defn- build-override
   "Construct a tool def whose execute delegates to the MCP server
-   when healthy, else calls __original.execute(args).
+   when healthy, else calls the NATIVE tool captured at build time.
 
    `native-tool` is the existing tool from the registry (used as
    display source). `manager-ref` is the atom holding the manager.
@@ -184,9 +184,14 @@
                                    :arguments ctx-args}))]
                     (ctx-result->string result))
                   (catch :default _e
-                    ((.-execute (.-__original td)) args)))
-                ;; Unhealthy: native fallback.
-                ((.-execute (.-__original td)) args))
+                    ((.-execute native-tool) args)))
+                ;; Unhealthy: native fallback. Uses the tool captured when this
+                ;; delegator was built, NOT `(.-__original td)`: register! pushes
+                ;; a throwaway stub before the real delegator, so with a proper
+                ;; override stack `td.__original` is that stub — whose execute
+                ;; returns nil. It only ever resolved to the native because the
+                ;; registry flattened every override to one slot.
+                ((.-execute native-tool) args))
               (catch :default e
                 ;; Last-resort: surface error rather than swallow.
                 (str "[ERROR] " (or (.-message e) (str e)))))))
@@ -316,9 +321,17 @@
           (map? applied)        applied
           (sequential? applied) {:overrides (vec applied) :hidden []}
           :else                 {:overrides [] :hidden []})]
+    ;; TWICE per name: `register!` pushes two layers — a throwaway stub to read
+    ;; `__original` off, then the real delegator. The registry keeps a stack of
+    ;; displaced tools now, so one pop would restore the stub (a tool whose
+    ;; execute returns nil) rather than the native. It used to be one pop only
+    ;; because the registry held a single write-once slot and any pop jumped
+    ;; straight back to the native — which is the same flattening that silently
+    ;; discarded other extensions' wrappers.
     (doseq [n overrides]
-      (try (.unoverrideTool api n)
-           (catch :default _e nil)))
+      (dotimes [_ 2]
+        (try (.unoverrideTool api n)
+             (catch :default _e nil))))
     (when (seq hidden)
       (let [active (set (js/Array.from (.getActiveTools api)))
             restored (apply conj active hidden)]
