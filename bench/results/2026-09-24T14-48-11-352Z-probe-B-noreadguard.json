@@ -1,7 +1,7 @@
 {
   "harness": 2,
   "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
-  "label": "probe-C-notokensuite",
+  "label": "probe-B-noreadguard",
   "gitSha": "87b984e",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 40,
@@ -51,8 +51,7 @@
         "max-snippet-chars": 1024
       },
       "read-guard": {
-        "enabled": true,
-        "max-lines": 500
+        "enabled": false
       },
       "supervisor": {
         "enabled": true,
@@ -84,9 +83,6 @@
     },
     "mcp": {
       "defer-tools": true
-    },
-    "extensions": {
-      "token-suite": false
     }
   },
   "timeoutMs": 600000,
@@ -156,8 +152,8 @@
       {
         "id": "javascript/transpose",
         "status": "timeout",
-        "durationMs": 977704,
-        "suspectClock": 978,
+        "durationMs": 1026657,
+        "suspectClock": 1027,
         "toolCalls": 0,
         "toolsUsed": {},
         "editedStub": false,
@@ -174,8 +170,8 @@
     {
       "id": "javascript/transpose",
       "status": "timeout",
-      "durationMs": 977704,
-      "suspectClock": 978,
+      "durationMs": 1026657,
+      "suspectClock": 1027,
       "toolCalls": 0,
       "toolsUsed": {},
       "editedStub": false,

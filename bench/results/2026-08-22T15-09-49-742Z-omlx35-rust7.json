@@ -1,0 +1,132 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "omlx35-rust7",
+  "gitSha": "a16fc7b",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "rust/bowling",
+    "rust/decimal",
+    "rust/doubly-linked-list",
+    "rust/forth",
+    "rust/react",
+    "rust/scale-generator",
+    "rust/xorcism"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 7,
+      "attempted": 7,
+      "passed": 3,
+      "failed": 1,
+      "timeout": 1,
+      "error": 2,
+      "skipped": 0,
+      "pct": 42.9
+    }
+  ],
+  "summary": {
+    "mean": 42.9,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/bowling",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 1144741,
+      "editedStub": false,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 154166,
+      "cacheRead": 88064,
+      "cacheWrite": 0,
+      "inputTokens": 120707
+    },
+    {
+      "id": "rust/decimal",
+      "status": "fail",
+      "durationMs": 1518439,
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 276356,
+      "cacheRead": 182272,
+      "cacheWrite": 0,
+      "inputTokens": 229122
+    },
+    {
+      "id": "rust/doubly-linked-list",
+      "status": "timeout",
+      "durationMs": 1800486,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 11551,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "rust/forth",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 1081399,
+      "editedStub": false,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 265469,
+      "cacheRead": 194560,
+      "cacheWrite": 0,
+      "inputTokens": 231305
+    },
+    {
+      "id": "rust/react",
+      "status": "pass",
+      "durationMs": 1133041,
+      "turns": 20,
+      "costUsd": 0,
+      "tokens": 903744,
+      "cacheRead": 790528,
+      "cacheWrite": 0,
+      "inputTokens": 875419
+    },
+    {
+      "id": "rust/scale-generator",
+      "status": "pass",
+      "durationMs": 643941,
+      "turns": 12,
+      "costUsd": 0,
+      "tokens": 347572,
+      "cacheRead": 276480,
+      "cacheWrite": 0,
+      "inputTokens": 329154
+    },
+    {
+      "id": "rust/xorcism",
+      "status": "pass",
+      "durationMs": 1375000,
+      "turns": 26,
+      "costUsd": 0,
+      "tokens": 1395268,
+      "cacheRead": 1263616,
+      "cacheWrite": 0,
+      "inputTokens": 1364359
+    }
+  ]
+}

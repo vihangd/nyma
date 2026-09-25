@@ -1,0 +1,61 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "probe-mimo-v2.5-free",
+  "gitSha": "cb605e0",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/mimo-v2.5-free",
+  "model": "opencode-zen/mimo-v2.5-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 300000,
+  "concurrency": 3,
+  "seed": 7,
+  "taskIds": [
+    "python/bottle-song",
+    "python/phone-number",
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 3,
+      "attempted": 3,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 3,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/bottle-song",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Error from provider (Console): Rate limit exceeded. Please try again later.",
+      "durationMs": 76632
+    },
+    {
+      "id": "python/phone-number",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Error from provider (Console): Rate limit exceeded. Please try again later.",
+      "durationMs": 79085
+    },
+    {
+      "id": "python/proverb",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Error from provider (Console): Rate limit exceeded. Please try again later.",
+      "durationMs": 84383
+    }
+  ]
+}

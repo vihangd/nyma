@@ -1,0 +1,71 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "fp4-probe2",
+  "gitSha": "4e3132a",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "quantizations": [
+            "fp4"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "concurrency": 3,
+  "seed": 7,
+  "taskIds": [
+    "javascript/wordy",
+    "python/proverb",
+    "rust/acronym"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 3,
+      "attempted": 3,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 3,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/wordy",
+      "status": "error",
+      "reason": "agent: Error: Provider returned error",
+      "durationMs": 7472
+    },
+    {
+      "id": "python/proverb",
+      "status": "error",
+      "reason": "agent: Error: Provider returned error",
+      "durationMs": 6463
+    },
+    {
+      "id": "rust/acronym",
+      "status": "error",
+      "reason": "agent: Error: Provider returned error",
+      "durationMs": 8272
+    }
+  ]
+}

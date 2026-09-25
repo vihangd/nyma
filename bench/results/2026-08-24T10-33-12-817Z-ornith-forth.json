@@ -1,0 +1,130 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "ornith-forth",
+  "gitSha": "35a7aaa",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Ornith-1.5-35B-A3B-MLX-4bit",
+  "model": "omlx/Ornith-1.5-35B-A3B-MLX-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true,
+      "profiles": {
+        "enabled": true,
+        "model-profiles": {
+          "omlx/Qwen3.6-35B-A3B-OptiQ-4bit": {
+            "editStrategy": "whole"
+          },
+          "omlx/Ornith-1.5-35B-A3B-MLX-4bit": {
+            "editStrategy": "whole"
+          }
+        }
+      },
+      "quality-monitor": {
+        "enabled": false
+      },
+      "evidence": {
+        "enabled": false
+      }
+    }
+  },
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "rust/forth"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 1,
+      "skipped": 0,
+      "pct": 0,
+      "metrics": {
+        "schemaValidity": 0,
+        "executableAccuracy": 0,
+        "wrongValid": 0,
+        "noToolCall": 100
+      }
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "rust/forth": {
+        "passes": 0,
+        "trials": 1,
+        "verdict": "failing"
+      }
+    },
+    "passHatK": 0,
+    "passAtK": 0,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "rust/forth",
+        "status": "error",
+        "reason": "agent never modified the stub (no tool call?)",
+        "durationMs": 495313,
+        "editedStub": false,
+        "toolCalls": 8,
+        "toolsUsed": {
+          "read": 5,
+          "think": 1,
+          "web_search": 1,
+          "web_fetch": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 176392,
+        "cacheRead": 126976,
+        "cacheWrite": 0,
+        "inputTokens": 162579
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "rust/forth",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 495313,
+      "editedStub": false,
+      "toolCalls": 8,
+      "toolsUsed": {
+        "read": 5,
+        "think": 1,
+        "web_search": 1,
+        "web_fetch": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 176392,
+      "cacheRead": 126976,
+      "cacheWrite": 0,
+      "inputTokens": 162579
+    }
+  ]
+}

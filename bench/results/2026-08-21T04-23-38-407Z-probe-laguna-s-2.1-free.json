@@ -1,0 +1,76 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "probe-laguna-s-2.1-free",
+  "gitSha": "cb605e0",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/laguna-s-2.1-free",
+  "model": "opencode-zen/laguna-s-2.1-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 300000,
+  "concurrency": 3,
+  "seed": 7,
+  "taskIds": [
+    "python/bottle-song",
+    "python/phone-number",
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 3,
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/bottle-song",
+      "status": "pass",
+      "durationMs": 69338,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 105717,
+      "cacheRead": 43008,
+      "cacheWrite": 0,
+      "inputTokens": 103146
+    },
+    {
+      "id": "python/phone-number",
+      "status": "pass",
+      "durationMs": 258339,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 262869,
+      "cacheRead": 76576,
+      "cacheWrite": 0,
+      "inputTokens": 249857
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 36152,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 97784,
+      "cacheRead": 18368,
+      "cacheWrite": 0,
+      "inputTokens": 96874
+    }
+  ]
+}

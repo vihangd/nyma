@@ -1,7 +1,7 @@
 {
   "harness": 2,
   "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
-  "label": "probe-C-notokensuite",
+  "label": "probe-A-full",
   "gitSha": "87b984e",
   "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
   "extensionCount": 40,
@@ -84,15 +84,15 @@
     },
     "mcp": {
       "defer-tools": true
-    },
-    "extensions": {
-      "token-suite": false
     }
   },
   "timeoutMs": 600000,
   "concurrency": 1,
   "serverPrefixCache": {
-    "before": null,
+    "before": {
+      "queries": 22621161,
+      "hits": 17494816
+    },
     "after": null,
     "sharePct": null,
     "note": "server-wide vLLM prefix-cache counters; null if unavailable, reset, or idle"
@@ -156,10 +156,13 @@
       {
         "id": "javascript/transpose",
         "status": "timeout",
-        "durationMs": 977704,
-        "suspectClock": 978,
-        "toolCalls": 0,
-        "toolsUsed": {},
+        "durationMs": 1570827,
+        "suspectClock": 1571,
+        "toolCalls": 3,
+        "toolsUsed": {
+          "glob": 1,
+          "read": 2
+        },
         "editedStub": false,
         "stubBytes": 256,
         "wouldHavePassed": null,
@@ -174,10 +177,13 @@
     {
       "id": "javascript/transpose",
       "status": "timeout",
-      "durationMs": 977704,
-      "suspectClock": 978,
-      "toolCalls": 0,
-      "toolsUsed": {},
+      "durationMs": 1570827,
+      "suspectClock": 1571,
+      "toolCalls": 3,
+      "toolsUsed": {
+        "glob": 1,
+        "read": 2
+      },
       "editedStub": false,
       "stubBytes": 256,
       "wouldHavePassed": null,

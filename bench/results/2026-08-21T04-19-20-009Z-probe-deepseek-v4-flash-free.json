@@ -1,0 +1,61 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "probe-deepseek-v4-flash-free",
+  "gitSha": "cb605e0",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/deepseek-v4-flash-free",
+  "model": "opencode-zen/deepseek-v4-flash-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 300000,
+  "concurrency": 3,
+  "seed": 7,
+  "taskIds": [
+    "python/bottle-song",
+    "python/phone-number",
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 3,
+      "attempted": 3,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 3,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/bottle-song",
+      "status": "error",
+      "reason": "agent: Error: Free promotion has ended for DeepSeek V4 Flash Free. You can continue using the model by subscribing to OpenCode Go - https://opencode.ai/go",
+      "durationMs": 6041
+    },
+    {
+      "id": "python/phone-number",
+      "status": "error",
+      "reason": "agent: Error: Free promotion has ended for DeepSeek V4 Flash Free. You can continue using the model by subscribing to OpenCode Go - https://opencode.ai/go",
+      "durationMs": 4576
+    },
+    {
+      "id": "python/proverb",
+      "status": "error",
+      "reason": "agent: Error: Free promotion has ended for DeepSeek V4 Flash Free. You can continue using the model by subscribing to OpenCode Go - https://opencode.ai/go",
+      "durationMs": 5000
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "forth-verify2",
+  "gitSha": "1050c2b",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true,
+      "profiles": {
+        "enabled": true,
+        "model-profiles": {
+          "omlx/Qwen3.6-35B-A3B-OptiQ-4bit": {
+            "editStrategy": "whole"
+          }
+        }
+      },
+      "quality-monitor": {
+        "enabled": false
+      },
+      "evidence": {
+        "enabled": false
+      }
+    }
+  },
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "rust/forth"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "rust/forth": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "rust/forth",
+        "status": "pass",
+        "durationMs": 1181075,
+        "toolCalls": 31,
+        "toolsUsed": {
+          "read": 8,
+          "bash": 11,
+          "write": 4,
+          "edit": 8
+        },
+        "turns": 30,
+        "costUsd": 0,
+        "tokens": 1323566,
+        "cacheRead": 1210368,
+        "cacheWrite": 0,
+        "inputTokens": 1303147
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "rust/forth",
+      "status": "pass",
+      "durationMs": 1181075,
+      "toolCalls": 31,
+      "toolsUsed": {
+        "read": 8,
+        "bash": 11,
+        "write": 4,
+        "edit": 8
+      },
+      "turns": 30,
+      "costUsd": 0,
+      "tokens": 1323566,
+      "cacheRead": 1210368,
+      "cacheWrite": 0,
+      "inputTokens": 1303147
+    }
+  ]
+}

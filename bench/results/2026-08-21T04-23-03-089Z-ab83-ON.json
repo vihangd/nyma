@@ -1,0 +1,792 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "ab83-ON",
+  "gitSha": "cb605e0",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/nemotron-3.5-lightning-free",
+  "model": "opencode-zen/nemotron-3.5-lightning-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    }
+  },
+  "timeoutMs": 420000,
+  "concurrency": 6,
+  "seed": 7,
+  "taskIds": [
+    "javascript/affine-cipher",
+    "javascript/alphametics",
+    "javascript/beer-song",
+    "javascript/binary",
+    "javascript/book-store",
+    "javascript/bottle-song",
+    "javascript/bowling",
+    "javascript/complex-numbers",
+    "javascript/connect",
+    "javascript/food-chain",
+    "javascript/forth",
+    "javascript/go-counting",
+    "javascript/grade-school",
+    "javascript/grep",
+    "javascript/house",
+    "javascript/killer-sudoku-helper",
+    "javascript/ledger",
+    "javascript/list-ops",
+    "javascript/meetup",
+    "javascript/ocr-numbers",
+    "javascript/palindrome-products",
+    "javascript/parallel-letter-frequency",
+    "javascript/phone-number",
+    "javascript/pig-latin",
+    "javascript/poker",
+    "javascript/promises",
+    "javascript/queen-attack",
+    "javascript/rational-numbers",
+    "javascript/react",
+    "javascript/rectangles",
+    "javascript/resistor-color-trio",
+    "javascript/rest-api",
+    "javascript/robot-name",
+    "javascript/say",
+    "javascript/scale-generator",
+    "javascript/simple-linked-list",
+    "javascript/space-age",
+    "javascript/state-of-tic-tac-toe",
+    "javascript/sum-of-multiples",
+    "javascript/tournament",
+    "javascript/transpose",
+    "javascript/triangle",
+    "javascript/twelve-days",
+    "javascript/two-bucket",
+    "javascript/variable-length-quantity",
+    "javascript/word-search",
+    "javascript/wordy",
+    "javascript/zebra-puzzle",
+    "javascript/zipper",
+    "python/affine-cipher",
+    "python/beer-song",
+    "python/book-store",
+    "python/bottle-song",
+    "python/bowling",
+    "python/connect",
+    "python/dominoes",
+    "python/dot-dsl",
+    "python/food-chain",
+    "python/forth",
+    "python/go-counting",
+    "python/grade-school",
+    "python/grep",
+    "python/hangman",
+    "python/list-ops",
+    "python/paasio",
+    "python/phone-number",
+    "python/pig-latin",
+    "python/poker",
+    "python/pov",
+    "python/proverb",
+    "python/react",
+    "python/rest-api",
+    "python/robot-name",
+    "python/scale-generator",
+    "python/sgf-parsing",
+    "python/simple-linked-list",
+    "python/transpose",
+    "python/tree-building",
+    "python/two-bucket",
+    "python/variable-length-quantity",
+    "python/wordy",
+    "python/zebra-puzzle",
+    "python/zipper"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 83,
+      "attempted": 83,
+      "passed": 9,
+      "failed": 2,
+      "timeout": 9,
+      "error": 63,
+      "skipped": 0,
+      "pct": 10.8
+    }
+  ],
+  "summary": {
+    "mean": 10.8,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/affine-cipher",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 77834,
+      "editedStub": false,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 243207,
+      "cacheRead": 184960,
+      "cacheWrite": 0,
+      "inputTokens": 242225
+    },
+    {
+      "id": "javascript/alphametics",
+      "status": "timeout",
+      "durationMs": 420013,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 254,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/beer-song",
+      "status": "pass",
+      "durationMs": 93184,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 243153,
+      "cacheRead": 174080,
+      "cacheWrite": 0,
+      "inputTokens": 239299
+    },
+    {
+      "id": "javascript/binary",
+      "status": "pass",
+      "durationMs": 37704,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 137256,
+      "cacheRead": 108800,
+      "cacheWrite": 0,
+      "inputTokens": 136002
+    },
+    {
+      "id": "javascript/book-store",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 118643,
+      "editedStub": false,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 209014,
+      "cacheRead": 156672,
+      "cacheWrite": 0,
+      "inputTokens": 208050
+    },
+    {
+      "id": "javascript/bottle-song",
+      "status": "timeout",
+      "durationMs": 420529,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 1286,
+      "wouldHavePassed": true,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/bowling",
+      "status": "timeout",
+      "durationMs": 421299,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 351,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/complex-numbers",
+      "status": "pass",
+      "durationMs": 228941,
+      "turns": 34,
+      "costUsd": 0,
+      "tokens": 1149875,
+      "cacheRead": 1031424,
+      "cacheWrite": 0,
+      "inputTokens": 1141047
+    },
+    {
+      "id": "javascript/connect",
+      "status": "timeout",
+      "durationMs": 421100,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 357,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/food-chain",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 111386,
+      "editedStub": false,
+      "turns": 3,
+      "costUsd": 0,
+      "tokens": 45479,
+      "cacheRead": 21760,
+      "cacheWrite": 0,
+      "inputTokens": 44419
+    },
+    {
+      "id": "javascript/forth",
+      "status": "timeout",
+      "durationMs": 420022,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 440,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/go-counting",
+      "status": "timeout",
+      "durationMs": 420019,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 481,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/grade-school",
+      "status": "pass",
+      "durationMs": 218303,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 126783,
+      "cacheRead": 47872,
+      "cacheWrite": 0,
+      "inputTokens": 123323
+    },
+    {
+      "id": "javascript/grep",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 241749,
+      "editedStub": false,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 109639,
+      "cacheRead": 50048,
+      "cacheWrite": 0,
+      "inputTokens": 109032
+    },
+    {
+      "id": "javascript/house",
+      "status": "timeout",
+      "durationMs": 434583,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 363,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/killer-sudoku-helper",
+      "status": "pass",
+      "durationMs": 319019,
+      "turns": 29,
+      "costUsd": 0,
+      "tokens": 868052,
+      "cacheRead": 772480,
+      "cacheWrite": 0,
+      "inputTokens": 861959
+    },
+    {
+      "id": "javascript/ledger",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 300701,
+      "editedStub": false,
+      "turns": 14,
+      "costUsd": 0,
+      "tokens": 328767,
+      "cacheRead": 235008,
+      "cacheWrite": 0,
+      "inputTokens": 322790
+    },
+    {
+      "id": "javascript/list-ops",
+      "status": "pass",
+      "durationMs": 118976,
+      "turns": 11,
+      "costUsd": 0,
+      "tokens": 290106,
+      "cacheRead": 252416,
+      "cacheWrite": 0,
+      "inputTokens": 286848
+    },
+    {
+      "id": "javascript/meetup",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 118170,
+      "editedStub": false,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 111891,
+      "cacheRead": 65280,
+      "cacheWrite": 0,
+      "inputTokens": 111403
+    },
+    {
+      "id": "javascript/ocr-numbers",
+      "status": "timeout",
+      "durationMs": 420562,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 2284,
+      "wouldHavePassed": false,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/palindrome-products",
+      "status": "pass",
+      "durationMs": 80644,
+      "turns": 6,
+      "costUsd": 0,
+      "tokens": 145474,
+      "cacheRead": 89216,
+      "cacheWrite": 0,
+      "inputTokens": 142781
+    },
+    {
+      "id": "javascript/parallel-letter-frequency",
+      "status": "pass",
+      "durationMs": 181817,
+      "turns": 25,
+      "costUsd": 0,
+      "tokens": 777619,
+      "cacheRead": 622336,
+      "cacheWrite": 0,
+      "inputTokens": 771934
+    },
+    {
+      "id": "javascript/phone-number",
+      "status": "fail",
+      "durationMs": 201248,
+      "turns": 13,
+      "costUsd": 0,
+      "tokens": 395253,
+      "cacheRead": 304640,
+      "cacheWrite": 0,
+      "inputTokens": 388929
+    },
+    {
+      "id": "javascript/pig-latin",
+      "status": "timeout",
+      "durationMs": 420030,
+      "suspectClock": null,
+      "editedStub": false,
+      "stubBytes": 256,
+      "wouldHavePassed": null,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "javascript/poker",
+      "status": "fail",
+      "durationMs": 162130,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 186162,
+      "cacheRead": 124032,
+      "cacheWrite": 0,
+      "inputTokens": 180899
+    },
+    {
+      "id": "javascript/promises",
+      "status": "pass",
+      "durationMs": 111096,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 278725,
+      "cacheRead": 235008,
+      "cacheWrite": 0,
+      "inputTokens": 272853
+    },
+    {
+      "id": "javascript/queen-attack",
+      "status": "error",
+      "reason": "agent: Error: Streaming response failed: [504] Upstream idle timeout exceeded",
+      "durationMs": 396454
+    },
+    {
+      "id": "javascript/rational-numbers",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 243049
+    },
+    {
+      "id": "javascript/react",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 182138,
+      "editedStub": false,
+      "turns": 8,
+      "costUsd": 0,
+      "tokens": 159633,
+      "cacheRead": 106624,
+      "cacheWrite": 0,
+      "inputTokens": 158881
+    },
+    {
+      "id": "javascript/rectangles",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 195963
+    },
+    {
+      "id": "javascript/resistor-color-trio",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 84515
+    },
+    {
+      "id": "javascript/rest-api",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69690
+    },
+    {
+      "id": "javascript/robot-name",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69547
+    },
+    {
+      "id": "javascript/say",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68855
+    },
+    {
+      "id": "javascript/scale-generator",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69346
+    },
+    {
+      "id": "javascript/simple-linked-list",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68845
+    },
+    {
+      "id": "javascript/space-age",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 70511
+    },
+    {
+      "id": "javascript/state-of-tic-tac-toe",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 70172
+    },
+    {
+      "id": "javascript/sum-of-multiples",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68681
+    },
+    {
+      "id": "javascript/tournament",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68462
+    },
+    {
+      "id": "javascript/transpose",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69009
+    },
+    {
+      "id": "javascript/triangle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68268
+    },
+    {
+      "id": "javascript/twelve-days",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69605
+    },
+    {
+      "id": "javascript/two-bucket",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68650
+    },
+    {
+      "id": "javascript/variable-length-quantity",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68296
+    },
+    {
+      "id": "javascript/word-search",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68611
+    },
+    {
+      "id": "javascript/wordy",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68944
+    },
+    {
+      "id": "javascript/zebra-puzzle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68895
+    },
+    {
+      "id": "javascript/zipper",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68622
+    },
+    {
+      "id": "python/affine-cipher",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68503
+    },
+    {
+      "id": "python/beer-song",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68889
+    },
+    {
+      "id": "python/book-store",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68545
+    },
+    {
+      "id": "python/bottle-song",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69127
+    },
+    {
+      "id": "python/bowling",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68428
+    },
+    {
+      "id": "python/connect",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68283
+    },
+    {
+      "id": "python/dominoes",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69014
+    },
+    {
+      "id": "python/dot-dsl",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68230
+    },
+    {
+      "id": "python/food-chain",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69065
+    },
+    {
+      "id": "python/forth",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68215
+    },
+    {
+      "id": "python/go-counting",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68937
+    },
+    {
+      "id": "python/grade-school",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68702
+    },
+    {
+      "id": "python/grep",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68771
+    },
+    {
+      "id": "python/hangman",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 80572
+    },
+    {
+      "id": "python/list-ops",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68743
+    },
+    {
+      "id": "python/paasio",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69351
+    },
+    {
+      "id": "python/phone-number",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68969
+    },
+    {
+      "id": "python/pig-latin",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68247
+    },
+    {
+      "id": "python/poker",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 67924
+    },
+    {
+      "id": "python/pov",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68662
+    },
+    {
+      "id": "python/proverb",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68633
+    },
+    {
+      "id": "python/react",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68799
+    },
+    {
+      "id": "python/rest-api",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68829
+    },
+    {
+      "id": "python/robot-name",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68105
+    },
+    {
+      "id": "python/scale-generator",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68632
+    },
+    {
+      "id": "python/sgf-parsing",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69275
+    },
+    {
+      "id": "python/simple-linked-list",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68706
+    },
+    {
+      "id": "python/transpose",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68441
+    },
+    {
+      "id": "python/tree-building",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 70525
+    },
+    {
+      "id": "python/two-bucket",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68558
+    },
+    {
+      "id": "python/variable-length-quantity",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69246
+    },
+    {
+      "id": "python/wordy",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68358
+    },
+    {
+      "id": "python/zebra-puzzle",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 68750
+    },
+    {
+      "id": "python/zipper",
+      "status": "error",
+      "reason": "agent: Error: Failed after 6 attempts. Last error: AI_APICallError: Rate limit exceeded. Please try again later.",
+      "durationMs": 69184
+    }
+  ]
+}

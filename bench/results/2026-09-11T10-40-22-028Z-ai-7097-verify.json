@@ -1,0 +1,103 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "ai-7097-verify",
+  "gitSha": "325d57a",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 38,
+  "ablation": null,
+  "envVars": null,
+  "role": "local",
+  "model": "vllm/unsloth/Qwen3.8-27B-NVFP4",
+  "modelSource": "global settings roles.local",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 300000,
+  "concurrency": 1,
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "python/wordy"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "python/wordy": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "python/wordy",
+        "status": "pass",
+        "durationMs": 198393,
+        "toolCalls": 8,
+        "toolsUsed": {
+          "read": 4,
+          "write": 1,
+          "bash": 2,
+          "edit": 1
+        },
+        "turns": 7,
+        "costUsd": 0,
+        "tokens": 166154,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "inputTokens": 161095
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "python/wordy",
+      "status": "pass",
+      "durationMs": 198393,
+      "toolCalls": 8,
+      "toolsUsed": {
+        "read": 4,
+        "write": 1,
+        "bash": 2,
+        "edit": 1
+      },
+      "turns": 7,
+      "costUsd": 0,
+      "tokens": 166154,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "inputTokens": 161095
+    }
+  ]
+}

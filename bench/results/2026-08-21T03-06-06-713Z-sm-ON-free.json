@@ -1,0 +1,96 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "sm-ON-free",
+  "gitSha": "10cfdce",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "opencode-zen/nemotron-3.5-lightning-free",
+  "model": "opencode-zen/nemotron-3.5-lightning-free",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true
+    }
+  },
+  "timeoutMs": 420000,
+  "concurrency": 4,
+  "seed": 7,
+  "taskIds": [
+    "javascript/wordy",
+    "python/bottle-song",
+    "python/phone-number",
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 4,
+      "attempted": 4,
+      "passed": 2,
+      "failed": 0,
+      "timeout": 1,
+      "error": 1,
+      "skipped": 0,
+      "pct": 50
+    }
+  ],
+  "summary": {
+    "mean": 50,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "javascript/wordy",
+      "status": "timeout",
+      "durationMs": 420301,
+      "suspectClock": null,
+      "editedStub": true,
+      "stubBytes": 2858,
+      "wouldHavePassed": true,
+      "tamperedTest": false,
+      "turns": null,
+      "costUsd": null,
+      "tokens": null
+    },
+    {
+      "id": "python/bottle-song",
+      "status": "error",
+      "reason": "agent never modified the stub (no tool call?)",
+      "durationMs": 20862,
+      "editedStub": false,
+      "turns": 4,
+      "costUsd": 0,
+      "tokens": 66067,
+      "cacheRead": 43520,
+      "cacheWrite": 0,
+      "inputTokens": 65892
+    },
+    {
+      "id": "python/phone-number",
+      "status": "pass",
+      "durationMs": 66205,
+      "turns": 10,
+      "costUsd": 0,
+      "tokens": 252675,
+      "cacheRead": 217600,
+      "cacheWrite": 0,
+      "inputTokens": 249448
+    },
+    {
+      "id": "python/proverb",
+      "status": "pass",
+      "durationMs": 110884,
+      "turns": 5,
+      "costUsd": 0,
+      "tokens": 118861,
+      "cacheRead": 91392,
+      "cacheWrite": 0,
+      "inputTokens": 116700
+    }
+  ]
+}

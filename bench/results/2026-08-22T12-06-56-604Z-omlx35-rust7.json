@@ -1,0 +1,91 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "omlx35-rust7",
+  "gitSha": "a16fc7b",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": null,
+  "timeoutMs": 1800000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "rust/bowling",
+    "rust/decimal",
+    "rust/doubly-linked-list",
+    "rust/forth",
+    "rust/react",
+    "rust/scale-generator",
+    "rust/xorcism"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 7,
+      "attempted": 7,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 7,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "rust/bowling",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 13562
+    },
+    {
+      "id": "rust/decimal",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5639
+    },
+    {
+      "id": "rust/doubly-linked-list",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5553
+    },
+    {
+      "id": "rust/forth",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5563
+    },
+    {
+      "id": "rust/react",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5847
+    },
+    {
+      "id": "rust/scale-generator",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5863
+    },
+    {
+      "id": "rust/xorcism",
+      "status": "error",
+      "reason": "agent: Error: Invalid API key",
+      "durationMs": 5570
+    }
+  ]
+}

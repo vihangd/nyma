@@ -1,0 +1,57 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "fp4try",
+  "gitSha": "4e3132a",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 39,
+  "ablation": null,
+  "envVars": null,
+  "role": "openrouter/qwen/qwen3.6-35b-a3b",
+  "model": "openrouter/qwen/qwen3.6-35b-a3b",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "openrouter": {
+      "model-routing": {
+        "qwen/qwen3.6-35b-a3b": {
+          "only": [
+            "darkbloom/fp4"
+          ]
+        }
+      }
+    }
+  },
+  "timeoutMs": 240000,
+  "concurrency": 1,
+  "seed": 7,
+  "taskIds": [
+    "python/proverb"
+  ],
+  "comparability": "python-only subset of Aider Polyglot; NOT comparable to published full-set (225 task, 6 language) scores",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 0,
+      "failed": 0,
+      "timeout": 0,
+      "error": 1,
+      "skipped": 0,
+      "pct": 0
+    }
+  ],
+  "summary": {
+    "mean": 0,
+    "spread": null,
+    "trials": 1
+  },
+  "results": [
+    {
+      "id": "python/proverb",
+      "status": "error",
+      "reason": "agent: Error: Provider returned error",
+      "durationMs": 6073
+    }
+  ]
+}
