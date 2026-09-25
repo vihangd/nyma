@@ -10,12 +10,22 @@
    from single-digit to 84% on structured tool-calling benchmarks.
 
    Nyma-native implementation of Forge's proxy behaviour:
-     1. before_provider_request — inject `respond` into the tools map
+     1. activation — REGISTER `respond` like any other tool
      2. middleware :leave — when `respond` fires, save message, set flag
      3. before_provider_request (next turn) — if flag set, block with the
         saved message as the assistant response (loop.cljs stores it as an
         assistant message and calls agent_end — clean termination, no extra
         model round-trip)
+
+   Step 1 used to `aset` the tool into `st-config.tools` from
+   before_provider_request. Tools are wrapped ONCE at the top of each loop
+   iteration, before that hook runs, so the injected object never passed
+   through wrap-tools-with-middleware: step 2's :leave never fired, `pending`
+   was never set, and step 3 was unreachable. It also skipped normalize-tool!,
+   leaving `:parameters` unconverted, and stayed out of `getAllTools` — which
+   the quality-monitor's hallucination check consults, so had it ever been
+   wrapped it would have been flagged as a hallucinated tool and its result
+   overwritten. Registering it is what makes all of that correct at once.
 
    The `respond` tool is stripped from the message before_store so the
    tool call doesn't appear as a visible tool invocation in the conversation.
@@ -25,7 +35,11 @@
 
 ;; ── Tool definition ──────────────────────────────────────────────
 
-(def ^:private respond-tool-name "small_model__respond")
+;; Registered under the bare name; extension_scope prefixes it with the
+;; namespace, the same convention the evidence tools follow (small-model__*).
+;; The old hand-written constant used an underscore and matched nothing.
+(def respond-tool-bare-name "respond")
+(def respond-tool-name "small-model__respond")
 
 (def ^:private respond-tool-def
   #js {:description
@@ -53,20 +67,14 @@
   [api _config]
   (let [pending    (atom nil)  ; saved respond message waiting to be promoted
 
-        ;; ── before_provider_request: inject + check pending ──────
+        ;; ── before_provider_request: promote a captured respond ──
         on-before-request
-        (fn [data _ctx]
+        (fn [_data _ctx]
           ;; If a respond call was captured last turn, block the next LLM
           ;; call and emit the message as the final assistant response.
-          (if-let [msg @pending]
-            (do (reset! pending nil)
-                #js {:block true :reason msg})
-            ;; Otherwise inject the respond tool into the tools map.
-            ;; st-config.tools is a plain JS object {name → tool-def}.
-            (do (let [tools (.-tools data)]
-                  (when tools
-                    (aset tools respond-tool-name respond-tool-def)))
-                nil)))
+          (when-let [msg @pending]
+            (reset! pending nil)
+            #js {:block true :reason msg}))
 
         ;; ── middleware :leave: detect respond call ────────────────
         respond-interceptor
@@ -99,12 +107,22 @@
                 (when (pos? (.-length filtered))
                   #js {:content filtered})))))]
 
+    ;; Registered, so the loop wraps it with the middleware pipeline and
+    ;; normalize-tool! migrates :parameters to a callable :inputSchema.
+    (.registerTool api respond-tool-bare-name respond-tool-def)
+
     (.on api "before_provider_request" on-before-request)
 
     (.addMiddleware api respond-interceptor)
 
     (.on api "message_before_store" on-before-store)
 
-    ;; Cleanup
+    ;; Cleanup. Previously removed the middleware only, leaving both event
+    ;; handlers subscribed and the tool registered after unload.
     (fn []
-      (.removeMiddleware api "small-model/respond-tool"))))
+      (.removeMiddleware api "small-model/respond-tool")
+      (when (.-unregisterTool api)
+        (try (.unregisterTool api respond-tool-bare-name) (catch :default _e nil)))
+      (when (.-off api)
+        (.off api "before_provider_request" on-before-request)
+        (.off api "message_before_store" on-before-store)))))

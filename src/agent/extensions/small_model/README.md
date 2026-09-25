@@ -246,13 +246,15 @@ no new leader plumbing. Requires the `advisor` extension.
 
 Synthetic `respond` tool from [Forge](https://github.com/antoinezambelli/forge) — the technique that moved an 8B model from single-digit to **84%** on structured tool-calling benchmarks.
 
-Small models (~8B) cannot reliably choose between returning bare text and calling a tool. Without guidance they frequently produce bare text when the agent loop expects a tool call, or call tools when they should be responding. Injecting `respond(message)` forces every output through a structured path: the model MUST either call a real tool or call `respond()` to reply.
+Small models (~8B) cannot reliably choose between returning bare text and calling a tool. Without guidance they frequently produce bare text when the agent loop expects a tool call, or call tools when they should be responding. Registering `small-model__respond` forces every output through a structured path: the model MUST either call a real tool or call it to reply.
 
 **Nyma-native implementation** (cleaner than Forge's proxy approach):
 
-1. `before_provider_request` — inject `respond` into the tools map
-2. Middleware `:leave` — when `respond` fires, save the message arg and set a flag
-3. Next `before_provider_request` — return `{:block true, :reason message}`, which the loop (loop.cljs–213) stores as a clean assistant message and emits `agent_end`
+1. Activation — register `respond` like any other tool, so the loop wraps it
+2. Middleware `:leave` — when it fires, save the message arg and set a flag
+3. Next `before_provider_request` — return `{:block true, :reason message}`, which the loop stores as a clean assistant message and emits `agent_end`
+
+Step 1 used to `aset` the tool into `st-config.tools` from `before_provider_request`. Tools are wrapped once at the top of each loop iteration, *before* that hook runs, so the injected object never reached `wrap-tools-with-middleware`: step 2 never fired and step 3 was unreachable. It also skipped `normalize-tool!` (leaving `:parameters` unconverted) and stayed out of `getAllTools`, which is what the quality-monitor's hallucination check consults — so had it ever been wrapped, its result would have been overwritten as a hallucinated tool. Registering it makes all of that correct at once.
 
 The `respond` tool call is stripped from message storage via `message_before_store`, so from the user's perspective the exchange looks like a normal text response.
 

@@ -43,11 +43,16 @@
 (defn- nudge-msg [n]
   (if (<= n 1)
     (str "Your last response stopped with the task apparently unfinished. "
-         "Continue working — call the next tool, or call respond() if you are "
+         "Continue working — call the next tool, or call small-model__respond if you are "
          "truly done.")
     (str "The task still looks incomplete. Do NOT stop with a status update. "
-         "Either take the next concrete action with a tool, or call respond() "
+         "Either take the next concrete action with a tool, or call small-model__respond "
          "to deliver the finished result.")))
+
+(defn nudge-messages
+  "Both nudge tiers, for the lint that checks they name a real tool."
+  []
+  [(nudge-msg 1) (nudge-msg 2)])
 
 ;; ── Activation ───────────────────────────────────────────────────
 

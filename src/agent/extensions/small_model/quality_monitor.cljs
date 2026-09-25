@@ -30,7 +30,7 @@
     (case (tier n)
       1 (str "Tool \"" tool-name "\" does not exist. "
              "Available tools: " tools-list ". "
-             "Pick one of those or call respond() to reply directly.")
+             "Pick one of those or call small-model__respond to reply directly.")
       2 (str "\"" tool-name "\" is not a valid tool. "
              "You must call one of: " tools-list ". Pick one.")
       (str "STOP. \"" tool-name "\" does not exist. "
@@ -46,17 +46,27 @@
            "Do not repeat it. Choose a different action or finish.")
     (str "STOP repeating \"" tool-name "\". "
          "You MUST do something different. "
-         "Change the tool, change the arguments, or call respond() to finish.")))
+         "Change the tool, change the arguments, or call small-model__respond to finish.")))
 
 (defn- empty-turn-msg [n]
   (case (tier n)
     1 (str "Your response was empty or only whitespace. "
-           "Please continue with the task or call respond() to report your findings.")
-    2 (str "Empty response again. You must either call a tool or call respond() "
+           "Please continue with the task or call small-model__respond to report your findings.")
+    2 (str "Empty response again. You must either call a tool or call small-model__respond "
            "to reply to the user. Do not produce blank output.")
     (str "STOP producing empty responses. "
-         "You MUST call a tool or call respond() now. "
+         "You MUST call a tool or call small-model__respond now. "
          "An empty response is not acceptable.")))
+
+(defn nudge-messages
+  "Every nudge string this module can send, for the lint that checks they name a
+   tool that exists. They used to say `respond()` while the tool was registered
+   under another name entirely, so the instruction was unfollowable."
+  []
+  (concat (for [n [1 2 3]] (hallucinated-tool-msg "bogus" ["bash" "read"] n))
+          (for [n [1 2 3]] (repeat-tool-msg "bash" n))
+          (for [n [1 2 3]] (empty-turn-msg n))
+          [(turn-budget-msg 35)]))
 
 (defn- turn-budget-msg [max-turns]
   (str "You've reached the turn limit (" max-turns " turns). "
