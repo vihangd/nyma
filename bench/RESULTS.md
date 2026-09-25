@@ -137,3 +137,6 @@ The columns are here so that is checkable rather than assumed.
 | 2026-09-24T14-31-04-574Z-probe-A-full | probe-A-full | `87b984e` | vllm/unsloth/Qwen3.8-27B-NVFP4 | 1 javascript | 0% | 1 | - | - | - | - | 3 | 0 | 0 | 26m | 0/1 | yes |
 | 2026-09-24T14-48-11-352Z-probe-B-noreadguard | probe-B-noreadguard | `87b984e` | vllm/unsloth/Qwen3.8-27B-NVFP4 | 1 javascript | 0% | 1 | - | - | - | - | - | 0 | 0 | 17m | 0/1 | yes |
 | 2026-09-24T15-04-29-135Z-probe-C-notokensuite | probe-C-notokensuite | `87b984e` | vllm/unsloth/Qwen3.8-27B-NVFP4 | 1 javascript | 0% | 1 | - | - | - | - | - | 0 | 0 | 16m | 0/1 | yes |
+| 2026-09-25T01-13-45-369Z-mac-smoke | mac-smoke | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 1 javascript | 100% | 0 | 87,288 | 52.8 | - | 9 | 10 | 0 | 3 | 4m | 1/1 | yes |
+| 2026-09-25T02-09-09-826Z-mac-smallmodel-js25-fixed | mac-smallmodel-js25-fixed | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 96% | 1 | 65,589 | 57.8 | - | 188 | 213 | 0 | 42 | 55m | 24/25 | yes |
+| 2026-09-25T02-55-01-689Z-mac-defer-js25-fixed | mac-defer-js25-fixed | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 100% | 0 | 95,425 | 73.5 | - | 182 | 190 | 23 | 19 | 46m | 25/25 |  |

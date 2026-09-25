@@ -1,0 +1,190 @@
+{
+  "harness": 2,
+  "graderNotes": "js suites activated; no-tool-call => error; suspectClock on over-cap timeouts",
+  "label": "mac-smoke",
+  "gitSha": "2fe292b",
+  "agent": "bun /Users/vihangd/projects/pers/nyma/dist/agent/cli.mjs",
+  "extensionCount": 40,
+  "ablation": null,
+  "envVars": {
+    "OMLX_API_KEY": "abcd"
+  },
+  "role": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "model": "omlx/Qwen3.6-35B-A3B-OptiQ-4bit",
+  "modelSource": "explicit",
+  "maxSteps": "agent default (100); bounded by timeoutMs",
+  "agentSettings": {
+    "small-model": {
+      "enabled": true,
+      "respond-tool": {
+        "enabled": true
+      },
+      "thinking-budget": {
+        "enabled": true,
+        "max-tokens": 8000,
+        "retry-without-thinking": true
+      },
+      "quality-monitor": {
+        "enabled": true,
+        "max-turns": 35
+      },
+      "profiles": {
+        "enabled": true,
+        "model-profiles": {
+          "omlx/Qwen3.6-35B-A3B-OptiQ-4bit": {
+            "thinking": "low",
+            "temperature": 0.15,
+            "allowed-tools": [
+              "read",
+              "write",
+              "edit",
+              "bash",
+              "glob",
+              "grep",
+              "advisor"
+            ],
+            "edit-strategy": "patch"
+          }
+        }
+      },
+      "evidence": {
+        "enabled": true,
+        "max-snippets": 20,
+        "max-snippet-chars": 1024
+      },
+      "read-guard": {
+        "enabled": true,
+        "max-lines": 500
+      },
+      "supervisor": {
+        "enabled": true,
+        "every-n-turns": 8,
+        "max-interventions": 3,
+        "pre-commit": true
+      },
+      "self-tune": {
+        "enabled": true,
+        "max-lessons": 20,
+        "min-failures": 2,
+        "max-reflections": 3,
+        "reflect-on": [
+          "quality-signal",
+          "verify-fail"
+        ]
+      },
+      "knowledge-inject": {
+        "enabled": true,
+        "dir": "knowledge",
+        "top-k": 1,
+        "threshold": 2,
+        "token-budget": 800
+      },
+      "finalize-warn": {
+        "enabled": true,
+        "max-nudges": 2
+      }
+    }
+  },
+  "timeoutMs": 600000,
+  "concurrency": 1,
+  "serverPrefixCache": {
+    "before": null,
+    "after": null,
+    "sharePct": null,
+    "note": "server-wide vLLM prefix-cache counters; null if unavailable, reset, or idle"
+  },
+  "temperature": 0.2,
+  "seed": 7,
+  "taskIds": [
+    "javascript/transpose"
+  ],
+  "comparability": "python + javascript + rust subset of Aider Polyglot (113 of 225 tasks, 3 of 6 languages); NOT comparable to published full-set scores. Single trial unless trials > 1.",
+  "trials": [
+    {
+      "total": 1,
+      "attempted": 1,
+      "passed": 1,
+      "failed": 0,
+      "timeout": 0,
+      "error": 0,
+      "skipped": 0,
+      "pct": 100,
+      "metrics": {
+        "schemaValidity": 100,
+        "executableAccuracy": 100,
+        "wrongValid": 0,
+        "noToolCall": 0
+      },
+      "cost": {
+        "totalTokens": 87288,
+        "tokensPerTask": 87288,
+        "totalCostUsd": 0,
+        "costPerTask": 0,
+        "cacheReadTokens": 40960,
+        "cacheReadShare": 52.8,
+        "tasksWithUsage": 1,
+        "tasksWithoutUsage": 0
+      }
+    }
+  ],
+  "summary": {
+    "mean": 100,
+    "spread": null,
+    "trials": 1
+  },
+  "reliability": {
+    "trials": 1,
+    "tasks": 1,
+    "perTask": {
+      "javascript/transpose": {
+        "passes": 1,
+        "trials": 1,
+        "verdict": "reliable"
+      }
+    },
+    "passHatK": 100,
+    "passAtK": 100,
+    "flakyCount": 0,
+    "flaky": []
+  },
+  "trialResults": [
+    [
+      {
+        "id": "javascript/transpose",
+        "status": "pass",
+        "durationMs": 264117,
+        "toolCalls": 10,
+        "toolsUsed": {
+          "read": 5,
+          "write": 3,
+          "bash": 2
+        },
+        "turns": 9,
+        "costUsd": 0,
+        "tokens": 87288,
+        "cacheRead": 40960,
+        "cacheWrite": 0,
+        "inputTokens": 77628
+      }
+    ]
+  ],
+  "results": [
+    {
+      "id": "javascript/transpose",
+      "status": "pass",
+      "durationMs": 264117,
+      "toolCalls": 10,
+      "toolsUsed": {
+        "read": 5,
+        "write": 3,
+        "bash": 2
+      },
+      "turns": 9,
+      "costUsd": 0,
+      "tokens": 87288,
+      "cacheRead": 40960,
+      "cacheWrite": 0,
+      "inputTokens": 77628
+    }
+  ]
+}
