@@ -80,9 +80,17 @@
 ;;; ─── through the real overrides ─────────────────────────────
 
 (defn- fake-api
-  "Minimal tool registry with the __original chaining overrideTool relies on."
-  [reg]
-  #js {:overrideTool
+  "Minimal tool registry with the __original chaining overrideTool relies on,
+   plus the event bus the read recorder now rides.
+
+   The recorder moved off the `read` wrapper onto `tool_complete`, because a
+   wrapper only sees a call while nothing else owns the tool — and mcp_client
+   overrides `read` onto lean-ctx, then routes there whenever the server is
+   healthy. So `hooks` here is not scaffolding: it is the path production uses."
+  [reg hooks]
+  #js {:on  (fn [ev f] (swap! hooks assoc ev f) nil)
+       :off (fn [ev _] (swap! hooks dissoc ev) nil)
+       :overrideTool
        (fn [name def]
          (when-let [prev (get @reg name)] (set! (.-__original def) prev))
          (swap! reg assoc name def) nil)
@@ -102,21 +110,34 @@
                            (swap! calls conj n)
                            (js/Promise.resolve (str n " ran on " (.-path args))))})))
 
-(defn- run! [reg name args]
-  ((.-execute (get @reg name)) args))
+(defn ^:async run!
+  "Call a tool, then emit `tool_complete` the way middleware.cljs:237-245 does
+   after every call — success or failure."
+  [reg hooks name args]
+  (let [emit (fn [result is-error]
+               (when-let [f (get @hooks "tool_complete")]
+                 (f #js {:toolName name :args args :result result
+                         :cancelled false :isError (boolean is-error)} nil)))]
+    (try
+      (let [out (js-await ((.-execute (get @reg name)) args))]
+        (emit out false)
+        out)
+      (catch :default e
+        (emit nil true)
+        (throw e)))))
 
 (defn ^:async t-edit-is-refused-then-allowed []
-  (let [reg   (atom {}) calls (atom [])
+  (let [reg   (atom {}) calls (atom []) hooks (atom {})
         _     (seed-tools! reg calls)
-        stop  (read-guard/activate (fake-api reg) {:read-guard {}})
+        stop  (read-guard/activate (fake-api reg hooks) {:read-guard {}})
         p     "src/agent/tools.cljs"]
     ;; Unread: refused, and the underlying edit never ran.
-    (let [out (js-await (run! reg "edit" #js {:path p}))]
+    (let [out (js-await (run! reg hooks "edit" #js {:path p}))]
       (-> (expect (str out)) (.toContain "has not been read"))
       (-> (expect (vec @calls)) (.toEqual #js [])))
     ;; After a read of the same file, the edit goes through.
-    (js-await (run! reg "read" #js {:path p}))
-    (let [out (js-await (run! reg "edit" #js {:path p}))]
+    (js-await (run! reg hooks "read" #js {:path p}))
+    (let [out (js-await (run! reg hooks "edit" #js {:path p}))]
       (-> (expect (str out)) (.toContain "edit ran on"))
       (-> (expect (vec @calls)) (.toEqual #js ["read" "edit"])))
     (stop)))
@@ -124,24 +145,24 @@
 (defn ^:async t-a-failed-read-does-not-unlock-an-edit []
   ;; The unlock happens after the read resolves, so a read that throws must
   ;; leave the file locked — otherwise "read it first" is satisfied by trying.
-  (let [reg (atom {}) calls (atom [])
+  (let [reg (atom {}) calls (atom []) hooks (atom {})
         _   (seed-tools! reg calls)
         _   (swap! reg assoc "read"
                    #js {:description "read" :inputSchema #js {:type "object"}
                         :execute (fn [_] (js/Promise.reject (js/Error. "ENOENT")))})
-        stop (read-guard/activate (fake-api reg) {:read-guard {}})
+        stop (read-guard/activate (fake-api reg hooks) {:read-guard {}})
         p    "src/agent/tools.cljs"]
-    (js-await (.catch (run! reg "read" #js {:path p}) (fn [_] nil)))
-    (let [out (js-await (run! reg "edit" #js {:path p}))]
+    (js-await (.catch (run! reg hooks "read" #js {:path p}) (fn [_] nil)))
+    (let [out (js-await (run! reg hooks "edit" #js {:path p}))]
       (-> (expect (str out)) (.toContain "has not been read")))
     (stop)))
 
 (defn ^:async t-can-be-switched-off []
-  (let [reg (atom {}) calls (atom [])
+  (let [reg (atom {}) calls (atom []) hooks (atom {})
         _   (seed-tools! reg calls)
-        stop (read-guard/activate (fake-api reg)
+        stop (read-guard/activate (fake-api reg hooks)
                                   {:read-guard {:require-read-before-edit false}})]
-    (let [out (js-await (run! reg "edit" #js {:path "src/agent/tools.cljs"}))]
+    (let [out (js-await (run! reg hooks "edit" #js {:path "src/agent/tools.cljs"}))]
       (-> (expect (str out)) (.toContain "edit ran on")))
     (stop)))
 

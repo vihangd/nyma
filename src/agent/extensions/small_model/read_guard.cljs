@@ -27,9 +27,18 @@
 ;; ── Helpers ──────────────────────────────────────────────────────
 
 ;; Paths this session has read, absolute so "./x" and "x" are the same file.
+;;
+;; realpath as well as resolve, because `path/resolve` does not follow symlinks
+;; and one file can therefore produce two keys. On macOS `os.tmpdir()` is
+;; /var/folders/… whose realpath is /private/var/folders/…, and a child process
+;; reports the resolved form as its cwd — so a relative read and an absolute
+;; write of the same file landed in different buckets and the write was refused.
+;; A path that does not exist yet has no realpath; the resolved form is correct
+;; for it, and `write-refusal` only consults the set for files that DO exist.
 (defn normalize-path [p]
   (when (and p (string? p) (seq p))
-    (path/resolve (str p))))
+    (let [abs (path/resolve (str p))]
+      (try (fs/realpathSync abs) (catch :default _e abs)))))
 
 (defn edit-refusal
   "The message an unread edit gets back, or nil when the edit may proceed.
@@ -152,10 +161,46 @@
                                           (or (refuse args)
                                               (js-await ((.-execute orig2) args))))})))))
 
-            ;; Cleanup
-            (fn []
-              (when (.-unoverrideTool api)
-                (.unoverrideTool api "read")
-                (when guard-edit?
-                  (doseq [t ["edit" "write"]]
-                    (try (.unoverrideTool api t) (catch :default _ nil))))))))))))
+            ;; ── the recorder ────────────────────────────────────
+            ;; Rides `tool_complete`, not the `read` wrapper above. The wrapper
+            ;; only sees a call while nothing else owns `read` — and mcp_client
+            ;; overrides `read` onto lean-ctx's ctx_read, then routes there
+            ;; whenever the server is healthy, so the wrapper beneath it is
+            ;; never invoked. `read-paths` stayed empty for whole sessions and
+            ;; every write onto an existing file was refused.
+            ;;
+            ;; tool_complete fires once per call after the top-most wrapper,
+            ;; whoever owns the tool (middleware.cljs:237-245).
+            (let [on-complete
+                  (fn [data _ctx]
+                    (let [tool   (str (or (.-toolName data) ""))
+                          result (str (or (.-result data) ""))]
+                      (when (and (= tool "read")
+                                 (not (.-cancelled data))
+                                 (not (.-isError data))
+                                 ;; mcp_client swallows a failure into an
+                                 ;; "[ERROR] …" string and still reports
+                                 ;; isError false, so trusting the flag alone
+                                 ;; would unlock a write on a read that never
+                                 ;; returned the file.
+                                 (not (.startsWith result "[ERROR]"))
+                                 (seq result))
+                        (when-let [abs (normalize-path (some-> (.-args data) (aget "path")))]
+                          (swap! read-paths conj abs))))
+                    nil)]
+              ;; The recorder is load-bearing: without it `read-paths` never
+              ;; fills and the write guard refuses everything. Say so rather
+              ;; than silently guarding a file nobody can write.
+              (if (.-on api)
+                (.on api "tool_complete" on-complete)
+                (d/warn "[small-model/read-guard] no event bus — read tracking is off, "
+                        "so read-before-write cannot be enforced"))
+
+              ;; Cleanup
+              (fn []
+                (when (.-off api) (.off api "tool_complete" on-complete))
+                (when (.-unoverrideTool api)
+                  (.unoverrideTool api "read")
+                  (when guard-edit?
+                    (doseq [t ["edit" "write"]]
+                      (try (.unoverrideTool api t) (catch :default _ nil)))))))))))))
