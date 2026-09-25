@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.11.0 — 2026-09-25
+
+A silent data-loss bug in the write path, the override chaining defect underneath it, and
+the first measurements that show what any of it costs. Measured on 25 JavaScript tasks
+against a local Qwen3.6-35B, on the tasks that passed in every arm: per-request cost fell
+from 23,249 to about 7,300 tokens, and the small-model profile from 111,271 to 43,289
+tokens per task with 63% fewer shell calls. It now costs less to run than the plain agent
+did.
+
+### Fixed
+- `write` could report `Wrote N bytes` while writing nothing. token-suite's result
+  compression rebuilt every edit/write result from the tool's ARGUMENTS without checking
+  what the tool returned, so read-guard's refusal — deliberately a string, not a throw —
+  was replaced by a byte count. The model believed it, tests kept failing against an
+  untouched file, and one benchmark task spent 600 seconds re-writing, re-reading and then
+  debugging the write tool before working around it through bash. Only a success the native
+  tool reports is compressed now; anything else passes through.
+- `overrideTool` silently dropped an earlier extension's wrapper. The registry kept one
+  write-once slot per tool name, so a second overrider chained past the first to the true
+  native and unregistering restored the native rather than the layer beneath. With
+  mcp-client overriding `read` and `edit` after small-model had wrapped them, read-guard's
+  path recorder never ran, its edit guard was discarded entirely, and its write guard
+  consulted a permanently empty set — refusing every write onto an existing file, all
+  session. The registry keeps a stack now and each override unwinds exactly its own layer.
+- Tool names are matched the way they are spelled. `registerTool` namespaces an extension's
+  tool as `<ns>__<name>`, so matching a bare name against the live set found only native
+  tools: an `editStrategy` could not reach the `multi_edit` it routes onto, and
+  `gateway-tool-names` — which exists so an allowlist written before MCP deferral cannot
+  strand the deferred route — was protecting only `retrieve_result`.
+- read-guard records a read it did not serve, via `tool_complete` rather than its own
+  wrapper, so an MCP-overridden `read` still unlocks the subsequent write. An `[ERROR] …`
+  string from a failed MCP read no longer counts as a read. Paths are compared by realpath,
+  so one file cannot occupy two keys through a symlinked temp dir.
+- A supervisor with nothing to say says nothing. The advisor tool always returns a string so
+  the executor model can react to a refusal, which meant it reported its own failures as a
+  successful call — and `Advisor: call failed — the model service is temporarily
+  unavailable` was injected into a small model's context as guidance, three times in one
+  task. Failed interventions are still charged against the budget so an unreachable advisor
+  cannot retry all run.
+- quality-monitor's two follow-up nudges are bounded. The turn-budget warning was delivered
+  as a followUp, which is itself a new turn, against an unlatched `>=` — so crossing the
+  budget kept re-warning until the outer cap. The empty-turn nudge had no bound at all and
+  the counter that looked like one was being cleared by a handler that runs before the one
+  reading it.
+- small-model's `respond` tool is registered rather than injected into the per-request tool
+  map after wrapping, so its interceptor fires and the turn-termination path it documents
+  exists for the first time.
+
+### Added
+- Tool schemas are withheld when nothing could serve them: the nine LSP tools unless a
+  configured server's binary is on PATH *and* handles a file type the workspace contains,
+  and `questionnaire` on a host with no interactive prompt. Worth about 2,300 tokens per
+  request in a headless run. Settings: `lsp.gate-tools`.
+- An extension's own model call is counted and priced by its own model. advisor, and through
+  it small-model's supervisor and self-tune, called `generateText` directly and read only
+  the text, so a benchmark arm making six paid consults reported the same cost as one making
+  none. Pricing uses the caller's model key, not the agent's, which would have billed a
+  frontier advisor at a local worker's rate.
+- `bench/RESULTS.md`, generated, one row per run with sha, model and task set. Figures are
+  recomputed from raw results rather than read from stored fields, because a timed-out task
+  reports no usage and dividing by every attempted task understates cost by exactly the
+  expensive tail.
+- The benchmark samples a vLLM server's prefix-cache counters when the route reports no
+  per-request cache tokens, so a token cut cannot be confused with a cache collapse.
+
+### Notes
+- Single-trial pass rates on the 25-task subset are not comparable. Across eleven arms, 14
+  of 25 tasks never failed and no task failed in every arm — every failure came from the
+  same 11 tasks. Use `--trials 3` and read `pass^3`/`pass@3` before drawing a conclusion
+  from a pass rate.
+
 ## 0.10.0 — 2026-09-23
 
 Research into the apprentice harness, billing groups on New-API relays, and a two-phase
