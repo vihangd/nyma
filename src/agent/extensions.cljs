@@ -461,6 +461,39 @@
                                 (when (and provider ((:get registry) provider))
                                   ((:resolve registry) provider mid))))
 
+       ;; ── Usage from an extension's own model call ────────
+       ;; `resolveModel` above is deliberately side-effect-free, which left
+       ;; every extension that calls a model of its own — advisor (and through
+       ;; it small-model's supervisor and self-tune), handoff, spec_driven,
+       ;; smart_compaction — invisible to every total. A benchmark arm making
+       ;; six Opus-5 consults reported the same cost and token count as one
+       ;; making none.
+       ;;
+       ;; `model-spec` is the caller's own "provider/model", NOT the agent's:
+       ;; the loop prices with the agent's key, so routing this through that
+       ;; path would bill a paid consult at a free local worker's rate.
+       ;; `usage` is the AI SDK's usage object from generateText/streamText.
+         :recordModelUsage  (fn [model-spec usage]
+                              (let [store (:store agent)
+                                    u     (or usage #js {})
+                                    input  (or (.-inputTokens u) 0)
+                                    output (or (.-outputTokens u) 0)
+                                    cr     (or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
+                                    cw     (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)]
+                                (when (and store (pos? (+ input output)))
+                                  ((:dispatch! store) :extension-usage
+                                   {:input-tokens       input
+                                    :output-tokens      output
+                                    :cache-read-tokens  cr
+                                    :cache-write-tokens cw
+                                    :cost (pricing/calculate-turn-cost
+                                           (str model-spec)
+                                           {:input-tokens       input
+                                            :output-tokens      output
+                                            :cache-read-tokens  cr
+                                            :cache-write-tokens cw})}))
+                                nil))
+
        ;; ── Thinking level ──────────────────────────────────
          :getThinkingLevel  (fn [] @(:thinking-level agent))
          :setThinkingLevel  (fn [level]

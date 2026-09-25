@@ -127,6 +127,23 @@
                            ;; dispatched once per run from result.totalUsage.
                            ;; :total-steps is the per-step figure.
                            (update :turn-count (fnil inc 0))))
+   ;; Spend by an extension that called a model of its own — advisor (and
+   ;; through it small-model's supervisor and self-tune), handoff, spec_driven,
+   ;; smart_compaction. They call `generateText` directly and used to read only
+   ;; `.text`, so none of it reached any total: a benchmark arm making six
+   ;; Opus-5 consults reported the same cost and tokens as one making none.
+   ;;
+   ;; Separate from :usage-updated because it must NOT touch :total-steps or
+   ;; :turn-count. Those are the agent's own work, and `-p --output-format json`
+   ;; reports them as num_turns/num_runs — a consult is spend, not a turn the
+   ;; model took, and folding it in would miscalibrate every turn budget.
+   :extension-usage  (fn [state data]
+                       (-> state
+                           (update :total-input-tokens (fnil + 0) (or (:input-tokens data) 0))
+                           (update :total-output-tokens (fnil + 0) (or (:output-tokens data) 0))
+                           (update :total-cache-read-tokens (fnil + 0) (or (:cache-read-tokens data) 0))
+                           (update :total-cache-write-tokens (fnil + 0) (or (:cache-write-tokens data) 0))
+                           (update :total-cost (fnil + 0.0) (or (:cost data) 0))))
    :tool-execution-started (fn [state data]
                              (update state :active-executions (fnil conj #{}) (:exec-id data)))
    :tool-execution-ended   (fn [state data]

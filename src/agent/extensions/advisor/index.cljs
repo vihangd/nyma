@@ -118,6 +118,20 @@ plain text; the executor will read it on its next turn.")
                    nil))))
        vec))
 
+(defn- record-usage!
+  "Report an advisor call's usage against ITS model key, not the agent's.
+
+   `chosen` is the {:provider :model} from settings.roles.advisor when one
+   resolved; without it the call fell back to the session's own model, which the
+   loop already prices, so there is no key to attribute and we stay silent
+   rather than guess."
+  [api chosen _model usage]
+  (when (and chosen (aget api "recordModelUsage"))
+    (try
+      ((aget api "recordModelUsage")
+       (str (:provider chosen) "/" (:model chosen)) usage)
+      (catch :default _e nil))))
+
 (defn ^:async consult-advisor
   "Core consultation fn. Reads the agent's transcript, resolves the
    advisor model, sends to generateText, returns the advice text.
@@ -195,6 +209,11 @@ plain text; the executor will read it on its next turn.")
                                                :maxOutputTokens max-out}
                                     think-opts (doto (aset "providerOptions" think-opts)))))
                   text   (str (.-text result))]
+              ;; Bill it to the model that actually spent it. Until this line,
+              ;; only `.text` was read, so an advisor consult cost nothing
+              ;; anywhere the session's totals are reported — including
+              ;; `-p --output-format json`, which is what the benchmark parses.
+              (record-usage! api chosen model (.-usage result))
               (if warn (str warn text) text))
             (catch :default e
               (str "Advisor: call failed — "

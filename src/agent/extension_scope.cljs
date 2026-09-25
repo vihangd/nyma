@@ -66,6 +66,9 @@
    :getTokenBudget :context
    :unregisterCompactionStrategy :context
    :resolveModel :model
+   ;; Same capability as resolveModel: an extension that may invoke a model of
+   ;; its own is the one that has to report what it spent.
+   :recordModelUsage :model
    :emitGlobal :events
    :getState :state
    :dispatch :state
