@@ -67,3 +67,40 @@
           (-> (run nil)
               (.then (fn [_]
                        (-> (expect (some #(.includes % "advisor") @lines)) (.toBeTruthy))))))))))
+
+;;; ─── the advisor reports failure as a SUCCESSFUL result ────────
+
+(describe "small-model/supervisor: an advisor error payload is not advice" (fn []
+
+  (it "the exact string a benchmark task was steered with three times"
+      (^:async fn []
+        ;; The advisor tool always returns a string — deliberately, so the
+        ;; executor model can react to a refusal — so it reports its own
+        ;; failures as a successful call. Guarding only against a throw missed
+        ;; every one of them, and the earlier test here mocked a throw, which is
+        ;; why this shipped.
+        (let [boom #js {:execute
+                        (fn [_] (str "Advisor: call failed — Failed after 3 attempts. "
+                                     "Last error: AI_APICallError: The model service is "
+                                     "temporarily unavailable. Please try again later."))}]
+          (-> (run boom)
+              (.then (fn [r] (-> (expect (count (:steers r))) (.toBe 0))))))))
+
+  (it "a refusal about transcript size is not advice either"
+      (^:async fn []
+        (-> (run #js {:execute (fn [_] "Advisor: refused — transcript is 240000 tokens, over the cap")})
+            (.then (fn [r] (-> (expect (count (:steers r))) (.toBe 0)))))))
+
+  (it "no model resolved is not advice"
+      (^:async fn []
+        (-> (run #js {:execute (fn [_] "Advisor: no model resolved. Set settings.roles.advisor to a {provider, model} pair.")})
+            (.then (fn [r] (-> (expect (count (:steers r))) (.toBe 0)))))))
+
+  (it "advice that merely MENTIONS the advisor still reaches the worker"
+      (^:async fn []
+        ;; the check is a prefix, not a substring — otherwise real advice
+        ;; discussing the advisor tool would be silently dropped
+        (-> (run #js {:execute (fn [_] "Call the Advisor: no. Fix the loop bound on line 12.")})
+            (.then (fn [r]
+                     (-> (expect (count (:steers r))) (.toBe 1))
+                     (-> (expect (first (:steers r))) (.toContain "line 12")))))))))

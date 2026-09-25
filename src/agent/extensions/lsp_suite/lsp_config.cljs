@@ -1,6 +1,7 @@
 (ns agent.extensions.lsp-suite.lsp-config
   "Load and merge LSP server configuration from .nyma/settings.json."
-  (:require ["node:fs" :as fs]
+  (:require [agent.tool-metadata :as tm]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.extensions.lsp-suite.lsp-servers-catalog :as catalog]))
 
@@ -118,12 +119,7 @@
    nil rather than the unchanged list because nil is how a handler says 'no
    opinion'; an empty vector would hide every tool in the session."
   [candidates bare-names]
-  (let [bare  (set bare-names)
-        lsp?  (fn [c]
-                (let [s (str c)]
-                  (boolean (some (fn [b]
-                                   (or (= s b) (.endsWith s (str "__" b))))
-                                 bare))))
+  (let [lsp?  (fn [c] (boolean (some (fn [b] (tm/matches-tool-name? c b)) bare-names)))
         kept  (vec (remove lsp? candidates))]
     (when (not= (count kept) (count candidates))
       kept)))

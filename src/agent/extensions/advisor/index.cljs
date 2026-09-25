@@ -118,6 +118,24 @@ plain text; the executor will read it on its next turn.")
                    nil))))
        vec))
 
+(def no-advice-prefix
+  "Every failure/refusal this tool reports starts with this.
+
+   The tool's contract is that it ALWAYS returns a string, because the executor
+   model has to be able to react to a refusal. That is right for a model and
+   wrong for a programmatic caller: the supervisor forwards whatever comes back
+   as guidance, so `Advisor: call failed — ... temporarily unavailable` was
+   injected into a small model's context as an instruction. Exported so the
+   check lives next to the strings it has to recognise rather than as a literal
+   in another namespace."
+  "Advisor: ")
+
+(defn no-advice?
+  "True when an advisor result is a report about the advisor rather than advice."
+  [result]
+  (let [s (str (or result ""))]
+    (or (str/blank? s) (.startsWith s no-advice-prefix))))
+
 (defn- record-usage!
   "Report an advisor call's usage against ITS model key, not the agent's.
 

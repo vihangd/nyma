@@ -274,3 +274,29 @@
    union them back in. One expressing a *permission* boundary — plan mode, role
    policy — deliberately should not: there, withholding the route is the point."
   #{"mcp_search" "mcp_call" "retrieve_result"})
+
+(defn matches-tool-name?
+  "Is `offered` — a name from the live active set — the tool called `bare`?
+
+   `registerTool` on the scoped api rewrites an extension's tool to
+   `<ns>__<name>`, while `overrideTool` keeps the real name. So a native tool is
+   `edit` and an extension's is `token-suite__multi_edit`, and anything matching
+   by bare name against the active set misses every extension tool.
+
+   The `__` boundary is required, not merely a suffix: `my_multi_edit` is a
+   different tool from `multi_edit`."
+  [offered bare]
+  (let [o (str offered) b (str bare)]
+    (or (= o b) (.endsWith o (str "__" b)))))
+
+(defn offered-names
+  "The spellings of `bares` that actually appear in `candidates`.
+
+   Use this wherever a set of bare tool names has to be reconciled with the live
+   active set. Filtering `candidates` by bare-name membership instead is how
+   `gateway-tool-names` came to protect only `retrieve_result` — the one entry
+   that happens to be a native — while mcp_search and mcp_call, the two it
+   exists for, were silently dropped by every profile allowlist."
+  [candidates bares]
+  (vec (filter (fn [c] (some (fn [b] (matches-tool-name? c b)) bares))
+               candidates)))

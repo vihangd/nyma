@@ -129,9 +129,19 @@
                     (seq hide)    cands
                     :else         nil)]
     (when base
-      (let [pruned  (remove #(contains? hide (str %)) base)
-            offered (set (map str cands))
-            gateway (filter offered tool-metadata/gateway-tool-names)
+      (let [hidden? (fn [c] (some (fn [h] (tool-metadata/matches-tool-name? c h)) hide))
+            ;; Also matched by namespace, for the same reason as `kept` below:
+            ;; `"whole"` hides `multi_edit`, and the name on the wire is
+            ;; `token-suite__multi_edit`, so a bare membership test let the tool
+            ;; the strategy was trying to remove straight through.
+            pruned  (remove hidden? base)
+            ;; Matched through `offered-names`, not by bare-name membership.
+            ;; Extension tools are namespaced by the scoped api, so the live set
+            ;; holds `mcp-client__mcp_search` and `token-suite__multi_edit` — a
+            ;; bare-name filter found only the natives, which is why `edit` was
+            ;; called 0 times across 25 tasks under a "patch" profile and why
+            ;; the gateway union protected only `retrieve_result`.
+            gateway (tool-metadata/offered-names cands tool-metadata/gateway-tool-names)
             ;; Same reasoning as the gateway union, one step further. The
             ;; strategy's whole job is to route the model ONTO a tool; hiding
             ;; `edit` only helps if what it routes to is actually on the wire.
@@ -142,10 +152,9 @@
             ;; to change a file. Measured as 0 `edit` calls and 2.5x the writes
             ;; across 25 tasks. Still subject to `hide`, so a later strategy
             ;; cannot be overridden by an earlier one's target.
-            kept    (->> tool-metadata/gateway-tool-names
-                         (concat keep)
-                         (filter offered)
-                         (remove #(contains? hide (str %))))]
+            kept    (->> (tool-metadata/offered-names
+                          cands (concat keep tool-metadata/gateway-tool-names))
+                         (remove hidden?))]
         (vec (distinct (concat pruned gateway kept)))))))
 
 (defn edit-tools-to-hide

@@ -24,6 +24,7 @@
      before_tool_call (permission_request) — pre-commit gate
    "
   (:require [agent.extensions.small-model.shared :as shared]
+            [agent.extensions.advisor.index :as advisor]
             [agent.debug :as d]
             [clojure.string :as str]))
 
@@ -83,7 +84,18 @@
       (if (and adv-tool (.-execute adv-tool))
         (let [result (js-await ((.-execute adv-tool)
                                 #js {:focus focus-question}))]
-          (str result))
+          ;; The advisor tool ALWAYS returns a string — deliberately, so the
+          ;; executor model can react to a refusal. It therefore reports its own
+          ;; failures as a successful result whose payload is an error, and
+          ;; guarding only against a throw was not enough: a benchmark task took
+          ;; three injections of "Advisor: call failed — ... temporarily
+          ;; unavailable" as guidance.
+          (if (advisor/no-advice? result)
+            (do (d/warn "small-model"
+                        (str "supervisor: advisor returned no advice, skipping intervention — "
+                             (str result)))
+                nil)
+            (str result)))
         (do (d/warn "small-model" "supervisor: advisor tool unavailable — skipping intervention")
             nil)))
     (catch :default e

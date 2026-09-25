@@ -182,3 +182,50 @@
         (-> (expect (count (profiles/edit-tools-to-keep "exact"))) (.toBe 0))
         (-> (expect (count (profiles/edit-tools-to-keep nil))) (.toBe 0))
         (-> (expect (profiles/resolve-allowed offered-all nil #{} #{})) (.toBeNil))))))
+
+;;; ─── production-shaped names ───────────────────────────────────
+
+(def ^:private offered-real
+  ;; What getActiveTools actually returns: natives bare, extension tools
+  ;; namespaced by the scoped api.
+  ["read" "write" "edit" "bash" "glob" "grep"
+   "token-suite__multi_edit" "mcp-client__mcp_search" "mcp-client__mcp_call"
+   "retrieve_result" "lsp-suite__hover"])
+
+(describe "profiles/resolve-allowed — against the names production really offers" (fn []
+
+  (it "\"patch\" surfaces multi_edit under its NAMESPACED name"
+      (fn []
+        ;; The tests above use bare names and pass either way, which is why the
+        ;; bug shipped: `edit` was called 0 times across 25 benchmark tasks
+        ;; because the keep-set said `multi_edit` and the offered name was
+        ;; `token-suite__multi_edit`.
+        (let [out (set (profiles/resolve-allowed
+                        offered-real
+                        ["read" "write" "edit" "bash" "glob" "grep"]
+                        (profiles/edit-tools-to-hide "patch")
+                        (profiles/edit-tools-to-keep "patch")))]
+          (-> (expect (contains? out "token-suite__multi_edit")) (.toBe true))
+          (-> (expect (contains? out "edit")) (.toBe false))
+          (-> (expect (contains? out "write")) (.toBe true)))))
+
+  (it "the gateway tools survive under their namespaced names"
+      (fn []
+        ;; gateway-tool-names is bare; two of its three entries are namespaced in
+        ;; production, so the union that exists to keep the deferred MCP route
+        ;; reachable was protecting only `retrieve_result`.
+        (let [out (set (profiles/resolve-allowed
+                        offered-real ["read" "write"] nil nil))]
+          (-> (expect (contains? out "mcp-client__mcp_search")) (.toBe true))
+          (-> (expect (contains? out "mcp-client__mcp_call")) (.toBe true))
+          (-> (expect (contains? out "retrieve_result")) (.toBe true)))))
+
+  (it "\"whole\" still hides the namespaced fuzzy tool"
+      (fn []
+        (let [out (set (profiles/resolve-allowed
+                        offered-real nil
+                        (profiles/edit-tools-to-hide "whole")
+                        (profiles/edit-tools-to-keep "whole")))]
+          (-> (expect (contains? out "token-suite__multi_edit")) (.toBe false))
+          (-> (expect (contains? out "edit")) (.toBe false))
+          (-> (expect (contains? out "write")) (.toBe true)))))))
