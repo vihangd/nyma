@@ -140,3 +140,4 @@ The columns are here so that is checkable rather than assumed.
 | 2026-09-25T01-13-45-369Z-mac-smoke | mac-smoke | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 1 javascript | 100% | 0 | 87,288 | 52.8 | - | 9 | 10 | 0 | 3 | 4m | 1/1 | yes |
 | 2026-09-25T02-09-09-826Z-mac-smallmodel-js25-fixed | mac-smallmodel-js25-fixed | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 96% | 1 | 65,589 | 57.8 | - | 188 | 213 | 0 | 42 | 55m | 24/25 | yes |
 | 2026-09-25T02-55-01-689Z-mac-defer-js25-fixed | mac-defer-js25-fixed | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 100% | 0 | 95,425 | 73.5 | - | 182 | 190 | 23 | 19 | 46m | 25/25 |  |
+| 2026-09-25T04-02-58-251Z-mac-smallmodel-js25-fixed2 | mac-smallmodel-js25-fixed2 | `ed97ec6` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 92% | 1 | 77,189 | 65 | - | 190 | 194 | 0 | 35 | 56m | 25/25 | yes |
