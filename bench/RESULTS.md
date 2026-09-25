@@ -142,3 +142,4 @@ The columns are here so that is checkable rather than assumed.
 | 2026-09-25T02-55-01-689Z-mac-defer-js25-fixed | mac-defer-js25-fixed | `2fe292b` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 100% | 0 | 95,425 | 73.5 | - | 182 | 190 | 23 | 19 | 46m | 25/25 |  |
 | 2026-09-25T04-02-58-251Z-mac-smallmodel-js25-fixed2 | mac-smallmodel-js25-fixed2 | `ed97ec6` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 92% | 1 | 77,189 | 65 | - | 190 | 194 | 0 | 35 | 56m | 25/25 | yes |
 | 2026-09-25T05-25-03-385Z-mac-smallmodel-js25-noeditstrat | mac-smallmodel-js25-noeditstrat | `5f1f5b5` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 80% | 4 | 59,634 | 57.7 | - | 144 | 181 | 29 | 14 | 79m | 21/25 | yes |
+| 2026-09-25T06-47-58-950Z-mac-smallmodel-js25-whole | mac-smallmodel-js25-whole | `dbc12f8` | omlx/Qwen3.6-35B-A3B-OptiQ-4bit | 25 javascript | 84% | 4 | 51,437 | 55.7 | - | 132 | 179 | 0 | 38 | 79m | 21/25 | yes |
