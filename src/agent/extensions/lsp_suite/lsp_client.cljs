@@ -37,8 +37,12 @@
 (defn- sleep-ms [ms]
   (js/Promise. (fn [resolve _] (js/setTimeout resolve ms))))
 
-(defn- command-on-path?
-  "Returns true if cmd is findable via 'which' (macOS/Linux)."
+(defn command-on-path?
+  "Returns true if cmd is findable via 'which' (macOS/Linux).
+
+   Public because the tool gate needs the same question answered before any
+   server is spawned: nine tool schemas ride on every request, and a binary that
+   is not installed can never serve one."
   [cmd]
   (when (and (string? cmd) (pos? (.-length cmd)))
     (try

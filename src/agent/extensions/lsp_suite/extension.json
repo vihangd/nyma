@@ -8,5 +8,10 @@
   "dependsOn": [],
   "dependencies": {
     "vscode-jsonrpc": "^9.0.0"
+  },
+  "settings": {
+    "lsp": {
+      "gate-tools": true
+    }
   }
 }

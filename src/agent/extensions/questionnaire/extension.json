@@ -3,7 +3,8 @@
   "description": "Structured user input flows for extensions",
   "capabilities": [
     "tools",
-    "ui"
+    "ui",
+    "events"
   ],
   "dependsOn": []
 }

@@ -232,6 +232,34 @@ or be an open-ended text question."
                                                    "answered")))))}
                       :execute (fn [args ctx] (questionnaire-execute api args ctx))})
 
+  ;; ── Withhold the schema on a host that cannot prompt ──────────
+  ;; This tool's schema is ~900 tokens: a four-level nested questions → options
+  ;; → {value,label,description,recommended} object, on every request. On a host
+  ;; with no interactive prompt — `--print`, the benchmark, any headless run —
+  ;; `questionnaire-execute` throws immediately, so all of it is on the wire to
+  ;; produce a throw.
+  ;;
+  ;; Gated on `ui-prompt-ready?`, the same predicate the execute path uses and
+  ;; the one the permission gate, plan mode, escalate and refine all guard with.
+  ;; Deliberately not the cli's `mode`: that classes "rpc" as headless, but an
+  ;; RPC frontend can proxy select/input, and then the tool does work.
+  ;;
+  ;; Re-checked per turn rather than once: `.ui` is populated by the host after
+  ;; extensions load, so asking at activation time would answer for every host.
+  (.on api "tool_access_check"
+       (fn [data _ctx]
+         (when-not (ui/ui-prompt-ready? (.-ui api))
+           (let [cands (vec (or (.-tools data) []))
+                 kept  (vec (remove (fn [c]
+                                      (let [s (str c)]
+                                        (or (= s "questionnaire")
+                                            (.endsWith s "__questionnaire"))))
+                                    cands))]
+             ;; nil when nothing was removed — nil is "no opinion" to the
+             ;; intersection merge, and an empty vector would hide everything.
+             (when (not= (count kept) (count cands))
+               #js {:allowed (clj->js kept)})))))
+
   ;; Return cleanup function
   (fn []
     (.unregisterTool api "questionnaire")))

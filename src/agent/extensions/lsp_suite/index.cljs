@@ -10,7 +10,8 @@
             [agent.extensions.lsp-suite.lsp_manager :as mgr]
             [agent.extensions.lsp-suite.lsp_diagnostics :as diags]
             [agent.extensions.lsp-suite.lsp_tools :as tools]
-            [agent.extensions.lsp-suite.lsp_formatters :as fmt]))
+            [agent.extensions.lsp-suite.lsp_formatters :as fmt]
+            [agent.extensions.lsp-suite.lsp_client :as lsp-client]))
 
 ;; ── Diagnostics prompt-section builder ───────────────────────────
 
@@ -120,6 +121,35 @@
 
       (.registerTool api "organize_imports"
                      (tools/make-organize-imports-tool manager cwd)))
+
+    ;; ── Withhold the tools when nothing could serve them ──────────
+    ;; Nine schemas of near-duplicate path/line/character parameters ride on
+    ;; every request. On a machine with no language server installed, and in any
+    ;; headless run, they are pure weight.
+    ;;
+    ;; The workspace match matters as much as the PATH check. Measured here:
+    ;; rust-analyzer and clangd are installed while the JavaScript server is not,
+    ;; so gating on `anything on PATH` answers yes for a pure-JavaScript project
+    ;; and never fires.
+    ;;
+    ;; Computed ONCE: this shells out to `which` per configured server and walks
+    ;; the tree, so asking per loop iteration would spawn processes every turn.
+    ;; A server installed mid-session is rare enough to be worth a restart.
+    (let [lsp-set   (when (.-settings api) (.settings api :lsp))
+          gate?     (not (false? (:gate-tools lsp-set)))
+          usable?   (and gate?
+                         (config/any-server-available?
+                          cfg lsp-client/command-on-path?
+                          (config/workspace-extensions cwd)))
+          bare      ["hover" "goto_definition" "find_references" "document_symbols"
+                     "workspace_symbols" "get_diagnostics" "rename_symbol"
+                     "code_action" "organize_imports"]]
+      (when (and gate? (not usable?))
+        (.on api "tool_access_check"
+             (fn [data _ctx]
+               (when-let [kept (config/without-lsp-tools
+                                (vec (or (.-tools data) [])) bare)]
+                 #js {:allowed (clj->js kept)})))))
 
     ;; ── Shutdown cleanup ──────────────────────────────────────────
 
