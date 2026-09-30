@@ -13,6 +13,8 @@
             [agent.ui.picker-frame :as picker-frame]
             [agent.ui.chat-pane :refer [create-chat-pane]]
             [agent.ui.status-bar :refer [create-status-bar]]
+            [agent.ui.project-card :as project-card]
+            [agent.version :as version]
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
             [agent.ui.editor-eval :as editor-eval]
@@ -646,7 +648,7 @@
 ;;; Entry point
 ;;; ---------------------------------------------------------------------------
 
-(defn ^:async start [agent session resources]
+(defn ^:async start [agent session resources & [opts]]
   (let [theme     (or (.-theme resources)
                       (theme-catalog/active-theme (.-themes resources) default-dark))
         ;; Every consumer reads through this thunk rather than the map above,
@@ -1171,6 +1173,21 @@
                    (.requestRender tui))
             st   @(:state agent)
             sess @(:session agent)]
+        ;; The project card first: where you are, before what you were doing.
+        ;; `collect` is the only I/O here (three git shell-outs) and runs exactly
+        ;; once, after the first frame — never from a render, where the status
+        ;; line would call it at 10 Hz. Failing soft to no card: a startup line
+        ;; is not worth a crash.
+        (try
+          (when-let [c (project-card/render
+                        (project-card/collect
+                         {:version         version/version
+                          :cwd             (js/process.cwd)
+                          :resources       resources
+                          :extension-count (:extension-count opts)}))]
+            (note c))
+          (catch :default e
+            (d/warn "project-card" (str "skipped: " (or (.-message e) (str e))))))
         (if-let [banner (resumed-banner
                          {:message-count (count @messages)
                           :name          (when sess (try ((:get-session-name sess))

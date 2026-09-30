@@ -989,7 +989,12 @@ Examples:
           "interactive" (js-await
                          (interactive/start
                           agent session
-                          (interactive-resources resources positionals)))
+                          (interactive-resources resources positionals)
+                          ;; The count is only in scope here — create-agent is
+                          ;; never given :extensions, and session_ready has
+                          ;; already fired by now (the bus has no replay), so a
+                          ;; listener inside start would miss it.
+                          {:extension-count (count @extensions-atom)}))
           "print"       (let [p (js-await (resolve-one-shot-prompt positionals))]
                           (when-not p (die-no-prompt! "-p"))
                         ;; `-p --output-format json` → single claude-style result
