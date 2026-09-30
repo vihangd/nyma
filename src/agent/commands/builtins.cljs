@@ -1,9 +1,10 @@
 (ns agent.commands.builtins
   "Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.)."
-  (:require [agent.utils.data :as data]
+  (:require ["node:path" :as path]
+            [agent.utils.data :as data]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact compaction-receipt settings->opts resolve-settings]]
-            [agent.sessions.manager :refer [session->seed-messages]]
+            [agent.sessions.manager :refer [session->seed-messages new-session-path]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.themes :refer [default-dark]]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
@@ -879,9 +880,26 @@
            :description "Start a FRESH session file — the old one stays on disk and is resumable"
            :handler (fn [_args ctx]
                       (skills/deactivate-all-skills! agent)
-      ((:dispatch! (:store agent)) :messages-cleared {})
-                      ((:emit (:events agent)) "session_start" {:reason "new"})
-                      (notify ctx "New session started"))}
+                      ;; Actually switch the file, which is what the description
+                      ;; above promises. Without this the manager kept appending
+                      ;; to the same JSONL, so a later `nyma -c` replayed the old
+                      ;; conversation and the new one as ONE session. `/resume`
+                      ;; and `/import` have always used switch-file; /new simply
+                      ;; never called it.
+                      ;;
+                      ;; Placed BEFORE the clear and the emit so anything
+                      ;; listening on session_start already sees the new path.
+                      (let [fresh
+                            (when-let [sess @(:session agent)]
+                              (when (and (fn? (:switch-file sess))
+                                         (fn? (:get-file-path sess)))
+                                (let [dir (path/dirname ((:get-file-path sess)))]
+                                  ((:switch-file sess) (new-session-path dir)))))]
+                        ((:dispatch! (:store agent)) :messages-cleared {})
+                        ((:emit (:events agent)) "session_start" {:reason "new"})
+                        (notify ctx (if fresh
+                                      (str "New session started — " (path/basename fresh))
+                                      "New session started"))))}
 
           "fork"
           {:group       :session
