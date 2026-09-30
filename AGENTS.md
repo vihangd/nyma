@@ -67,6 +67,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models. |
 | `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories. |
 | `src/agent/providers/catalog.cljs` | `agent.providers.catalog` | Enumerate every model nyma knows about, across all registered providers. |
+| `src/agent/providers/fallback.cljs` | `agent.providers.fallback` | Which failures are worth trying a different model for, and which one to try. |
 | `src/agent/providers/model_fetch.cljs` | `agent.providers.model-fetch` | Discover a gateway's model list from its OpenAI-shaped `/v1/models` endpoint, with an on-disk cache. |
 | `src/agent/providers/oauth.cljs` | `agent.providers.oauth` | — |
 | `src/agent/providers/registry.cljs` | `agent.providers.registry` | LLM provider registry (register/resolve by name). |

@@ -1,7 +1,8 @@
 (ns agent.extensions.model-roles
   "Model roles: named presets (default, fast, deep, plan, commit) that map
    to provider/model pairs. Switch with /role <name>."
-  (:require [clojure.string :as str]
+  (:require [agent.providers.fallback :as fb]
+            [clojure.string :as str]
             [agent.debug :as d]
             [agent.events :as events]
             [agent.extensions.model-roles.policy :as policy]
@@ -366,6 +367,37 @@
             (when (some? allowed)
               #js {:allowed (clj->js allowed)})))
 
+        ;; provider_error — try the next model in the role's `fallback` chain.
+        ;; Attempts are tracked per RUN, keyed on the config object, so a chain
+        ;; cannot loop and a later turn starts fresh.
+        attempted (atom {})
+        on-provider-error
+        (fn [data]
+          (let [msg   (str (or (aget data "message") ""))
+                cfg   (aget data "config")
+                from  (str (or (aget data "model") ""))]
+            (when (and cfg (fb/should-fall-back? msg))
+              (let [state (.getState api)
+                    roles (get-roles api)
+                    role  (get roles (or (:active-role state) :default))
+                    entries (fb/chain role)
+                    tried   (or (get @attempted cfg) #{from})
+                    nxt     (fb/next-entry entries tried)]
+                (when nxt
+                  (let [spec  (fb/spec-of nxt)
+                        model (try ((aget api "resolveModel") (:provider nxt) (:model nxt))
+                                   (catch :default _e nil))]
+                    (when model
+                      (swap! attempted assoc cfg (conj tried spec))
+                      (aset cfg "model" model)
+                      ;; Said once, in the transcript. Answering from a model the
+                      ;; status line does not name is worse than failing.
+                      (d/warn "model-roles" (fb/announcement from spec msg))
+                      (when (.-sendMessage api)
+                        (try (.sendMessage api (fb/announcement from spec msg) #js {:role "info"})
+                             (catch :default _e nil)))
+                      #js {:retry true})))))))
+
         ;; permission_request — resolve a decision from BOTH axes and COMBINE them
         ;; by precedence (deny > allow > ask), so a permissive axis can't shadow a
         ;; restrictive one: a role's per-tool deny survives even under full-auto,
@@ -402,6 +434,12 @@
                #js {"system-prompt-additions" #js [prompt]}))))
 
     (.on api "tool_access_check" on-tool-access)
+
+    ;; provider_error — a fallback chain, on a seam that already existed.
+    ;; `loop.cljs` emits this as a COLLECT and re-runs streamText when a handler
+    ;; answers {retry: true}, so a chain needs no change to the run loop: swap
+    ;; the model on the config and say retry.
+    (.on api "provider_error" on-provider-error)
 
     (.on api "permission_request" on-permission)
     (.on api "role_change" on-role-change)

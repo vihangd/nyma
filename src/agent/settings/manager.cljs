@@ -115,6 +115,20 @@
    ;; tool that edits files walk past the mode whose entire purpose is to ask
    ;; first. It is named in every mode now, because the failure mode of this
    ;; table is silence.
+   ;;
+   ;; A role may also carry an optional `:fallback` — a vector of
+   ;; `{:provider :model}` tried in order when the primary is UNREACHABLE
+   ;; (refused, timed out, 5xx, overloaded, or a local server that lists a
+   ;; model it cannot load). No chain ships by default on purpose: answering
+   ;; from a model the user never chose is worse than failing, so this is
+   ;; opt-in. `agent.providers.fallback` decides what qualifies and
+   ;; deliberately excludes request-shaped failures — a 401 or a prompt that
+   ;; does not fit fails the same way on the next model, and falling back
+   ;; would bury the thing that needs fixing. The switch is announced once in
+   ;; the transcript. Example:
+   ;;   {:roles {:default {:provider "omlx" :model "qwen3.6-35b"
+   ;;                      :fallback [{:provider "anthropic"
+   ;;                                  :model "claude-sonnet-5"}]}}}
    :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
                      :policy {"write" "ask" "exec" "ask" "network" "ask"
                               "other" "ask"}}
