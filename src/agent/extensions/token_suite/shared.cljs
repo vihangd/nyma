@@ -57,9 +57,6 @@
             n
             (recur (inc i) (if (= 10 (.charCodeAt str' i)) (inc n) n)))))))
 
-(defn count-chars [s]
-  (count (str s)))
-
 (defn truncate-head-tail
   "Keep first `head` lines and last `tail` lines, with truncation notice."
   [text head-lines tail-lines]
@@ -73,10 +70,6 @@
         (str (.join head-part "\n")
              "\n... (" omitted " lines truncated) ...\n"
              (.join tail-part "\n"))))))
-
-(defn is-claude-model? [model-id]
-  (and (string? model-id)
-       (.startsWith (str model-id) "claude")))
 
 (def supported-compaction-models
   "Claude models that support the server-side compaction API

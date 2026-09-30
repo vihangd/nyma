@@ -69,15 +69,6 @@
   [ch]
   (or (:name ch) (.-name ch) "unknown"))
 
-(defn channel-capabilities-set
-  "Extract capabilities from a channel as a Clojure set."
-  [ch]
-  (let [raw (or (:capabilities ch) (.-capabilities ch))]
-    (cond
-      (set? raw)   raw
-      (some? raw)  (set (js/Array.from raw))
-      :else        #{})))
-
 (defn ctx-fn
   "Extract a function key from a response context (handles maps and JS objects)."
   [ctx k]

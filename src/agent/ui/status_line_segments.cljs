@@ -503,17 +503,3 @@
 (install-builtins!)
 
 ;;; ─── Layout helpers ─────────────────────────────────────
-
-(defn render-segments
-  "Invoke the :render fn of each segment id in `ids` against `context`.
-   Returns a vector of {:id :content :color} for visible segments only."
-  [ids context]
-  (->> ids
-       (keep (fn [id]
-               (when-let [seg (get-segment id)]
-                 (when-let [r ((:render seg) context)]
-                   (when (:visible? r)
-                     {:id (str id)
-                      :content (:content r)
-                      :color   (:color r)})))))
-       vec))

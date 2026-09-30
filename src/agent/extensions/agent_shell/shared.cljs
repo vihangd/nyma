@@ -260,16 +260,6 @@
   (swap! edit-counts dissoc (str pool-key))
   nil)
 
-(defn clear-transcripts-for-agent!
-  "Forget every project's transcript for `agent-key` (the `/agent disconnect`
-   shape, which tears down all cwds for that agent)."
-  [agent-key]
-  (let [prefix (str (kw-name agent-key) "@")]
-    (let [drop-prefixed (fn [m] (into {} (remove (fn [[k _]] (and (string? k) (.startsWith k prefix))) m)))]
-      (swap! transcripts drop-prefixed)
-      (swap! edit-counts drop-prefixed)))
-  nil)
-
 (defn- ->camel-case
   "kebab-case-string → camelCaseString."
   [s]
