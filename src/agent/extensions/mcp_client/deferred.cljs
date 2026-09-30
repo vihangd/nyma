@@ -190,7 +190,12 @@
 (defn search-tool
   [catalog-fn]
   (tool
-   #js {:description
+   #js {;; Read-only: it returns tool descriptions and schemas, nothing more.
+        ;; Declared because a tool with no :safety categorises as "other", and an
+        ;; absent policy mapping means the gate ALLOWS — so saying nothing here
+        ;; is how a tool walks past ask-mode.
+        :safety #js {:read-only? true :capabilities #js [] :category "search"}
+        :description
         (str "Search the connected MCP servers for a tool. Their tools are not "
              "listed in your context — search by what you want to do, then run "
              "the result with mcp_call.")
@@ -206,7 +211,15 @@
 (defn call-tool
   [manager]
   (tool
-   #js {:description
+   #js {;; Destructive by construction: this invokes ANY tool on ANY connected
+        ;; server, so its blast radius is the union of everything the servers
+        ;; expose — filesystem writes and shell included. Declaring it makes the
+        ;; gate treat it as a write rather than dropping it into "other", which
+        ;; every permission mode already has an opinion about, user-defined roles
+        ;; included.
+        :safety #js {:destructive? true :requires-confirmation? true
+                     :capabilities #js ["filesystem" "write"] :category "mcp"}
+        :description
         (str "Run a tool on an MCP server. Use mcp_search first to find the "
              "server, tool name and parameters.")
         :inputSchema

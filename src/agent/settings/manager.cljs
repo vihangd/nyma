@@ -109,13 +109,26 @@
    ;; section (`merge-policies`): a user who defines one custom role keeps
    ;; every built-in below; a user role of the SAME name replaces that one
    ;; role whole, so a custom `plan` still has to carry its own tool list.
+   ;; "other" is the category `categorize-tool` gives a tool that declares no
+   ;; :safety — every MCP tool, and any extension tool that says nothing about
+   ;; itself. An absent mapping means the gate ALLOWS, so leaving it out let a
+   ;; tool that edits files walk past the mode whose entire purpose is to ask
+   ;; first. It is named in every mode now, because the failure mode of this
+   ;; table is silence.
    :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
-                     :policy {"write" "ask" "exec" "ask" "network" "ask"}}
+                     :policy {"write" "ask" "exec" "ask" "network" "ask"
+                              "other" "ask"}}
            :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
            :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
            ;; Permission-mode roles (model-less → preserve the active model).
-           :accept-edits {:policy {"write" "allow" "exec" "ask" "network" "ask"}}
-           :full-auto    {:policy {"read" "allow" "write" "allow" "exec" "allow" "network" "allow"}}
+           ;; accept-edits waives the prompt for a KNOWN write; it does not
+           ;; waive it for a tool that never said what it does.
+           :accept-edits {:policy {"write" "allow" "exec" "ask" "network" "ask"
+                                   "other" "ask"}}
+           ;; full-auto must name it too, or a headless run dead-ends on a
+           ;; prompt it cannot show.
+           :full-auto    {:policy {"read" "allow" "write" "allow" "exec" "allow"
+                                   "network" "allow" "other" "allow"}}
            ;; Stronger reviewer for the `advisor` tool / `/advisor` cmd.
            ;; Falls back to :deep, then current model, if unset by user.
            :advisor {:provider "anthropic" :model "claude-opus-4-20250514"}
