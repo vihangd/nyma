@@ -8,7 +8,8 @@
    `resolve-auto-append` is the way out. It is pure so the selection rules are
    testable without a terminal."
   (:require ["bun:test" :refer [describe it expect afterEach]]
-            [agent.ui.status-line-segments :as segs]))
+            [agent.ui.status-line-segments :as segs]
+            [agent.ui.status-bar :as status-bar]))
 
 (afterEach (fn [] (segs/install-builtins!) nil))
 
@@ -170,3 +171,53 @@
         (-> (expect (:auto-append? (segs/get-segment "compact-in"))) (.toBeFalsy))
         (segs/apply-settings! {:right-segments ["compact-in"]})
         (-> (expect (:auto-append? (segs/get-segment "compact-in"))) (.toBe true))))))
+
+;;; ─── NO_COLOR ──────────────────────────────────────────────────
+
+(describe "status bar honours NO_COLOR completely" (fn []
+
+  (it "emits no escape sequences at all when colour is off"
+      (fn []
+        ;; `fg` already returned "" at depth 0, but RESET/BOLD/DIM were
+        ;; unconditional constants — so NO_COLOR produced a line with every
+        ;; colour suppressed and bare \e[0m / \e[1m / \e[2m still in it.
+        (let [prev (aget js/process.env "NO_COLOR")]
+          (aset js/process.env "NO_COLOR" "1")
+          (try
+            (segs/apply-settings! {:left-segments ["path" "git"]
+                                   :right-segments ["cost" "context-pct"]})
+            (let [bar (status-bar/create-status-bar
+                       (fn [] {:colors {:primary "#7aa2f7" :muted "#565f89"
+                                        :border "#3b4261" :secondary "#9ece6a"}}))]
+              (.setState bar #js {:model "qwen" :provider "omlx" :streaming true
+                                  :cost-usd 0.34 :ctx-used 8000 :ctx-window 65536
+                                  :git-branch "main" :git-status #js {:unstaged 1}
+                                  :path "/tmp/x" :turn-count 3})
+              (let [line (aget (.render bar 120) 0)
+                    escapes (.match line (js/RegExp. "\\u001b\\[[0-9;]*m" "g"))]
+                (-> (expect (if escapes (.-length escapes) 0)) (.toBe 0))
+                ;; and the content is still all there
+                (-> (expect line) (.toContain "qwen"))
+                (-> (expect line) (.toContain "main"))
+                (-> (expect line) (.toContain "$0.34"))))
+            (finally
+              (if prev
+                (aset js/process.env "NO_COLOR" prev)
+                (js-delete js/process.env "NO_COLOR")))))))
+
+  (it "still colours when NO_COLOR is unset"
+      (fn []
+        ;; the other half of the contract — a suppressed line must not be the
+        ;; only line the bar can produce
+        (let [prev (aget js/process.env "NO_COLOR")]
+          (js-delete js/process.env "NO_COLOR")
+          (try
+            (segs/apply-settings! nil)
+            (let [bar (status-bar/create-status-bar
+                       (fn [] {:colors {:primary "#7aa2f7" :muted "#565f89" :border "#3b4261"}}))]
+              (.setState bar #js {:model "qwen" :turn-count 1})
+              (let [line (aget (.render bar 120) 0)
+                    escapes (.match line (js/RegExp. "\\u001b\\[[0-9;]*m" "g"))]
+                (-> (expect (> (if escapes (.-length escapes) 0) 0)) (.toBe true))))
+            (finally
+              (when prev (aset js/process.env "NO_COLOR" prev)))))))))

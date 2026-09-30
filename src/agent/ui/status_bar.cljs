@@ -11,15 +11,22 @@
    Each render call walks the registry fresh, so there's no caching
    layer to invalidate when extensions add/remove segments at
    runtime."
-  (:require [agent.utils.ansi :refer [fg]]
+  (:require [agent.utils.ansi :refer [fg color-depth]]
             ["@earendil-works/pi-tui" :refer [truncateToWidth visibleWidth]]
             [agent.ui.status-line-segments :as segs]
             [agent.debug :as dbg]))
 
-(def ^:private ESC   (js/String.fromCharCode 27))
-(def ^:private RESET (str ESC "[0m"))
-(def ^:private BOLD  (str ESC "[1m"))
-(def ^:private DIM   (str ESC "[2m"))
+(def ^:private ESC (js/String.fromCharCode 27))
+
+;; Gated on colour depth, like `fg`. These were unconditional constants, so
+;; NO_COLOR=1 produced a line with every colour correctly suppressed and bare
+;; \e[0m / \e[1m / \e[2m still in it — `fg` returns "" at depth 0 but nothing
+;; told these to. Functions rather than constants because the depth is read from
+;; the environment, and a `def` would freeze it at module load.
+(defn- sgr [code] (if (pos? (color-depth)) (str ESC "[" code "m") ""))
+(defn- RESET [] (sgr "0"))
+(defn- BOLD  [] (sgr "1"))
+(defn- DIM   [] (sgr "2"))
 
 (defn- render-extension-segments
   "Walk the segment registry, call each auto-append segment's render
@@ -73,8 +80,8 @@
    reads as 'previous │ segment'. Divider color follows the theme
    border so segments don't shout for attention."
   [{:keys [content color]} border]
-  (str (fg border) " │ " RESET
-       (when color (fg color)) content RESET))
+  (str (fg border) " │ " (RESET)
+       (when color (fg color)) content (RESET)))
 
 (defn create-status-bar
   "Returns a pi-tui Component that renders a one-line status bar.
@@ -132,22 +139,22 @@
                          show-prov? (and (seq (str provider))
                                          (not= (str provider) model-piece))
                          provider-piece (when show-prov?
-                                          (str (fg muted) DIM provider RESET
-                                               (fg border) "/" RESET))
+                                          (str (fg muted) (DIM) provider (RESET)
+                                               (fg border) "/" (RESET)))
                          ;; Built-in left content.
-                         core-left (str (fg muted) " nyma " RESET
-                                        (fg border) "│" RESET
+                         core-left (str (fg muted) " nyma " (RESET)
+                                        (fg border) "│" (RESET)
                                         " "
                                         (or provider-piece "")
-                                        (fg primary) model-piece RESET)
+                                        (fg primary) model-piece (RESET))
                          ;; Built-in right content.
                          core-right (str " "
                                          (if streaming
-                                           (str (fg secondary) BOLD "● streaming" RESET)
-                                           (str (fg muted) DIM "ready" RESET))
+                                           (str (fg secondary) (BOLD) "● streaming" (RESET))
+                                           (str (fg muted) (DIM) "ready" (RESET)))
                                          (when (pos? turn-count)
-                                           (str (fg border) " │" RESET
-                                                (fg muted) DIM " " turn-count " turns" RESET))
+                                           (str (fg border) " │" (RESET)
+                                                (fg muted) (DIM) " " turn-count " turns" (RESET)))
                                          " ")
                          ;; Extension auto-append segments.
                          ;; Usage/context numbers refresh once per turn (the
