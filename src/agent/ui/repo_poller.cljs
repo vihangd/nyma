@@ -54,8 +54,9 @@
    without timers; `start!` below is the same thing on an interval.
 
    `on-change` is called with the bar keys ONLY when they differ from the last
-   poll — never on an unchanged poll, and never on the first poll if there is
-   nothing to report."
+   poll, never on an unchanged poll. The first poll always reports — including
+   nil for a non-repo, because the caller sets non-git facts from this callback
+   and would otherwise never hear anything outside a repo."
   [{:keys [fetch on-change]}]
   (let [last-val (atom ::none)
         stopped  (atom false)]
@@ -74,7 +75,13 @@
                   ;; processes every interval for the life of the session.
                   (if (nil? next)
                     (do (reset! stopped true)
-                        (when (and (not= prev ::none) (some? prev))
+                        ;; Report nil unless nil was already reported. Including
+                        ;; on the FIRST poll: the caller sets non-git facts (the
+                        ;; `path` segment) from this callback, so staying silent
+                        ;; outside a repo hid a segment that has nothing to do
+                        ;; with git. Reporting once also clears a stale branch if
+                        ;; the repo goes away mid-session.
+                        (when (not= prev nil)
                           (reset! last-val nil)
                           (when on-change (on-change nil)))
                         nil)

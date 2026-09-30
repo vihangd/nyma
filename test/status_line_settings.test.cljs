@@ -45,6 +45,19 @@
           (-> (expect (contains? (:spec r) "activity")) (.toBe false))
           (-> (expect (contains? (:spec r) "cost")) (.toBe false)))))
 
+  (it "an EMPTY vector means no built-in segments, not the defaults"
+      (fn []
+        ;; `seq` collapses [] into nil, so this silently restored the four
+        ;; defaults — there was no way to express an empty line
+        (let [r (R {:left-segments [] :right-segments []})]
+          (-> (expect (count (:spec r))) (.toBe 0)))))
+
+  (it "one empty side still replaces the defaults wholesale"
+      (fn []
+        (let [r (R {:left-segments [] :right-segments ["cost"]})]
+          (-> (expect (contains? (:spec r) "activity")) (.toBe false))
+          (-> (expect (get (:spec r) "cost")) (.toBe :right)))))
+
   (it "the vector order is the render order"
       (fn []
         ;; the whole point: ordering used to be sort-by :id and nothing else, so

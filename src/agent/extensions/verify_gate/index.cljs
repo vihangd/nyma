@@ -131,6 +131,30 @@
                               (shared/tail-lines output 40) "\n```")
                          #js {:deliverAs "followUp"}))))))))]
 
+    ;; Registered OUTSIDE the branch below. It sat in the `else` — the
+    ;; verify-is-OFF arm — while `last-result` is only ever set in the `:cmd`
+    ;; arm, so the two were mutually exclusive: with verify.cmd set the segment
+    ;; never appeared, and without it the segment existed and could never have
+    ;; data. Exactly inverted.
+    (when (.-registerStatusSegment api)
+      (.registerStatusSegment
+       api "verify.last"
+       #js {:category "verify"
+            :autoAppend true
+            :position "right"
+            :render
+            (fn [ctx]
+              (let [{:keys [status]} @last-result
+                    theme (aget ctx "theme")
+                    col   (fn [k d] (or (get-in theme [:colors k]) d))]
+                (case status
+                  :pass #js {:visible? true :content " verify ✓"
+                             :color (col :success "#9ece6a")}
+                  :fail #js {:visible? true :content " verify ✗"
+                             :color (col :error "#f7768e")}
+                  ;; Nothing has run yet — and "no result" is not a pass.
+                  #js {:visible? false})))}))
+
     (if (:cmd cfg)
       (do
         (.on api "tool_complete" on-complete)
@@ -153,27 +177,6 @@
                              (.notify ui msg "warning"))))
                        nil)]
         (when (seq unknown) (.on api "session_ready" on-ready))
-        ;; The last verify outcome on the status line. Pure over the atom above,
-        ;; which is set where the bus events are already emitted — the command
-        ;; has run either way, so this adds no work. Hidden until something has
-        ;; actually run, because "no result yet" is not a pass.
-        (when (.-registerStatusSegment api)
-          (.registerStatusSegment
-           api "verify.last"
-           #js {:category "verify"
-                :autoAppend true
-                :position "right"
-                :render
-                (fn [ctx]
-                  (let [{:keys [status]} @last-result
-                        theme (aget ctx "theme")
-                        col   (fn [k d] (or (get-in theme [:colors k]) d))]
-                    (case status
-                      :pass #js {:visible? true :content " verify ✓"
-                                 :color (col :success "#9ece6a")}
-                      :fail #js {:visible? true :content " verify ✗"
-                                 :color (col :error "#f7768e")}
-                      #js {:visible? false})))}))
         (fn []
           (when (seq unknown) (.off api "session_ready" on-ready)))))))
 

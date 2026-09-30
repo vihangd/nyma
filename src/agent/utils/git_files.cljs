@@ -17,6 +17,16 @@
      (str/trim (cp/execSync (str "git " cmd)
                             #js {:encoding "utf-8"
                                  :cwd (or cwd js/undefined)
+                                 ;; stderr IGNORED, not inherited. execSync sends
+                                 ;; the child's stderr to the parent's unless
+                                 ;; told otherwise, and a failing git prints
+                                 ;; there — `fatal: no upstream configured for
+                                 ;; branch 'main'` is the common case. The status
+                                 ;; line polls every 5s, so that is twelve writes
+                                 ;; a minute landing mid-render and corrupting
+                                 ;; the TUI, which is exactly what debug.cljs
+                                 ;; routes its own output to a file to avoid.
+                                 :stdio #js ["ignore" "pipe" "ignore"]
                                  :maxBuffer (* 64 1024 1024)}))
      (catch :default _ ""))))
 
@@ -34,6 +44,8 @@
      (str/replace (cp/execSync (str "git " cmd)
                                #js {:encoding "utf-8"
                                     :cwd (or cwd js/undefined)
+                                    ;; See run-git: stderr must not reach the TUI.
+                                    :stdio #js ["ignore" "pipe" "ignore"]
                                     :maxBuffer (* 64 1024 1024)})
                   #"\n+$" "")
      (catch :default _ ""))))

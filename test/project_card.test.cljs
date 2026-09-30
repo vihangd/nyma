@@ -97,6 +97,16 @@
       (fn []
         (-> (expect (card/abbrev-path "/Users/me/projects/x" "/Users/me")) (.toBe "~/projects/x"))))
 
+  (it "requires a separator, so a sibling directory is not mangled"
+      (fn []
+        ;; home /Users/me + cwd /Users/meg/work rendered as ~g/work
+        (-> (expect (card/abbrev-path "/Users/meg/work" "/Users/me")) (.toBe "/Users/meg/work"))
+        (-> (expect (card/abbrev-path "/Users/me-other" "/Users/me")) (.toBe "/Users/me-other"))))
+
+  (it "home itself is just ~"
+      (fn []
+        (-> (expect (card/abbrev-path "/Users/me" "/Users/me")) (.toBe "~"))))
+
   (it "leaves a path outside home alone"
       (fn []
         (-> (expect (card/abbrev-path "/tmp/x" "/Users/me")) (.toBe "/tmp/x"))))

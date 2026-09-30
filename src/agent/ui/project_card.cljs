@@ -30,8 +30,14 @@
   [p home-dir]
   (let [p (str (or p ""))
         h (str (or home-dir ""))]
-    (if (and (seq h) (.startsWith p h))
-      (str "~" (.slice p (count h)))
+    ;; The boundary check matters: a bare startsWith turns home /Users/me and
+    ;; cwd /Users/meg/work into `~g/work`.
+    (if (and (seq h)
+             (.startsWith p h)
+             (or (= (count p) (count h))
+                 (= "/" (.charAt p (count h)))))
+      (let [rest (.slice p (count h))]
+        (if (seq rest) (str "~" rest) "~"))
       p)))
 
 (defn compact-count

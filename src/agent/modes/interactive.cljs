@@ -739,7 +739,13 @@
                                                              c (let [sm (:settings agent)]
                                                                  (when (and sm (fn? (:get sm)))
                                                                    (:compaction ((:get sm)))))]
-                                                         (when (and w (pos? w))
+                                                         ;; nil when compaction is
+                                                         ;; off: counting down to
+                                                         ;; an event that will
+                                                         ;; never fire is worse
+                                                         ;; than showing nothing.
+                                                         (when (and w (pos? w)
+                                                                    (not (false? (:enabled c))))
                                                            (compaction/compaction-point
                                                             w (:threshold c) (:reserve c) (:max-working c))))
                                                        (catch :default _ nil))
@@ -1228,9 +1234,19 @@
                     :interval-ms (:poll-git-interval-ms cfg)
                     :fetch    (fn [] (git-files/repo-state cwd))
                     :on-change (fn [bar-keys]
+                                 ;; nil means the repo went away (or was never
+                                 ;; one). setState MERGES, so passing {} would
+                                 ;; freeze the last branch and dirty counts on
+                                 ;; the line forever; the keys have to be
+                                 ;; explicitly nil to clear the segment.
                                  (.setState status-bar
-                                            (clj->js (merge {:path cwd} (or bar-keys {}))))
+                                            (clj->js (or bar-keys
+                                                         {:git-branch nil :git-status nil})))
                                  (.requestRender tui))})))
+        ;; `path` is not a git fact. Set once, unconditionally — it used to be
+        ;; set inside on-change, which never fires outside a repo, so selecting
+        ;; the `path` segment in a non-repo directory hid it permanently.
+        (.setState status-bar #js {:path (js/process.cwd)})
 
         ;; The project card first: where you are, before what you were doing.
         ;; `collect` is the only I/O here (three git shell-outs) and runs exactly

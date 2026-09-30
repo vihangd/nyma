@@ -461,9 +461,12 @@
    `autoAppend`, and silently dropping `todos.progress` or `mcp.summary` because
    a user listed the built-ins they wanted would be a surprise. Pure."
   [cfg known]
-  (let [left  (seq (:left-segments cfg))
-        right (seq (:right-segments cfg))]
-    (if (or left right)
+  ;; `some?`, not `seq`: `seq` collapses [] into nil, so `{:left-segments []}` —
+  ;; the natural way to say "no built-in segments" — silently restored the
+  ;; default four. An explicitly empty vector is a choice; an absent key is not.
+  (let [left  (:left-segments cfg)
+        right (:right-segments cfg)]
+    (if (or (some? left) (some? right))
       (let [named   (concat (map (fn [id] [(str id) :left])  (or left []))
                             (map (fn [id] [(str id) :right]) (or right [])))
             ok      (filterv (fn [[id _]] (contains? known id)) named)

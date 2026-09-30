@@ -88,6 +88,16 @@
           (-> (expect (count @(:seen p))) (.toBe 2))
           (-> (expect (last @(:seen p))) (.toBeNil)))))
 
+  (it "a non-repo FIRST poll still reports, so a caller can clear"
+      (fn []
+        ;; it used to report nothing on the first poll, and the only caller sets
+        ;; the `path` segment inside on-change — so `path`, which has nothing to
+        ;; do with git, was permanently hidden outside a repo
+        (let [p (mk [nil])]
+          ((:poll! p))
+          (-> (expect (count @(:seen p))) (.toBe 1))
+          (-> (expect (last @(:seen p))) (.toBeNil)))))
+
   (it "stop! halts polling"
       (fn []
         (let [p (mk [clean clean])]
