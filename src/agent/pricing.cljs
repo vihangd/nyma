@@ -58,6 +58,16 @@
         (when-not (contains? @unpriced-providers (spec-provider model-key))
           (get costs (spec-bare-id model-key))))))
 
+(defn priced?
+  "Do we know this model's rates at all?
+
+   `calculate-turn-cost` returns 0 on a miss, which is indistinguishable from a
+   genuinely free session — and every local model is a miss, so `$0.00` was the
+   answer for an entire benchmark campaign. Callers that report a cost to a human
+   or a machine should ask this first and say \"unknown\" rather than zero."
+  [model-key]
+  (some? (lookup-cost model-key)))
+
 (defn model-cost-key
   "Pricing key for the model currently on `config`, as `provider/id`.
 

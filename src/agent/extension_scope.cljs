@@ -88,6 +88,26 @@
       (aset o (name m) (aget base-api (name m))))
     o))
 
+
+(defn- inert-ui
+  "The `api.ui` an extension gets without the `:ui` capability — or before the
+   host has wired one.
+
+   It used to be `#js {:available false}` and nothing else, so any call was a
+   TypeError. Every in-tree caller guards on `.available`, which is why nothing
+   crashed, but that made the guard mandatory boilerplate at each call site and
+   the class had already burned three extensions silently. The methods are here
+   as no-ops so `(when (.-available ui) …)` is a choice rather than a
+   requirement; `available` stays false, which is still the honest answer."
+  []
+  #js {:available false
+       :select    (fn [& _] (js/Promise.resolve nil))
+       :input     (fn [& _] (js/Promise.resolve nil))
+       :confirm   (fn [& _] (js/Promise.resolve false))
+       :notify    (fn [& _] nil)
+       :setWidget (fn [& _] nil)
+       :clearWidget (fn [& _] nil)})
+
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.
    Tools and commands are prefixed with 'namespace__' to prevent collisions.
@@ -349,8 +369,8 @@
     ;; snapshot would capture undefined/stale value.
     (js/Object.defineProperty scoped "ui"
                               #js {:get         (fn [] (if (check capabilities :ui)
-                                                         (or (.-ui base-api) #js {:available false})
-                                                         #js {:available false}))
+                                                         (or (.-ui base-api) (inert-ui))
+                                                         (inert-ui)))
                                    :enumerable  true
                                    :configurable true})
     ;; The SQLite store cli.cljs hangs on the base api AFTER extensions

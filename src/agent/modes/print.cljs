@@ -1,6 +1,8 @@
 (ns agent.modes.print
   "Print mode."
-  (:require [agent.loop :refer [run]]
+  (:require [agent.pricing :as pricing]
+            [agent.model-info :as model-info]
+            [agent.loop :refer [run]]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
             [agent.utils.event-json :refer [step-usage]]
             [clojure.string :as str]))
@@ -88,7 +90,15 @@
                            empty "Error: empty response (no assistant output)"
                            :else text)
          :session_id     (str (session-id agent))
-         :total_cost_usd (or (:total-cost st) 0)
+         ;; null, not 0, when the model has no known rates: 0 says "this was
+         ;; free", and an unpriced local model is not free — it is unmeasured.
+         ;; A machine consumer of `-p --output-format json` could not tell the
+         ;; two apart.
+         :total_cost_usd (let [c (:total-cost st)]
+                           (cond
+                             (and (number? c) (pos? c)) c
+                             (pricing/priced? (model-info/config-model-key (:config agent))) (or c 0)
+                             :else nil))
          ;; num_turns and the cache figures were absent or hardcoded to zero.
          ;; Both are now read from the store: the cache split is the biggest
          ;; cost lever there is, and a turn count is what a turn budget has to

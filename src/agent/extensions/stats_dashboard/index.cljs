@@ -184,7 +184,9 @@
 
     ;; /stats-session — current session only
     (.registerCommand api "stats-session"
-                      #js {:description "Show usage stats for current session"
+                      ;; `/cost` is the name every peer uses for this.
+                      #js {:aliases #js ["cost"]
+                           :description "Show usage stats for current session"
                            :handler
                            (fn [_args ctx]
                              (let [state (.getState api)

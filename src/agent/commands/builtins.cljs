@@ -708,6 +708,7 @@
 
           "model"
           {:group       :model
+           :aliases     ["m"]
            :description "Pick a model (no args), switch to one, or `list` them all"
            :handler (fn [args ctx]
                       (cond
@@ -737,6 +738,7 @@
 
           "clear"
           {:group       :session
+           :aliases     ["cls"]
            :description "Reset the context in THIS session file — the transcript and the model's context, nothing on disk"
            :handler (fn [_args ctx]
                       (skills/deactivate-all-skills! agent)

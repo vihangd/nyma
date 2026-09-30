@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.shared
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.home :as home]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
             [clojure.string :as str]
@@ -90,20 +91,29 @@
 
 ;; ── Utility functions ────────────────────────────────────────
 
+(defn- suite-section
+  "The `bash-suite` section of one settings file, or nil. Never throws."
+  [settings-path]
+  (when (fs/existsSync settings-path)
+    (try
+      (let [parsed (js/JSON.parse (fs/readFileSync settings-path "utf8"))]
+        (when-let [suite (aget parsed "bash-suite")]
+          (ji/js->clj* suite)))
+      (catch :default _e nil))))
+
 (defn load-config
-  "Load config from .nyma/settings.json bash-suite key, merge with defaults."
+  "Load the `bash-suite` section, global then project, merged over the defaults.
+
+   It read only `cwd/.nyma/settings.json`, so a user's own allow/deny lists in
+   `~/.nyma/settings.json` were silently inert — they configured the shell gate
+   and it never looked. Project still wins over global, which is the precedence
+   every other section uses; the same home-vs-project omission this repo has
+   fixed twice elsewhere."
   []
-  (let [settings-path (path/join (js/process.cwd) ".nyma" "settings.json")]
-    (if (fs/existsSync settings-path)
-      (try
-        (let [raw (fs/readFileSync settings-path "utf8")
-              parsed (js/JSON.parse raw)
-              suite  (aget parsed "bash-suite")]
-          (if suite
-            (merge-with merge default-config (ji/js->clj* suite))
-            default-config))
-        (catch :default _e default-config))
-      default-config)))
+  (reduce (fn [acc sec] (if sec (merge-with merge acc sec) acc))
+          default-config
+          [(suite-section (path/join (home/dir) ".nyma" "settings.json"))
+           (suite-section (path/join (js/process.cwd) ".nyma" "settings.json"))]))
 
 (defn is-bash-tool?
   "Check if a tool name refers to the bash tool."

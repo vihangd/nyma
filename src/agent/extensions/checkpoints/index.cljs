@@ -44,7 +44,11 @@
     (.on api "turn_finalize" on-finalize)
 
     (.registerCommand api "rewind"
-                      #js {:description "Restore files edited in the last turn. Usage: /rewind | /rewind list"
+                      ;; `undo` is what anyone reaches for; `rewind` is what it
+                      ;; was called. The resolver already resolves aliases and
+                      ;; extension_scope passes opts through untouched.
+                      #js {:aliases #js ["undo"]
+                           :description "Restore files edited in the last turn. Usage: /rewind | /undo | /rewind list"
                            :handler
                            (fn [args ctx]
                              (let [notify (fn [m l] (when-let [ui (.-ui ctx)]

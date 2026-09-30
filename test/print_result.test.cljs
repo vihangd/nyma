@@ -47,13 +47,37 @@
                         r (result-object a 1 nil)]
                     (-> (expect (.-session_id r)) (.toBe "abc123")))))
 
-            (it "defaults usage/cost to 0 when absent"
+            (it "defaults token counts to 0 when absent"
                 (fn []
                   (let [a (fake-agent {:messages [{:role "assistant" :content "y"}]} nil)
                         r (result-object a 0 nil)]
-                    (-> (expect (.-total_cost_usd r)) (.toBe 0))
                     (-> (expect (.. r -usage -input_tokens)) (.toBe 0))
-                    (-> (expect (.. r -usage -total_tokens)) (.toBe 0)))))))
+                    (-> (expect (.. r -usage -total_tokens)) (.toBe 0)))))
+
+            (it "reports cost as null when the model has no known rates"
+                (fn []
+                  ;; 0 says "this was free". An unpriced model — every local one —
+                  ;; is not free, it is unmeasured, and a machine consumer of
+                  ;; `-p --output-format json` could not tell the two apart.
+                  (let [a (fake-agent {:messages [{:role "assistant" :content "y"}]} nil)
+                        r (result-object a 0 nil)]
+                    (-> (expect (.-total_cost_usd r)) (.toBeNull))))) 
+
+            (it "reports 0 for a PRICED model that genuinely spent nothing"
+                (fn []
+                  ;; the other half of the contract: null must mean "unknown",
+                  ;; not "zero", or it is the same conflation the other way round
+                  (let [a (assoc (fake-agent {:messages [{:role "assistant" :content "y"}]} nil)
+                                 :config #js {:model #js {:modelId "claude-sonnet-5"}})
+                        r (result-object a 0 nil)]
+                    (-> (expect (.-total_cost_usd r)) (.toBe 0)))))
+
+            (it "a real cost is reported whether or not the model is priced"
+                (fn []
+                  (let [a (fake-agent {:messages [{:role "assistant" :content "y"}]
+                                       :total-cost 0.0123} nil)
+                        r (result-object a 0 nil)]
+                    (-> (expect (.-total_cost_usd r)) (.toBe 0.0123)))))))
 
 ;; is_error so orchestrators (cw) can fall back on flaky/empty small-model replies
 (describe "print:result-object is_error"

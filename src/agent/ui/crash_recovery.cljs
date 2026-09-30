@@ -108,6 +108,17 @@
           (when-not (width-error? err)
             (try (when tui (.stop tui)) (catch :default _ nil)))
           (js/console.error (str "\n" (or (and err (.-stack err)) (.-message err) err)))
+          ;; The width guard's counter, which had no caller at all — its own
+          ;; docstring names the reason to print it: a render crash while this
+          ;; reads zero means the bad line came from somewhere the guard does not
+          ;; cover, which is a different bug from one it clamped and still broke.
+          ;; This is the diagnostic for the repo's most productive bug class
+          ;; (one number, two units), and it was sitting unused.
+          (when (width-error? err)
+            (js/console.error
+             (str "width guard: " (guard-clamp-count) " line(s) clamped this session"
+                  (when (zero? (guard-clamp-count))
+                    " — zero, so the offending line bypassed the guard"))))
           (js/console.error (resume-hint (path-fn)))
           (exit-fn 1))
 
