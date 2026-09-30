@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.12.0 — 2026-09-30
+
+Project awareness. Opening a project now tells you where you are, and fifteen
+status-line segments that were implemented but unreachable can finally be
+selected.
+
+### Added
+- A project card at session start: branch and working-tree state, what the agent
+  loaded, and what the standing prompt costs.
+
+      nyma 0.12.0  ·  ~/projects/pers/nyma
+        main ~3 ?9 ↑2
+        40 extensions · 24 skills
+        AGENTS.md ~11k tok
+
+  The AGENTS.md figure is the one most worth having — measured at ~11k tokens in
+  this repo, the bulk of the system prompt, and nothing surfaced it before. Every
+  line is optional: a missing fact omits its line rather than printing a zero,
+  because `0 skills` reads as a broken install and silence reads as nothing to
+  say. A clean repo in sync shows only its branch.
+- `settings.status-line` works again and now selects which built-in segments
+  appear, on which side, and **in what order**. Twenty exist; four could render.
+  `git`, `path`, `pr`, `session`, `hostname`, `token-in/out/total/rate`,
+  `context-total`, `cache-read`, `cache-write`, `model`, `role` and `time` were
+  registered and unreachable, and the key that would have selected them was
+  marked inert. Ordering was previously `sort-by :id` alone, so `context-pct`
+  could never sit right of `cost`.
+
+      "status-line": {
+        "left-segments":  ["activity", "path", "git"],
+        "right-segments": ["context-pct", "compact-in", "cost", "time-spent"]
+      }
+
+  Unset reproduces the previous four exactly. An unknown id warns once at startup
+  and the rest of the line still renders. Extension segments are untouched — they
+  manage their own placement.
+- `compact-in`: how much room is left before the session compacts. `ctx:%` says
+  how full the window is, not when the conversation will be rewritten under you —
+  on a 65k window compaction fires at 49,152, so `ctx:73%` is already nearly
+  there. Hidden when compaction is disabled or already past the point.
+- Live git on the status line, from a 5s poller rather than a render.
+  `settings.status-line.poll-git` turns it off entirely (no timer, no first poll).
+- LSP diagnostic counts, and the last verify-gate result, as segments.
+
+### Fixed
+- Child `git` stderr reached the terminal. `execSync` inherits stderr unless told
+  otherwise, and `rev-list @{upstream}` fails on any branch without an upstream —
+  the common case. At a 5s poll that is twelve `fatal: no upstream configured`
+  writes a minute landing mid-render and corrupting the TUI. Both git helpers
+  ignore it now.
+- `NO_COLOR=1` left bare `\e[0m`, `\e[1m` and `\e[2m` in the status line. `fg`
+  honoured the setting; three hardcoded escape constants did not. 35 escapes to 0
+  on a fully-populated line.
+- `git status --porcelain` was parsed after `run-git` trimmed both ends of stdout,
+  which eats the leading space of the first line — so ` M path`, a worktree-only
+  change, read as staged. `run-git-raw` trims only the trailing newline. The
+  index and worktree columns are independent, and a conflict (`UU`/`AA`/`DD`) is
+  no longer counted as an ordinary staged change.
+- A home-prefix path check without a separator turned `/Users/meg/work` into
+  `~g/work` for a user whose home is `/Users/me`.
+- `{"left-segments": []}` silently restored the default segments instead of
+  meaning "none".
+
+### Notes
+- Benchmark cross-check on a second model and machine (Qwen3.8-27B on a DGX
+  Spark): the 0.11.0 small-model fixes hold — 92% → 100% pass, 65% fewer tokens,
+  51% fewer turns, 80% fewer shell calls. The deferral arm moved the *other* way
+  on pass rate there than on the Mac, which is the flaky-task variance 0.11.0
+  documented rather than a regression.
+
 ## 0.11.0 — 2026-09-25
 
 A silent data-loss bug in the write path, the override chaining defect underneath it, and
