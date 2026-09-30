@@ -16,7 +16,7 @@
             ["node:os" :as os]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.extension-loader :refer [discover-and-load]]))
+            [agent.extension-loader :refer [discover-and-load deactivate-all]]))
 
 (def ^:private builtin-dir
   ;; Anchored to this compiled test's own directory — see
@@ -58,9 +58,14 @@
       (doseq [t ["read" "write" "edit" "bash"
                  "todos__todo_write" "todos__todo_read" "advisor__advisor"]]
         (-> (expect #js [t (contains? names t)]) (.toEqual #js [t true]))))
-    (doseq [e loaded]
-      (when-let [d (:deactivate e)]
-        (try (d) (catch :default _e nil))))))
+    ;; deactivate-all, not a hand-rolled loop over :deactivate. The loop ran the
+    ;; extension's own cleanup but never `dispose-scope!`, so anything the scope
+    ;; auto-tracked was left behind — and this test loads EVERY extension, so the
+    ;; leak reached every later test file in the same process. It only became
+    ;; visible when extensions started registering status-line segments and
+    ;; loader_smoke's residue snapshot began comparing against a polluted
+    ;; registry.
+    (js-await (deactivate-all loaded))))
 
 (describe "tools/schema-validation/full-load"
           (fn []

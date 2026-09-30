@@ -3,7 +3,8 @@
   "description": "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics",
   "capabilities": [
     "tools",
-    "events"
+    "events",
+    "ui"
   ],
   "dependsOn": [],
   "dependencies": {

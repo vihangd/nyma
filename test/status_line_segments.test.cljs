@@ -1,6 +1,6 @@
 (ns status-line-segments.test
   "Tests for segment registry and context-usage-level."
-  (:require ["bun:test" :refer [describe it expect beforeEach]]
+  (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
             [agent.ui.status-line-segments :as segs :refer [register-segment
                                                    unregister-segment
                                                    get-segment
@@ -8,9 +8,17 @@
                                                    auto-append-ids
                                                    context-usage-level
                                                    token-rate-per-sec
-                                                   reset-registry!]]))
+                                                   reset-registry!
+                                                   install-builtins!]]))
 
 (beforeEach (fn [] (reset-registry!)))
+
+;; Put the built-ins back. The registry is a MODULE-level atom, and bun runs
+;; every test file in one process — so emptying it here left every later file
+;; looking at a status line with no segments at all. Invisible until segments
+;; started carrying project data: loader_smoke's residue snapshot then compared
+;; an empty registry against one holding another extension's leaked segment.
+(afterEach (fn [] (reset-registry!) (install-builtins!) nil))
 
 ;;; ─── registry lifecycle ───────────────────────────────────────────────────
 

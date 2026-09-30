@@ -122,6 +122,32 @@
       (.registerTool api "organize_imports"
                      (tools/make-organize-imports-tool manager cwd)))
 
+    ;; ── Diagnostics on the status line ────────────────────────────
+    ;; Pure over the live view — no I/O, which the render cadence requires. The
+    ;; count is partial by construction (servers spawn lazily, the store is
+    ;; capped) so it is a signal, not an audit, and it hides at zero rather than
+    ;; claiming a clean workspace it cannot verify.
+    (when (.-registerStatusSegment api)
+      (.registerStatusSegment
+       api "lsp.diagnostics"
+       #js {:category "lsp"
+            :autoAppend true
+            :position "left"
+            :render
+            (fn [ctx]
+              (let [{:keys [errors warnings]} (diags/severity-counts)
+                    theme (aget ctx "theme")
+                    col   (fn [k d] (or (get-in theme [:colors k]) d))]
+                (cond
+                  (pos? (or errors 0))
+                  #js {:visible? true
+                       :content (str " ✗" errors (when (pos? (or warnings 0)) (str " ⚠" warnings)))
+                       :color (col :error "#f7768e")}
+                  (pos? (or warnings 0))
+                  #js {:visible? true :content (str " ⚠" warnings)
+                       :color (col :warning "#e0af68")}
+                  :else #js {:visible? false})))}))
+
     ;; ── Withhold the tools when nothing could serve them ──────────
     ;; Nine schemas of near-duplicate path/line/character parameters ride on
     ;; every request. On a machine with no language server installed, and in any

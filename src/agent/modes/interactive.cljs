@@ -16,6 +16,7 @@
             [agent.ui.project-card :as project-card]
             [agent.ui.status-line-segments :as segs]
             [agent.ui.repo-poller :as repo-poller]
+            [agent.sessions.compaction :as compaction]
             [agent.utils.git-files :as git-files]
             [agent.version :as version]
             [agent.ui.app-reducers :as reducers]
@@ -727,6 +728,21 @@
                                          :ctx-window (try ((:context-window (:model-registry agent))
                                                            (model-info/config-model-key (:config agent)))
                                                           (catch :default _ nil))
+                                         ;; Where compaction actually fires, via
+                                         ;; the pure compaction-point — so the
+                                         ;; segment is a function of two numbers
+                                         ;; and this is the only place that knows
+                                         ;; about settings.
+                                         :compact-at (try
+                                                       (let [w ((:context-window (:model-registry agent))
+                                                                (model-info/config-model-key (:config agent)))
+                                                             c (let [sm (:settings agent)]
+                                                                 (when (and sm (fn? (:get sm)))
+                                                                   (:compaction ((:get sm)))))]
+                                                         (when (and w (pos? w))
+                                                           (compaction/compaction-point
+                                                            w (:threshold c) (:reserve c) (:max-working c))))
+                                                       (catch :default _ nil))
                                          :session-id (when-let [sess @(:session agent)]
                                                        (when (fn? (:session-file sess))
                                                          (last (.split (str ((:session-file sess))) "/"))))})))

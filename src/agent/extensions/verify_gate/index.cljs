@@ -15,6 +15,18 @@
         code   (js-await (.-exited proc))]
     {:exit-code code :output (str stdout (when (seq stderr) (str "\n" stderr)))}))
 
+;; The last verify outcome, for the status line: {:status :pass|:fail :cmd s}.
+;;
+;; Recorded where the bus events are already emitted, so this costs nothing — the
+;; command has run either way. Module-level rather than episode-scoped because
+;; every other piece of verify_gate state is reset by `end-episode!`, and the
+;; point of this one is to survive the episode and still be readable next turn.
+;;
+;; NB a comment, not a docstring: Squint's `defonce` takes no docstring, so
+;; `(defonce x "doc" (atom nil))` binds x to the STRING and drops the atom —
+;; every later `reset!` then fails inside squint core with a nil error.
+(defonce last-result (atom nil))
+
 (defn ^:export activate [api]
   (let [cfg      (shared/config (.settings api))
         edited?  (atom false)
@@ -76,6 +88,7 @@
                   ;; "verify is settled" from "verify is mid-fix-loop" — the
                   ;; fail/exhausted pair alone only ever says it is red, so a
                   ;; subscriber had no edge on which to resume.
+                  (reset! last-result {:status :pass :cmd (:cmd cfg)})
                   (when (.-emitGlobal api)
                     (.emitGlobal api "small-model/verify-pass"
                                  #js {:cmd (:cmd cfg) :attempts @attempts}))
@@ -83,6 +96,7 @@
                 ;; Publish a failure signal for small-model/self-tune (additive;
                 ;; no-op if nothing subscribes). Mirrors quality_monitor's bus use.
                 (do
+                  (reset! last-result {:status :fail :cmd (:cmd cfg)})
                   (when (and (.-emitGlobal api) (not @signalled?))
                     (reset! signalled? true)
                     (.emitGlobal api "small-model/verify-fail"
@@ -139,6 +153,27 @@
                              (.notify ui msg "warning"))))
                        nil)]
         (when (seq unknown) (.on api "session_ready" on-ready))
+        ;; The last verify outcome on the status line. Pure over the atom above,
+        ;; which is set where the bus events are already emitted — the command
+        ;; has run either way, so this adds no work. Hidden until something has
+        ;; actually run, because "no result yet" is not a pass.
+        (when (.-registerStatusSegment api)
+          (.registerStatusSegment
+           api "verify.last"
+           #js {:category "verify"
+                :autoAppend true
+                :position "right"
+                :render
+                (fn [ctx]
+                  (let [{:keys [status]} @last-result
+                        theme (aget ctx "theme")
+                        col   (fn [k d] (or (get-in theme [:colors k]) d))]
+                    (case status
+                      :pass #js {:visible? true :content " verify ✓"
+                                 :color (col :success "#9ece6a")}
+                      :fail #js {:visible? true :content " verify ✗"
+                                 :color (col :error "#f7768e")}
+                      #js {:visible? false})))}))
         (fn []
           (when (seq unknown) (.off api "session_ready" on-ready)))))))
 

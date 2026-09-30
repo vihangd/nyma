@@ -132,7 +132,7 @@
     :manifest  #js {"namespace" "headroom" "description" "ML context compression via the Headroom proxy (off by default)" "capabilities" #js ["events" "commands" "flags" "ui"] "dependsOn" #js [] "dependencies" #js {"headroom-ai" "^0.22.4"} "settings" #js {"headroom" #js {"enabled" false "proxy-url" "http://localhost:8787" "compression-threshold" 0.5 "min-tokens-to-compress" 8000 "algorithms" #js ["SmartCrusher" "CodeCompressor" "Kompress"] "disable-ccr" true}}}}
    {:namespace "lsp-suite"
     :module    ext-lsp-suite
-    :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"} "settings" #js {"lsp" #js {"gate-tools" true}}}}
+    :manifest  #js {"namespace" "lsp-suite" "description" "Code intelligence via LSP: hover, go-to-definition, find-references, symbols, diagnostics" "capabilities" #js ["tools" "events" "ui"] "dependsOn" #js [] "dependencies" #js {"vscode-jsonrpc" "^9.0.0"} "settings" #js {"lsp" #js {"gate-tools" true}}}}
    {:namespace "mcp-client"
     :module    ext-mcp-client
     :manifest  #js {"namespace" "mcp-client" "description" "MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`, with a per-tool description budget (`mcp.max-description-length`)" "capabilities" #js ["events" "tools" "tools-override" "commands" "ui"] "dependsOn" #js ["agent-shell"]}}

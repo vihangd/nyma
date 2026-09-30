@@ -118,3 +118,42 @@
         (segs/apply-settings! {:left-segments ["git"]})
         (-> (expect (:auto-append? (segs/get-segment "ext.thing"))) (.toBe true))
         (segs/unregister-segment "ext.thing")))))
+
+;;; ─── compaction headroom ───────────────────────────────────────
+
+(defn- render-one [id state]
+  (segs/apply-settings! {:right-segments [id]})
+  (let [seg (segs/get-segment id)]
+    ((:render seg) (merge {:theme {:colors {}}} state))))
+
+(describe "compact-in segment" (fn []
+
+  (it "names the room left before the conversation is rewritten"
+      (fn []
+        ;; ctx:% says how full the window is; it does not say when compaction
+        ;; fires, which is the thing you plan around. On a 65k window the point
+        ;; is 49,152 — so ctx:73% is already nearly there.
+        (let [out (render-one "compact-in" {:ctx-used 8000 :compact-at 49152})]
+          (-> (expect (:visible? out)) (.toBe true))
+          (-> (expect (:content out)) (.toContain "41.2k"))
+          (-> (expect (:content out)) (.toContain "to compact")))))
+
+  (it "hides once past the point, rather than showing negative headroom"
+      (fn []
+        (-> (expect (:visible? (render-one "compact-in" {:ctx-used 54000 :compact-at 49152})))
+            (.toBeFalsy))))
+
+  (it "hides when there is no window to reason about"
+      (fn []
+        (-> (expect (:visible? (render-one "compact-in" {:ctx-used 8000 :compact-at nil})))
+            (.toBeFalsy))
+        (-> (expect (:visible? (render-one "compact-in" {:ctx-used 0 :compact-at 49152})))
+            (.toBeFalsy))))
+
+  (it "is selectable, which is the only reason it can appear at all"
+      (fn []
+        ;; like the other fifteen, it is inert until settings name it
+        (segs/apply-settings! nil)
+        (-> (expect (:auto-append? (segs/get-segment "compact-in"))) (.toBeFalsy))
+        (segs/apply-settings! {:right-segments ["compact-in"]})
+        (-> (expect (:auto-append? (segs/get-segment "compact-in"))) (.toBe true))))))

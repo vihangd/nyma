@@ -280,6 +280,31 @@
              (get-in theme [:colors :muted] "#565f89"))
     (hidden)))
 
+(defn- compact-in-seg
+  "How much room is left before this session compacts.
+
+   `ctx:12%` tells you how full the window is; it does not tell you when the
+   conversation will be rewritten under you, which is the thing you actually plan
+   around. `compact-at` is the token count where the trigger fires, computed by
+   the pure `compaction/compaction-point` and passed in — the segment stays a
+   pure function of two numbers so this ns needs no new dependency.
+
+   Hidden once past the point: at that stage compaction is imminent and the
+   number would read as negative headroom."
+  [{:keys [ctx-used compact-at theme]}]
+  (let [used (or ctx-used 0)
+        at   (or compact-at 0)]
+    (if (and (pos? at) (pos? used) (< used at))
+      (let [left (- at used)
+                ;; Tiered on how close it is, reusing the context palette so the
+                ;; colour means the same thing it does on ctx:%.
+            lvl  (cond (< left 5000) :context-error
+                       (< left 20000) :context-warning
+                       :else :muted)]
+        (visible (str " ~" (compact-number left) " to compact")
+                 (get-in theme [:colors lvl] "#565f89")))
+      (hidden))))
+
 (defn- time-spent-seg [{:keys [time-spent-ms theme]}]
   (if (pos? (or time-spent-ms 0))
     (visible (format-duration-ms time-spent-ms)
@@ -395,7 +420,8 @@
    ["hostname"      :workspace hostname-seg]
    ["cache-read"    :usage    cache-read-seg]
    ["cache-write"   :usage    cache-write-seg]
-   ["activity"      :agent    activity-seg]])
+   ["activity"      :agent    activity-seg]
+   ["compact-in"    :usage    compact-in-seg]])
 
 ;; Activity segment auto-appends so users see the spinner + verb
 ;; without having to edit their preset. Position :left places it

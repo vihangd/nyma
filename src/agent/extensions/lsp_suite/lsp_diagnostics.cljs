@@ -84,6 +84,27 @@
 
 (defn pending-count [] (count @pending))
 
+(defn severity-counts
+  "`{:errors n :warnings n}` over the LIVE view, for the status line.
+
+   Reads `current-diags`, NOT `pending`: `drain-pending!` empties that queue
+   inside `before_agent_start`, so a segment reading it would race the prompt
+   injector and flicker to zero every turn.
+
+   Partial by construction — servers spawn lazily on extension match, so this
+   covers files an already-running server has opened, and the store is capped at
+   10 per file / 30 per drain. A count, not an audit."
+  []
+  (reduce (fn [acc [_uri entries]]
+            (reduce (fn [a {:keys [diag]}]
+                      (case (and diag (.-severity diag))
+                        1 (update a :errors inc)
+                        2 (update a :warnings inc)
+                        a))
+                    acc entries))
+          {:errors 0 :warnings 0}
+          @current-diags))
+
 (defn clear! []
   (reset! pending [])
   (reset! current-diags {})

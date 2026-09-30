@@ -165,6 +165,7 @@
                                      :cost-usd        (:cost-usd st)
                                      :ctx-used        (:ctx-used st)
                                      :ctx-window      (:ctx-window st)
+                                     :compact-at      (:compact-at st)
                                      :token-in        (:token-in st)
                                      :token-out       (:token-out st)
                                      :session-id      (:session-id st)
