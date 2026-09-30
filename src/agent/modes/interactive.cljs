@@ -14,6 +14,7 @@
             [agent.ui.chat-pane :refer [create-chat-pane]]
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.project-card :as project-card]
+            [agent.ui.status-line-segments :as segs]
             [agent.version :as version]
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
@@ -679,6 +680,19 @@
         turn-count   (atom 0)
         submit-lock  (atom false)
 
+        ;; settings.status-line selects which built-in segments appear, where,
+        ;; and in what order. Applied BEFORE the bar exists, because
+        ;; install-builtins! rewrites the module registry the bar reads each
+        ;; frame. Unknown ids warn once here rather than per frame — this
+        ;; registry is walked at render cadence.
+        _            (let [sm (:settings agent)
+                           cfg (when (and sm (fn? (:get sm)))
+                                 (:status-line ((:get sm))))]
+                       (doseq [id (segs/apply-settings! cfg)]
+                         (d/warn "status-line"
+                                 (str "unknown segment \"" id "\" — ignored. Known: "
+                                      (str/join ", " (sort (segs/builtin-ids)))))))
+
         chat-pane    (create-chat-pane theme-fn)
         status-bar   (create-status-bar theme-fn)
 
@@ -699,6 +713,12 @@
                                          ;; count is the context fill, not the
                                          ;; tree-walking estimate.
                                          :cost-usd   (:total-cost st)
+                                         ;; In the store since the cache-token
+                                         ;; work and never passed on, so
+                                         ;; cache-read/cache-write could not
+                                         ;; render even if selected.
+                                         :cache-read  (:total-cache-read-tokens st)
+                                         :cache-write (:total-cache-write-tokens st)
                                          :token-in   (:total-input-tokens st)
                                          :token-out  (:total-output-tokens st)
                                          :ctx-used   (:last-input-tokens st)

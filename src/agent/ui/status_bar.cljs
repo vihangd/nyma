@@ -37,7 +37,12 @@
                        ;; so without this gate usage segments push the model
                        ;; off the left edge at ~70 columns.
                        (not (and width (< width 70) (= :usage (:category %))))))
-         (sort-by :id)
+         ;; Explicit order first, alphabetical after. Until settings could select
+         ;; segments, `sort-by :id` WAS the ordering — so `context-pct` could
+         ;; never sit to the right of `cost`. Anything without an :order (every
+         ;; extension segment, and any built-in on the default spec) keeps the
+         ;; old alphabetical behaviour, after the ones a user placed by hand.
+         (sort-by (fn [seg] [(or (:order seg) 1000) (:id seg)]))
          (keep (fn [seg]
                  (try
                    ;; Pass the bar's state, not just the theme. Segments got
@@ -163,6 +168,23 @@
                                      :token-in        (:token-in st)
                                      :token-out       (:token-out st)
                                      :session-id      (:session-id st)
+                                     ;; Keys the segment docstring advertises and
+                                     ;; seg-ctx never supplied, so the segments
+                                     ;; reading them rendered nothing even once
+                                     ;; selected. All are already in bar state or
+                                     ;; derived from it — no new I/O.
+                                     :model-id        model
+                                     :cache-read      (:cache-read st)
+                                     :cache-write     (:cache-write st)
+                                     :token-total     (let [i (or (:token-in st) 0)
+                                                            o (or (:token-out st) 0)]
+                                                        (when (pos? (+ i o)) (+ i o)))
+                                     ;; Project keys, fed by whoever owns the
+                                     ;; polling — nil until then, which hides the
+                                     ;; segment rather than showing a stale value.
+                                     :path            (:path st)
+                                     :git-branch      (:git-branch st)
+                                     :git-status      (:git-status st)
                                      :time-spent-ms   (when (and since (pos? since))
                                                         (- (js/Date.now) since))}
                          left-segs  (render-extension-segments theme :left seg-ctx width)

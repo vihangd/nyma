@@ -400,26 +400,75 @@
 ;; Activity segment auto-appends so users see the spinner + verb
 ;; without having to edit their preset. Position :left places it
 ;; alongside model / path / git on the left of the status line.
-(def ^:private auto-append-spec
+(def default-auto-append
   ;; cost / context-pct / time-spent were implemented and unreachable: not
   ;; auto-appended, and the bar never fed them state. "role" is gone from
   ;; here — model_roles' own segment (role + mode + escalation) auto-appends
   ;; and the two rendered side by side.
+  ;;
+  ;; The other fifteen built-ins stayed unreachable for the same reason and had
+  ;; no way out: `settings.status-line` was declared inert, so there was no way
+  ;; to select one. `resolve-auto-append` is that way.
   {"activity"    :left
    "cost"        :right
    "context-pct" :right
    "time-spent"  :right})
 
-(defn install-builtins!
-  "Install every built-in into the module-level registry. Safe to call
-   multiple times."
+(defn builtin-ids
+  "Every built-in segment id — the set `settings.status-line` may name."
   []
-  (doseq [[id cat render] builtin-segments]
-    (let [base    {:category cat :render render}
-          with-ap (if-let [pos (get auto-append-spec id)]
-                    (assoc base :auto-append? true :position pos)
-                    base)]
-      (register-segment id with-ap))))
+  (set (map first builtin-segments)))
+
+(defn resolve-auto-append
+  "Which built-ins appear, where, and in what order.
+
+   `cfg` is `settings.status-line`. Naming either `:left-segments` or
+   `:right-segments` REPLACES the defaults wholesale — a half-specified line
+   would be impossible to reason about — and the vector order is the render
+   order, which is the point: until now ordering was `sort-by :id` and nothing
+   else, so `context-pct` could never sit right of `cost`.
+
+   Unknown ids come back in `:unknown` rather than throwing, so a typo costs a
+   warning and the rest of the line still renders.
+
+   Extension-registered segments are NOT affected: they set their own
+   `autoAppend`, and silently dropping `todos.progress` or `mcp.summary` because
+   a user listed the built-ins they wanted would be a surprise. Pure."
+  [cfg known]
+  (let [left  (seq (:left-segments cfg))
+        right (seq (:right-segments cfg))]
+    (if (or left right)
+      (let [named   (concat (map (fn [id] [(str id) :left])  (or left []))
+                            (map (fn [id] [(str id) :right]) (or right [])))
+            ok      (filterv (fn [[id _]] (contains? known id)) named)
+            unknown (mapv first (remove (fn [[id _]] (contains? known id)) named))]
+        {:spec    (into {} (map (fn [[id p]] [id p]) ok))
+         :order   (into {} (map-indexed (fn [i [id _]] [id i]) ok))
+         :unknown unknown})
+      {:spec default-auto-append :order {} :unknown []})))
+
+(defn install-builtins!
+  "Install every built-in into the module-level registry. Safe to call multiple
+   times, which is how settings are applied: re-installing with a different spec
+   both adds `:auto-append?` to the newly selected and removes it from the
+   dropped, because `register-segment` replaces the whole map."
+  ([] (install-builtins! default-auto-append {}))
+  ([spec order]
+   (doseq [[id cat render] builtin-segments]
+     (let [base    {:category cat :render render}
+           with-ap (if-let [pos (get spec id)]
+                     (cond-> (assoc base :auto-append? true :position pos)
+                       (contains? order id) (assoc :order (get order id)))
+                     base)]
+       (register-segment id with-ap)))))
+
+(defn apply-settings!
+  "Re-install the built-ins according to `settings.status-line`. Returns the
+   unknown ids so the caller can warn once, at startup, rather than per frame."
+  [cfg]
+  (let [{:keys [spec order unknown]} (resolve-auto-append cfg (builtin-ids))]
+    (install-builtins! spec order)
+    unknown))
 
 ;; Register built-ins at module load.
 (install-builtins!)

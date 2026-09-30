@@ -370,8 +370,7 @@
    are the ones that go stale."
   {"steering-mode"          "never implemented; steers are injected all-at-once"
    "follow-up-mode"         "never implemented; the follow-up queue is already one-at-a-time"
-   "scrollback-mode"        "removed with the Ink UI; there is no pager"
-   "status-line"            "removed with the Ink UI; segments are auto-appended in id order"})
+   "scrollback-mode"        "removed with the Ink UI; there is no pager"})
 
 (defn inert-in
   "Keys of `user-settings` that are known to do nothing, sorted. Pure."
