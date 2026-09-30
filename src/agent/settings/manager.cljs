@@ -74,10 +74,16 @@
    ;; file; load-json normalizes both to kebab-case before merge.
    ;; See src/agent/ui/scrollback.cljs and src/agent/ui/chat_pager.cljs.
    :scrollback-mode        true
+   ;; left/right-segments name built-in status-line segments in render order;
+   ;; unset keeps the four that have always been shown. `poll-git` drives the
+   ;; `git` and `path` segments — porcelain is an execSync, so it runs on an
+   ;; interval and never on the render path.
    :status-line            {:preset "default"
                             :left-segments nil
                             :right-segments nil
-                            :separator nil}
+                            :separator nil
+                            :poll-git true
+                            :poll-git-interval-ms 5000}
    ;; Where pickers, prompts and info overlays are placed. `anchor` accepts any
    ;; of pi-tui's nine values — center, top-left, top-center, top-right,
    ;; left-center, right-center, bottom-left, bottom-center, bottom-right —

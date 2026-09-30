@@ -15,6 +15,8 @@
             [agent.ui.status-bar :refer [create-status-bar]]
             [agent.ui.project-card :as project-card]
             [agent.ui.status-line-segments :as segs]
+            [agent.ui.repo-poller :as repo-poller]
+            [agent.utils.git-files :as git-files]
             [agent.version :as version]
             [agent.ui.app-reducers :as reducers]
             [agent.ui.editor-bash :as editor-bash]
@@ -740,6 +742,8 @@
         ;; a hung process, which is the complaint this whole change started
         ;; from. Tick only while working: at idle the status line must stop
         ;; re-rendering so the terminal scroll position holds.
+        ;; Set after .start; holds the poller's stop fn so shutdown can clear it.
+        stop-repo-poll (atom nil)
         tick-timer   (atom nil)
         set-tick!    (fn [on?]
                        (if on?
@@ -1169,6 +1173,7 @@
                             ((:off events) "session_clear"         on-session-clear)
                             ((:off events) "session_start"         on-session-start)
                             ((:off events) "turn_request"          on-turn-request)
+                            (when-let [stop @stop-repo-poll] (stop))
                             ((:emit-async events) "session_shutdown" #js {:reason "user-exit"})
                             (js/process.exit 0))})]
         (.addInputListener tui
@@ -1193,6 +1198,24 @@
                    (.requestRender tui))
             st   @(:state agent)
             sess @(:session agent)]
+        ;; Git figures for the `git` / `path` segments. A poller, never a render:
+        ;; render is synchronous at up to 10 Hz while streaming and porcelain is
+        ;; an execSync. It requests a render ONLY when something changed, because
+        ;; the status tick deliberately stops at idle — re-rendering there moves
+        ;; the terminal scroll position.
+        (let [cfg (let [sm (:settings agent)]
+                    (when (and sm (fn? (:get sm))) (:status-line ((:get sm)))))
+              cwd (js/process.cwd)]
+          (reset! stop-repo-poll
+                  (repo-poller/start!
+                   {:enabled? (not (false? (:poll-git cfg)))
+                    :interval-ms (:poll-git-interval-ms cfg)
+                    :fetch    (fn [] (git-files/repo-state cwd))
+                    :on-change (fn [bar-keys]
+                                 (.setState status-bar
+                                            (clj->js (merge {:path cwd} (or bar-keys {}))))
+                                 (.requestRender tui))})))
+
         ;; The project card first: where you are, before what you were doing.
         ;; `collect` is the only I/O here (three git shell-outs) and runs exactly
         ;; once, after the first frame — never from a render, where the status
