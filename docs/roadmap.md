@@ -24,7 +24,7 @@ build on pi-tui's own `matchesKey`.
 ### 1b. CommandRegistry aliases / hidden / enabled in `builtins.cljs`
 
 - **What's ready:** `src/agent/commands/parser.cljs` supports `:aliases`, `:hidden?`, `:enabled?` on any command spec via `command-suggestions` / `visible-commands`. `autocomplete_builtins.cljs:slash-provider` already consumes the filtered, sorted suggestions list. Coverage in `test/commands_parser.test.cljs`. (`parse-command-line` was removed — it never had a caller; `modes/interactive.cljs:run-command!` + `commands/resolver.cljs` own dispatch, with an args *vector* and `ns__cmd` suffix resolution the cc-kit port did not match.)
-- **What's wired:** the shape is read end-to-end, but `src/agent/commands/builtins.cljs` doesn't declare any aliases, hide any commands, or gate any of them. Existing commands work because the parser treats all three fields as optional.
+- **What's wired:** all of it, as of 2026-09-30. `builtins.cljs` declares `:aliases` (`/cls`→`/clear`, `/m`→`/model`), and `checkpoints` and `stats_dashboard` carry `["undo"]` and `["cost"]` for commands nobody guessed the names of. `resolver.cljs:16-20` resolves them and `extension_scope.cljs:226` passes `opts` through, so each one was pure data — one line. This entry sat open reading "doesn't declare any aliases" long enough that the work was re-estimated as expensive; it was not.
 - **Why we stopped:** mechanical, low leverage until a real need surfaces.
 - **When to do it:**
   - Users ask for short aliases like `/cls` → `/clear`, `/q` → `/exit`.
@@ -85,13 +85,23 @@ Original entry, for context:
   3. Short-circuit with a friendly error if the sandbox mode denies the tool's category.
 - **Files to touch:** `src/agent/middleware.cljs` for the gating, `src/agent/commands/builtins.cljs` if we add an `/allow-always <tool>` command, extension tools that want custom safety profiles.
 
-### 1e. Shared `ProgressBar` component
+### 1e. Shared `ProgressBar` component — CLOSED (2026-09-30, moot)
+
+Both files this entry offers are gone: `src/agent/ui/progress_bar.cljs` and
+`test/progress_bar.test.cljs` do not exist, and neither does the adopter it named
+(`agent_shell/ui/status_line.cljs` — deleted in the `api.ui` dead-slot sweep, which
+took the private `progress-bar` helper with it). Nothing to wire and nothing to wire
+it into. A shared bar can be rebuilt when something actually wants one.
+
+<details><summary>original entry</summary>
 
 - **What's ready:** `src/agent/ui/progress_bar.cljs` with `render-string` (pure) and `ProgressBar` (JSX). Unicode sub-cell resolution (8 block glyphs). Full coverage in `test/progress_bar.test.cljs` (19 tests).
 - **What's wired:** nothing. `agent_shell/ui/status_line.cljs:50-53` still has its own private `progress-bar` helper that only uses full/empty blocks, no sub-cell smoothness.
 - **Why we stopped:** drop-in replacement, but shipping at the same time as the module creates noise.
 - **When to do it:** anytime — swap the private helper for `(render-string ratio width)` in `agent_shell/ui/status_line.cljs`. Also worth considering as the bar for streaming token counters, extension downloads, and compaction progress.
 - **Files to touch:** `src/agent/extensions/agent_shell/ui/status_line.cljs` (delete the private helper, require and call `progress-bar/render-string`).
+
+</details>
 
 ### 1f. `mk-tool-ctx` / `mk-api-mock` test fixtures
 
@@ -333,7 +343,11 @@ Original entry, for context:
 
 **2026-08 — second confirmed instance, and it was load-bearing.** `cli.cljs:437` emits `session_start` about 96 lines and one extension-load phase before `interactive/start` (`cli.cljs:533`) registers a handler for it. The event bus has no replay or stickiness, so that emit reaches an empty handler list — for the UI *and* for every extension (`mcp_client`, `claude_hook_bridge`, `openwiki` all subscribe to it and never see the startup emit). Startup resume works only because `interactive/start` seeds the pane directly, by a separate code path.
 
-**Mitigation:** an emit that fires before subscribers exist is dead, not merely early. Either move the emit after extension load and UI mount, or give the bus a replay for lifecycle events. Until then, treat `session_start` at startup as unreliable and seed from state directly.
+**Mitigation:** an emit that fires before subscribers exist is dead, not merely early. Either move the emit after extension load and UI mount, or give the bus a replay for lifecycle events.
+
+**2026-09-30 — the `session_start` half is FIXED.** The emit is deferred: `cli.cljs` parks the payload as `:pending-session-start` and emits it at `cli.cljs:917`, after extension load and `register-builtins`, with the comment stating why. `mcp_client`, `claude_hook_bridge` and `openwiki` now see the startup emit.
+
+**Still open: `session_ready` and `api.ui`.** `session_ready` fires at `cli.cljs:930`, ~60 lines before `interactive/start` mounts at `cli.cljs:990` — the code there says so outright, and passes `:extension-count` in explicitly *because* "session_ready has already fired by now (the bus has no replay), so a listener inside start would miss it". So the original contract stands for the UI: anything depending on a live `api.ui` must run from a user-interaction handler. `api.ui` without the `:ui` capability at least no longer throws — it returns no-op stubs as of 2026-09-30 — but a stub is not a mounted UI.
 
 ### 3d. "Picker silently swallows a key"
 
@@ -472,7 +486,7 @@ Items identified in the caveman/dirac research (`/Users/vihangd/.claude/plans/dy
 
 | Item | Current state | Gap | Revisit when |
 |---|---|---|---|
-| **D4** Hook timeout + cancel + SIGINT | `hooks.cljs:27,42-43,63` has a per-script timeout (default **5000ms**) via `js/setTimeout` + `.kill proc`. | (i) no AbortController for cooperative cancel, (ii) no SIGINT exit-130 special case, (iii) default is 6× shorter than dirac's 30s. Bumping the default and distinguishing "user-cancelled" from "timeout" is a small fix. | We hit a hook script that exceeds 5s in production, or we want a hook to cooperatively abort on parent Esc. |
+| **D4** Hook timeout + cancel + SIGINT — **CLOSED (2026-09-30)** | `hooks.cljs` no longer exists; hooks run through `claude_hook_bridge/handlers/`. | All three gaps are closed. `command.cljs:24` defaults to **600s** and `http.cljs:24`/`prompt.cljs:18` to 30s, not 5s. An `abort-signal` is threaded into every handler and raced against the timeout (`command.cljs:126-138`), which is the cooperative cancel. And the result distinguishes `:aborted?` from `:timed-out?` (`command.cljs:84`), which is the user-cancelled-vs-timeout case the exit-130 note was after. | — |
 | **D5** Streaming hook output with source prefixes | `run-hook-script` at `hooks.cljs:25-50` buffers stdout and parses once at exit. | When multiple global + project hooks run on the same event, there's no streaming UI and no source prefix to disambiguate output. Dirac's `hook-executor.ts` streams with a per-script prefix. | We ship a hook system with >2 concurrent scripts per event and their diagnostic output is unreadable. |
 | **D9** Cross-platform hook templates | `/new-extension` scaffolds extension code but no hook scripts. | Auto-generate a bash template on Unix + PowerShell on Windows when a user runs a hypothetical `/new-hook` command (or when `/new-extension` declares hooks). Dirac's `hook-executor.ts` has `templates.ts` with the shapes. | We add `/new-hook` or extend `/new-extension` to scaffold hook scripts. |
 | **D6** PreToolUse UI message reordering | Hook-injected messages are appended in emission order. | Dirac reorders the PreToolUse UI message to appear **above** the pending tool box so users see the hook's note before the tool output. Small polish. | Users report confusion about when a hook message applies to the tool call below or the one above. |
@@ -1481,14 +1495,26 @@ not rediscovered:
 - **Function keys are stringified** by `assoc`/`add-watch`. Two closures with identical source
   shared one slot in `extensions.cljs`'s handler map. Fixed with `js/Map`; detector: any
   `(swap! m assoc some-fn …)` or `(add-watch a some-fn …)` in src.
-- **MCP tools are still `"other"`** for the permission gate. `mcp_client` cannot know a remote
-  tool's side effects; a per-server `safety` default in `.mcp.json` would let the user say.
-- **`emitGlobal` is unprefixed** — any extension can emit `permission_request`. A deny-list of
-  core names on that path is a five-line change; nothing legitimate emits them today.
-- **`api.exec`/`api.spawn` have no permission path**, and `lsp_suite`, `verify_gate`,
-  `bash_suite`, `openwiki` call `Bun.spawn` directly, so `:spawn` is unenforceable for
-  compiled-in extensions. Only a lint (`Bun.spawn` outside `bash_suite`/`agent_shell` needs
-  `spawn` declared) makes the capability mean anything.
+- **MCP tools are still `"other"`** for the permission gate — but `"other"` is no longer a hole.
+  **Fixed 2026-09-30:** every built-in role maps it (`ask` in `:default`/`:accept-edits`, `allow`
+  in `:full-auto`), because an ABSENT mapping meant allow, so every MCP tool — `mcp_call`
+  included — was callable in every mode, plan mode among them. The gateway tools carry
+  `:safety` now too. Still owed, and now cosmetic rather than load-bearing: `mcp_client` cannot
+  know a remote tool's side effects, so a per-server `safety` default in `.mcp.json` would let
+  the user say better than `ask`-everything does.
+- ~~**`emitGlobal` is unprefixed**~~ — **DONE.** The deny-list landed; `emitGlobal` refuses the
+  gate events (`permission_request`, `tool_access_check`). See the 2026-09-14 entry below, which
+  already recorded it — this bullet was the duplicate that stayed open.
+- **`api.exec`/`api.spawn` have no permission path.** A lint now holds the line
+  (`test/direct_spawn_lint.test.cljs`, 2026-09-30): an allowlist of the extensions that may
+  launch a process, so a *new* one cannot start spawning unnoticed. Two corrections to what this
+  bullet said. It named only `Bun.spawn`, but `lsp_suite/lsp_client.cljs` uses
+  `node:child_process` — a lint checking one form would have run green over the other. And it
+  proposed making the capability mean something by requiring `:spawn` on the manifests; that was
+  tried and reverted, because the capability-coverage lint then failed the same manifests for
+  declaring a capability they never use (`:spawn` gates `api.exec`/`api.spawn`, which these
+  extensions bypass — that is the whole problem). An allowlist states the fact directly instead
+  of overloading a capability with a second meaning.
 - **State-atom discipline — landed 2026-09-14.** `model_roles` owns `:active-role` through one
   `activate-role!` and a `role_change` event; spec_driven and agent_shell emit it. Message
   writes (spec_driven reset, small_model relief, core `sendMessage`) go through the store via
@@ -1508,11 +1534,14 @@ not rediscovered:
   lowest-priority `before_agent_start`/`context_assembly`/`before_tool_call` handler wins
   silently; two `getTokenBudget`s and two `getModelInfo`s (ctx vs api) return different numbers;
   `api.dispatch` emits an event, not a store dispatch; `setThinkingLevel` throws where every
-  other setter is silent; `api.ui` without `:ui` has no method stubs, so calls `TypeError`.
+  other setter is silent; ~~`api.ui` without `:ui` has no method stubs, so calls `TypeError`~~
+  — **fixed 2026-09-30**, it returns no-op `select`/`input`/`confirm`/`notify`/`setWidget`/
+  `clearWidget` alongside `available: false`, so the guard is optional rather than mandatory.
 - **Test gaps still open:** no throwing-command-handler isolation test; `settings/manager`
   `:roles` replace semantics untested at that layer; `add_dir` has no tests; six test files still
-  hand-roll agent+api+scope instead of `test/tool_ctx_fixture` (§1f); tests run `dist/` with no
-  freshness guard.
+  hand-roll agent+api+scope instead of `test/tool_ctx_fixture` (§1f).
+  ~~tests run `dist/` with no freshness guard~~ — **done**, `dist_freshness` fails on a stale
+  build (recorded in the 2026-09-14 entry below; this was the duplicate).
 - **`advisor/index.cljs:88`** reads `(:advisor (:roles settings))` with no default — the
   documented `:roles`-replaces trap, hit in practice: any user `:roles` map disables the advisor
   role.
@@ -1852,3 +1881,59 @@ array's item type as its doc (squint keywords are strings); thinking_budget disa
 when `turn_finalize` says a continue-nudge was queued (`:nudged`); `/compact` and `api.compact` go
 through `settings->opts` so `compaction.strategy` applies to every trigger; relay `->js-model` and
 the model cache keep a declared cache-read of 0.
+
+## 2026-09-30 — easy wins, and where the tokens actually are
+
+SOTA checked by search rather than recalled: fallback model chains (Claude Code CLI ≥ 2026.6),
+per-agent cost attribution, and published measurements putting tool RESULTS near 56% of context
+tokens and tool calls 28% (CliffCompaction reduces old calls to signatures; Self-Compacting
+agents report 30–70% lower cost per question).
+
+**Measured on nyma's own committed traces** — 64 traces, 3.1M chars: `assistant` 51.1%,
+`tool_call` 44.7%, `user` 4.2%; `bash` (818k) + `read` (558k) are ~98% of tool content. So the
+standing-prefix work of the last two releases addressed the *smaller* half. One first reading
+corrected before acting on it: the 12k truncation cap is **not** broken — `read` deliberately
+carries a 200k policy because it is line-capped at the tool, and `bash` registers its own.
+
+**Landed.** A tool that declares no `:safety` no longer walks past the gate (see the MCP bullet
+above); `/new` switches the session file instead of only clearing the store, so `nyma -c` no
+longer replays two sessions as one; `bash` allow/deny lists read `~/.nyma` as well as the project
+file; `api.ui` returns stubs without the `:ui` capability; an unpriced model reports `null`, not
+`$0.00`, in `-p --output-format json`; four command aliases; the width-guard counter appears in
+the crash handler, which is the diagnostic for this repo's most productive bug class; the spawn
+allowlist lint; 110 lines of unreachable code deleted; and an opt-in per-role `:fallback` chain.
+
+**The fallback chain needed no run-loop change**, which is worth recording as a seam that paid
+off: `loop.cljs` already emits `provider_error` as a collect event and re-runs `streamText` when
+a handler answers `{retry: true}`. The chain is a `model_roles` handler that swaps the model on
+the config and says retry. The classification line is availability versus request — refused,
+timed out, 5xx, overloaded, or a local server that lists a model it cannot load are worth another
+model; a 401 or a prompt that will not fit are not, because the next model fails the same way and
+falling back buries the setup error. Request patterns are checked FIRST and win, because a
+context overflow arrives from Anthropic as an `invalid_request_error`.
+
+**Dropped, not deferred: the reads-without-writers state-key lint.** `roadmap.md` has owed it
+since the `:runtime-model` and `.-textDelta` instances. Two prototypes produced 11 then 9 false
+positives, because reads reach state through shapes a grep cannot tell from a state key. The
+~60-line estimate was wrong, and a lint that has to be read past is worse than none. The class
+still bites; it needs a different detector.
+
+**Deferred with the measurement already done: tool-result reduction.** It is where the tokens
+are (44.7% of transcript, `bash`+`read` ~98% of that). It is deferred because nyma has four
+interacting context mechanisms — `tool_result_policy`, `priority_assembly`, `smart_compaction`,
+`anthropic_compaction` — and `priority_assembly` only prunes once *already over budget*, then
+drops whole messages rather than reducing them. It deserves its own pass with a before/after
+benchmark, not a change bundled with nine others.
+
+**Still owed, verified open:**
+
+- `lsp_client.cljs:233` `did-close!` has no caller, so every language server accumulates buffers
+  for the session's life. A **wire**, not a delete — but there is no obvious call site, which is
+  why it is still here.
+- Cost attribution stops short of `handoff`, `spec_driven`, `smart_compaction` and `subagent`.
+- `budget` does not cap extension spend.
+- The bench ledger does not mark which pass rates are single-trial. On the 25-task set they are
+  not comparable between arms: 14 tasks never failed, no task failed in every arm, and every
+  failure came from the same 11.
+- `docs/plan-context-engineering.md` asserts `is-claude-model?` "already gates behavior to
+  Claude". That function was deleted as dead; the premise is false and the doc is untouched.
