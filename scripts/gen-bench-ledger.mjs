@@ -20,7 +20,7 @@ import * as path from "node:path";
 
 const DIR = "bench/results";
 
-function summarize(file) {
+export function summarize(file) {
   const d = JSON.parse(readFileSync(path.join(DIR, file), "utf8"));
   const rs = d.results ?? [];
   if (!rs.length) return null;
@@ -61,11 +61,15 @@ function summarize(file) {
   };
 }
 
-const rows = readdirSync(DIR)
-  .filter((f) => f.endsWith(".json") && f !== "latest.json")
-  .map((f) => { try { return summarize(f); } catch { return null; } })
-  .filter(Boolean)
-  .sort((a, b) => (a.file < b.file ? -1 : 1));
+export function rowsOf() {
+  return readdirSync(DIR)
+    .filter((f) => f.endsWith(".json") && f !== "latest.json")
+    .map((f) => { try { return summarize(f); } catch { return null; } })
+    .filter(Boolean)
+    .sort((a, b) => (a.file < b.file ? -1 : 1));
+}
+
+const rows = rowsOf();
 
 const n = (v) => (v == null ? "-" : typeof v === "number" ? v.toLocaleString("en-US") : v);
 const head = `# Benchmark results ledger
@@ -94,6 +98,13 @@ const body = rows.map((r) =>
   `| ${r.file.replace(/\.json$/, "")} | ${r.label} | \`${r.sha}\` | ${r.model} | ${r.tasks} ${r.langs} | ${r.pass}% | ${r.timeout} | ${n(r.tokPerTask)} | ${r.cachePct ?? "-"} | ${r.serverCachePct ?? "-"} | ${n(r.turns)} | ${n(r.toolCalls)} | ${r.edits} | ${r.writes} | ${r.wallMin}m | ${r.reported} | ${r.smallModel ? "yes" : ""} |`
 ).join("\n");
 
-const out = `${head}\n${body}\n`;
-writeFileSync("bench/RESULTS.md", out);
-console.log(`bench/RESULTS.md — ${rows.length} runs`);
+export const out = `${head}\n${body}\n`;
+
+// Guarded so a test can import `summarize`/`rowsOf`/`out` without overwriting
+// the committed ledger. Without this the only way to check the generator was
+// to run it, which is why `bench/RESULTS.md` was the one generated artifact in
+// the repo with no drift test.
+if (import.meta.main) {
+  writeFileSync("bench/RESULTS.md", out);
+  console.log(`bench/RESULTS.md — ${rows.length} runs`);
+}
