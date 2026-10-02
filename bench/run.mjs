@@ -129,13 +129,36 @@ function run(cmd, args, { cwd, timeoutMs, input, env }) {
       : null;
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
+    // Reap the group on EVERY exit path, not only on timeout.
+    //
+    // The timeout branch above kills the group and explains why grandchildren
+    // escape; the normal-completion path did not, and that is the one that
+    // leaked. A solution the agent writes can spawn workers that outlive the
+    // test runner: they let go of the inherited stdout pipe (so 'close' fires
+    // and the task is scored a clean pass) while still running. The harness
+    // then deletes the task's temp directory and moves on, and the workers
+    // survive pointing at a path that no longer exists.
+    //
+    // Measured: one `parallel-letter-frequency` run left a `jest` parent and
+    // 86 node workers alive for SEVEN DAYS, ~359 MB, long after the benchmark
+    // reported success. They also quietly load the machine every later run is
+    // timed on.
+    //
+    // SIGKILL with no grace period is right here: the child has already
+    // exited, so anything still in its group ignored its parent going away,
+    // and the directory it was working in is about to be removed. killTree
+    // swallows ESRCH when the group is already empty, which is the usual case.
+    const reap = () => { try { killTree(child, "SIGKILL"); } catch { /* gone */ } };
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       if (hardTimer) clearTimeout(hardTimer);
+      reap();
       resolve({ exitCode: code, stdout, stderr, timedOut });
     });
     child.on("error", (e) => {
       if (timer) clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
+      reap();
       resolve({ exitCode: -1, stdout, stderr: String(e.message), timedOut });
     });
     if (input !== undefined) { child.stdin.write(input); }
