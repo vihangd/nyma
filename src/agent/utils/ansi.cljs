@@ -1,6 +1,5 @@
 (ns agent.utils.ansi
-  "ANSI-aware text utilities (`truncate-text`, `terminal-width`)."
-  )
+  "ANSI-aware text utilities (`truncate-text`, `terminal-width`).")
 
 (defn terminal-width
   "Returns current terminal width, defaulting to 80 if unavailable."
@@ -78,7 +77,6 @@
                  remaining (- (count lines) max-lines)]
              (str (.join kept "\n") "\n[..." remaining " more lines]")))))))
 
-
 ;;; ─── Colour ─────────────────────────────────────────────────────────
 ;;; One `fg` for every renderer. Three files each carried their own
 ;;; truecolor-only copy, and none of them knew about NO_COLOR or a terminal
@@ -103,9 +101,17 @@
        ;; terminal — it is no terminal. NO_COLOR is the opt-out.
        :else                                        16777216))))
 
-(defn- hex->rgb [hex]
+(defn- hex->rgb
+  "`#rrggbb` → [r g b], or nil.
+
+   The digits are checked, not just the shape. Without that, `#gggggg` passed
+   the length-and-`#` test and `parseInt` returned NaN for each channel — which
+   the old luminance branch quietly turned into plain white, and which any
+   arithmetic downstream turns into nonsense. `fg` promises the empty string
+   for a colour it cannot read; this is what makes that true."
+  [hex]
   (let [h (str (or hex ""))]
-    (when (and (= (count h) 7) (.startsWith h "#"))
+    (when (re-matches #"#[0-9a-fA-F]{6}" h)
       [(js/parseInt (.slice h 1 3) 16)
        (js/parseInt (.slice h 3 5) 16)
        (js/parseInt (.slice h 5 7) 16)])))
@@ -113,6 +119,62 @@
 (defn- rgb->256 [[r g b]]
   (let [q (fn [v] (js/Math.round (* 5 (/ v 255))))]
     (+ 16 (* 36 (q r)) (* 6 (q g)) (q b))))
+
+(defn rgb->16
+  "Nearest of the 16 ANSI colours, as an SGR foreground code.
+
+   This replaced a luminance test that returned 97 or 37 — bright white or
+   white — for every colour. At depth 16 that made error, warning and success
+   byte-identical, so the one thing colour carries in this UI (which of these
+   lines is a problem) was gone exactly where there is no other signal.
+
+   Hue sector, not nearest-RGB. Nearest-RGB was tried first and is wrong for
+   precisely the colours themes are built from: `#f7768e`, this theme's error
+   red, is 34,152 away from pure red and 14,706 from mid-grey, so a distance
+   metric calls a salmon-pink error message grey — and then success and muted
+   land on the same grey. Every desaturated colour collapses to the centre,
+   which is the bug again in a new coat.
+
+   So: decide chromatic-or-not by saturation, then pick by hue. Pure.
+
+   pi-tui cannot help here. Its `TerminalColorMode` is only
+   `\"256color\" | \"truecolor\"`, so `foregroundAnsi` has no 16-colour mode to
+   borrow — passing one falls through to 256."
+  [[r g b]]
+  (let [mx    (max r g b)
+        mn    (min r g b)
+        delta (- mx mn)
+        ;; HSV value and saturation, 0–1.
+        v     (/ mx 255)
+        s     (if (zero? mx) 0 (/ delta mx))
+        bright? (> v 0.6)]
+    (if (< s 0.2)
+      ;; Greyscale: three steps is all 16 colours offer.
+      (cond (< v 0.25) 30                        ; black
+            (< v 0.55) 90                        ; bright black (grey)
+            (< v 0.85) 37                        ; white
+            :else      97)                       ; bright white
+      ;; Chromatic: six 60° sectors, bright or normal by value.
+      (let [h (* 60 (cond
+                      (= mx r) (mod (/ (- g b) delta) 6)
+                      (= mx g) (+ 2 (/ (- b r) delta))
+                      :else    (+ 4 (/ (- r g) delta))))
+            h (if (neg? h) (+ h 360) h)
+            ;; Boundaries are the midpoints between the six primaries (30, 90,
+            ;; 150, …) EXCEPT yellow/green, which sits at 75 rather than 90.
+            ;; Yellow is a narrow perceptual band: `#9ece6a`, an unmistakably
+            ;; green "success" colour, computes to hue 88.8° and a midpoint
+            ;; boundary would print it as yellow — the same shade as "warning",
+            ;; which is the one pair that most needs to stay distinguishable.
+            base (cond
+                   (< h 30)  31                  ; red
+                   (< h 75)  33                  ; yellow
+                   (< h 150) 32                  ; green
+                   (< h 210) 36                  ; cyan
+                   (< h 270) 34                  ; blue
+                   (< h 330) 35                  ; magenta
+                   :else     31)]                ; back to red
+        (if bright? (+ base 60) base)))))
 
 (defn fg
   "Foreground SGR for a #rrggbb string at the terminal's depth; empty string
@@ -122,8 +184,7 @@
    (if-let [[r g b] (hex->rgb hex)]
      (cond
        (= depth 0)  ""
-       (< depth 256) (let [lum (+ (* 0.299 r) (* 0.587 g) (* 0.114 b))]
-                       (str ESC "[" (if (> lum 128) "97" "37") "m"))
+       (< depth 256) (str ESC "[" (rgb->16 [r g b]) "m")
        (= depth 256) (str ESC "[38;5;" (rgb->256 [r g b]) "m")
        :else         (str ESC "[38;2;" r ";" g ";" b "m"))
      "")))
