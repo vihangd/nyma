@@ -12,7 +12,7 @@
         "@earendil-works/pi-tui": "^0.85.1",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "ai": "7.0.97",
-        "headroom-ai": "^0.37.0",
+        "headroom-ai": "0.39.1",
         "linkedom": "^0.18.13",
         "marked": "^17.0.6",
         "marked-terminal": "^7.3.0",
@@ -216,7 +216,7 @@
 
     "hasown": ["hasown@2.0.3", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg=="],
 
-    "headroom-ai": ["headroom-ai@0.37.0", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "@anthropic-ai/sdk": ">=0.30.0", "ai": ">=6.0.0", "openai": ">=4.0.0" }, "optionalPeers": ["@ai-sdk/provider", "@anthropic-ai/sdk", "ai", "openai"] }, "sha512-LhhcQyEmcOtH6MNgcaoU2OnI/7QlMyF1CZPYdZwIWyumXjnTM6JXZZpbIufT2LFWD6cYWdUsrk3iXa9LOY3hvw=="],
+    "headroom-ai": ["headroom-ai@0.39.1", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "@anthropic-ai/sdk": ">=0.30.0", "ai": ">=6.0.0", "openai": ">=4.0.0" }, "optionalPeers": ["@ai-sdk/provider", "@anthropic-ai/sdk", "ai", "openai"] }, "sha512-jMItSdHA444lCXxibw/XlyhPt9vp09LuLgLNVG6/1Ay0lOZEUhrwlezsMMhr98RMgIe9AejhIQef91cvUgiWgA=="],
 
     "highlight.js": ["highlight.js@10.7.3", "", {}, "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="],
 

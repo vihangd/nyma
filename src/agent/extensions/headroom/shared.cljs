@@ -19,8 +19,21 @@
    :proxy-url             "http://localhost:8787"
    :compression-threshold 0.5
    :min-tokens-to-compress 8000
-   :algorithms            ["SmartCrusher" "CodeCompressor" "Kompress"]
-   :disable-ccr           true})
+   ;; nil = the proxy's default marker-free pipeline. See `compress/valid-modes`.
+   :mode                  nil})
+
+(def removed-keys
+  "Settings that named an option surface `headroom-ai` never had, with what to
+   use instead. `proxyUrl`, `algorithms` and `disableCcr` appear nowhere in the
+   package — not in `dist/`, not in the type defs, not in the source maps — so
+   the algorithm list and the CCR flag were decided entirely by the proxy while
+   these sat in settings files looking effective.
+
+   Reported rather than dropped in silence, the same reason `settings/manager`
+   keeps `inert-keys` with a reason per key: a setting that does nothing is
+   worse than one that is rejected."
+  {:algorithms  "removed — the proxy owns the transform pipeline; use `mode` to pick one of ccr, lossy_inline, lossless_then_lossy"
+   :disable-ccr "removed — CCR is a pipeline mode now and off by default; `\"mode\": \"ccr\"` turns it on"})
 
 ;; ── Settings loader ──────────────────────────────────────────────
 
@@ -81,6 +94,19 @@
 
 (defn load-config []
   (:config (read-config)))
+
+(defn removed-key-warnings
+  "One message per `removed-keys` entry present in the user's config. Pure.
+
+   `read-config` merges defaults under the user's file, so membership alone
+   cannot distinguish a user key from a default — which is why the removed keys
+   are absent from `default-config` rather than kept with a nil value."
+  [config]
+  (->> removed-keys
+       (keep (fn [[k hint]]
+               (when (contains? config k)
+                 (str "headroom." (name k) " is ignored: " hint))))
+       vec))
 
 (defn disabled-hint
   "What `/headroom-stats` answers when the extension is off. Names the exact

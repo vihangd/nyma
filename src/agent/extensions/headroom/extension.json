@@ -9,7 +9,7 @@
   ],
   "dependsOn": [],
   "dependencies": {
-    "headroom-ai": "^0.22.4"
+    "headroom-ai": "^0.39.1"
   },
   "settings": {
     "headroom": {

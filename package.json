@@ -39,7 +39,7 @@
     "@earendil-works/pi-tui": "^0.85.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ai": "7.0.97",
-    "headroom-ai": "^0.37.0",
+    "headroom-ai": "0.39.1",
     "linkedom": "^0.18.13",
     "marked": "^17.0.6",
     "marked-terminal": "^7.3.0",

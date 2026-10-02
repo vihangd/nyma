@@ -26,7 +26,7 @@ User message → loop.cljs
   → context_assembly (priority 10):    headroom compresses the survivors
        ↓
   POST http://localhost:8787/headroom/compress
-  { messages, model, algorithms, disableCcr }
+  { messages, model, tokenBudget, config: { mode } }
        ↓
   Python proxy (Rust axum + Python runtime):
     1. ContentRouter detects type per message block (JSON / code / logs / text)
@@ -109,16 +109,24 @@ All keys under `"headroom"` in `.nyma/settings.json` or `~/.nyma/settings.json`:
     // Minimum message tokens before compression is attempted
     "minTokensToCompress": 8000,
 
-    // Which algorithms to request (proxy picks the best per content type)
-    "algorithms": ["SmartCrusher", "CodeCompressor", "Kompress"],
-
-    // Disable reversible CCR markers (safe default — see CCR section)
-    "disableCcr": true
+    // Pipeline mode. Omit for the proxy's default marker-free pipeline.
+    // One of: "ccr", "lossy_inline", "lossless_then_lossy" — the proxy
+    // answers 400 to anything else, so an unknown value is dropped with a
+    // warning instead of failing every assembly.
+    "mode": null
   }
 }
 ```
 
-### Available algorithms
+**Removed settings.** `algorithms` and `disableCcr` are gone, and if they are in
+your settings file nyma now says so at startup. They named an option surface
+`headroom-ai` never had: `proxyUrl`, `algorithms` and `disableCcr` appear
+nowhere in the package, so the transform pipeline was always the proxy's choice
+and the CCR flag never reached it. The algorithm table below still describes
+what the proxy does — it was never nyma's to select. CCR is a pipeline mode
+now: use `"mode": "ccr"` where you would have set `"disableCcr": false`.
+
+### Available algorithms (selected by the proxy)
 
 | Algorithm | Best for | Notes |
 |---|---|---|
@@ -183,13 +191,13 @@ Zero interaction. lean-ctx overrides `read`/`edit` tools at the MCP layer to ret
 
 ## CCR — reversible compression (deferred)
 
-When `disableCcr: false`, the proxy replaces compressed blocks with `<<ccr:HASH>>` markers and stores originals in local SQLite. The model can call `headroom_retrieve(hash)` to recover original content on demand.
+When `"mode": "ccr"`, the proxy replaces compressed blocks with `<<ccr:HASH>>` markers and stores originals in local SQLite. The model can call `headroom_retrieve(hash)` to recover original content on demand.
 
 To enable:
 1. `headroom mcp install` — registers MCP tools in `.mcp.json`, auto-discovered by `mcp_client`
-2. Set `"disableCcr": false` in settings
+2. Set `"mode": "ccr"` in settings
 
-First slice ships with `disableCcr: true` — without the `headroom_retrieve` tool registered, CCR markers would be unrecoverable.
+CCR stays off by default — without the `headroom_retrieve` tool registered, CCR markers would be unrecoverable.
 
 ## Troubleshooting
 

@@ -27,6 +27,51 @@
   (try (or (some-> event .-tokenBudget .-contextWindow) 100000)
        (catch :default _ 100000)))
 
+(defn- input-budget [event]
+  (try (let [b (some-> event .-tokenBudget .-inputBudget)]
+         (when (and (number? b) (pos? b)) b))
+       (catch :default _ nil)))
+
+(def valid-modes
+  "The pipeline modes `POST /v1/compress` accepts. Unset means the proxy's
+   default marker-free pipeline; the proxy answers 400 to anything else
+   (headroom-ai `CompressMode`), so an unknown value is dropped here with a
+   warning rather than turned into a failed request every assembly."
+  #{"ccr" "lossy_inline" "lossless_then_lossy"})
+
+(defn resolve-mode
+  "config → the `config.mode` to send, or nil for the proxy default. Pure.
+
+   `:algorithms` and `:disable-ccr` are the two keys this replaces. They named
+   an option surface headroom-ai never had — `proxyUrl`, `algorithms` and
+   `disableCcr` appear nowhere in the package, so both settings were inert and
+   the algorithm list was decided entirely by the proxy. CCR is now a pipeline
+   mode instead of a flag, and off by default, so the one legacy spelling worth
+   honouring is an explicit `disable-ccr: false`, which asked for CCR on."
+  [config]
+  (let [m (some-> (:mode config) str)]
+    (cond
+      (contains? valid-modes m) m
+      (seq m)                   ::invalid
+      (false? (:disable-ccr config)) "ccr"
+      :else                     nil)))
+
+(defn compress-opts
+  "The options object handed to `headroom-ai`'s `compress`. Pure.
+
+   Exported and pure because the bug this replaced was invisible from the
+   outside: the old call passed `proxyUrl`, `algorithms` and `disableCcr`, none
+   of which the package has ever read, and nothing asserted the option NAMES.
+   A test over the returned object is the only thing that catches that class."
+  [{:keys [base-url model token-budget mode]}]
+  (let [o #js {:baseUrl base-url :model model}]
+    ;; Absent, not zero/null: the proxy reads a missing key as its default.
+    (when (and (number? token-budget) (pos? token-budget))
+      (aset o "tokenBudget" token-budget))
+    (when (and mode (string? mode))
+      (aset o "config" #js {:mode mode}))
+    o))
+
 ;; ── Activation ───────────────────────────────────────────────────
 
 (defn activate
@@ -36,12 +81,15 @@
         threshold  (or (:compression-threshold config) 0.5)
         min-tokens (or (:min-tokens-to-compress config) 8000)
         proxy-url  (or (:proxy-url config) "http://localhost:8787")
-        algorithms (or (:algorithms config) ["SmartCrusher" "CodeCompressor" "Kompress"])
-        ;; Read, not hardcoded. The README documents setting
-        ;; "disableCcr": false to turn CCR markers on, and the literal below
-        ;; made that instruction impossible to follow. `some?` rather than
-        ;; `or`, so an explicit false is not coerced back to the default.
-        disable-ccr (let [v (:disable-ccr config)] (if (some? v) (boolean v) true))
+        ;; `baseUrl`, not `proxyUrl` — see the call site. The nyma-facing
+        ;; setting keeps the name `proxy-url`, which is accurate.
+        mode       (let [m (resolve-mode config)]
+                     (when (= m ::invalid)
+                       (d/warn "headroom"
+                               (str "unknown headroom.mode " (pr-str (:mode config))
+                                    " — using the proxy default. Valid: "
+                                    (str/join ", " (sort valid-modes)))))
+                     (when (string? m) m))
         warn-once  (atom false)
 
         handler
@@ -62,12 +110,20 @@
                 (try
                   (let [messages (.-messages event)
                         model-id (current-model-id event)
-                        result   (js-await
-                                  (compress messages
-                                            #js {:proxyUrl   proxy-url
-                                                 :model      model-id
-                                                 :algorithms (clj->js algorithms)
-                                                 :disableCcr disable-ccr}))]
+                        ;; `baseUrl` is the option headroom-ai reads. The
+                        ;; previous `proxyUrl` was ignored, and the package's
+                        ;; own default happens to be this same localhost:8787
+                        ;; — so a DEFAULT setup worked and a configured proxy
+                        ;; was silently bypassed, while `probe-proxy` went on
+                        ;; reporting the configured one healthy.
+                        opts     (compress-opts
+                                  {:base-url     proxy-url
+                                   :model        model-id
+                                   ;; "compress to fit within this limit",
+                                   ;; which is what this handler is for.
+                                   :token-budget (input-budget event)
+                                   :mode         mode})
+                        result   (js-await (compress messages opts))]
                     (when result
                       (let [saved (or (.-tokensSaved result) 0)
                             r     (or (.-compressionRatio result) 1.0)]

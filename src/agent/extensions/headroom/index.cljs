@@ -37,6 +37,17 @@
       (d/warn (str "[headroom] " m))
       (when notify (notify m "error")))))
 
+(defn notify-removed-keys!
+  "Say that a setting the user wrote no longer does anything, and what replaced
+   it. Separate from the malformed-file path above because this is a warning
+   about a file that parsed fine — the setting is simply inert, which is the
+   failure mode that let `algorithms` and `disableCcr` look effective for
+   fifteen minor versions."
+  [config notify]
+  (doseq [m (shared/removed-key-warnings config)]
+    (d/warn (str "[headroom] " m))
+    (when notify (notify m "warn"))))
+
 (defn ^:export default [api]
   (.registerFlag api "headroom"
                  ;; No :default — an absent flag must read as nil so settings
@@ -56,7 +67,10 @@
         ;; api.ui.notify while building the TUI, well after extensions load,
         ;; so an activation-time notify would find `available` false and be
         ;; swallowed back into debug.log.
-        on-ready (fn [_data _ctx] (notify-settings-errors! errors notify) nil)
+        on-ready (fn [_data _ctx]
+                   (notify-settings-errors! errors notify)
+                   (notify-removed-keys! base notify)
+                   nil)
         _        (when (seq errors) (.on api "session_ready" on-ready))
         drop-ready! (fn [] (when (seq errors) (.off api "session_ready" on-ready)))
         flag-val (.getFlag api "headroom")
