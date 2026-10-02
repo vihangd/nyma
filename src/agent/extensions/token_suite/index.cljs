@@ -8,6 +8,7 @@
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.anthropic-compaction :as anthropic-compaction]
             [agent.extensions.token-suite.token-preview :as token-preview]
+            [agent.extensions.token-suite.tool-deferral :as tool-deferral]
             [agent.token-estimation :as te]
             [clojure.string :as str]))
 
@@ -54,6 +55,14 @@
          "Structured Context:  " (:files-discovered sc) " files, "
          (:hot-tokens sc) " hot + " (:warm-tokens sc) " warm tokens\n"
          "Smart Compaction:    " (:full-compactions sm) " full compactions\n"
+         ;; Printed only once deferral has done something — a zero line in a
+         ;; setup with no deferred tools reads as a broken feature. Written and
+         ;; never read is the inverse of this repo's most common bug, so the
+         ;; reader lands with the writer.
+         (let [tdf (:tool-deferral s)]
+           (when (pos? (or (:searches tdf) 0))
+             (str "Tool Deferral:       " (:searches tdf) " searches, "
+                  (:revealed tdf) " tools revealed\n")))
          "─────────────────────────────────────────\n"
          "Total Estimated Token Savings: ~" total-saved " tokens")))
 
@@ -69,6 +78,7 @@
     (swap! deactivators conj (smart-compaction/activate api))
     (swap! deactivators conj (anthropic-compaction/activate api))
     (swap! deactivators conj (token-preview/activate api))
+    (swap! deactivators conj (tool-deferral/activate api))
 
     ;; Register /token-stats command
     (.registerCommand api "token-stats"

@@ -27,6 +27,13 @@
                       ;; if your turns are minutes apart. See kv-cache/valid-ttls.
                       :cache-ttl nil
                       :extra-providers {:anthropic [] :google []}}
+   ;; Withhold a tool's JSON Schema from every request until the model asks
+   ;; for it with `tool_search`. Off by default and inert with no patterns:
+   ;; it changes what the model can see, which is not a default anyone should
+   ;; get by upgrading. Patterns match the LIVE name (`mcp__*`) or the bare one
+   ;; (`multi_edit`). See tool_deferral for why there is no `tool_invoke`.
+   :tool-deferral    {:enabled false
+                      :defer []}
    :repo-map         {:max-tokens 2000 :reindex-on-edit true
                       :extensions #{"js" "ts" "tsx" "cljs" "py" "rs" "go" "java" "rb"}}
    :priority-assembly {:min-keep 3 :always-keep-compaction true}

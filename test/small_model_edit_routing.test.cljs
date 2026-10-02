@@ -98,11 +98,16 @@
 
   (it "the set names every tool that is the only route to withheld content"
       (fn []
-        ;; the two deferral introduces, plus the recall for a truncated result
+        ;; the two MCP deferral introduces, the generic deferral search, plus
+        ;; the recall for a truncated result
         (-> (expect (contains? tm/gateway-tool-names "mcp_search")) (.toBe true))
         (-> (expect (contains? tm/gateway-tool-names "mcp_call")) (.toBe true))
         (-> (expect (contains? tm/gateway-tool-names "retrieve_result")) (.toBe true))
-        (-> (expect (count tm/gateway-tool-names)) (.toBe 3))))
+        (-> (expect (contains? tm/gateway-tool-names "tool_search")) (.toBe true))
+        ;; The count is pinned on purpose: adding a tool that is the only route
+        ;; to withheld content has to be a decision, not a drive-by, because a
+        ;; capability allowlist written before it existed cannot name it.
+        (-> (expect (count tm/gateway-tool-names)) (.toBe 4))))
 
   (it "a profile allowlist that forgets the truncation recall still gets it"
       (fn []

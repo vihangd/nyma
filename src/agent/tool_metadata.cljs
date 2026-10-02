@@ -267,13 +267,19 @@
                              id it cannot spend.\" A user-authored allowlist has
                              no such convention protecting it.
 
+     tool_search           — `token_suite/tool_deferral` withholds any tool
+                             whose name matches a configured pattern and offers
+                             this in its place. Same reasoning as the two
+                             above: drop it and the deferred tools become
+                             unreachable rather than merely unlisted.
+
    `tool_access_check` merges by INTERSECTION, so any handler returning an
    explicit allowlist silently removes anything it does not name — and an
    allowlist written before these existed cannot name them. A narrower
    expressing a *capability* preference (which model is good at what) should
    union them back in. One expressing a *permission* boundary — plan mode, role
    policy — deliberately should not: there, withholding the route is the point."
-  #{"mcp_search" "mcp_call" "retrieve_result"})
+  #{"mcp_search" "mcp_call" "retrieve_result" "tool_search"})
 
 (defn matches-tool-name?
   "Is `offered` — a name from the live active set — the tool called `bare`?
