@@ -1937,3 +1937,96 @@ benchmark, not a change bundled with nine others.
   failure came from the same 11.
 - `docs/plan-context-engineering.md` asserts `is-claude-model?` "already gates behavior to
   Claude". That function was deleted as dead; the premise is false and the doc is untouched.
+
+## 2026-10-02 — pi 1.0, and four bugs it did not cause
+
+pi 1.0 shipped 2026-10-01: the first stable release of the harness nyma takes its TUI from
+(`@earendil-works/pi-tui`) and its closest peer. nyma was eight releases behind. This is the
+third pi sweep (see 2026-09-12 above for the fork and the deprecation).
+
+**The headline breaking change does not apply to nyma.** "The TUI now runs fullscreen; set
+`tuiMode: 'regular'` to keep scrollback" is a *coding-agent* default. `tuiMode` does not exist in
+pi-tui; 1.0 still ships `TuiMainScreen` and `TuiAltScreen` as separate constructible classes with
+unchanged semantics, and `interactive.cljs:667` names `TuiMainScreen` explicitly. So the whole
+idle-quiescence discipline — repo-poller change detection, spinner gating, tick start/stop, all of
+which exists only because the main buffer shares the terminal's scrollback — stands.
+
+**What landed.** Four verified bugs, none of them from pi: `headroom` passed three option names
+the package has never had; `/fork` was a no-op; `priority_assembly` hand-rolled the edit set and
+so never scored `multi_edit`; `kv_cache` set no cache TTL. Four borrows: alt+enter queues a
+follow-up, the tree viewer can branch, `settings.startup` turns the card down, and generic tool
+deferral. Plus the 16-colour fallback and the full dependency bump. See the commits.
+
+**Generic tool deferral is the one real feature.** `token-suite.tool-deferral.defer` takes name
+patterns and withholds the matching tools' schemas until `tool_search` turns them up. Measured on
+8 natives + 5 MCP servers × 8 tools + 4 extension tools: 52 advertised tools → 13, and 9,381
+schema tokens → 1,621 (83%). It has no `tool_invoke` on purpose — a dispatcher presents itself to
+the permission gate instead of its target, which is the hole `96c0da5` closed.
+
+**Dependencies, all of them.** pi-tui 1.0, squint 0.14.210, `ai` 7.0.127 and the three
+`@ai-sdk/*` providers, plus five smaller ones. `marked` stays at 17 for the reason recorded in the
+2026-09-11 sweep. `ai` was verified with a live run rather than the suite, which is what its exact
+pin is for: two turns, a correct answer, and a non-zero cache read.
+
+**The pi-tui bump cannot be verified by the test suite**, and this is worth recording as a
+standing fact rather than a one-off: 17 test files import pi-tui and none of them render a real
+terminal. It was checked three ways instead — every imported symbol present in 1.0.0, the three
+strings nyma depends on (`"exceeds terminal width"`, `overlayStack`, and the absence of an
+`exports` map, which is what lets the `dist/keys.js` deep import resolve), and a live drive with
+`expect` against both `bun dist/` and the compiled binary: overlay typing, picker Enter, and the
+editor still alive afterwards.
+
+**1.0 adds Linux native prebuilds that 0.85.1 did not ship.** Four `bundle:all` targets are Linux
+and two are musl, where a glibc-linked `.node` will not load. Not a problem: the loader is lazy,
+every `require` is in try/catch falling through candidate paths, and the Linux branch returns
+early unless `DISPLAY` is set. nyma never calls it at all — `/copy` shells to `pbcopy`.
+
+### The upstream report is unblocked
+
+`roadmap.md:469` held three pi-tui findings with a stated blocker: *"Blocked on there being no
+release since 2026-05-07; the ask is a release, not a patch."* Eight releases and a 1.0 later,
+that blocker is void.
+
+Finding (2) survives 1.0 and is still the valuable one: `tui-main-screen.ts` throws
+"Rendered line {i} exceeds terminal width …", calls `this.stop()` first, and the check is **still
+only on the incremental path** — `fullRender()` has none, so an over-wide line on first render,
+resize or forced render soft-wraps and desynchronises the differential renderer instead of
+throwing. [Issue #9691](https://github.com/earendil-works/pi/issues/9691) already covers the loud
+half; the silent twin belongs as a comment there, not a new issue.
+
+Consequence for nyma: the message substring still matches, so `crash_recovery` survives the bump,
+and `width_guard` + `crash_recovery` both stay load-bearing. Neither is deletable.
+
+### Pi Durable — ruled out, and the one invariant checked
+
+Pi Durable shipped alongside 1.0: a `Harness` over one storage backend (memory / SQLite-WAL /
+JSONL), conversations as immutable entry trees, atomic commits that append entries and mutate
+typed documents together, and tasks as durable state machines checkpointed at each step, so a
+crash mid-tool-call resumes where it stopped. Targets Node, Bun and Cloudflare Durable Objects.
+Its pitch is many surfaces and several humans steering one agent.
+
+**Not a borrow.** It is a different substrate for the agent loop, not a feature: adopting it means
+replacing `loop.cljs` and `sessions/manager.cljs`, and the gateway already covers the
+multi-surface half (session pool, per-conversation lanes, idempotency dedup). Its own README calls
+the API experimental and subject to change between releases, and notes that one process owns a
+storage at a time with no cross-process locking.
+
+**Its invariant — nothing is displayed before it is durably stored — was checked, and nyma
+already holds it.** `attach-session-persistence!` says so: "appends are synchronous, one per
+message", and the one real gap was the assistant turn, which is only dispatched when the turn
+completes — so a crash mid-stream lost the whole response. That is already solved with a sidecar
+checkpoint fed from `message_update`, the same event the UI renders from ("so this cannot drift
+from what the user saw on screen"), dropped the moment the real entry reaches the JSONL. Nothing
+owed here.
+
+### Ruled out, so the next sweep does not re-derive them
+
+| item | why not |
+|---|---|
+| **Codemode** | The measured answer to nyma's own tool-result problem (44.7% of transcript), and still deferred: it needs a QuickJS sandbox, a tools-as-functions bridge, and a `store`/`load` session-entry type. Its own docs list the ceilings — no recursion, 256 MB, scripts fail if they await anything but a pending tool call. Deserves its own pass with a before/after benchmark, like the tool-result reduction it would subsume. |
+| **Append-only context edits** (`appendContextEdit(entryId, null)`, pi 0.87) | Omits a message from future provider context without touching raw history, usage or UI. This is the clean substrate for that same deferred work — named here so the next pass starts from it rather than from `priority_assembly`, which only prunes once already over budget and then drops whole messages. |
+| **MCP OAuth** | nyma has none: `mcp_client/client.cljs` has no `authProvider`, and auth is static headers in `normalize-headers`. pi 1.0 hardened per-server credentials, RFC 9207 `iss` checks and `authServerMetadataUrl`. A real gap, the largest of these, and no benefit to the local models actually being benchmarked here. |
+| **Virtual models** (`registerVirtualModel`, pi 0.99) | `model_roles` + `providers/fallback.cljs` already cover named provider+model+policy presets and failover. pi's adds a per-request thinking level, which roles cannot carry. Small, but nothing is asking for it. |
+| **Image generation** (`models.generateImages()`) | nyma has image *input* (`multimodal.cljs`, `view_image`). Output is greenfield with no use behind it. |
+| **Cache warming** (pi 0.86, `cache_warming_decision`) | Considered and dropped in favour of the cheaper rung: `kv_cache` had no `ttl` at all, and setting one is a line. Warming is also Anthropic-only, and this project's sessions and benchmarks run on local models. |
+| **pi-tui colour helpers** for the 16-colour fallback | Checked, cannot help: `TerminalColorMode` is `"256color" \| "truecolor"` only, so `foregroundAnsi` has no 16-colour mode and passing one falls through to 256. The mapping had to be written. |
