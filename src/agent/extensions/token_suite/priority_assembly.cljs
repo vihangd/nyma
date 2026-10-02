@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.priority-assembly
-  (:require [agent.extensions.token-suite.shared :as shared]))
+  (:require [agent.extensions.token-suite.shared :as shared]
+            [agent.tool-metadata :as tm]))
 
 (def ^:private role-base-scores
   {"compaction"  200
@@ -8,17 +9,33 @@
    "tool_call"   60
    "tool_result"  40})
 
-(defn- is-edit-call? [msg]
-  (let [tool-name (or (.-toolName msg)
-                      (when-let [m (.-metadata msg)] (aget m "tool-name"))
-                      "")]
-    (contains? #{"edit" "write" "multi_edit"} tool-name)))
+(defn- is-edit-call?
+  "Did this tool_call edit a file? Scores the message 30 points higher, so a
+   prune keeps the edit rather than the chatter around it.
+
+   Goes through `tool-metadata/file-editing?` rather than a literal set. The
+   set this replaced was `#{\"edit\" \"write\" \"multi_edit\"}`, and the live
+   name of the multi-edit tool is `token-suite__multi_edit` — the scoped
+   `registerTool` prefixes with the extension namespace — so the bonus never
+   reached the one tool that rewrites a whole file. `file-editing?` resolves
+   the prefixed name because `extensions.cljs` registers a tool's `:safety`
+   under the name it was registered with. This is the drift `tool_metadata`'s
+   own docstring warns about: \"compaction missed multi_edit for months\"."
+  [msg]
+  (tm/file-editing? (or (.-toolName msg)
+                        (when-let [m (.-metadata msg)] (aget m "tool-name"))
+                        "")))
 
 (defn- is-focus-summary? [msg]
   (let [content (str (shared/msg-content msg))]
     (.startsWith content "[Focus:")))
 
-(defn- score-message [msg index total]
+(defn score-message
+  "Message → priority. Higher survives a prune. Pure, and public so the edit
+   bonus can be asserted against the LIVE tool name: the bug this scoring had
+   was invisible from the handler, because a missing 30-point bonus only shows
+   up as the wrong message being dropped under budget pressure."
+  [msg index total]
   (let [role     (shared/msg-role msg)
         base     (get role-base-scores role 30)
         recency  (if (>= index (- total 5)) 50 0)
@@ -39,7 +56,7 @@
         current     (atom 0)
         _           (doseq [i (range total)]
                       (swap! current + 4
-                        (.estimateTokens api (str (shared/msg-content (aget messages i))))))
+                             (.estimateTokens api (str (shared/msg-content (aget messages i))))))
 
         ;; Under budget — no pruning
         over?       (> @current available)]
@@ -54,14 +71,14 @@
 
             ;; Must-keep indices
             must-keep (set
-                        (concat
-                          [0]
-                          (range (max 0 (- total min-keep)) total)
-                          (when (:always-keep-compaction pa-cfg)
-                            (keep (fn [{:keys [index]}]
-                                    (when (= (shared/msg-role (aget messages index)) "compaction")
-                                      index))
-                                  scored))))
+                       (concat
+                        [0]
+                        (range (max 0 (- total min-keep)) total)
+                        (when (:always-keep-compaction pa-cfg)
+                          (keep (fn [{:keys [index]}]
+                                  (when (= (shared/msg-role (aget messages index)) "compaction")
+                                    index))
+                                scored))))
 
             ;; Sort prunable by score ascending
             prunable (->> scored
@@ -92,10 +109,10 @@
                 (.splice arr 1 0 notice)
                 ;; Stats
                 (swap! shared/suite-stats update :priority-assembly
-                  (fn [s] (-> s
-                              (update :turns inc)
-                              (update :messages-pruned + pruned-count)
-                              (update :tokens-saved + (- @current @tokens)))))
+                       (fn [s] (-> s
+                                   (update :turns inc)
+                                   (update :messages-pruned + pruned-count)
+                                   (update :tokens-saved + (- @current @tokens)))))
                 #js {:messages arr}))))))))
 
 (defn activate [api]
@@ -103,8 +120,8 @@
         pa-cfg (:priority-assembly config)]
 
     (.on api "context_assembly"
-      (fn [event _ctx]
-        (prune-messages api event pa-cfg))
-      70)
+         (fn [event _ctx]
+           (prune-messages api event pa-cfg))
+         70)
 
     (fn [] nil)))

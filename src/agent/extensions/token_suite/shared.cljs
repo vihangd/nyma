@@ -21,6 +21,11 @@
                       :cache-messages true
                       :checkpoint-every-turns 4
                       :max-message-breakpoints 2
+                      ;; nil sends no `ttl`, leaving Anthropic's 5-minute
+                      ;; default. "1h" trades a dearer cache WRITE for a cache
+                      ;; that survives a long gap between turns — worth it only
+                      ;; if your turns are minutes apart. See kv-cache/valid-ttls.
+                      :cache-ttl nil
                       :extra-providers {:anthropic [] :google []}}
    :repo-map         {:max-tokens 2000 :reindex-on-edit true
                       :extensions #{"js" "ts" "tsx" "cljs" "py" "rs" "go" "java" "rb"}}

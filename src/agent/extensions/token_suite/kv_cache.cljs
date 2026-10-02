@@ -31,6 +31,7 @@
      slot 3: N-back checkpoint
      slot 4: reserved for future (tool-block caching)"
   (:require [agent.debug :as d]
+            [clojure.string :as str]
             [agent.pricing :as pricing]
             [agent.extensions.token-suite.shared :as shared]))
 
@@ -76,15 +77,38 @@
   [provider]
   (case provider :anthropic "anthropic" :google "google" nil))
 
+(def valid-ttls
+  "The cache lifetimes Anthropic accepts (`@ai-sdk/anthropic` `cacheControl.ttl`).
+   Anything else is refused by the API, so an unknown value is dropped rather
+   than sent."
+  #{"5m" "1h"})
+
+(defn cache-control
+  "The `cacheControl` object for a breakpoint. Pure.
+
+   `ttl` is OMITTED unless asked for, which keeps the default byte-identical to
+   the requests nyma has always sent — Anthropic's own default is 5 minutes.
+   A `1h` TTL is not free: the cache WRITE costs more, and it only pays back on
+   a session whose gaps between turns exceed five minutes. That tradeoff is the
+   user's to make, so this is a setting rather than a new default.
+
+   Only applied for Anthropic: `provider-key` also answers for Google, which
+   has no ttl on its cacheControl."
+  [provider ttl]
+  (let [o #js {:type "ephemeral"}]
+    (when (and (= provider :anthropic) (contains? valid-ttls ttl))
+      (aset o "ttl" ttl))
+    o))
+
 (defn- annotate-message!
   "Mutate a JS message in place: add providerOptions.<provider>.cacheControl
-   = {type: 'ephemeral'}. Preserves any existing providerOptions for other
-   providers."
-  [msg provider]
+   = {type: 'ephemeral'} (plus `ttl` when configured). Preserves any existing
+   providerOptions for other providers."
+  [msg provider ttl]
   (when-let [pkey (provider-key provider)]
     (let [existing (or (.-providerOptions msg) #js {})
           ppart    (or (aget existing pkey) #js {})]
-      (aset ppart "cacheControl" #js {:type "ephemeral"})
+      (aset ppart "cacheControl" (cache-control provider ttl))
       (aset existing pkey ppart)
       (aset msg "providerOptions" existing))))
 
@@ -131,7 +155,7 @@
   "Walk st-config.messages, place cache_control on anchor + checkpoints.
    Mutates the messages array in place. Returns the count of breakpoints
    placed (for stats / testing)."
-  [config-obj provider every-turns max-message-breakpoints]
+  [config-obj provider every-turns max-message-breakpoints ttl]
   (let [messages (.-messages config-obj)]
     (if (or (nil? messages) (zero? (.-length messages)))
       0
@@ -141,7 +165,7 @@
             checkpoints (find-checkpoint-indices messages anchor every-turns ckpt-budget)
             indices     (cond-> [] anchor (conj anchor) :always (into checkpoints))]
         (doseq [i indices]
-          (annotate-message! (aget messages i) provider))
+          (annotate-message! (aget messages i) provider ttl))
         (count indices)))))
 
 (defn activate [api]
@@ -174,6 +198,19 @@
         cache-messages?   (boolean (:cache-messages kv-config))
         every-turns       (or (:checkpoint-every-turns kv-config) 4)
         max-msg-breaks    (or (:max-message-breakpoints kv-config) 2)
+        ;; nil = send no `ttl` at all, which is what nyma has always done and
+        ;; leaves Anthropic's 5-minute default in force. An unknown value is
+        ;; dropped with one warning rather than refused by the API every turn.
+        ttl               (let [t (some-> (:cache-ttl kv-config) str)]
+                            (cond
+                              (nil? t)                       nil
+                              (contains? valid-ttls t)       t
+                              :else
+                              (do (d/warn "token-suite"
+                                          (str "unknown kv-cache.cache-ttl " (pr-str t)
+                                               " — ignoring. Valid: "
+                                               (str/join ", " (sort valid-ttls))))
+                                  nil)))
 
         on-before
         (fn [config-obj _ctx]
@@ -211,7 +248,7 @@
                                   :content stable
                                   :providerOptions
                                   (doto #js {}
-                                    (aset pkey #js {:cacheControl #js {:type "ephemeral"}}))}
+                                    (aset pkey #js {:cacheControl (cache-control provider ttl)}))}
                              #js {:role "system" :content dynamic}])))
 
               ;; Layer 2: message-level breakpoints (anchor + N-back checkpoint).
@@ -219,7 +256,7 @@
               ;; without this, Layer-2-only configs pay cache-write premiums
               ;; forever with zero reads and no miss ever surfaces.
               (when cache-messages?
-                (when (pos? (annotate-messages! config-obj provider every-turns max-msg-breaks))
+                (when (pos? (annotate-messages! config-obj provider every-turns max-msg-breaks ttl))
                   (when @prev-annotated? (reset! expected-hit? true))
                   (reset! annotated true))))
 
