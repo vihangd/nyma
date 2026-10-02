@@ -19,7 +19,8 @@
       yields zero tasks — which naively reads as `all done`. That would have the
       loop declare victory on a broken file. `:no-tasks` is a distinct outcome
       and it stops the loop."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.tool-metadata :as tm]))
 
 (def default-phase-order ["plan" "execute" "verify" "ship"])
 
@@ -264,7 +265,7 @@
                     "files; the loop advances on its own once tasks.md holds "
                     "real tasks.")}
 
-      (and (contains? plan-phase-writable-tools tool)
+      (and (tm/matches-any-tool-name? tool plan-phase-writable-tools)
            (seq (str (or spec-dir "")))
            (not (under? (str (or path "")) (str spec-dir))))
       {:allowed? false

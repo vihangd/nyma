@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.smart-compaction
-  (:require ["ai" :refer [generateText]]
+  (:require [agent.tool-metadata :as tm]
+            ["ai" :refer [generateText]]
             [agent.extensions.token-suite.shared :as shared]
             [agent.sessions.compaction :as compaction]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
@@ -118,7 +119,7 @@ with every section below present.
               (cond
                 (= tool-name "read")
                 (swap! ops update :read #(if (some #{fpath} %) % (conj % fpath)))
-                (contains? #{"edit" "write" "multi_edit"} tool-name)
+                (tm/matches-any-tool-name? tool-name #{"edit" "write" "multi_edit"})
                 (swap! ops update :edit #(if (some #{fpath} %) % (conj % fpath)))))))))
     @ops))
 

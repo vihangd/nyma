@@ -295,6 +295,22 @@
   (let [o (str offered) b (str bare)]
     (or (= o b) (.endsWith o (str "__" b)))))
 
+(defn matches-any-tool-name?
+  "Is `offered` — a name from the live active set — any of the tools in `bares`?
+
+   The single-name counterpart to `offered-names`, and the thing eight call
+   sites needed. Each had `(contains? #{\"edit\" \"write\" \"multi_edit\"} name)`
+   against a name taken off an event, which carries the REGISTERED name — so
+   `token-suite__multi_edit` matched none of them and the one tool that
+   rewrites a whole file was invisible to `.nymaignore` enforcement,
+   spec_driven's phase gate, repo-map reindexing, LSP didChange, compaction's
+   edit tracking and structured_context's hot-file window.
+
+   Demonstrated for `.nymaignore`: with `*.secret` ignored, `edit`, `write` and
+   `multi_edit` are all blocked and `token-suite__multi_edit` is not."
+  [offered bares]
+  (boolean (some (fn [b] (matches-tool-name? offered b)) bares)))
+
 (defn offered-names
   "The spellings of `bares` that actually appear in `candidates`.
 

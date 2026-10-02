@@ -99,8 +99,16 @@
                                 agent-keys))]
           (-> (.select (.-ui api) "Select agent to hand off to:" options)
               (.then (fn [selected]
-                       (when selected
-                         (do-handoff api from-key selected nil))))))
+                       ;; `ui.select` resolves with the chosen ITEM, not a
+                       ;; string — the items above are {value,label,description}
+                       ;; objects. Passing `selected` straight in made
+                       ;; `do-handoff` look up the registry by object, miss, and
+                       ;; tell the user "Unknown agent: [object Object]". Same
+                       ;; bug `/fork` had; `overlay_host`'s `make-select-picker`
+                       ;; is the contract ("on-resolve receives the chosen
+                       ;; item").
+                       (when-let [to (and selected (.-value selected))]
+                         (do-handoff api from-key to nil))))))
         (notify api (str "Usage: /agent handoff <agent> [context message]\n"
                          "Available agents: "
                          (str/join ", " (map shared/kw-name (keys registry/agents))))

@@ -3,7 +3,8 @@
    Adds hover, goto-definition, find-references, document-symbols,
    workspace-symbols, and get-diagnostics tools. Syncs LSP servers'
    view of the workspace with read/write/edit tool activity."
-  (:require ["node:fs" :as fs]
+  (:require [agent.tool-metadata :as tm]
+            ["node:fs" :as fs]
             ["node:path" :as node-path]
             [clojure.string :as str]
             [agent.extensions.lsp-suite.lsp_config :as config]
@@ -34,7 +35,7 @@
   (or (and data (.-name data)) (and data (.-toolName data))))
 
 (defn- file-write-tool? [name]
-  (#{"write" "edit" "multi_edit"} name))
+  (tm/matches-any-tool-name? name #{"write" "edit" "multi_edit"}))
 
 (defn- file-read-tool? [name]
   (= name "read"))

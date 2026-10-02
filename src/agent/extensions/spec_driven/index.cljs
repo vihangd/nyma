@@ -1893,6 +1893,8 @@
     ;; silently missed every agent-driven one. Diff the checked set around a
     ;; write to the active spec's tasks file and emit for what actually flipped.
     (let [write-tools #{"write" "edit" "multi_edit"}
+          ;; Matched through `matches-any-tool-name?`: the event carries the
+          ;; REGISTERED name, so a bare set missed `token-suite__multi_edit`.
           checked-set (fn [content]
                         (->> (parse-tasks (or content ""))
                              (filter :checked?)
@@ -1924,7 +1926,7 @@
           ;; spec-tree walks per `read`, `grep` and `bash`, i.e. every tool call.
           touches?    (fn [event]
                         (let [tool (or (.-toolName event) "")]
-                          (when (contains? write-tools tool)
+                          (when (tool-metadata/matches-any-tool-name? tool write-tools)
                             (let [p (tool-metadata/tool-path (.-args event))]
                               (when p
                                 (when-let [tp (tasks-path)]

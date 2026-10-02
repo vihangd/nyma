@@ -14,6 +14,8 @@
 ;; claimed otherwise and dropping it just blanked the status line for the tool
 ;; that does the bulk of wiki edits.
 (def ^:private write-tools #{"write" "edit" "multi_edit"})
+;; Compared through `tm/matches-any-tool-name?`: the name on an event is the
+;; REGISTERED one, so a bare membership test missed `token-suite__multi_edit`.
 
 (defn- set-status! [ctx value]
   (when-let [ui (.-ui ctx)]
@@ -28,7 +30,8 @@
         (fn [event ctx]
           (let [tool (or (.-toolName event) "")
                 path (tool-metadata/tool-path (.-args event))]
-            (when (and (contains? write-tools tool) (shared/under-dir? dir (str path)))
+            (when (and (tool-metadata/matches-any-tool-name? tool write-tools)
+                       (shared/under-dir? dir (str path)))
               (set-status! ctx (str "📝 documenting " path)))))
         ;; Clear only what we set — an unrelated write elsewhere in the repo
         ;; must not wipe the wiki status, and must not set it either.
@@ -36,7 +39,8 @@
         (fn [event ctx]
           (let [tool (or (.-toolName event) "")
                 path (tool-metadata/tool-path (.-args event))]
-            (when (and (contains? write-tools tool) (shared/under-dir? dir (str path)))
+            (when (and (tool-metadata/matches-any-tool-name? tool write-tools)
+                       (shared/under-dir? dir (str path)))
               (set-status! ctx ""))))
         handlers [["tool_execution_start" on-tool-start]
                   ["tool_execution_end" on-tool-end]]]

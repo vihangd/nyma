@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.structured-context
-  (:require ["ai" :refer [tool]]
+  (:require [agent.tool-metadata :as tm]
+            ["ai" :refer [tool]]
             ["zod" :as z]
             ["node:fs" :as fs]
             ["node:path" :as path]
@@ -242,12 +243,13 @@
                  args (.-args event)
                  fpath (when args (or (.-path args) ""))]
              (when (and (seq fpath)
-                        (contains? #{"read" "edit" "write" "multi_edit" "glob" "grep"} tool))
+                        (tm/matches-any-tool-name?
+                         tool #{"read" "edit" "write" "multi_edit" "glob" "grep"}))
             ;; glob/grep pass a DIRECTORY as :path — dirname would record its
             ;; parent, and warm-dir matching (accessed at-or-below warm dir)
             ;; never matches a parent. File tools still take dirname.
                (swap! accessed-dirs conj
-                      (if (contains? #{"glob" "grep"} tool)
+                      (if (tm/matches-any-tool-name? tool #{"glob" "grep"})
                         fpath
                         (path/dirname fpath))))))
          0)

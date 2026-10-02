@@ -255,6 +255,29 @@
                                                        values  (mapv #(.-value %) options)]
                                                    (-> (expect (some #(= % "claude") values)) (.toBeTruthy))))))
 
+                                         (it "no arg + user PICKS an agent → the pick is resolved to its value, not passed as an object"
+                                             (fn []
+                                               (reset! shared/active-agent "qwen")
+                                        ;; `ui.select` resolves with the chosen ITEM — a
+                                        ;; {value,label,description} object — not a string. The
+                                        ;; handler passed it straight to `do-handoff` as
+                                        ;; `to-key-str`, so `(get registry/agents item)` missed and
+                                        ;; the user saw "Unknown agent: [object Object]".
+                                        ;;
+                                        ;; Every mock in this file defaulted `:select-result` to
+                                        ;; nil, so the cancel path was tested and the PICK path
+                                        ;; never was. That is the only reason this survived.
+                                               (let [api     (make-mock-api
+                                                              {:select-result #js {:value "claude"
+                                                                                   :label "Claude"
+                                                                                   :description ""}})
+                                                     handler (agent-handoff-handler api)]
+                                                 (-> (js/Promise.resolve (handler [] nil))
+                                                     (.then (fn [_]
+                                                              (let [msgs (str/join " | " @(.-_notifications api))]
+                                                                (-> (expect msgs) (.not.toContain "Unknown agent"))
+                                                                (-> (expect msgs) (.not.toContain "[object Object]")))))))))
+
                                          (it "no arg + user cancels picker (nil) → no handoff attempt"
                                              (fn []
                                                (reset! shared/active-agent "qwen")

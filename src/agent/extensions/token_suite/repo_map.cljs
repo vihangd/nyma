@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.repo-map
-  (:require [agent.extensions.token-suite.shared :as shared]
+  (:require [agent.tool-metadata :as tm]
+            [agent.extensions.token-suite.shared :as shared]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]))
@@ -164,7 +165,7 @@
       (.on api "tool_execution_end"
         (fn [event _ctx]
           (let [tool (or (.-toolName event) "")]
-            (when (contains? #{"edit" "write" "multi_edit"} tool)
+            (when (tm/matches-any-tool-name? tool #{"edit" "write" "multi_edit"})
               (reset! dirty true))))))
 
     ;; before_agent_start — inject repo map as prompt-section
