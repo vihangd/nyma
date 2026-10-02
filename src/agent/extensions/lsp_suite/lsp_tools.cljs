@@ -10,18 +10,35 @@
 
 ;; ── Shared helpers ────────────────────────────────────────────────
 
-(defn- ->0 [n] (dec (js/parseInt n 10)))   ; 1-based → 0-based
+(defn ->0
+  "A 1-based line/column from the model to LSP's 0-based position.
 
-(defn- abs-path [file-arg cwd]
+   Guarded, because nothing validates the tool arguments and both failure
+   modes reach the language server. Every tool here documents `line` and `col`
+   as 1-based, but a model thinking in 0-based terms sends `0`, which bare
+   `(dec …)` turns into `-1`; a non-numeric argument turns into `NaN`. LSP
+   positions are non-negative integers, so both are clamped to 0 — the first
+   line or column — rather than handed over as nonsense.
+
+   Public and pure so the conversion is testable on its own. This module was
+   446 lines with no test at all, and an off-by-one in a coordinate transform
+   is exactly what a unit test is for."
+  [n]
+  (let [v (js/parseInt n 10)]
+    (if (or (js/Number.isNaN v) (< v 1)) 0 (dec v))))
+
+(defn abs-path [file-arg cwd]
   (if (.isAbsolute node-path file-arg)
     file-arg
     (node-path/resolve cwd file-arg)))
 
-(defn- no-server-msg [file]
+(defn no-server-msg [file]
   (str "No LSP server configured for " file
        ". Add a server entry under the 'lsp' key in .nyma/settings.json."))
 
-(defn- position-params [file line col cwd]
+(defn position-params
+  "The LSP `TextDocumentPositionParams` for a 1-based file/line/col. Pure."
+  [file line col cwd]
   (let [uri (fmt/path->uri (abs-path file cwd))]
     #js {:textDocument #js {:uri uri}
          :position     #js {:line      (->0 line)
@@ -66,7 +83,7 @@
 
 ;; ── goto_definition ───────────────────────────────────────────────
 
-(defn- format-locations [locs]
+(defn format-locations [locs]
   (when locs
     (let [items (if (array? locs) locs #js [locs])]
       (if (zero? (.-length items))

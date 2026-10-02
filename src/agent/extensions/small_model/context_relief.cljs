@@ -20,7 +20,13 @@
 
 ;; ── Error detection ───────────────────────────────────────────────
 
-(defn- context-length-error? [msg]
+(defn context-length-error?
+  "Is this the provider telling us the prompt will not fit? Pure.
+
+   Public and tested: this module was 87 lines with no test at all, and it
+   hooks `provider_error` — the same event whose per-site payload asymmetry
+   killed the fallback chain."
+  [msg]
   (let [m (str/lower-case (str msg))]
     (or (str/includes? m "prompt too long")
         (str/includes? m "context window")
@@ -33,7 +39,7 @@
 
 ;; ── Pruning ───────────────────────────────────────────────────────
 
-(defn- prune-messages
+(defn prune-messages
   "Keep the first `keep-head` messages (task anchor) and the last
    `keep-tail` messages (recent context), dropping the middle.
    Inserts a compaction notice at the cut point."
@@ -84,4 +90,13 @@
     (.on api "provider_error" on-error)
     (.on api "agent_end" on-end)
 
-    (fn [] nil)))
+    ;; A REAL deactivator. This returned `(fn [] nil)` while every sibling
+    ;; (`evidence`, `profiles`, `tool_deferral`) unregisters what it added, so
+    ;; both handlers survived `/reload` and accumulated one copy per reload —
+    ;; and nothing could see it, because no test ever called `activate` for any
+    ;; small_model submodule (the extension ships disabled, so even the
+    ;; full-load sweep returns before they run).
+    (fn []
+      (.off api "provider_error" on-error)
+      (.off api "agent_end" on-end)
+      nil)))
