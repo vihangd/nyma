@@ -7,7 +7,8 @@
    Stop is observational in nyma (we already streamed the response;
    we can't make the model continue from a hook). We still fire it so
    logging/notification hooks (TTS, audit trails, etc.) work."
-  (:require [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
+  (:require [agent.utils.error-class :as ec]
+            [agent.extensions.claude-hook-bridge.dispatch :as dispatch]
             [agent.extensions.claude-hook-bridge.events.common :as common]))
 
 (def ^:private bridge-priority 200)
@@ -35,7 +36,13 @@
      (common/base api "StopFailure")
      ;; CC's StopFailure input: `error` is the error TYPE (the matcher
      ;; value), `error_details` the message.
-     #js {:error         (str (or (.-errorType data) "unknown"))
+     ;; DERIVED from the message. This read `(.-errorType data)`, and nothing
+     ;; in the codebase has ever set that field — so every StopFailure hook
+     ;; dispatched with the literal "unknown" and a user's
+     ;; `matchers: {"rate_limit": …}` could not fire. The generated event map
+     ;; shows it: `provider_error` carries config/error/message/model/source,
+     ;; and no errorType.
+     #js {:error         (ec/error-type msg)
           :error_details (str msg)})))
 
 (defn register!
@@ -52,7 +59,8 @@
 
         fail-handler
         (fn [data]
-          (let [t (str (or (.-errorType data) "unknown"))]
+          (let [m (.-message data)
+                t (ec/error-type (if (string? m) m (and (object? m) (.-error m))))]
             (dispatch/dispatch
              {:hooks-map     @hooks-atom
               :event-name    "StopFailure"

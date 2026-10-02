@@ -216,14 +216,28 @@
                                                         (-> (expect (.-source p)) (.toBe "startup"))
                                                         (-> (expect (nil? (.-reason p))) (.toBe true)))))
 
-                                                (it "SessionStart: fork and tree both read as resume"
+                                                (it "SessionStart maps every reason a producer actually emits"
                                                     (^:async fn []
-                                                      (-> (expect (.-source (js-await (fire! session/register! "SessionStart" "session_start"
-                                                                                             #js {:reason "fork"}))))
-                                                          (.toBe "resume"))
-                                                      (-> (expect (.-source (js-await (fire! session/register! "SessionStart" "session_start"
-                                                                                             #js {:reason "tree"}))))
-                                                          (.toBe "resume"))))
+                                        ;; The four producers are `cli.cljs`
+                                        ;; ("fork"/"continue"/"resume"/"default") and
+                                        ;; `commands/builtins` ("fork"/"resume"/"new"). "continue" and
+                                        ;; "default" were both unmapped and fell through to "startup" —
+                                        ;; so `-c`, whose entire purpose is resuming, did not fire a
+                                        ;; user's `matchers: {"resume": …}`.
+                                        ;;
+                                        ;; This used to assert "tree" → resume. Nothing emits "tree";
+                                        ;; it was a mapping for a reason with no producer, and asserting
+                                        ;; it pinned unreachable behaviour.
+                                                      (doseq [[reason want] [["fork"     "resume"]
+                                                                             ["resume"   "resume"]
+                                                                             ["continue" "resume"]
+                                                                             ["new"      "startup"]
+                                                                             ["default"  "startup"]
+                                        ;; anything unrecognised still has a safe default
+                                                                             ["???"      "startup"]]]
+                                                        (let [got (.-source (js-await (fire! session/register! "SessionStart" "session_start"
+                                                                                             #js {:reason reason})))]
+                                                          (-> (expect #js [reason got]) (.toEqual #js [reason want]))))))
 
                                                 (it "SessionEnd carries reason (no source): clear → clear, user-exit → prompt_input_exit, else other"
                                                     (^:async fn []
@@ -258,14 +272,25 @@
                                                  (-> (expect (.-output_tokens p)) (.toBe 0))
                                                  (-> (expect (.-last_assistant_message p)) (.toBe "")))))
 
-                                         (it "StopFailure carries the error type as `error` and the message as error_details"
+                                         (it "StopFailure derives the error type from the message, which is what the producer sends"
                                              (^:async fn []
+                                        ;; This fixture used to pass `#js {:errorType "rate_limit"}` and assert
+                                        ;; it came back. Nothing in src has ever SET `errorType`, so the
+                                        ;; fixture fabricated the producer: every real StopFailure dispatched
+                                        ;; with "unknown" and a user's `matchers: {"rate_limit": …}` could not
+                                        ;; fire. The payload fields are the ones `loop.cljs` actually emits.
                                                (let [p (js-await (fire! stop/register! "StopFailure" "provider_error"
-                                                                        #js {:errorType "rate_limit" :message "slow down"}))]
+                                                                        #js {:message "429 rate limit exceeded"}))]
                                                  (common-fields p "StopFailure")
                                                  (-> (expect (.-error p)) (.toBe "rate_limit"))
-                                                 (-> (expect (.-error_details p)) (.toBe "slow down"))
+                                                 (-> (expect (.-error_details p)) (.toBe "429 rate limit exceeded"))
                                                  (-> (expect (nil? (.-error_type p))) (.toBe true)))
+                                        ;; The real outage shape, verbatim from @ai-sdk.
+                                               (let [p (js-await (fire! stop/register! "StopFailure" "provider_error"
+                                                                        #js {:message "Cannot connect to API: Unable to connect."}))]
+                                                 (-> (expect (.-error p)) (.toBe "unavailable")))
+                                        ;; A nested {:error …} message still yields its details, and an
+                                        ;; unclassifiable one is "unknown" rather than nil.
                                                (let [p (js-await (fire! stop/register! "StopFailure" "provider_error"
                                                                         #js {:message #js {:error "nested"}}))]
                                                  (-> (expect (.-error p)) (.toBe "unknown"))

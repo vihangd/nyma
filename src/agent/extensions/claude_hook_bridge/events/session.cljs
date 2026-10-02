@@ -30,10 +30,24 @@
 (def ^:private bridge-priority 200)
 
 (def ^:private start-reason->matcher
-  {"new"    "startup"
-   "fork"   "resume"
-   "resume" "resume"
-   "tree"   "resume"})
+  "nyma's `session_start` `:reason` to Claude Code's SessionStart `source`.
+
+   Must cover every reason a producer actually emits. `cli.cljs` emits
+   `continue` (the `-c` flag) and `default`, and neither was mapped, so both
+   fell through to `startup` -- when `-c` is semantically a resume, so a user's
+   resume matcher did not fire for the one flag whose whole purpose is
+   resuming.
+
+   `tree` was mapped and is emitted by nothing; asserting it pinned
+   unreachable behaviour, so it is gone.
+
+   Producers: `cli.cljs` (`fork` / `continue` / `resume` / `default`) and
+   `commands/builtins` (`fork` / `resume` / `new`)."
+  {"new"      "startup"
+   "default"  "startup"
+   "fork"     "resume"
+   "resume"   "resume"
+   "continue" "resume"})
 
 (def ^:private end-reason->matcher
   {"clear"      "clear"

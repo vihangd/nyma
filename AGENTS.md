@@ -116,6 +116,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`). |
 | `src/agent/utils/credentials.cljs` | `agent.utils.credentials` | Read API keys saved by `/login <provider>`. |
 | `src/agent/utils/data.cljs` | `agent.utils.data` | Two things every namespace kept re-deriving: reading a config key whose spelling depends on who wrote it, and parsing JSON that may not b… |
+| `src/agent/utils/error_class.cljs` | `agent.utils.error-class` | What KIND of provider failure is this? |
 | `src/agent/utils/event_json.cljs` | `agent.utils.event-json` | Pure mappers from the AI SDK StepResult nyma hands to `turn_end` into the plain shapes any JSONL consumer (pi-rpc, `-p --output-format st… |
 | `src/agent/utils/git_files.cljs` | `agent.utils.git-files` | Synchronous git shell-outs shared by core and extensions. |
 | `src/agent/utils/home.cljs` | `agent.utils.home` | The one place nyma asks where HOME is. |

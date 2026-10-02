@@ -41,6 +41,7 @@
 
    Reference: https://agentskills.io/specification"
   (:require [agent.debug :as d]
+            [agent.tool-metadata :as tool-metadata]
             ["node:path" :as path]
             ["node:fs" :as fs]
             ["ai" :refer [tool]]
@@ -719,7 +720,17 @@
                        (release-orphaned-tools! agent)
                        nil)
           on-call  (fn [d]
-                     (when-let [p (some-> d .-input .-path)]
+                     ;; `tool_call` has TWO producers with disjoint payloads:
+                     ;; `loop.cljs` forwards the raw ai@7 stream part, whose
+                     ;; arguments are on `input`, while `middleware.cljs`
+                     ;; emits `{name, toolName, args, execId}`. Reading only
+                     ;; `.-input` meant every middleware-emitted call
+                     ;; contributed nothing to the touched-path window, so
+                     ;; path-scoped skill activation saw roughly half the
+                     ;; file traffic. `tool-path` is the shared extractor and
+                     ;; already handles path/file_path/filePath.
+                     (when-let [p (or (some-> d .-input tool-metadata/tool-path)
+                                      (some-> d .-args tool-metadata/tool-path))]
                        ;; Moving window: a hard stop at the cap froze the set,
                        ;; so path-scoped activation died for every file opened
                        ;; later in a long session. Drop the oldest instead.
