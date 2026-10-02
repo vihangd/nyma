@@ -309,15 +309,56 @@ Examples:
   ;; has no package.json to read.
   (js/process.stdout.write (str version "\n")))
 
-(defn- ^:async read-stdin-string []
-  (js/Promise.
-   (fn [resolve _reject]
-     (let [chunks (atom [])
-           stdin  (.-stdin js/process)]
-       (.setEncoding stdin "utf8")
-       (.on stdin "data"  (fn [c] (swap! chunks conj c)))
-       (.on stdin "end"   (fn [] (resolve (.join (clj->js @chunks) ""))))
-       (.on stdin "error" (fn [_] (resolve "")))))))
+(defn- ^:async read-stdin-string
+  "Drain stdin to a string.
+
+   `timeout-ms`, when given, resolves with whatever has arrived so far instead
+   of waiting for EOF. That matters because this resolves ONLY on `\"end\"`:
+   stdin being a pipe that nobody ever closes is completely normal — a wrapper,
+   a supervisor, an editor's task runner — and without a bound, `nyma -p
+   \"prompt\"` blocked forever before emitting a single byte, with the model
+   never contacted. Reproduced as zero output over seven minutes."
+  ([] (read-stdin-string nil))
+  ([timeout-ms]
+   (js/Promise.
+    (fn [resolve _reject]
+      (let [chunks (atom [])
+            done   (atom false)
+            stdin  (.-stdin js/process)
+            finish (fn [] (when-not @done
+                            (reset! done true)
+                            (resolve (.join (clj->js @chunks) ""))))]
+        (.setEncoding stdin "utf8")
+        (.on stdin "data"  (fn [c] (swap! chunks conj c)))
+        (.on stdin "end"   finish)
+        (.on stdin "error" (fn [_] (when-not @done (reset! done true) (resolve ""))))
+        (when timeout-ms
+          (let [t (js/setTimeout finish timeout-ms)]
+            ;; Do not hold the event loop open on this timer's account.
+            (when (.-unref t) (.unref t)))))))))
+
+(defn combine-prompt
+  "positional + piped stdin → the one-shot prompt, or nil. Pure.
+
+   Both present means the positional first, then a blank line, then stdin —
+   that is the documented contract for `nyma -p \"summarise this\" < file`."
+  [pos stdin]
+  (let [has-pos? (and (string? pos) (pos? (count pos)))
+        stdin    (when (and (string? stdin) (pos? (count (.trim stdin))))
+                   (.trim stdin))]
+    (cond
+      (and has-pos? stdin) (str pos "\n\n" stdin)
+      has-pos?             pos
+      stdin                stdin
+      :else                nil)))
+
+(def stdin-with-prompt-timeout-ms
+  "How long to wait for piped stdin when a positional prompt was ALSO given.
+
+   Anything already buffered arrives on the first tick, so this only bounds the
+   pathological case: an open pipe with nothing coming. Short enough not to be
+   felt, long enough for a pipe that is mid-write."
+  150)
 
 (defn- ^:async resolve-one-shot-prompt
   "For print/json modes: combine the positional prompt with piped stdin.
@@ -334,15 +375,16 @@ Examples:
   (let [pos      (first positionals)
         has-pos? (and (string? pos) (pos? (count pos)))
         piped?   (not (.-isTTY (.-stdin js/process)))
+        ;; Bounded ONLY when a positional prompt is also present. With a
+        ;; prompt in hand there is always something to run, so an open pipe
+        ;; that never closes must not be able to stall the whole command —
+        ;; which is exactly what it did, silently, before the model was ever
+        ;; contacted. With no positional, stdin IS the prompt, so waiting for
+        ;; EOF is the only correct thing to do.
         stdin    (when piped?
-                   (let [s (js-await (read-stdin-string))
-                         t (when s (.trim s))]
-                     (when (and t (pos? (count t))) t)))]
-    (cond
-      (and has-pos? stdin) (str pos "\n\n" stdin)
-      has-pos?             pos
-      stdin            stdin
-      :else            nil)))
+                   (js-await (read-stdin-string
+                              (when has-pos? stdin-with-prompt-timeout-ms))))]
+    (combine-prompt pos stdin)))
 
 (def output-formats #{"text" "json" "stream-json"})
 
@@ -657,7 +699,7 @@ Examples:
                     (d/warn "settings" w))
         sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
         resources (-> (js-await (discover {:context-files (:context-files merged)
-                                          :max-skill-description (:max-description-length (:skills merged))}))
+                                           :max-skill-description (:max-description-length (:skills merged))}))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
         session   (js-await (resolve-session values mode sessions-dir))
