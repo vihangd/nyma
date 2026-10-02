@@ -57,7 +57,7 @@ elsewhere (or is empty) — read the emit site.
 | `reload` | src/agent/commands/builtins.cljs | - | - |
 | `resources_discover` | src/agent/resources/loader.cljs | - | cwd, reason |
 | `role_change` | src/agent/extensions/agent_shell/features/plan_capture.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/extensions/model_roles/index.cljs | role, source |
-| `session_before_fork` | src/agent/commands/builtins.cljs | - | leaf-id |
+| `session_before_fork` | src/agent/commands/builtins.cljs | - | leaf-id, new-leaf |
 | `session_before_switch` | src/agent/sessions/manager.cljs | - | new-path, old-path |
 | `session_clear` | src/agent/commands/builtins.cljs | src/agent/extensions/agent_shell/index.cljs, src/agent/modes/interactive.cljs | - |
 | `session_end` | src/agent/cli.cljs | src/agent/extensions/agent_state/index.cljs, src/agent/extensions/claude_hook_bridge/events/session.cljs, src/agent/extensions/mcp_client/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs | - |

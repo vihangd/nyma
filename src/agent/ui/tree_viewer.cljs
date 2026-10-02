@@ -53,8 +53,17 @@
    Returns an object with .render(w,h), .onInput(input, key), .dispose().
    onInput receives Ink's (input, key) pair — we branch on key properties
    (.-upArrow, .-return, .-escape) for consistency with the other pickers
-   in the codebase and with CustomComponentAdapter's calling convention."
-  [session]
+   in the codebase and with CustomComponentAdapter's calling convention.
+
+   `on-branch`, when given, is called with an entry id when the user presses
+   `b`. The viewer was read-only until then — it listed a tree whose whole
+   point is that you can return to an earlier point, and offered no way to do
+   it. Optional, so a caller that only wants to look (and the tests that
+   construct it bare) is unchanged.
+
+   Only USER entries are offered: branching at an assistant reply or a tool
+   result would re-run the model against an identical prefix."
+  [session & [on-branch]]
   (let [tree      ((:get-tree session))
         selected  (atom 0)
         collapsed (atom #{})
@@ -70,7 +79,9 @@
                   ;; width it overflowed no matter what the entries held,
                   ;; which pi-tui turns into a dead session.
                   header  (truncate-to
-                           "Session Tree (↑/↓ PgUp/PgDn Home/End, Enter fold/unfold, Esc close)"
+                           (if on-branch
+                             "Session Tree (↑/↓ Enter fold, b branch here, Esc close)"
+                             "Session Tree (↑/↓ PgUp/PgDn Home/End, Enter fold/unfold, Esc close)")
                            cols)
                   lines   (into [header ""]
                                 (map-indexed
@@ -101,6 +112,14 @@
                                                            (conj c (:id entry)))))))
                                       nil)
                 (.-escape key)    #js {:close true}
+                ;; `b` rather than Enter: Enter already folds, and silently
+                ;; changing what the most-pressed key does to something that
+                ;; rewrites the conversation would be the wrong trade.
+                (and on-branch (= (str _input) "b"))
+                (let [entry (:entry (nth visible @selected nil))]
+                  (if (and entry (= "user" (:role entry)))
+                    (do (on-branch (:id entry)) #js {:close true})
+                    nil))
                 :else             nil))))
 
     component))

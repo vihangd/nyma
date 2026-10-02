@@ -46,6 +46,26 @@
     (.showOverlay (.-ui ctx) text)
     (js/console.log (str "\n" text "\n"))))
 
+(defn branch-at!
+  "Move the session's leaf to `entry-id` and tell everyone. THE branch routine,
+   shared by `/fork` and the tree viewer's `b` so the two cannot drift.
+
+   Clearing the store matters: `branch-fn` only moves `leaf-id`, so without it
+   the UI keeps showing the messages from the branch just left while the model
+   is given the new one. The old `/fork` emitted `session_start` without the
+   clear, which was harmless only because it never actually moved the leaf."
+  [agent ctx session entry-id label]
+  (let [leaf ((:leaf-id session))]
+    ((:emit (:events agent)) "session_before_fork"
+                             {:leaf-id leaf :new-leaf entry-id})
+    ((:branch session) entry-id)
+    ((:dispatch! (:store agent)) :messages-cleared {})
+    ((:emit (:events agent)) "session_start" {:reason "fork"})
+    (notify ctx (if (seq (str (or label "")))
+                  (str "Branched from: " label)
+                  "Branched"))
+    entry-id))
+
 (defn positional-args
   "The flag-free tokens interactive mode's shared splitter put on `ctx`, or
    nil when the caller is not interactive mode (a keybinding, an alias
@@ -742,7 +762,7 @@
            :description "Reset the context in THIS session file — the transcript and the model's context, nothing on disk"
            :handler (fn [_args ctx]
                       (skills/deactivate-all-skills! agent)
-      ((:dispatch! (:store agent)) :messages-cleared {})
+                      ((:dispatch! (:store agent)) :messages-cleared {})
                       ((:emit (:events agent)) "session_clear" {})
                       (notify ctx "Messages cleared"))}
 
@@ -905,14 +925,67 @@
 
           "fork"
           {:group       :session
-           :description "Fork conversation at current point"
-           :handler (fn [_args ctx]
+           :description "Branch the conversation from an earlier message"
+           :aliases     ["branch"]
+           ;; It used to read the CURRENT leaf and branch at it, which
+           ;; `branch-fn` turns into `reset!` of `leaf-id` to the value it
+           ;; already held — events fired, "Session forked" printed, and
+           ;; nothing diverged. Branching at the tip is a no-op by definition,
+           ;; so the point to branch from has to be chosen. `/fork <n>` takes
+           ;; the nth candidate for non-interactive use; bare `/fork` asks.
+           :handler (^:async fn [args ctx]
                       (when-let [s @(:session agent)]
-                        (let [leaf ((:leaf-id s))]
-                          ((:emit (:events agent)) "session_before_fork" {:leaf-id leaf})
-                          ((:branch s) leaf)
-                          ((:emit (:events agent)) "session_start" {:reason "fork"})
-                          (notify ctx "Session forked"))))}
+                        (let [cands ((:fork-candidates s))
+                              n     (count cands)
+                              arg   (str (or (first args) ""))
+                              pick  (cond
+                                      (empty? cands) nil
+                                      ;; 1-based, as shown in the picker
+                                      (re-matches #"\d+" arg)
+                                      (nth cands (dec (js/parseInt arg 10)) nil)
+                                      (seq arg)
+                                      (first (filter #(= (:id %) arg) cands))
+                                      :else ::ask)]
+                          (cond
+                            (zero? n)
+                            (show-info ctx (str "Nothing to branch from yet — `/fork` needs an "
+                                                "earlier user message, and this branch has none "
+                                                "before the current one."))
+
+                            (nil? pick)
+                            (show-info ctx (str "No such fork point: " (pr-str arg)
+                                                ". `/fork` with no argument lists them."))
+
+                            :else
+                            (let [chosen
+                                  (if (not= pick ::ask)
+                                    pick
+                                    (when (and ctx (.-ui ctx) (.-select (.-ui ctx)))
+                                      (let [labels (clj->js
+                                                    (map-indexed
+                                                     (fn [i c] (str (inc i) ". " (:label c)))
+                                                     cands))
+                                            idx (js-await
+                                                 (.select (.-ui ctx)
+                                                          "Branch from which message?"
+                                                          labels))]
+                                        (when (number? idx) (nth cands idx nil)))))]
+                              (cond
+                                ;; No UI to ask with (print/rpc mode): list them
+                                ;; rather than silently doing nothing.
+                                (and (= pick ::ask) (nil? chosen)
+                                     (not (and ctx (.-ui ctx) (.-select (.-ui ctx)))))
+                                (show-info ctx
+                                           (str "Fork points (use `/fork <n>`):\n"
+                                                (str/join "\n"
+                                                          (map-indexed
+                                                           (fn [i c] (str "  " (inc i) ". " (:label c)))
+                                                           cands))))
+                                ;; Picker dismissed.
+                                (nil? chosen) nil
+
+                                :else
+                                (branch-at! agent ctx s (:id chosen) (:label chosen))))))))}
 
           "tree"
           {:group       :session
@@ -920,8 +993,12 @@
            :handler (fn [_args ctx]
                       (when-let [s @(:session agent)]
                         (if (and ctx (.-ui ctx) (.-custom (.-ui ctx)))
-                     ;; Interactive tree viewer via custom overlay
-                          (.custom (.-ui ctx) (create-tree-viewer s))
+                     ;; Interactive tree viewer via custom overlay. `b` on a
+                     ;; user entry branches there — the same routine `/fork`
+                     ;; uses, so the two commands cannot drift apart.
+                          (.custom (.-ui ctx)
+                                   (create-tree-viewer
+                                    s (fn [entry-id] (branch-at! agent ctx s entry-id nil))))
                      ;; Fallback: text dump
                           (let [tree ((:get-tree s))
                                 lines (->> (take 20 tree)

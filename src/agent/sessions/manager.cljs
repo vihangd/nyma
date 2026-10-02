@@ -83,6 +83,38 @@
            [(:id entry) {:idx idx :parent-id (:parent-id entry) :role (:role entry)}]))
         entries))
 
+(defn fork-candidates
+  "The entries you can usefully branch at: the user messages on the ACTIVE
+   branch, oldest first, each with a one-line label. Pure.
+
+   User messages only, because those are the points a conversation can take a
+   different turn from — branching at an assistant reply or a tool result would
+   re-run the model against an identical prefix.
+
+   The CURRENT leaf is excluded, and that is the whole point of this function.
+   `/fork` used to read the leaf and branch at it, which `branch-fn` turns into
+   `reset!` of `leaf-id` to the value it already held: events fired, the notice
+   printed, and nothing diverged. Branching at the tip is a no-op by
+   definition, so the tip is not a candidate.
+
+   `entries` is the raw vector; `branch-indices` is `walk-branch`'s output, so
+   callers that already have the active branch do not re-walk it."
+  [entries branch-indices]
+  (let [n (count branch-indices)]
+    (->> branch-indices
+         (map-indexed vector)
+         ;; drop the tip: branching there changes nothing
+         (remove (fn [[pos _]] (= pos (dec n))))
+         (keep (fn [[_ idx]]
+                 (let [e (nth entries idx nil)]
+                   (when (and e (= "user" (:role e)))
+                     {:id    (:id e)
+                      :label (let [t (-> (str (or (:content e) ""))
+                                         (.replace (js/RegExp. "\\s+" "g") " ")
+                                         (.trim))]
+                               (if (> (count t) 72) (str (.slice t 0 71) "…") t))}))))
+         vec)))
+
 (defn- walk-branch
   "Walk from leaf-id to root using the index. Returns vector of array indices
    in root-to-leaf order."
@@ -208,6 +240,13 @@
              :branch           branch-fn
              :get-tree         get-tree-fn
              :leaf-id          leaf-id-fn
+             ;; The entries `/fork` and the tree viewer can branch at. Lives
+             ;; here rather than in the caller because `walk-branch` and the
+             ;; index are private to this namespace.
+             :fork-candidates  (fn []
+                                 (fork-candidates @entries
+                                                  (walk-branch (build-index @entries)
+                                                               @leaf-id)))
              :search           search-fn
              ;; Session naming and entry labeling (pi-compat)
              ;; Also persisted as an entry: the atom alone died with the
