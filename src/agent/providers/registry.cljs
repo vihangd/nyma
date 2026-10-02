@@ -90,12 +90,12 @@
                      "openai-compatible"
                      ((createOpenAI #js {:apiKey        key
                                          :baseURL       (:base-url config)
-                                         :compatibility "compatible"})
+                                        })
                       model-id)
                 ;; Default: try openai-compatible
                      ((createOpenAI #js {:apiKey        key
                                          :baseURL       (:base-url config)
-                                         :compatibility "compatible"})
+                                        })
                       model-id)))))))))
 
 (defn create-provider-registry

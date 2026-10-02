@@ -110,7 +110,6 @@
                          "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}"]
              model  (.chat (createOpenAI #js {:apiKey "x"
                                               :baseURL "http://local.test/v1"
-                                              :compatibility "compatible"
                                               :fetch (rescue-fetch chunks)})
                            "m")
              res    (js-await (.doStream model
@@ -156,7 +155,6 @@
 (defn ^:async drain [contents tools]
   (let [model (.chat (createOpenAI #js {:apiKey "x"
                                         :baseURL "http://local.test/v1"
-                                        :compatibility "compatible"
                                         :fetch (rescue-fetch* (content-chunks contents) tools)})
                      "m")
         res   (js-await (.doStream model

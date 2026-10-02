@@ -26,12 +26,12 @@
 
 (defn- openai-chat-model [f]
   (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1"
-                            :compatibility "compatible" :fetch f})
+                            :fetch f})
          "claude-opus-5"))
 
 (defn- openai-responses-model [f]
   (.responses (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1"
-                                 :compatibility "compatible" :fetch f})
+                                 :fetch f})
               "gpt-5.4"))
 
 (defn- google-model [f]

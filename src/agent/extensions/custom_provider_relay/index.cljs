@@ -467,14 +467,14 @@
         :responses
         (.responses (createOpenAI #js {:apiKey        key
                                        :baseURL       (:base-url entry)
-                                       :compatibility "compatible"})
+                                      })
                     model-id)
 
         ;; Gateways relay DeepSeek/GLM/Qwen, which stream reasoning through
         ;; `reasoning_content` and need it replayed on later turns.
         (.chat (createOpenAI #js {:apiKey        key
                                   :baseURL       (:base-url entry)
-                                  :compatibility "compatible"
+                                 
                                   ;; Gateways relay models that sometimes emit a
                                   ;; tool call as PROSE instead of tool_calls —
                                   ;; observed on velona/nemotron, which called

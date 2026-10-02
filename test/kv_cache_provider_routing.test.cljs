@@ -44,7 +44,7 @@
 
 (defn- openai-model [f]
   (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1"
-                            :compatibility "compatible" :fetch f})
+                            :fetch f})
          "claude-opus-5"))
 
 (defn ^:async annotate!

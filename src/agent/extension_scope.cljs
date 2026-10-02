@@ -111,8 +111,17 @@
        ;; stub set itself inconsistent: `model_switcher` calls `.-input` on one
        ;; branch and `.-custom` on the other, so a partial stub set answers one
        ;; and not the other, which is a worse contract than either all or none.
-       :custom      (fn [& _] (js/Promise.resolve nil))
-       :showOverlay (fn [& _] nil)})
+       ;;
+       ;; Both return a no-op DISMISS FUNCTION, matching the real surface
+       ;; (`overlay_host` `custom`/`showOverlay` both return `(show! …)`, a
+       ;; synchronous dismisser). The first version of these two stubs returned
+       ;; a Promise and nil respectively — so a caller doing
+       ;; `(let [dismiss (.custom ui p)] … (dismiss))` threw
+       ;; "dismiss is not a function" exactly when the UI was unavailable,
+       ;; which is the case the stubs exist for. Completing a stub set is only
+       ;; an improvement if the stubs have the right SHAPE.
+       :custom      (fn [& _] (fn [] nil))
+       :showOverlay (fn [& _] (fn [] nil))})
 
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.

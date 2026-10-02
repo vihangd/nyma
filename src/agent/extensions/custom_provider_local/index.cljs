@@ -152,7 +152,7 @@
                          base-fetch)]
       (.chat (createOpenAI #js {:apiKey        key
                                 :baseURL       base-url
-                                :compatibility "compatible"
+                               
                                 :fetch         fetch-fn})
              model-id))))
 
