@@ -15,6 +15,12 @@ The listeners column is reported only. Payload keys are the union over the
 emit sites that pass a literal map; a `-` there means the payload is built
 elsewhere (or is empty) — read the emit site.
 
+**The union is not the contract.** See the divergence table at the end: an
+event emitted from several sites may carry different keys at each, and this
+column cannot show that. It hid a real defect once — `provider_error` listed
+`config`, so it looked guaranteed, while the stream-error site omitted it and
+the one handler that needed it never fired.
+
 | Event | Emitted in | Listened in | Payload keys |
 | --- | --- | --- | --- |
 | `acp_commands_update` | src/agent/extensions/agent_shell/acp/notifications.cljs | - | - |
@@ -80,6 +86,28 @@ elsewhere (or is empty) — read the emit site.
 | `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `user_bash` | src/agent/ui/editor_bash.cljs | - | blocked, command, exit-code, reason, stderr, stdout |
 | `user_eval` | src/agent/ui/editor_eval.cljs | - | blocked, exit-code, expr, reason, stderr, stdout, unavailable |
+
+## Payload divergence
+
+Events emitted from more than one site, where the sites do not agree on which
+keys they carry. A consumer reading a key from the right-hand column gets
+`undefined` whenever the OTHER site fired — silently, and usually on the path
+that matters least often, which is why this is worth a table of its own.
+
+| Event | Sites | On every site | On SOME sites only |
+| --- | --- | --- | --- |
+| `acp_message` | 2 | agent-key | **chunk, text, type** |
+| `acp_subagent` | 2 | agent-key, id, state | **name** |
+| `acp_thought` | 2 | agent-key | **text, thought** |
+| `acp_tool_start` | 2 | agent-key | **kind, status, title, tool-id, toolCallId, toolName** |
+| `acp_tool_update` | 2 | agent-key, status | **content, tool-id, toolCallId** |
+| `agent_end` | 3 | text, usage | **finishReason** |
+| `provider_error` | 2 | config, message, model | **error, source** |
+| `session_ready` | 2 | cwd, extensions, model | **reason** |
+| `session_start` | 3 | reason | **previousSessionFile** |
+| `spec_task_complete` | 2 | spec, task | **line, line-idx, source, text** |
+| `turn_request` | 2 | text | **echo** |
+| `user_bash` | 2 | blocked, command, exit-code, stderr, stdout | **reason** |
 
 ## pi-compat events
 

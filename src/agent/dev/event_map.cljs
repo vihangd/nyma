@@ -11,7 +11,8 @@
 
    Report, don't fail: a zero-listener row is a fact on the page. The only
    failure is drift between the committed file and the source."
-  (:require ["node:fs" :as fs]
+  (:require [clojure.set]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.events :as events]
@@ -55,6 +56,23 @@
           {}
           (re-seq payload-re (str source))))
 
+(defn- payload-sites
+  "{event [#{key} …]} -- one key set PER EMIT SITE in `source`.
+
+   The union that `payload-keys` builds is what this file has always printed,
+   and it is what hid a real defect: `provider_error` showed
+   `config, error, message, model, source`, so `config` looked like part of the
+   contract, while the stream-error site sent only `message` and `source`. The
+   one handler that needed `config` therefore never fired, for the exact
+   failure the feature existed to handle. A union cannot express per-site
+   asymmetry; this can."
+  [source]
+  (reduce (fn [m [_ ev body]]
+            (update m ev (fnil conj [])
+                    (set (map second (re-seq #":([a-zA-Z][a-zA-Z0-9_-]*)" body)))))
+          {}
+          (re-seq payload-re (str source))))
+
 (def ^:private listen-re
   #"(?:\.on|\(:on|:on\b)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
 
@@ -73,7 +91,8 @@
 
 (defn scan
   "Walk src once. Returns {:emitters {event #{file}} :listeners {event #{file}}
-   :payloads {event #{key}} :registry-calls {api-name #{file}}}."
+   :payloads {event #{key}} :payload-sites {event [#{key}]}
+   :registry-calls {api-name #{file}}}."
   []
   (reduce
    (fn [acc f]
@@ -83,12 +102,40 @@
        (-> acc
            (update :emitters  (fn [m] (reduce add m (names-matching emit-re src))))
            (update :payloads  (fn [m] (merge-with into m (payload-keys src))))
+           (update :payload-sites (fn [m] (merge-with into m (payload-sites src))))
            (update :listeners (fn [m] (reduce add m (into (names-matching listen-re src)
                                                           (names-matching table-listen-re src)))))
            (update :registry-calls
                    (fn [m] (reduce add m (set (map second (re-seq register-re src)))))))))
-   {:emitters {} :listeners {} :payloads {} :registry-calls {}}
+   {:emitters {} :listeners {} :payloads {} :payload-sites {} :registry-calls {}}
    (cljs-files src-root)))
+
+(defn divergent-payloads
+  "Events whose emit sites DISAGREE about which keys they carry. Pure over a
+   `scan` result.
+
+   Returns `{event {:common #{k} :only-some #{k} :sites n}}`, where
+   `:only-some` is the keys present at some sites and absent at others — the
+   shape a consumer can be caught by. An event emitted from one site, or from
+   several that agree, does not appear.
+
+   This is the view the union column cannot give. `provider_error` is the
+   worked example: three sites, all carrying `message`, `model` and `config`,
+   but `error` only on the two throw paths and `source` only on the stream
+   path. A handler reading `.-error` degrades silently on the common failure."
+  [scanned]
+  (reduce-kv
+   (fn [acc ev sites]
+     (if (< (count sites) 2)
+       acc
+       (let [common (reduce clojure.set/intersection (set (first sites)) (map set sites))
+             all    (reduce clojure.set/union #{} (map set sites))
+             only   (clojure.set/difference all common)]
+         (if (seq only)
+           (assoc acc ev {:common common :only-some only :sites (count sites)})
+           acc))))
+   {}
+   (:payload-sites scanned)))
 
 (def ^:private stream-mapped
   "Names emitted by mapping a stream chunk type through loop.cljs's
@@ -203,6 +250,19 @@
              " | " (if token (str "`" token "` in " (cell (readers-of token))) "-")
              " |")))))
 
+(defn- divergence-rows [scanned]
+  (let [d (divergent-payloads scanned)]
+    (if (empty? d)
+      ["_No event's emit sites disagree._"]
+      (concat
+       ["| Event | Sites | On every site | On SOME sites only |"
+        "| --- | --- | --- | --- |"]
+       (for [n (sort (keys d))]
+         (let [{:keys [common only-some sites]} (get d n)]
+           (str "| `" n "` | " sites " | "
+                (if (seq common) (str/join ", " (sort common)) "-") " | **"
+                (str/join ", " (sort only-some)) "** |")))))))
+
 (defn render-event-map
   "The full document. Pure apart from reading src."
   []
@@ -227,9 +287,25 @@
        "emit sites that pass a literal map; a `-` there means the payload is built"
        "elsewhere (or is empty) — read the emit site."
        ""
+       "**The union is not the contract.** See the divergence table at the end: an"
+       "event emitted from several sites may carry different keys at each, and this"
+       "column cannot show that. It hid a real defect once — `provider_error` listed"
+       "`config`, so it looked guaranteed, while the stream-error site omitted it and"
+       "the one handler that needed it never fired."
+       ""
        "| Event | Emitted in | Listened in | Payload keys |"
        "| --- | --- | --- | --- |"]
       (event-rows scanned)
+      [""
+       "## Payload divergence"
+       ""
+       "Events emitted from more than one site, where the sites do not agree on which"
+       "keys they carry. A consumer reading a key from the right-hand column gets"
+       "`undefined` whenever the OTHER site fired — silently, and usually on the path"
+       "that matters least often, which is why this is worth a table of its own."
+       ""]
+      (divergence-rows scanned)
+
       [""
        "## pi-compat events"
        ""
