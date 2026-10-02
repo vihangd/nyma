@@ -34,7 +34,17 @@
   "Namespace segments of every `agent.extensions.<x>` this source requires,
    as kebab-case strings, minus `self`."
   [source self]
-  (->> (re-seq #"agent\.extensions\.([a-z0-9-]+)" source)
+  ;; `[a-z0-9_-]`, not `[a-z0-9-]`, in the extension-name segment.
+  ;;
+  ;; Squint resolves `agent.extensions.token_suite.shared` and
+  ;; `agent.extensions.token-suite.shared` identically, so the underscore
+  ;; spelling is a legal way to write a cross-extension require that the
+  ;; hyphen-only pattern would not see. Checked before widening: today every
+  ;; require uses the hyphenated EXTENSION name (the underscores in `src/`,
+  ;; e.g. `lsp-suite.lsp_client`, are all in the module segment, which this
+  ;; capture group does not read). So this closes a prospective hole rather
+  ;; than an active one — the dependency it would miss does not exist yet.
+  (->> (re-seq #"agent\.extensions\.([a-z0-9_-]+)" source)
        (map second)
        (remove #(= % self))
        set))

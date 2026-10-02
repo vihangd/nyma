@@ -10,9 +10,23 @@
 (describe "AGENTS.md namespaces table" (fn []
                                          (it "is the generated one"
                                              (fn []
-                                               (let [doc (fs/readFileSync (path/join (js/process.cwd) "AGENTS.md") "utf8")]
-                                                 (-> (expect (.includes doc gen/AGENTS_START)) (.toBe true))
-                                                 (-> (expect (.includes doc (gen/render))) (.toBe true)))))
+                                               (let [doc (fs/readFileSync (path/join (js/process.cwd) "AGENTS.md") "utf8")
+                                                     i   (.indexOf doc gen/AGENTS_START)
+                                                     j   (.indexOf doc gen/AGENTS_END)]
+                                        ;; Both markers must be present, and the text BETWEEN them must
+                                        ;; equal the generated table exactly.
+                                        ;;
+                                        ;; This was `(.includes doc (gen/render))`, which passes in two
+                                        ;; ways it should not: `String.includes("")` is always true, so a
+                                        ;; generator returning nothing satisfies it; and a hand-added row
+                                        ;; inside the region satisfies it too, since containment says
+                                        ;; nothing about what ELSE is there. Region equality says both.
+                                                 (-> (expect (>= i 0)) (.toBe true))
+                                                 (-> (expect (> j i)) (.toBe true))
+                                                 (let [region (.trim (.slice doc (+ i (count gen/AGENTS_START)) j))
+                                                       table  (.trim (gen/render))]
+                                                   (-> (expect (pos? (count table))) (.toBe true))
+                                                   (-> (expect region) (.toBe table))))))
 
                                          (it "describe reads the ns and the first sentence of its docstring"
                                              (fn []

@@ -12,9 +12,17 @@
               (fn []
                 (-> (gen/render)
                     (.then (fn [table]
-                             (let [doc (fs/readFileSync (path/join (js/process.cwd) "README.md") "utf8")]
-                               (-> (expect (.includes doc gen/README_START)) (.toBe true))
-                               (-> (expect (.includes doc table)) (.toBe true))))))))
+                             (let [doc (fs/readFileSync (path/join (js/process.cwd) "README.md") "utf8")
+                                   i   (.indexOf doc gen/README_START)
+                                   j   (.indexOf doc gen/README_END)]
+                               ;; Region equality, not containment — `.includes`
+                               ;; is satisfied by an empty table and by an extra
+                               ;; hand-added row.
+                               (-> (expect (>= i 0)) (.toBe true))
+                               (-> (expect (> j i)) (.toBe true))
+                               (let [region (.trim (.slice doc (+ i (count gen/README_START)) j))]
+                                 (-> (expect (pos? (count (.trim table)))) (.toBe true))
+                                 (-> (expect region) (.toBe (.trim table))))))))))
 
           (it "every event has a kind and a doc"
               (fn []

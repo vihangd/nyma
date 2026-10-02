@@ -50,6 +50,23 @@
                     (doseq [n ["tools_this_turn" "step_usage" "turn_error" "overflow_recovered_QMARK_"]]
                       (-> (expect #js [n (escaped? src n)]) (.toEqual #js [n false]))))))
 
+            (it "each name it checks still exists in loop.mjs"
+                (fn []
+        ;; `escaped?` is `(and declared? bare?)`, so a name that has been
+        ;; RENAMED or DELETED makes `declared?` false and the check above
+        ;; passes vacuously — the lint quietly stops guarding it. Only
+        ;; `tools_this_turn` had an independent existence check (via the
+        ;; tool-counter test); the other three could have been deleted from
+        ;; loop.cljs with this file still green.
+                  (let [src (fs/readFileSync loop-mjs "utf8")
+                        missing (->> ["tools_this_turn" "step_usage" "turn_error"
+                                      "overflow_recovered_QMARK_"]
+                                     (remove (fn [n]
+                                               (some? (.match src (js/RegExp.
+                                                                   (str "(?:const|let|var)\\s+" n "_?\\d*\\s*="))))))
+                                     vec)]
+                    (-> (expect (clj->js missing)) (.toEqual (clj->js []))))))
+
             (it "the tool counter is actually incremented from onStepFinish"
         ;; the increment and the declaration must name the SAME symbol
                 (fn []

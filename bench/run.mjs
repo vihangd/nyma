@@ -99,7 +99,7 @@ const HELP = `bench/run.mjs — Aider-Polyglot subset runner
 
 // ── process helpers ───────────────────────────────────────────────────────
 
-function run(cmd, args, { cwd, timeoutMs, input, env }) {
+export function run(cmd, args, { cwd, timeoutMs, input, env }) {
   return new Promise((resolve) => {
     // detached: the agent spawns bash, which spawns test runners. Killing only
     // the direct child leaves those grandchildren holding the stdout pipe, so
@@ -739,4 +739,10 @@ async function main() {
   console.log(out);
 }
 
-main();
+// Guarded so a test can import `run` without launching a benchmark. Without
+// this the reap behaviour could only be checked by scanning the source for
+// the string `reap();` — a lint that, in its first version, passed against
+// the very regression it existed to catch.
+if (import.meta.main) {
+  main();
+}

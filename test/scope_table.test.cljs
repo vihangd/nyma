@@ -12,6 +12,15 @@
 (defn- base [] (create-extension-api (create-agent {:model "test" :system-prompt "x"})))
 
 (describe "scoped api: passthrough table" (fn []
+            (it "the passthrough tables are populated"
+                (fn []
+        ;; Guard the guard. Every assertion in this file is a `doseq` over
+        ;; `passthrough-gates` or `ungated-passthroughs`; if either emptied,
+        ;; the loops would iterate nothing and all of them would report green
+        ;; while checking no methods at all.
+                  (-> (expect (count passthrough-gates)) (.toBeGreaterThan 5))
+                  (-> (expect (count ungated-passthroughs)) (.toBeGreaterThan 5))))
+
                                             (it "every passthrough exists on the base api"
                                                 (fn []
                                                   (let [b (base)]
