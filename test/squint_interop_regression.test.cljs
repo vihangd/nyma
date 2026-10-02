@@ -126,3 +126,89 @@
                                                                         (-> (expect (second (:end @seen))) (.toBe "/tmp/x"))
                                                                         (-> (expect (first (:update @seen))) (.toBe "read"))
                                                                         (-> (expect (second (:update @seen))) (.toBe "chunk-1")))))))
+
+;;; ─── Squint semantics that have each cost a bug ──────────────────
+;;;
+;;; Executable documentation. Each of these is currently recorded only as a
+;;; prose comment next to the code it bit, which means a squint upgrade that
+;;; changed the behaviour would be found the same way it was the first time.
+
+(describe "a squint map cannot be keyed on an object" (fn []
+
+  (it "two distinct objects collapse to one entry"
+      (fn []
+        ;; THE trap, and it sits on the fallback path. `model_roles` tracked
+        ;; per-run fallback attempts in a squint map keyed on the streamText
+        ;; config OBJECT. Map literals compile to plain JS objects, so every
+        ;; key stringifies to "[object Object]": one global bucket, and once a
+        ;; chain was exhausted fallback was dead for the lifetime of the
+        ;; process — the opposite of "a later turn starts fresh".
+        (let [a #js {:model "m"} b #js {:model "n"}
+              m (-> {} (assoc a "A") (assoc b "B"))]
+          (-> (expect (count m)) (.toBe 1))
+          (-> (expect (get m a)) (.toBe "B"))
+          (-> (expect (get m b)) (.toBe "B")))))
+
+  (it "a WeakMap keys on identity, which is what that code needs"
+      (fn []
+        (let [a #js {:model "m"} b #js {:model "n"} wm (js/WeakMap.)]
+          (.set wm a #{"A"})
+          (.set wm b #{"B"})
+          (-> (expect (.get wm a)) (.toEqual #{"A"}))
+          (-> (expect (.get wm b)) (.toEqual #{"B"})))))
+
+  (it "no src file keys a map on a likely object"
+      (fn []
+        ;; Narrow on purpose: `(assoc m cfg …)`/`(swap! a assoc cfg …)` where
+        ;; the key is named like a config/object rather than a keyword or
+        ;; string. A broad version of this was tried for state keys and gave
+        ;; 11 then 9 false positives, which is why that lint was dropped.
+        (let [rx (js/RegExp. "\\(assoc\\s+(?:@)?[\\w*-]+\\s+(cfg|config|st-config|obj|model)\\b" "g")
+              hits (atom [])]
+          (doseq [f (mapcat cljs-files lint-roots)]
+            (let [content (fs/readFileSync f "utf8")]
+              (doseq [[i raw] (map-indexed vector (str/split content "\n"))]
+                (let [line (first (str/split raw ";"))]
+                  (loop []
+                    (when-let [m (.exec rx line)]
+                      (swap! hits conj (str f ":" (inc i) " key=" (aget m 1)))
+                      (recur)))))))
+          (-> (expect (str/join "\n" @hits)) (.toBe "")))))))
+
+(describe "squint keywords are strings" (fn []
+
+  (it "a keyword equals its name, so a string key finds a keyword entry"
+      (fn []
+        ;; Why `tool-metadata/file-editing?` works at all: `extensions.cljs`
+        ;; stores capabilities as a set of JS STRINGS, and the predicate tests
+        ;; `(contains? caps :filesystem)`. I spent a probe convincing myself
+        ;; that was broken before discovering it is not.
+        (-> (expect (contains? #{"filesystem" "write"} :filesystem)) (.toBe true))
+        (-> (expect (= :filesystem "filesystem")) (.toBe true))))
+
+  (it "and `keyword?` therefore answers true for ANY string"
+      (fn []
+        ;; Sharper than I first wrote, and found by asserting the opposite:
+        ;; there is no keyword/string distinction to dispatch on, so
+        ;; `keyword?` cannot be used to validate that a value is a keyword.
+        ;; It is only used in docstrings in src/ today; this pins why it must
+        ;; stay that way.
+        (-> (expect (= (name :default) "default")) (.toBe true))
+        (-> (expect (keyword? "default")) (.toBe true))
+        (-> (expect (keyword? "any old string")) (.toBe true))))))
+
+(describe "defonce takes no docstring" (fn []
+
+  (it "no src file gives defonce one"
+      (fn []
+        ;; `(defonce x "doc" (atom nil))` binds x to the STRING and drops the
+        ;; atom — recorded at verify_gate/index.cljs after it cost a `reset!`
+        ;; that failed inside squint core. Nothing stopped a second one.
+        (let [rx (js/RegExp. "\\(defonce\\s+[\\w*?!<>-]+\\s+\"" "g")
+              hits (atom [])]
+          (doseq [f (mapcat cljs-files lint-roots)]
+            (let [content (fs/readFileSync f "utf8")]
+              (doseq [[i raw] (map-indexed vector (str/split content "\n"))]
+                (when (.exec rx (first (str/split raw ";")))
+                  (swap! hits conj (str f ":" (inc i)))))))
+          (-> (expect (str/join "\n" @hits)) (.toBe "")))))))

@@ -121,7 +121,14 @@
        ;; which is the case the stubs exist for. Completing a stub set is only
        ;; an improvement if the stubs have the right SHAPE.
        :custom      (fn [& _] (fn [] nil))
-       :showOverlay (fn [& _] (fn [] nil))})
+       :showOverlay (fn [& _] (fn [] nil))
+       ;; The editor pair completes the set. `extensions.cljs` declares the ui
+       ;; contract as ten methods; this had eight, so two of them were still a
+       ;; TypeError when the capability was absent — the gap the stubs exist to
+       ;; close, left half open. `test/ui_surface_parity.test.cljs` compares the
+       ;; two lists so it cannot drift again.
+       :setEditorValue (fn [& _] nil)
+       :getEditorValue (fn [& _] nil)})
 
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.
