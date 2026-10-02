@@ -1,8 +1,17 @@
 (ns ext-mcp-client-integration.test
   "Real subprocess MCP integration tests. Gated by
-   MCP_INTEGRATION_TESTS=1 (mirrors LSP's pattern at
-   ext_lsp_suite_integration.test.cljs:22-24) so CI/dev
-   doesn't pay the spawn cost on every run.
+   MCP_INTEGRATION_TESTS=1 so CI/dev doesn't pay the spawn cost on every run.
+
+   Gated with `describe.skipIf` / `it.skipIf`, so a closed gate reports
+   SKIPPED. These previously wrapped each body in `(when (and (enabled?) …))`,
+   so with the gate closed the tests RAN, asserted nothing, and reported PASS.
+   That is why this file used to carry a gate-notice test whose only job was
+   to print that nothing had been verified — the workaround for a gate that
+   could not say so itself. Honest skips make it unnecessary.
+
+   The `(when (and (enabled?) …))` guards inside each body are now redundant
+   with the skipIf gates and left in place deliberately: they are inert when
+   the gates agree, and removing them buys nothing.
 
    When enabled, exercises the full client lifecycle against:
      1. lean-ctx mcp                  — already on PATH
@@ -94,21 +103,16 @@
       (js-await (client/stop! c))
       (-> (expect (client/state c)) (.toBe :stopped)))))
 
-;;; ─── Test gate notice ───────────────────────────────────────────
+;;; ─── Suite ──────────────────────────────────────────────────────
 
-(defn ^:async test-gate-notice []
-  ;; Always passes — but logs a hint when the gate is closed so
-  ;; people aren't confused why "tests pass" without verifying
-  ;; actual MCP behavior.
-  (when-not (enabled?)
-    (js/console.log
-     "[mcp-integration] MCP_INTEGRATION_TESTS unset — skipping real subprocess tests")))
-
-(describe "mcp-client/integration"
+((.skipIf describe (not (enabled?))) "mcp-client/integration"
           (fn []
-            (it "MCP_INTEGRATION_TESTS gate notice" test-gate-notice)
-            (it "lean-ctx mcp: connect → list → call → close (gated)"
-                test-lean-ctx-roundtrip)
-            (it "server-everything: connect → list → call → close (gated)"
-                test-server-everything-roundtrip)
-            (it "stop! is idempotent (gated)" test-stop-is-idempotent)))
+            ((.skipIf it (not (on-path? "lean-ctx")))
+             "lean-ctx mcp: connect → list → call → close"
+             test-lean-ctx-roundtrip)
+            ((.skipIf it (not (on-path? "npx")))
+             "server-everything: connect → list → call → close"
+             test-server-everything-roundtrip)
+            ((.skipIf it (not (on-path? "lean-ctx")))
+             "stop! is idempotent"
+             test-stop-is-idempotent)))

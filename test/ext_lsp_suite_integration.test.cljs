@@ -1,7 +1,13 @@
 (ns ext-lsp-suite-integration.test
   "Integration tests for lsp_suite — require clojure-lsp on PATH.
    Run with: LSP_INTEGRATION_TESTS=1 bun test test/ext_lsp_suite_integration.test.cljs
-   Skipped by default to avoid slowing CI."
+
+   Gated with `describe.skipIf`, so with the env var unset these report as
+   SKIPPED. They previously wrapped each body in `(when run-tests? …)`, which
+   meant the tests ran, asserted nothing, and reported PASS — five green
+   results standing in for the only coverage `lsp_client` and `lsp_manager`
+   have. A test that cannot fail is worse than a missing one: it hides the
+   absence. `ext_agent_shell_e2e` had the convention right."
   (:require ["bun:test" :refer [describe it expect beforeAll afterAll]]
             ["node:child_process" :as cp]
             ["node:path" :as node-path]
@@ -62,58 +68,53 @@
 ;; ── Individual test bodies ────────────────────────────────────────
 
 (defn ^:async test-client-running []
-  (when run-tests?
-    (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))]
-      (-> (expect (some? client)) (.toBe true))
-      (-> (expect (lsp-client/running? client)) (.toBe true)))))
+  (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))]
+    (-> (expect (some? client)) (.toBe true))
+    (-> (expect (lsp-client/running? client)) (.toBe true))))
 
 (defn ^:async test-hover []
-  (when run-tests?
-    (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))
-          result (js-await
-                  (lsp-client/request! client
-                                       "textDocument/hover"
-                                       #js {:textDocument #js {:uri (fmt/path->uri test-file)}
-                                            :position     #js {:line 0 :character 4}}))]
-      ;; clojure-lsp may return nil for some positions; any non-throw is valid
-      (-> (expect (not (= result js/undefined))) (.toBe true)))))
+  (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))
+        result (js-await
+                (lsp-client/request! client
+                                     "textDocument/hover"
+                                     #js {:textDocument #js {:uri (fmt/path->uri test-file)}
+                                          :position     #js {:line 0 :character 4}}))]
+    ;; clojure-lsp may return nil for some positions; any non-throw is valid
+    (-> (expect (not (= result js/undefined))) (.toBe true))))
 
 (defn ^:async test-document-symbols []
-  (when run-tests?
-    (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))
-          result (js-await
-                  (lsp-client/request! client
-                                       "textDocument/documentSymbol"
-                                       #js {:textDocument #js {:uri (fmt/path->uri test-file)}}))]
-      (-> (expect (some? result)) (.toBe true))
-      (-> (expect (pos? (.-length result))) (.toBe true)))))
+  (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))
+        result (js-await
+                (lsp-client/request! client
+                                     "textDocument/documentSymbol"
+                                     #js {:textDocument #js {:uri (fmt/path->uri test-file)}}))]
+    (-> (expect (some? result)) (.toBe true))
+    (-> (expect (pos? (.-length result))) (.toBe true))))
 
 (defn ^:async test-find-references []
-  (when run-tests?
-    (let [loop-file (str project-root "/src/agent/loop.cljs")
-          _         (js-await (mgr/ensure-open! @mgr-ref loop-file))
-          client    (js-await (mgr/get-client-for! @mgr-ref loop-file))
-          result    (js-await
-                     (lsp-client/request! client
-                                          "textDocument/references"
-                                          #js {:textDocument #js {:uri (fmt/path->uri loop-file)}
-                                               :position     #js {:line 0 :character 5}
-                                               :context      #js {:includeDeclaration true}}))]
-      ;; Result may be nil or an array; just verify no exception thrown
-      (-> (expect true) (.toBe true)))))
+  (let [loop-file (str project-root "/src/agent/loop.cljs")
+        _         (js-await (mgr/ensure-open! @mgr-ref loop-file))
+        client    (js-await (mgr/get-client-for! @mgr-ref loop-file))
+        result    (js-await
+                   (lsp-client/request! client
+                                        "textDocument/references"
+                                        #js {:textDocument #js {:uri (fmt/path->uri loop-file)}
+                                             :position     #js {:line 0 :character 5}
+                                             :context      #js {:includeDeclaration true}}))]
+    ;; Result may be nil or an array; just verify no exception thrown
+    (-> (expect true) (.toBe true))))
 
 (defn ^:async test-did-change []
-  (when run-tests?
-    (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))]
-      (mgr/did-change! @mgr-ref test-file "(ns agent.core)")
-      (let [fs      (js/require "node:fs")
-            content (.readFileSync fs test-file "utf8")]
-        (mgr/did-change! @mgr-ref test-file content))
-      (-> (expect (lsp-client/running? client)) (.toBe true)))))
+  (let [client (js-await (mgr/get-client-for! @mgr-ref test-file))]
+    (mgr/did-change! @mgr-ref test-file "(ns agent.core)")
+    (let [fs      (js/require "node:fs")
+          content (.readFileSync fs test-file "utf8")]
+      (mgr/did-change! @mgr-ref test-file content))
+    (-> (expect (lsp-client/running? client)) (.toBe true))))
 
 ;; ── Suite ─────────────────────────────────────────────────────────
 
-(describe "LSP integration — clojure-lsp"
+((.skipIf describe (not run-tests?)) "LSP integration — clojure-lsp"
           (fn []
             (beforeAll setup! 60000)
             (afterAll teardown!)
