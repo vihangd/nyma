@@ -44,6 +44,16 @@
                          :category     :agent
                          :bound-by     "interactive mode"
                          :fixed?       true}
+   ;; Enter during a turn steers — it lands between tool steps, so the model
+   ;; sees it mid-work. That is the right default and the wrong thing when you
+   ;; mean "when you're done, also do this": a steer can derail the turn it
+   ;; interrupts. Both queues have always existed (`steer-queue` and
+   ;; `follow-queue`, drained at different points); only the follow-up one had
+   ;; no key. alt+enter is free — pi-tui's editor binds newLine to shift+enter.
+   "app.queue"          {:description  "Queue the message for AFTER the current turn, instead of steering into it"
+                         :default-keys ["alt+enter"]
+                         :category     :agent
+                         :bound-by     "interactive mode"}
    ;; ── Editor ──
    "app.submit"         {:description  "Submit the message"
                          :default-keys ["return"]

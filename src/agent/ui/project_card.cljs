@@ -102,13 +102,52 @@
          (when (pos? (or indexed-symbols 0))
            (str " · " (compact-count indexed-symbols) " symbols")))))
 
+(def startup-modes
+  "What `settings.startup` selects.
+
+   `card` is the default and what nyma has always done. `header` is the one
+   line naming the version and where you are — borrowed from pi's
+   `quietStartup: \"header\"` — for anyone who opens a lot of sessions and does
+   not need the git and loaded-resources lines each time. `silent` prints
+   nothing at all, for a recorded demo or a screenshot."
+  #{:card :header :silent})
+
+(defn startup-mode
+  "settings.startup → one of `startup-modes`. Pure.
+
+   Unknown values fall back to `:card` rather than to silence: a typo must not
+   be the reason a session opens with no context at all."
+  [v]
+  (let [k (some-> v str .trim .toLowerCase)]
+    (cond
+      (nil? k)      :card
+      (= k "")      :card
+      (= k "card")  :card
+      (= k "header") :header
+      (= k "silent") :silent
+      :else         nil)))
+
+(defn head-line
+  "`nyma 0.12.0  ·  ~/projects/x`. Pure."
+  [{:keys [version cwd home-dir]}]
+  (str "nyma " (or version "?")
+       (when (seq (str (or cwd ""))) (str "  ·  " (abbrev-path cwd home-dir)))))
+
+(defn header
+  "The header line for `startup: \"header\"`, without `collect`'s three git
+   shell-outs — the only reason those are worth paying for is the card's other
+   lines, so header mode must not do that work and throw it away."
+  [{:keys [version cwd]}]
+  (head-line {:version  version
+              :cwd      (or cwd (js/process.cwd))
+              :home-dir (try (home/dir) (catch :default _e nil))}))
+
 (defn render
   "The card, or nil when there is nothing worth printing.
 
    Pure. `facts` is whatever `collect` gathered; every field is optional."
-  [{:keys [version cwd home-dir] :as facts}]
-  (let [head  (str "nyma " (or version "?")
-                   (when (seq (str (or cwd ""))) (str "  ·  " (abbrev-path cwd home-dir))))
+  [{:as facts}]
+  (let [head  (head-line facts)
         body  (->> [(git-line facts) (loaded-line facts)
                     (prompt-line facts) (index-line facts)]
                    (remove nil?)

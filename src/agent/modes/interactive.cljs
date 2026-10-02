@@ -1155,6 +1155,30 @@
                 :description (get-in kbr/default-actions ["app.tools.expand" :description])
                 :handler     (fn [] (update-messages! reducers/tool-toggle-expanded))}))
 
+      ;; alt+enter: queue what is typed for AFTER the turn, rather than
+      ;; steering into it. Same mechanism as ctrl+o above — a `(:shortcuts
+      ;; agent)` entry under whatever combo maps to `app.queue` — because
+      ;; input listeners run before the editor's focus dispatch, which is the
+      ;; only place a key the editor would otherwise swallow can be caught.
+      (let [combo (or (kbr/get-binding @(:keybinding-registry agent) "app.queue")
+                      "alt+enter")]
+        (swap! (:shortcuts agent) assoc combo
+               {:action      "app.queue"
+                :description (get-in kbr/default-actions ["app.queue" :description])
+                :handler
+                (fn []
+                  (let [t (.trim (str (or (.getText editor) "")))]
+                    (when (seq t)
+                      (.addToHistory editor t)
+                      (follow-up agent {:role "user" :content t})
+                      (.setText editor "")
+                      ;; Marked, and marked differently from a steer's `↩`:
+                      ;; the two go to different queues and arrive at
+                      ;; different times, so a transcript that showed them
+                      ;; identically would be lying about the order of events.
+                      (add-user-msg! (str t "  ⏳ queued"))
+                      (.requestRender tui))))}))
+
       ;; Registered shortcuts — extensions' `registerShortcut` and every
       ;; keybindings.json binding. Both landed in `(:shortcuts agent)` and
       ;; NOTHING read it at keypress time, so prompt_history's ctrl+r, the
@@ -1253,25 +1277,44 @@
         ;; once, after the first frame — never from a render, where the status
         ;; line would call it at 10 Hz. Failing soft to no card: a startup line
         ;; is not worth a crash.
-        (try
-          (when-let [c (project-card/render
-                        (project-card/collect
-                         {:version         version/version
-                          :cwd             (js/process.cwd)
-                          :resources       resources
-                          :extension-count (:extension-count opts)}))]
-            (note c))
-          (catch :default e
-            (d/warn "project-card" (str "skipped: " (or (.-message e) (str e))))))
-        (if-let [banner (resumed-banner
-                         {:message-count (count @messages)
-                          :name          (when sess (try ((:get-session-name sess))
-                                                         (catch :default _ nil)))
-                          :file-path     (when sess (try ((:get-file-path sess))
-                                                         (catch :default _ nil)))
-                          :total-cost    (:total-cost st)})]
-          (note banner)
-          (note kbr/first-launch-hint)))
+        ;; settings.startup selects how much of this appears: the full card,
+        ;; the one-line header (pi's `quietStartup: "header"`), or nothing.
+        ;; An unknown value warns and falls back to the card — a typo must not
+        ;; be the reason a session opens with no context.
+        (let [raw  (let [sm (:settings agent)]
+                     (when (and sm (fn? (:get sm))) (:startup ((:get sm)))))
+              mode (or (project-card/startup-mode raw)
+                       (do (d/warn "startup"
+                                   (str "unknown settings.startup " (pr-str raw)
+                                        " — showing the project card. Valid: card, header, silent"))
+                           :card))]
+          (when-not (= mode :silent)
+            (try
+              (if (= mode :header)
+                ;; `header` deliberately does NOT call `collect`: the card's
+                ;; other lines are the only reason those three git shell-outs
+                ;; are worth paying for.
+                (note (project-card/header {:version version/version
+                                            :cwd     (js/process.cwd)}))
+                (when-let [c (project-card/render
+                              (project-card/collect
+                               {:version         version/version
+                                :cwd             (js/process.cwd)
+                                :resources       resources
+                                :extension-count (:extension-count opts)}))]
+                  (note c)))
+              (catch :default e
+                (d/warn "project-card" (str "skipped: " (or (.-message e) (str e)))))))
+          (when-not (= mode :silent)
+            (if-let [banner (resumed-banner
+                             {:message-count (count @messages)
+                              :name          (when sess (try ((:get-session-name sess))
+                                                             (catch :default _ nil)))
+                              :file-path     (when sess (try ((:get-file-path sess))
+                                                             (catch :default _ nil)))
+                              :total-cost    (:total-cost st)})]
+              (note banner)
+              (note kbr/first-launch-hint)))))
 
       ;; The prompt cli handed us (`nyma "do the thing"` with no -p). Submitted
       ;; AFTER .start so the first frame has painted and the turn's output has

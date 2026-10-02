@@ -65,6 +65,13 @@
    ;; to the expanded body; the rest is summarised as "… N more lines".
    :tool-display           "collapsed"
    :tool-display-max-lines 40
+   ;; How much a session opens with. "card" is what nyma has always printed:
+   ;; version + path, then git state, loaded resources, the standing prompt's
+   ;; token cost and the repo-map size. "header" is the first line only — pi's
+   ;; `quietStartup: "header"` — and skips the card's three git shell-outs
+   ;; rather than computing them and dropping them. "silent" prints nothing,
+   ;; including the resume banner. An unknown value warns and shows the card.
+   :startup                "card"
    ;; Layout mode for the chat view. Accepts:
    ;;   true    — default, natural-flow + writeToStdout commits
    ;;   false   — fixed-height + Ink <Static> emissions to scrollback
@@ -507,7 +514,7 @@
   (let [[stripped warns] (strip-project-widening (load-json path))]
     (when (seq warns)
       (d/warn "settings" (str path " may not widen permissions; ignored: " (str/join ", " warns)
-                             " — set these in ~/.nyma/settings.json or on the command line")))
+                              " — set these in ~/.nyma/settings.json or on the command line")))
     stripped))
 
 (defn create-settings-manager
