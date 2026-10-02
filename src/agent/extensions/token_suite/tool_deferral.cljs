@@ -121,6 +121,27 @@
       5
       :else nil)))
 
+(defn schema->json
+  "A tool's declared schema as JSON Schema, or nil.
+
+   An in-tree tool's `:inputSchema` is a ZOD schema, and `JSON.stringify` of
+   one yields Zod internals — `{\"def\":{\"type\":\"object\",\"shape\":…}}` — with every
+   `.describe()` string dropped. That is not a schema the model can use, and
+   the schema is the only reason the tool was withheld, so handing back
+   internals makes the whole feature pointless.
+
+   `z.toJSONSchema` is the converter. Wrapped, because a recursive schema can
+   make it throw, and that throw would land inside `tool_search`'s execute."
+  [schema]
+  (when schema
+    (try
+      (cond
+        ;; Already JSON Schema (an MCP bridge hands us a plain object).
+        (aget schema "type")       schema
+        (aget schema "jsonSchema") (aget schema "jsonSchema")
+        :else                      (.toJSONSchema z schema))
+      (catch :default _e nil))))
+
 (defn format-results
   "Search hits → what the model reads. Pure.
 
@@ -137,7 +158,9 @@
                    (map (fn [{:keys [name description schema]}]
                           (str name "\n"
                                (when (seq (str (or description ""))) (str "  " description "\n"))
-                               "  parameters: " (js/JSON.stringify (clj->js (or schema {})))))
+                               (if-let [js-schema (schema->json schema)]
+                                 (str "  parameters: " (js/JSON.stringify js-schema))
+                                 "  parameters: (schema unavailable — call it and read the error)")))
                         hits)))))
 
 ;; ── activation ───────────────────────────────────────────────────
@@ -189,8 +212,12 @@
                      (swap! stats update :searches inc)
                      (when (seq hits)
                        (swap! activated into (map :name hits))
-                       (swap! stats update :revealed + (count hits))
-                       (swap! shared/suite-stats assoc :tool-deferral @stats))
+                       (swap! stats update :revealed + (count hits)))
+                     ;; Published on EVERY search, not only a hit: a search that
+                     ;; matched nothing is the most interesting thing
+                     ;; `/token-stats` could tell you, and gating the publish on
+                     ;; hits meant the counter it reads never moved.
+                     (swap! shared/suite-stats assoc :tool-deferral @stats)
                      (format-results hits)))}
 
             access-handler

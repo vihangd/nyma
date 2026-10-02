@@ -22,21 +22,41 @@
   ;; Unreachable, refused, timed out, or the server is in no state to answer.
   ["econnrefused" "enotfound" "eai_again" "econnreset" "etimedout"
    "fetch failed" "failed to fetch" "network error" "socket hang up"
+   ;; What @ai-sdk/* ACTUALLY says for a refused connection, found by pointing
+   ;; a provider at a closed port and reading the message: "Cannot connect to
+   ;; API: Unable to connect. Is the computer able to access the url?". The
+   ;; raw errno never reaches it — the SDK wraps and retries first, so the
+   ;; message is "Failed after 6 attempts. Last error: AI_APICallError: Cannot
+   ;; connect to API…". Matching only "econnrefused" missed every real case.
+   "cannot connect" "unable to connect"
    "timeout" "timed out"
+   ;; Go's canonical timeout string — ollama and vLLM gateways report an
+   ;; unreachable or wedged backend this way, which is squarely what the chain
+   ;; is for. A bare "context" in request-patterns used to swallow it.
+   "deadline exceeded"
    "503" "502" "504" "500" "overloaded" "capacity" "saturated"
    "service unavailable" "bad gateway" "internal server error"
    "no healthy upstream"
    ;; The model itself is not there: a 404 on the model route, or a local
    ;; server that lists a model it cannot load — both seen on this machine.
    "model not found" "model_not_found" "unknown model" "does not exist"
-   "failed to load" "not supported"])
+   "failed to load"
+   ;; "model type X not supported" is a load failure (seen verbatim from mlx).
+   ;; Matched on "model type" rather than a bare "not supported", which also
+   ;; caught "tool use is not supported by this model" — a capability mismatch,
+   ;; where swapping models silently is a surprise rather than a recovery.
+   "model type"])
 
 (def ^:private request-patterns
   ;; The caller's problem, not the endpoint's. A different model does not help,
   ;; and falling back would bury the thing that needs fixing.
   ["401" "403" "invalid api key" "invalid x-api-key" "invalid_api_key"
    "unauthorized" "authentication" "permission denied" "forbidden"
-   "context" "too long" "maximum" "context_length"])
+   ;; "context length"/"context_length", NOT a bare "context": Go-based local
+   ;; servers (ollama, vLLM gateways) report a timeout as "context deadline
+   ;; exceeded", which is an availability failure and exactly what the chain is
+   ;; for — a bare substring suppressed it.
+   "context length" "context_length" "context window" "too long" "maximum tokens"])
 
 (defn should-fall-back?
   "Is this failure a reason to try the next model in the chain?

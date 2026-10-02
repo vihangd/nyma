@@ -59,7 +59,24 @@
     ((:emit (:events agent)) "session_before_fork"
                              {:leaf-id leaf :new-leaf entry-id})
     ((:branch session) entry-id)
-    ((:dispatch! (:store agent)) :messages-cleared {})
+    ;; Clearing alone was a correctness bug, not a cosmetic one: `build-context`
+    ;; reads `(:messages @(:state agent))`, so an empty store IS an empty model
+    ;; context. `/fork` left the model with no history at all — the opposite of
+    ;; "continue from an earlier point", and invisible because the branch was
+    ;; intact on disk the whole time.
+    ;;
+    ;; Reseeded exactly as /resume does it (`switch-to-session!`), and for the
+    ;; same reasons: `:replaying-session?` so the replayed entries are not
+    ;; re-appended to the new branch's JSONL, and skills deactivated because the
+    ;; ones loaded on the abandoned branch are not the ones this branch loaded.
+    (swap! (:state agent) assoc :replaying-session? true)
+    (try
+      (skills/deactivate-all-skills! agent)
+      ((:dispatch! (:store agent)) :messages-cleared {})
+      (doseq [msg (session->seed-messages ((:build-context session)))]
+        ((:dispatch! (:store agent)) :message-added {:message msg}))
+      (finally
+        (swap! (:state agent) assoc :replaying-session? false)))
     ((:emit (:events agent)) "session_start" {:reason "fork"})
     (notify ctx (if (seq (str (or label "")))
                   (str "Branched from: " label)
@@ -961,15 +978,27 @@
                                   (if (not= pick ::ask)
                                     pick
                                     (when (and ctx (.-ui ctx) (.-select (.-ui ctx)))
-                                      (let [labels (clj->js
-                                                    (map-indexed
-                                                     (fn [i c] (str (inc i) ". " (:label c)))
-                                                     cands))
-                                            idx (js-await
-                                                 (.select (.-ui ctx)
-                                                          "Branch from which message?"
-                                                          labels))]
-                                        (when (number? idx) (nth cands idx nil)))))]
+                                      ;; `ui.select` resolves with the chosen
+                                      ;; ITEM — a `{:label :value}` object — not
+                                      ;; an index (overlay_host's
+                                      ;; make-select-picker: "on-resolve
+                                      ;; receives the chosen item"). Passing
+                                      ;; bare strings and reading a number made
+                                      ;; this branch silently do nothing after
+                                      ;; the user picked.
+                                      (let [items (clj->js
+                                                   (map-indexed
+                                                    (fn [i c]
+                                                      {:label (str (inc i) ". " (:label c))
+                                                       :value (:id c)})
+                                                    cands))
+                                            chosen (js-await
+                                                    (.select (.-ui ctx)
+                                                             "Branch from which message?"
+                                                             items))
+                                            id (when chosen (.-value chosen))]
+                                        (when id
+                                          (first (filter #(= (:id %) id) cands))))))]
                               (cond
                                 ;; No UI to ask with (print/rpc mode): list them
                                 ;; rather than silently doing nothing.

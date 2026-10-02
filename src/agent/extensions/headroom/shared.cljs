@@ -33,7 +33,10 @@
    keeps `inert-keys` with a reason per key: a setting that does nothing is
    worse than one that is rejected."
   {:algorithms  "removed — the proxy owns the transform pipeline; use `mode` to pick one of ccr, lossy_inline, lossless_then_lossy"
-   :disable-ccr "removed — CCR is a pipeline mode now and off by default; `\"mode\": \"ccr\"` turns it on"})
+   ;; `false` is still honoured (resolve-mode maps it to mode "ccr"), so the
+   ;; message says mapped rather than ignored — a warning that misdescribes
+   ;; what the code did is worse than none.
+   :disable-ccr "superseded — CCR is a pipeline mode now; `false` is read as `\"mode\": \"ccr\"`, and `true` as the default pipeline. Set `mode` directly"})
 
 ;; ── Settings loader ──────────────────────────────────────────────
 
@@ -105,7 +108,10 @@
   (->> removed-keys
        (keep (fn [[k hint]]
                (when (contains? config k)
-                 (str "headroom." (name k) " is ignored: " hint))))
+                 ;; No "is ignored" prefix: one of these keys IS still read
+                 ;; (disable-ccr maps to a mode), and each hint says its own
+                 ;; fate.
+                 (str "headroom." (name k) " " hint))))
        vec))
 
 (defn disabled-hint

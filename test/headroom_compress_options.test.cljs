@@ -133,3 +133,28 @@
           ;; The assertion that matters: the request went to OUR server.
                       (-> (expect (count @hits)) (.toBeGreaterThan 0))
                       (-> (expect (first @hits)) (.toContain (str ":" port))))))))
+
+(describe "the warning actually reaches the user"
+         (fn []
+           (test "a VALID settings file carrying a removed key still warns"
+                 (fn []
+        ;; The gate was `(when (seq errors) …)`, so the removed-key warning only
+        ;; ran if the file ALSO failed to parse — dead for exactly the people it
+        ;; is for. The condition is the OR of both reasons to speak.
+                   (let [errors []
+                         base   {:enabled false :algorithms ["X"]}
+                         say?   (or (seq errors) (seq (shared/removed-key-warnings base)))]
+                     (-> (expect (boolean say?)) (.toBe true)))))
+
+           (test "a clean config stays silent"
+                 (fn []
+                   (let [say? (or (seq []) (seq (shared/removed-key-warnings shared/default-config)))]
+                     (-> (expect (boolean say?)) (.toBe false)))))
+
+           (test "the message does not claim disable-ccr is ignored, because it is not"
+                 (fn []
+        ;; resolve-mode still maps `false` to mode "ccr". A warning that
+        ;; misdescribes what the code did is worse than none.
+                   (let [m (first (shared/removed-key-warnings {:disable-ccr false}))]
+                     (-> (expect m) (.not.toContain "is ignored"))
+                     (-> (expect m) (.toContain "ccr")))))))

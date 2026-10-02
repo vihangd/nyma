@@ -552,7 +552,30 @@
                                                                    :model   model-id
                                                                    :config  st-config}))]
                                 (if (get err-result "retry")
-                                  (js-await (streamText st-config))
+                                  ;; Looped, not single-shot: a fallback chain
+                                  ;; with two entries could otherwise never get
+                                  ;; past the first, because a second throw here
+                                  ;; left no one to ask. Bounded at 4 — a chain
+                                  ;; longer than that is a configuration to fix,
+                                  ;; not a condition to ride out.
+                                  (loop [n 0 last-err e]
+                                    (let [r (try
+                                              {:ok (js-await (streamText st-config))}
+                                              (catch :default e2 {:err e2}))]
+                                      (cond
+                                        (:ok r) (:ok r)
+                                        (>= n 3) (throw (with-provider-detail! (:err r)))
+                                        :else
+                                        (let [again (js-await
+                                                     (emit-collect
+                                                      "provider_error"
+                                                      #js {:error   (:err r)
+                                                           :message (.-message (:err r))
+                                                           :model   model-id
+                                                           :config  st-config}))]
+                                          (if (get again "retry")
+                                            (recur (inc n) (:err r))
+                                            (throw (with-provider-detail! (:err r))))))))
                                   ;; Attach the provider's own explanation
                                   ;; before this leaves the loop — it is the
                                   ;; only place the raw error is still in hand.
@@ -577,9 +600,7 @@
                               (when (= "error" (.-type chunk-val))
                                 (let [msg (stream-error-message chunk-val)]
                                   (reset! stream-error (or msg "stream error"))
-                                  (dbg/error "loop" (str "provider stream error: " (or msg chunk-val)))
-                                  (emit "provider_error" #js {:message (or msg "stream error")
-                                                              :source  "stream"})))
+                                  (dbg/error "loop" (str "provider stream error: " (or msg chunk-val)))))
                               (if (= evt-type "message_update")
                                 (do
                                   ;; AI SDK v7 fullStream: the text-delta part
@@ -602,6 +623,35 @@
                                     (when-not @aborted (emit evt-type chunk-val))))
                                 (emit evt-type chunk-val)))
                             (when-not @aborted (recur))))))
+
+                  ;; A stream `error` part — not a throw — is how an unreachable
+                  ;; or overloaded provider actually arrives. Verified against
+                  ;; ai@7.0.127: `streamText` pointed at a refused port does NOT
+                  ;; throw, it yields parts ["start","error"]. So the catch
+                  ;; around `streamText` above never sees the outage case, and a
+                  ;; fallback chain wired only there could not fire for
+                  ;; ECONNREFUSED — the exact failure it was written for.
+                  ;;
+                  ;; Emitted here as a COLLECT carrying `:config`, so a handler
+                  ;; can swap the model on it and ask for a retry. Rather than
+                  ;; recurring directly, it sets `retry-state`, which hands the
+                  ;; work to the bounded retry immediately below: same attempt
+                  ;; cap, same st-config object the handler just mutated, and no
+                  ;; second retry path to keep in step with this one.
+                    (when (and @stream-error
+                               (nil? @(:retry-state agent))
+                               (< attempt 2)
+                               (get (js-await
+                                     (emit-collect "provider_error"
+                                                   #js {:message @stream-error
+                                                        :source  "stream"
+                                                        :model   model-id
+                                                        :config  st-config}))
+                                    "retry"))
+                      (reset! stream-error nil)
+                      (reset! accumulated "")
+                      (reset! (:retry-state agent)
+                              {:reason "provider-fallback" :inject []}))
 
                   ;; Aborted → inject messages and retry (max 2 times)
                     (if-let [retry @(:retry-state agent)]

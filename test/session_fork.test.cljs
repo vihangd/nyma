@@ -109,3 +109,24 @@
    (when-let [d @tmp]
      (try (fs/rmSync d #js {:recursive true :force true}) (catch :default _e nil))
      (reset! tmp nil))))
+
+(describe "the model's context after branching"
+         (fn []
+           (test "build-context reads the STORE, so a cleared store is an empty context"
+                 (fn []
+        ;; This is why `branch-at!` has to reseed and not merely clear:
+        ;; `context/build-context` reads `(:messages @(:state agent))`, so
+        ;; clearing the store left the model with NO history at all while the
+        ;; branch sat intact on disk — invisible, and the opposite of what
+        ;; "continue from an earlier point" means.
+                   (let [s (mk-session)]
+                     ((:append s) {:role "user" :content "shared"})
+                     ((:append s) {:role "assistant" :content "reply A"})
+                     ((:append s) {:role "user" :content "follow A"})
+                     (let [fork-point (:id (first ((:fork-candidates s))))]
+                       ((:branch s) fork-point)
+            ;; What the reseed feeds the store, via session->seed-messages.
+                       (let [ctx ((:build-context s))]
+                         (-> (expect (pos? (count ctx))) (.toBe true))
+                         (-> (expect (clj->js (mapv :content ctx))) (.toContain "shared"))
+                         (-> (expect (clj->js (mapv :content ctx))) (.not.toContain "follow A")))))))))

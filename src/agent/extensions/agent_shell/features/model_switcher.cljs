@@ -104,14 +104,20 @@
       (let [models (get-filtered-models agent-key)]
         (if (empty? models)
           ;; No model list available — fall back to text input
-          (if (and (.-ui api) (.-input (.-ui api)))
+          ;; `.available`, not presence. `api.ui` without the `:ui` capability
+          ;; now carries no-op METHODS (so a call is not a TypeError), which
+          ;; means a presence test passes and this awaited a promise resolving
+          ;; nil — silently doing nothing instead of printing the one
+          ;; actionable line below. `available` is the contract; presence never
+          ;; was.
+          (if (and (.-ui api) (.-available (.-ui api)) (.-input (.-ui api)))
             (-> (.input (.-ui api) "Enter model name" "model-id")
                 (.then (fn [value]
                          (when (and value (seq value))
                            (switch-model! api value)))))
             (notify api "No models available. Use /agent-shell__model <model-id> to switch directly."))
           ;; Show fuzzy picker
-          (when (and (.-ui api) (.-custom (.-ui api)))
+          (when (and (.-ui api) (.-available (.-ui api)) (.-custom (.-ui api)))
             (.custom (.-ui api)
                      (picker/create-picker models
                                            (fn [selected-id]

@@ -1169,6 +1169,16 @@
                 (fn []
                   (let [t (.trim (str (or (.getText editor) "")))]
                     (when (seq t)
+                      ;; Only meaningful DURING a turn. `follow-queue` is drained
+                      ;; when a run ends, so queueing while idle put the text
+                      ;; nowhere — it sat until some later, unrelated turn
+                      ;; finished and then arrived as if the user had just typed
+                      ;; it, while the "queued" echo claimed it had been
+                      ;; accepted. Idle alt+enter submits instead, which is what
+                      ;; "send this" means when nothing is running.
+                      (if-not @streaming
+                        (on-submit t)
+                        (do
                       (.addToHistory editor t)
                       (follow-up agent {:role "user" :content t})
                       (.setText editor "")
@@ -1177,7 +1187,7 @@
                       ;; different times, so a transcript that showed them
                       ;; identically would be lying about the order of events.
                       (add-user-msg! (str t "  ⏳ queued"))
-                      (.requestRender tui))))}))
+                      (.requestRender tui))))))}))
 
       ;; Registered shortcuts — extensions' `registerShortcut` and every
       ;; keybindings.json binding. Both landed in `(:shortcuts agent)` and

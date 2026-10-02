@@ -106,7 +106,13 @@
        :confirm   (fn [& _] (js/Promise.resolve false))
        :notify    (fn [& _] nil)
        :setWidget (fn [& _] nil)
-       :clearWidget (fn [& _] nil)})
+       :clearWidget (fn [& _] nil)
+       ;; `custom` and `showOverlay` belong here too. Leaving them out made the
+       ;; stub set itself inconsistent: `model_switcher` calls `.-input` on one
+       ;; branch and `.-custom` on the other, so a partial stub set answers one
+       ;; and not the other, which is a worse contract than either all or none.
+       :custom      (fn [& _] (js/Promise.resolve nil))
+       :showOverlay (fn [& _] nil)})
 
 (defn create-scoped-api
   "Wrap the base extension API with namespace prefixing and capability gating.

@@ -71,8 +71,14 @@
                    (notify-settings-errors! errors notify)
                    (notify-removed-keys! base notify)
                    nil)
-        _        (when (seq errors) (.on api "session_ready" on-ready))
-        drop-ready! (fn [] (when (seq errors) (.off api "session_ready" on-ready)))
+        ;; Registered when there is ANYTHING to say, not only when the file
+        ;; failed to parse. Gating on `errors` alone made the removed-key
+        ;; warning dead for exactly the users it is for: someone whose
+        ;; settings file is valid JSON and still carries `algorithms` or
+        ;; `disableCcr`.
+        say?     (or (seq errors) (seq (shared/removed-key-warnings base)))
+        _        (when say? (.on api "session_ready" on-ready))
+        drop-ready! (fn [] (when say? (.off api "session_ready" on-ready)))
         flag-val (.getFlag api "headroom")
         config   (cond
                    (true? flag-val)  (assoc base :enabled true)

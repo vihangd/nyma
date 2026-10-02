@@ -368,9 +368,15 @@
               #js {:allowed (clj->js allowed)})))
 
         ;; provider_error — try the next model in the role's `fallback` chain.
-        ;; Attempts are tracked per RUN, keyed on the config object, so a chain
-        ;; cannot loop and a later turn starts fresh.
-        attempted (atom {})
+        ;;
+        ;; Attempts are tracked per RUN, keyed on the config object. A squint
+        ;; MAP cannot do that: map literals compile to plain JS objects, so
+        ;; every object key stringifies to "[object Object]" and all runs
+        ;; collapsed into one bucket — once a chain was exhausted, fallback was
+        ;; dead for the lifetime of the process, the exact opposite of "a later
+        ;; turn starts fresh". A WeakMap keys on reference identity, and lets
+        ;; the entry go when the run's config does.
+        attempted (js/WeakMap.)
         on-provider-error
         (fn [data]
           (let [msg   (str (or (aget data "message") ""))
@@ -381,14 +387,23 @@
                     roles (get-roles api)
                     role  (get roles (or (:active-role state) :default))
                     entries (fb/chain role)
-                    tried   (or (get @attempted cfg) #{from})
+                    ;; `next-entry` requires the PRIMARY to be in `attempted`,
+                    ;; or a chain that re-lists it would retry the model that
+                    ;; just failed. `data.model` is the bare modelId
+                    ;; (`loop.cljs` sets it from the model object) while
+                    ;; `spec-of` yields `provider/model`, so seeding from it
+                    ;; never matched. Seed from the ROLE instead, which is the
+                    ;; same shape the chain entries are in.
+                    primary (fb/spec-of {:provider (or (:provider role) "")
+                                         :model    (or (:model role) "")})
+                    tried   (or (.get attempted cfg) #{primary})
                     nxt     (fb/next-entry entries tried)]
                 (when nxt
                   (let [spec  (fb/spec-of nxt)
                         model (try ((aget api "resolveModel") (:provider nxt) (:model nxt))
                                    (catch :default _e nil))]
                     (when model
-                      (swap! attempted assoc cfg (conj tried spec))
+                      (.set attempted cfg (conj tried spec))
                       (aset cfg "model" model)
                       ;; Said once, in the transcript. Answering from a model the
                       ;; status line does not name is worse than failing.

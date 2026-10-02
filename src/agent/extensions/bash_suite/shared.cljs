@@ -110,10 +110,31 @@
    every other section uses; the same home-vs-project omission this repo has
    fixed twice elsewhere."
   []
-  (reduce (fn [acc sec] (if sec (merge-with merge acc sec) acc))
-          default-config
-          [(suite-section (path/join (home/dir) ".nyma" "settings.json"))
-           (suite-section (path/join (js/process.cwd) ".nyma" "settings.json"))]))
+  (let [global  (suite-section (path/join (home/dir) ".nyma" "settings.json"))
+        project (suite-section (path/join (js/process.cwd) ".nyma" "settings.json"))
+        ;; A project file may not SHRINK the deny list. `merge-with merge` is
+        ;; two levels deep, so `permissions.denylist` was replaced wholesale —
+        ;; meaning a cloned repo could ship a `.nyma/settings.json` naming one
+        ;; harmless pattern and thereby drop every entry in the user's global
+        ;; deny list, including the defaults. `settings/manager` has
+        ;; `strip-project-widening` for exactly this; reading the files
+        ;; directly bypassed it, so the rule is enforced here instead.
+        ;;
+        ;; The deny list is therefore a UNION across defaults, global and
+        ;; project: a project can add a prohibition, never remove one. The
+        ;; allow list is NOT unioned — a project adding to it widens what may
+        ;; run, which is the direction that needs the user's say.
+        merged  (reduce (fn [acc sec] (if sec (merge-with merge acc sec) acc))
+                        default-config
+                        [global project])
+        denies  (->> [default-config global project]
+                     (keep (fn [c] (get-in c [:permissions :denylist])))
+                     (apply concat)
+                     distinct
+                     vec)]
+    (if (seq denies)
+      (assoc-in merged [:permissions :denylist] denies)
+      merged)))
 
 (defn is-bash-tool?
   "Check if a tool name refers to the bash tool."
