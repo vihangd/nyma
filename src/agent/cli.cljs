@@ -997,7 +997,14 @@ Examples:
       ;; The exit code is 128+signo, the shell convention, so a supervisor can
       ;; tell a signalled stop from a clean `/exit` — unless something earlier
       ;; already chose one.
-      (doseq [[sig code] [["SIGTERM" 143] ["SIGHUP" 129]]]
+      ;;
+      ;; SIGHUP only with a terminal on stdin. A handler REPLACES an inherited
+      ;; ignore, so installing it unconditionally broke `nohup nyma -p … &`:
+      ;; the hangup nohup exists to ignore ran shutdown! instead. Hangup means
+      ;; "the session is gone" only for a terminal session, and nohup moves a
+      ;; terminal stdin to /dev/null, so this test is the nohup test too.
+      (doseq [[sig code] (cond-> [["SIGTERM" 143]]
+                           (.-isTTY js/process.stdin) (conj ["SIGHUP" 129]))]
         (.on js/process sig
              (fn []
                (when-not (.-exitCode js/process)
