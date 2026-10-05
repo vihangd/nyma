@@ -1291,7 +1291,12 @@
         ;; the one-line header (pi's `quietStartup: "header"`), or nothing.
         ;; An unknown value warns and falls back to the card — a typo must not
         ;; be the reason a session opens with no context.
-        (let [raw  (let [sm (:settings agent)]
+        (let [;; Counted BEFORE the card: it is a note in the same list, so
+              ;; counting after made every fresh session open with
+              ;; "Resumed <file> — 1 message" — and, the banner being non-nil,
+              ;; never show a new user the first-launch hint.
+              seeded (count @messages)
+              raw  (let [sm (:settings agent)]
                      (when (and sm (fn? (:get sm))) (:startup ((:get sm)))))
               mode (or (project-card/startup-mode raw)
                        (do (d/warn "startup"
@@ -1317,7 +1322,7 @@
                 (d/warn "project-card" (str "skipped: " (or (.-message e) (str e)))))))
           (when-not (= mode :silent)
             (if-let [banner (resumed-banner
-                             {:message-count (count @messages)
+                             {:message-count seeded
                               :name          (when sess (try ((:get-session-name sess))
                                                              (catch :default _ nil)))
                               :file-path     (when sess (try ((:get-file-path sess))

@@ -6,6 +6,9 @@
    invisible to the suite; TUI checks were ad-hoc `expect` scripts. Bun 1.4's
    `Bun.spawn({terminal})` gives the CLI a real TTY inside `bun test`.
 
+   It also caught a startup bug no unit test could: every fresh session
+   opened with \"Resumed <file> — 1 message\".
+
    One drive: a reply holding a wide table and CJK, rendered at 120 columns,
    then the terminal resized to 50. Asserted: the process survives, pi-tui's
    width check never fired (directly, or via crash recovery), and the table is
@@ -60,6 +63,11 @@
                                    :data (fn [_t d] (swap! buf str (.decode dec d #js {:stream true})))}})]
     (try
       (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "faketest") 15000))) (.toBe true))
+      ;; A fresh HOME is a fresh session. The banner once counted the project
+      ;; card as a message and said "Resumed <file> — 1 message" here, which
+      ;; also suppressed the first-launch hint.
+      (-> (expect (str/includes? (strip @buf) "Resumed")) (.toBe false))
+      (-> (expect (str/includes? (strip @buf) "Esc aborts")) (.toBe true))
       (.write (.-terminal proc) "hello")
       (js-await (js/Bun.sleep 300))
       ;; CSI-u Enter: a plain \r inserts a newline in the editor.
