@@ -986,6 +986,24 @@ Examples:
                              "nyma: interrupted — press Ctrl-C again to exit\n"))
                  (shutdown! agent extensions-atom shutdown-done? "sigint")))))
 
+      ;; SIGTERM and SIGHUP take the same graceful path as a second Ctrl-C.
+      ;; Without these, `kill <pid>`, `docker stop`, systemd and a closed
+      ;; terminal all took the DEFAULT action — the process died with none of
+      ;; the shutdown sequence run, so MCP sockets were never closed, LSP
+      ;; servers never got `shutdown`, ACP agents never got close→TERM→KILL,
+      ;; and background jobs (and anything they forked) were orphaned. Only
+      ;; SIGINT was ever handled.
+      ;;
+      ;; The exit code is 128+signo, the shell convention, so a supervisor can
+      ;; tell a signalled stop from a clean `/exit` — unless something earlier
+      ;; already chose one.
+      (doseq [[sig code] [["SIGTERM" 143] ["SIGHUP" 129]]]
+        (.on js/process sig
+             (fn []
+               (when-not (.-exitCode js/process)
+                 (set! (.-exitCode js/process) code))
+               (shutdown! agent extensions-atom shutdown-done? (.toLowerCase sig)))))
+
       ;; `/exit` emits this rather than calling process.exit itself, so it takes
       ;; the same async path as SIGINT — session_shutdown fires once and MCP/LSP
       ;; get closed instead of killed.
