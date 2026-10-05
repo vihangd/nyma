@@ -55,6 +55,20 @@
                       (-> (expect (str name ": " (str/includes? cmd "--minify")))
                           (.toBe (str name ": true")))))))
 
+            ;; Measured on Bun 1.4.2: with it, nyma's exit — normal, or via the
+            ;; SIGTERM/SIGHUP shutdown path — kills every live descendant, and
+            ;; a nyma whose parent died (editor, supervisor, pi-rpc host) exits
+            ;; instead of running on orphaned. Without it, both leave processes
+            ;; behind. Deliberately detached work (`nohup … &`, whose shell has
+            ;; already exited) is not a descendant any more and survives either
+            ;; way. Not a fix for nyma itself being SIGKILLed: nothing reaps then.
+            (it "every compile target runs with --no-orphans"
+                (fn []
+                  (doseq [[name cmd] (bundle-scripts)]
+                    (when (str/includes? cmd "--compile")
+                      (-> (expect (str name ": " (str/includes? cmd "--compile-exec-argv=--no-orphans")))
+                          (.toBe (str name ": true")))))))
+
             (it "bundle:all builds every target"
                 (fn []
                   (let [all (get scripts "bundle:all")]
