@@ -271,7 +271,10 @@
       "assistant"
       (let [{:keys [text reasoning]} (split-think-blocks content)
             prev     (when md-cache @md-cache)
-            result   (mb/incremental-render (or text "") prev {})
+            ;; Laid out for (w-2), the width of the body after the gutter,
+            ;; so tables wrap inside their cells instead of being chopped by
+            ;; the hard wrap below — which now only backs that up.
+            result   (mb/incremental-render (or text "") prev {} (- w 2))
             _        (when md-cache (reset! md-cache result))
             rendered (:rendered result)
             ;; Wrap at (w-2) to leave room for the 2-col left gutter:

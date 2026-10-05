@@ -122,7 +122,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/home.cljs` | `agent.utils.home` | The one place nyma asks where HOME is. |
 | `src/agent/utils/js_interop.cljs` | `agent.utils.js-interop` | Squint ships `clj->js` but NOT `js->clj`. |
 | `src/agent/utils/jsonl_stdin.cljs` | `agent.utils.jsonl-stdin` | Reading a JSONL protocol channel off a stream. |
-| `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | — |
+| `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | Markdown → ANSI, via Bun.markdown.ansi; `marked` only for its lexer. |
 | `src/agent/utils/markdown_blocks.cljs` | `agent.utils.markdown-blocks` | Incremental markdown rendering via block-level tokenization. |
 | `src/agent/utils/reasoning_request.cljs` | `agent.utils.reasoning-request` | Translate nyma's thinking level into each provider's REQUEST dialect. |
 | `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |

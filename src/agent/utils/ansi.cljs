@@ -194,3 +194,33 @@
        (= depth 256) (str ESC "[38;5;" (rgb->256 [r g b]) "m")
        :else         (str ESC "[38;2;" r ";" g ";" b "m"))
      "")))
+
+(defn- xterm-256->rgb
+  "RGB of an xterm-256 palette index: 0-15 the basic colours (approximated),
+   16-231 the 6x6x6 cube, 232-255 the grey ramp."
+  [n]
+  (cond
+    (< n 16)  (let [base [[0 0 0] [205 0 0] [0 205 0] [205 205 0]
+                          [0 0 238] [205 0 205] [0 205 205] [229 229 229]
+                          [127 127 127] [255 0 0] [0 255 0] [255 255 0]
+                          [92 92 255] [255 0 255] [0 255 255] [255 255 255]]]
+                (nth base n))
+    (< n 232) (let [i (- n 16)
+                    s (fn [v] (if (zero? v) 0 (+ 55 (* 40 v))))]
+                [(s (js/Math.floor (/ i 36)))
+                 (s (mod (js/Math.floor (/ i 6)) 6))
+                 (s (mod i 6))])
+    :else     (let [v (+ 8 (* 10 (- n 232)))] [v v v])))
+
+(defn downgrade-256
+  "Rewrite xterm-256 SGRs (`38;5;N` foreground, `48;5;N` background) to the
+   nearest of the 16 ANSI colours, for a terminal that cannot show 256.
+
+   For output nyma does not colour itself — Bun.markdown.ansi emits 256-colour
+   codes and has no depth option, where marked-terminal went through chalk,
+   which downgraded."
+  [s]
+  (.replace (str s) (js/RegExp. (str ESC "\\[(38|48);5;(\\d{1,3})m") "g")
+            (fn [_m kind n]
+              (let [code (rgb->16 (xterm-256->rgb (js/parseInt n 10)))]
+                (str ESC "[" (if (= kind "48") (+ code 10) code) "m")))))
