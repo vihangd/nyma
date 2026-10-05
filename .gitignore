@@ -28,3 +28,6 @@ probe_*.mjs
 
 # rust benchmark build targets
 bench/rust-target*/
+
+# Cross-target binaries from bun run bundle:all (CI builds the release ones)
+/nyma-*
