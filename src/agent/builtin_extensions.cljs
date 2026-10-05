@@ -81,7 +81,7 @@
     :manifest  #js {"namespace" "ast-tools" "description" "Tree-sitter–backed code search and editing tools" "capabilities" #js ["tools" "exec"]}}
    {:namespace "bash-suite"
     :module    ext-bash-suite
-    :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed)" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.9.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "edit-diff" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
+    :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed)" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.12.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "edit-diff" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
    {:namespace "budget"
     :module    ext-budget
     :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
