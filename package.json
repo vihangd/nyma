@@ -20,6 +20,7 @@
     "start": "bun dist/agent/cli.mjs",
     "pretest": "npx squint compile",
     "test": "bun test dist",
+    "test:fast": "npx squint compile && bun test --parallel dist",
     "repl": "npx squint repl",
     "gen:bench-ledger": "bun scripts/gen-bench-ledger.mjs",
     "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",

@@ -295,4 +295,7 @@
                             _     (.render pane 100)
                             after (- (js/performance.now) t1)]
                         ;; A render after invalidate must pay real work again.
-                        (-> (expect (> (/ after (max warm 0.001)) 5)) (.toBe true)))))))))
+                        (-> (expect (> (/ after (max warm 0.001)) 5)) (.toBe true))))))
+                ;; A timing ratio: a cache that is not cleared fails every
+                ;; attempt, a loaded machine (bun test --parallel) one.
+                #js {:retry 2})))

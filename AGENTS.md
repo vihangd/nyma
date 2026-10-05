@@ -175,6 +175,8 @@ bun run gen:builtins      # after ADDING an extension: regenerates the compiled-
 
 # Run tests (compiles first; a bare `bun test dist` runs stale output — test/dist_freshness catches it)
 bun run test
+bun run test:fast         # --parallel: ~20 s vs ~55 s, but Bun 1.4.2 sometimes segfaults a
+                          # worker and aborts the run (loudly) — rerun, or use `test`
 
 # One-time: pre-commit hook (incremental compile + the lint tests, ~5 s)
 bun run hooks:install
