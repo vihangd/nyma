@@ -17,31 +17,66 @@
     (try
       (let [tokens (md/lexer content)]
         (vec
-          (keep (fn [token]
-                  (let [t (.-type token)
-                        raw (.-raw token)]
+         (keep (fn [token]
+                 (let [t (.-type token)
+                       raw (.-raw token)]
                     ;; Skip pure whitespace tokens
-                    (when (and t raw (not= t "space"))
-                      {:type t
-                       :raw  raw
-                       :lang (.-lang token)})))
-                tokens)))
+                   (when (and t raw (not= t "space"))
+                     {:type t
+                      :raw  raw
+                      :lang (.-lang token)})))
+               tokens)))
       (catch :default _e
         [{:type "paragraph" :raw content}]))))
 
 ;;; ─── Single block rendering ───────────────────────────────────
 
-(defn- keep-line-breaks
-  "Turn a paragraph's single newlines into hard breaks.
+(def ^:private fence-re #"^\s*(>\s*)*(```|~~~)")
+(def ^:private no-break-before-re
+  "Lines a hard break must not precede: a new list item, a fence, a heading,
+   a setext underline, a bare `>` (an empty quote line)."
+  #"^\s*(([-*+]|\d+[.)])\s|(>\s*)*(```|~~~)|#{1,6}\s|(=+|-+)\s*$|(>\s*)+$)")
+
+(defn- backtick-count
+  "Unescaped backticks in a line."
+  [line]
+  (count (.match line (js/RegExp. "(?<!\\\\)`" "g"))))
+
+(defn keep-line-breaks
+  "Turn single newlines inside a paragraph, list or quote into hard breaks.
 
    Bun.markdown.ansi follows CommonMark and joins a soft break into a space
    (`a\nb` → `a b`); its `hardSoftBreaks` option is not honoured by `ansi` on
    1.4.2. marked-terminal ran with reflowText off and kept them, and models
-   write one-thing-per-line text that means exactly that. A trailing
-   backslash is CommonMark's own hard break. Paragraphs only — a code block's
-   backslashes would be literal."
+   write one-thing-per-line text — `- src/foo.cljs\n  renamed bar`, a quoted
+   excerpt — that means exactly that. A trailing backslash is CommonMark's
+   own hard break, so it goes at the end of a line ONLY where the next line
+   continues the same paragraph:
+   - not before a new item, a fence, a heading or an empty quote line, and
+     not on the last line — there it renders as a literal backslash;
+   - not inside a fence nested in a list item, where it would be code;
+   - not inside an open inline code span, which Bun already breaks on its
+     own and where the backslash would be literal."
   [raw]
-  (.replace raw (js/RegExp. "\\n(?!\\n*$)" "g") "\\\n"))
+  (let [lines (.split raw "\n")
+        n     (.-length lines)
+        out   #js []]
+    (loop [i 0, in-fence false, ticks 0]
+      (if (>= i n)
+        (.join out "\n")
+        (let [line   (aget lines i)
+              nxt    (when (< (inc i) n) (aget lines (inc i)))
+              blank? (= "" (.trim line))
+              fence? (boolean (.test fence-re line))
+              ticks  (if blank? 0 (+ ticks (backtick-count line)))
+              break? (and (not in-fence) (not fence?) (not blank?)
+                          (some? nxt) (seq (.trim nxt))
+                          (not (.test no-break-before-re nxt))
+                          (even? ticks)
+                          (not (.endsWith line "\\"))
+                          (not (.endsWith line "  ")))]
+          (.push out (if break? (str line "\\") line))
+          (recur (inc i) (if fence? (not in-fence) in-fence) ticks))))))
 
 (defn render-block
   "Render a single block's raw markdown to ANSI string.
@@ -50,20 +85,22 @@
    Returns nil from custom renderer to fall back to default."
   ([block custom-renderers] (render-block block custom-renderers nil))
   ([block custom-renderers columns]
-  (let [type       (:type block)
-        lang       (:lang block)
+   (let [type       (:type block)
+         lang       (:lang block)
         ;; Check for custom renderer: try type+lang first (e.g. "code:diff"), then type only
-        renderer-key (when lang (str type ":" lang))
-        custom-fn    (or (when renderer-key (get custom-renderers renderer-key))
-                         (get custom-renderers type))
-        raw          (if (= type "paragraph") (keep-line-breaks (:raw block)) (:raw block))]
-    (if custom-fn
-      (let [result (try (custom-fn block) (catch :default _ nil))]
-        (if (some? result)
-          (str result)
+         renderer-key (when lang (str type ":" lang))
+         custom-fn    (or (when renderer-key (get custom-renderers renderer-key))
+                          (get custom-renderers type))
+         raw          (if (contains? #{"paragraph" "list" "blockquote"} type)
+                        (keep-line-breaks (:raw block))
+                        (:raw block))]
+     (if custom-fn
+       (let [result (try (custom-fn block) (catch :default _ nil))]
+         (if (some? result)
+           (str result)
           ;; Custom returned nil → fall back to default
-          (md/render-markdown raw columns)))
-      (md/render-markdown raw columns)))))
+           (md/render-markdown raw columns)))
+       (md/render-markdown raw columns)))))
 
 ;;; ─── Incremental render ───────────────────────────────────────
 
@@ -77,32 +114,32 @@
   ([content prev-cache custom-renderers]
    (incremental-render content prev-cache custom-renderers nil))
   ([content prev-cache custom-renderers columns]
-  (if (or (nil? content) (= content ""))
-    {:blocks [] :rendered-blocks [] :rendered ""}
-    (let [blocks (split-blocks content)
-          n      (count blocks)]
-      (if (zero? n)
-        {:blocks [] :rendered-blocks [] :rendered ""}
-        (let [prev-cache    (when (= columns (:columns prev-cache)) prev-cache)
-              prev-blocks   (:blocks prev-cache)
-              prev-rendered (:rendered-blocks prev-cache)
-              prev-n        (count prev-blocks)
+   (if (or (nil? content) (= content ""))
+     {:blocks [] :rendered-blocks [] :rendered ""}
+     (let [blocks (split-blocks content)
+           n      (count blocks)]
+       (if (zero? n)
+         {:blocks [] :rendered-blocks [] :rendered ""}
+         (let [prev-cache    (when (= columns (:columns prev-cache)) prev-cache)
+               prev-blocks   (:blocks prev-cache)
+               prev-rendered (:rendered-blocks prev-cache)
+               prev-n        (count prev-blocks)
               ;; For each block except the last, check if it matches the cached version
-              rendered-blocks
-              (vec
+               rendered-blocks
+               (vec
                 (map-indexed
-                  (fn [i block]
-                    (if (and (< i (dec n))             ;; not the last block
-                             (< i prev-n)              ;; was in previous cache
-                             (= (:raw block) (:raw (nth prev-blocks i)))) ;; unchanged
+                 (fn [i block]
+                   (if (and (< i (dec n))             ;; not the last block
+                            (< i prev-n)              ;; was in previous cache
+                            (= (:raw block) (:raw (nth prev-blocks i)))) ;; unchanged
                       ;; Reuse cached render
-                      (nth prev-rendered i)
+                     (nth prev-rendered i)
                       ;; Re-render this block
-                      (render-block block custom-renderers columns)))
-                  blocks))
+                     (render-block block custom-renderers columns)))
+                 blocks))
               ;; Join all rendered blocks
-              rendered (.join (clj->js rendered-blocks) "\n")]
-          {:blocks          blocks
-           :rendered-blocks rendered-blocks
-           :rendered        rendered
-           :columns         columns}))))))
+               rendered (.join (clj->js rendered-blocks) "\n")]
+           {:blocks          blocks
+            :rendered-blocks rendered-blocks
+            :rendered        rendered
+            :columns         columns}))))))

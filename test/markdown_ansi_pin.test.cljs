@@ -115,4 +115,30 @@
             (it "leave code blocks alone — no backslashes added"
                 (fn []
                   (let [out (:rendered (mb/incremental-render "```\na\nb\n```" nil {} 40))]
-                    (-> (expect (.includes out "\\")) (.toBe false)))))))
+                    (-> (expect (.includes out "\\")) (.toBe false)))))
+
+            ;; Each case: the lines that must appear, ANSI stripped and trimmed,
+            ;; in order — and never a stray backslash. Bun alone joins every one.
+            (it "survive in lists, quotes and nested items; never leak a backslash"
+                (fn []
+                  (doseq [[md want]
+                          [["- src/foo.cljs\n  renamed bar\n- b" ["* src/foo.cljs" "renamed bar" "* b"]]
+                           ["- a\n  cont\n- b\n  end"            ["* a" "cont" "* b" "end"]]
+                           ["1. step one\n   detail\n2. two"      ["1. step one" "detail" "2. two"]]
+                           ["> q1\n> q2\n> q3"                   ["| q1" "| q2" "| q3"]]
+                           ["- a\n  - b\n    more\n- c"          ["* a" "* b" "more" "* c"]]
+                           ["- a\ncont lazy\n- b"                ["* a" "cont lazy" "* b"]]
+                           ["- x\n\n  ```\n  a\n  b\n  ```"      ["* x" "| a" "| b"]]
+                           ;; Bun breaks inside a code span itself; a backslash
+                           ;; there would print.
+                           ["use `a\nb` here\nnext"              ["use a" "b here" "next"]]]]
+                    (let [prev (aget js/process.env "NO_COLOR")
+                          _    (aset js/process.env "NO_COLOR" "1")
+                          out  (try (:rendered (mb/incremental-render md nil {} 60))
+                                    (finally (if (some? prev)
+                                               (aset js/process.env "NO_COLOR" prev)
+                                               (js-delete js/process.env "NO_COLOR"))))
+                          got  (->> (.split out "\n") (map #(.trim %)) (filter seq) vec)]
+                      (-> (expect #js [md (.includes out "\\")]) (.toEqual #js [md false]))
+                      (-> (expect #js [md (clj->js (filterv (set want) got))])
+                          (.toEqual #js [md (clj->js want)]))))))))
