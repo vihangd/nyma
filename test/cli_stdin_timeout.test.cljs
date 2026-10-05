@@ -78,7 +78,13 @@
                                    (fn []
                                      (it "exits promptly with a positional prompt and a stdin nobody closes"
                                          (^:async fn []
-                                           (let [fifo (path/join (os/tmpdir) (str "nyma-stdin-" (js/Date.now)))
+                                           (let [;; A scratch HOME. This passed `(os/tmpdir)` as HOME,
+                                        ;; which is the REAL temp dir, so every run wrote
+                                        ;; `$TMPDIR/.nyma/{debug.log,nyma.db,-shm,-wal}` and left
+                                        ;; them there — and under `bun test --parallel` that would
+                                        ;; be one SQLite file shared by every worker.
+                                                 home (fs/mkdtempSync (path/join (os/tmpdir) "nyma-stdin-home-"))
+                                                 fifo (path/join (os/tmpdir) (str "nyma-stdin-" (js/Date.now)))
                                                  _    (js/Bun.spawnSync #js ["mkfifo" fifo])
              ;; A writer that holds the pipe open without ever closing it.
                                                  holder (js/Bun.spawn #js ["bash" "-c" (str "sleep 30 > " fifo)])
@@ -87,14 +93,17 @@
                                                        #js ["bun" cli-entry "-p" "hi"
                                                             "--model" "nope/nope" "--output-format" "json"]
                                                        #js {:stdin (js/Bun.file fifo)
+                                                            :cwd home
                                                             :stdout "pipe" :stderr "pipe"
                                                             :env #js {"NYMA_NO_MODEL_DISCOVERY" "1"
-                                                                      "HOME" (os/tmpdir)
+                                                                      "HOME" home
                                                                       "PATH" (.-PATH js/process.env)}})
                                                  code (js-await (.-exited proc))
                                                  ms   (- (js/Date.now) started)]
                                              (try (.kill holder) (catch :default _e nil))
                                              (try (fs/unlinkSync fifo) (catch :default _e nil))
+                                             (try (fs/rmSync home #js {:recursive true :force true})
+                                                  (catch :default _e nil))
          ;; It must have EXITED. Before the fix this never returned at all.
                                              (-> (expect (number? code)) (.toBe true))
          ;; Generously bounded: the measured fixed run is ~4s, the broken one

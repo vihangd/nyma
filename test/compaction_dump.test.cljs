@@ -176,15 +176,47 @@
   "Returns a generateText stub that always resolves with the given text."
   (fn [_opts] (js/Promise.resolve #js {:text text})))
 
+(defn- dump-paths
+  "The dump files AND their directory, as the code actually created them."
+  [ctx]
+  (let [j (.-precompactJsonPath ctx)
+        t (.-precompactTextPath ctx)]
+    {:json j :text t :dir (when j (path/dirname j))}))
+
 (defn ^:async test-dump-cleanup-main-path []
+  ;; This asserted `(when (fs/existsSync tmp-dir) …)` against a FIXED
+  ;; `$TMPDIR/nyma-precompact`. The code has since moved to
+  ;; `spill/private-temp-dir!`, a mkdtemp with that prefix, so the fixed path
+  ;; never existed, the `when` never ran, and the test asserted nothing while
+  ;; passing. Now it reads the paths the code reports and checks them.
   (let [msgs   (make-large-messages 400)
         sm     (make-session msgs)
         events (make-events-no-summary)]
     (js-await (compact sm "mock-model" events {:gen-fn (make-stub-gen valid-gen-summary)}))
-    ;; Dump directory should be empty after main-path append
-    (when (fs/existsSync tmp-dir)
-      (let [files (js/Array.from (fs/readdirSync tmp-dir))]
-        (-> (expect (count files)) (.toBe 0))))))
+    (let [{:keys [json text dir]} (dump-paths ((:get-captured events)))]
+      ;; Guard: no dump means nothing below checks anything.
+      (-> (expect (string? json)) (.toBe true))
+      (-> (expect (fs/existsSync json)) (.toBe false))
+      (-> (expect (fs/existsSync text)) (.toBe false))
+      ;; and the directory, not just its files
+      (-> (expect (fs/existsSync dir)) (.toBe false)))))
+
+(defn ^:async test-dump-cleanup-on-failure []
+  ;; The leak the vacuous test was hiding: when the summarisation call throws,
+  ;; cleanup never ran and the dump — the full conversation as JSON and text —
+  ;; stayed in $TMPDIR. 363 such directories had accumulated on one machine,
+  ;; two of them per `/compact` invoked without a model by this very suite.
+  (let [msgs   (make-large-messages 400)
+        sm     (make-session msgs)
+        events (make-events-no-summary)
+        failing (fn [_opts] (js/Promise.reject (js/Error. "provider unreachable")))]
+    (try (js-await (compact sm "mock-model" events {:gen-fn failing}))
+         (catch :default _e nil))
+    (let [{:keys [json text dir]} (dump-paths ((:get-captured events)))]
+      (-> (expect (string? json)) (.toBe true))
+      (-> (expect (fs/existsSync json)) (.toBe false))
+      (-> (expect (fs/existsSync text)) (.toBe false))
+      (-> (expect (fs/existsSync dir)) (.toBe false)))))
 
 (defn ^:async test-dump-unique-names []
   (let [paths       (atom #{})
@@ -211,4 +243,5 @@
                                                           (it "dump JSON contains toSummarize and toKeep arrays" test-dump-json-content)
                                                           (it "dump text file contains formatted messages with [Role]: prefix" test-dump-text-content)
                                                           (it "dump files are cleaned up after main-path (non-extension) append" test-dump-cleanup-main-path)
+                                                          (it "dump is cleaned up when the summarisation call THROWS" test-dump-cleanup-on-failure)
                                                           (it "two back-to-back compactions produce distinct dump filenames" test-dump-unique-names)))
