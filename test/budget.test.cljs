@@ -1,5 +1,5 @@
 (ns budget.test
-  (:require ["bun:test" :refer [describe it expect]]
+  (:require ["bun:test" :refer [describe it expect jest]]
             [agent.extensions.budget.shared :as shared]
             [agent.extensions.budget.index :as b]))
 
@@ -79,10 +79,18 @@
                       :off (fn [evt _] (swap! handlers dissoc evt))}
         _        (b/activate api)
         ctx      #js {:abort (fn [] (reset! aborted true))}]
-    ((get @handlers "before_agent_start") #js {} ctx)
-    ;; No turn_end ever fires — the provider is hung.
-    (js-await (js/Promise. (fn [res _] (js/setTimeout res 90))))
-    (-> (expect @aborted) (.toBe true))))
+    ;; Fake timers: this was a real 90 ms sleep against a 50 ms budget, the
+    ;; most load-sensitive assertion in the suite. Also lets it check the
+    ;; timer does not fire EARLY, which a sleep could not.
+    (.useFakeTimers jest)
+    (try
+      ((get @handlers "before_agent_start") #js {} ctx)
+      ;; No turn_end ever fires — the provider is hung.
+      (.advanceTimersByTime jest 40)
+      (-> (expect @aborted) (.toBe false))
+      (.advanceTimersByTime jest 20)
+      (-> (expect @aborted) (.toBe true))
+      (finally (.useRealTimers jest)))))
 
 (defn ^:async t-wall-clock-disarms-on-agent-end []
   (let [handlers (atom {})
@@ -93,10 +101,13 @@
                       :off (fn [evt _] (swap! handlers dissoc evt))}
         _        (b/activate api)
         ctx      #js {:abort (fn [] (reset! aborted true))}]
-    ((get @handlers "before_agent_start") #js {} ctx)
-    ((get @handlers "agent_end") #js {} ctx)
-    (js-await (js/Promise. (fn [res _] (js/setTimeout res 90))))
-    (-> (expect @aborted) (.toBe false))))
+    (.useFakeTimers jest)
+    (try
+      ((get @handlers "before_agent_start") #js {} ctx)
+      ((get @handlers "agent_end") #js {} ctx)
+      (.advanceTimersByTime jest 90)
+      (-> (expect @aborted) (.toBe false))
+      (finally (.useRealTimers jest)))))
 
 (describe "budget wall clock" (fn [])
           (it "config carries wall-seconds and turns the extension on"

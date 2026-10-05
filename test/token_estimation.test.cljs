@@ -118,4 +118,8 @@
       (let [s     (str (.repeat "x" 50000) (.repeat "() => {};" 20000))
             start (js/Date.now)]
         (dotimes [_ 5] (estimate-tokens s))
-        (-> (expect (/ (- (js/Date.now) start) 5)) (.toBeLessThan 6)))))))
+        (-> (expect (/ (- (js/Date.now) start) 5)) (.toBeLessThan 6))))
+    ;; A return to allocation fails every attempt; a loaded machine fails one.
+    ;; Per test, not a global --retry, which would multiply the CLI tests'
+    ;; 90-120 s timeouts.
+    #js {:retry 2})))

@@ -1,6 +1,6 @@
 (ns token-preview.test
   "Tests for the token-preview sub-extension of token-suite."
-  (:require ["bun:test" :refer [describe it expect beforeEach afterEach]]
+  (:require ["bun:test" :refer [describe it expect beforeEach afterEach jest]]
             [clojure.string :as str]
             [agent.extensions.token-suite.token-preview :as token-preview]))
 
@@ -44,8 +44,14 @@
 
 ;;; ─── State reset ──────────────────────────────────────────────
 
-(beforeEach (fn [] nil))
-(afterEach  (fn [] nil))
+;; Fake timers: the widget debounces 300 ms, and five tests used to sleep a
+;; real 400 ms each to get past it.
+(beforeEach (fn [] (.useFakeTimers jest)))
+(afterEach  (fn [] (.useRealTimers jest)))
+
+(defn- after-debounce [f]
+  (.advanceTimersByTime jest 400)
+  (f))
 
 ;;; ─── Group 1: Activation ──────────────────────────────────────
 
@@ -83,27 +89,21 @@
         ;; but we can verify estimation via the setTimeout callback
         (fire-event api "editor_change" #js {:text "hello world"})
         ;; Use Promise to wait past debounce
-        (js/Promise.
-          (fn [resolve _]
-            (js/setTimeout
+        (after-debounce
               (fn []
                 (-> (expect (pos? (count @(.-_estimates api)))) (.toBe true))
-                (resolve nil))
-              400))))))
+                )))))
 
   (it "widget content starts with ~"
     (fn []
       (let [api   (make-mock-api)
             deact (token-preview/activate api)]
         (fire-event api "editor_change" #js {:text "some text here"})
-        (js/Promise.
-          (fn [resolve _]
-            (js/setTimeout
+        (after-debounce
               (fn []
                 (let [widget-lines (get @(.-_widgets api) "token-preview")]
                   (-> (expect (some #(str/starts-with? % "~") widget-lines)) (.toBeTruthy)))
-                (resolve nil))
-              400))))))))
+                )))))))
 
 ;;; ─── Group 3: Empty text ──────────────────────────────────────
 
@@ -115,16 +115,13 @@
             deact (token-preview/activate api)]
         ;; First set a widget
         (fire-event api "editor_change" #js {:text "some text"})
-        (js/Promise.
-          (fn [resolve _]
-            (js/setTimeout
+        (after-debounce
               (fn []
                 ;; Now clear with empty text
                 (fire-event api "editor_change" #js {:text ""})
                 ;; Widget should be gone immediately (no debounce for empty)
                 (-> (expect (nil? (get @(.-_widgets api) "token-preview"))) (.toBe true))
-                (resolve nil))
-              400))))))))
+                )))))))
 
 ;;; ─── Group 4: Toggle ─────────────────────────────────────────
 
@@ -154,14 +151,11 @@
         (handler #js [] #js {:ui (.-ui api)})
         ;; Fire change
         (fire-event api "editor_change" #js {:text "lots of text here"})
-        (js/Promise.
-          (fn [resolve _]
-            (js/setTimeout
+        (after-debounce
               (fn []
                 ;; Widget should not have been set
                 (-> (expect (nil? (get @(.-_widgets api) "token-preview"))) (.toBe true))
-                (resolve nil))
-              400))))))))
+                )))))))
 
 ;;; ─── Group 5: Deactivation ────────────────────────────────────
 
@@ -171,14 +165,11 @@
       (let [api   (make-mock-api)
             deact (token-preview/activate api)]
         (fire-event api "editor_change" #js {:text "hello"})
-        (js/Promise.
-          (fn [resolve _]
-            (js/setTimeout
+        (after-debounce
               (fn []
                 (deact)
                 (-> (expect (nil? (get @(.-_widgets api) "token-preview"))) (.toBe true))
-                (resolve nil))
-              400))))))
+                )))))
 
   (it "deactivator removes event listener"
     (fn []
