@@ -91,6 +91,47 @@
     (vec (concat (keep second dollar-ms)
                  (keep second paren-ms)))))
 
+(def ^:private shell-interpreters
+  "Interpreters whose inline script is SHELL, so it can be classified by this
+   same analyzer. `python`/`perl`/`node` take inline code too, but it is not
+   shell; `check-obfuscation` covers their suspicious `-c`/`-e` shapes."
+  #{"bash" "sh" "zsh" "fish" "dash" "ksh" "csh" "tcsh"})
+
+(defn extract-inline-scripts
+  "Shell scripts handed to an interpreter INLINE: `bash -c '<s>'`,
+   `bash <<< '<s>'`, and heredoc bodies fed to an interpreter. Returns the
+   script strings for the recursive classifier, like `extract-subshells`.
+
+   Only `echo '<s>' | bash` used to be caught. The destructive patterns are
+   raw-string regexes ending in `(\\s|$)`, so in `bash -c 'rm -rf /'` the
+   closing quote after `/` defeated them and the command was classified SAFE —
+   as was the here-string form. The heredoc form passed only because
+   shell-quote 1.11 mis-tokenizes `<<` and leaves the body as plain words;
+   shell-quote 1.12's real heredoc support would have hidden it.
+
+   Pure. Matches the interpreter as a whole command word, so `grep -c` — a
+   count, not an execution — is not mistaken for one."
+  [cmd]
+  (let [s       (str cmd)
+        interp  "(?:^|[\\s;&|(`])(?:bash|sh|zsh|fish|dash|ksh|csh|tcsh)"
+        ;; -c, including combined short flags like -lc / -ic
+        dash-c  (js/RegExp. (str interp "\\s+(?:-[a-zA-Z]*c[a-zA-Z]*)\\s+(['\"])([\\s\\S]*?)\\1") "g")
+        ;; here-string, quoted or bare
+        here-q  (js/RegExp. (str interp "\\s*<<<\\s*(['\"])([\\s\\S]*?)\\1") "g")
+        here-b  (js/RegExp. (str interp "\\s*<<<\\s*([^\\s'\"][^\\n;&|]*)") "g")
+        ;; heredoc: <<DELIM, <<-DELIM, <<'DELIM', <<\"DELIM\"
+        heredoc (js/RegExp. (str interp "[^\\n]*?<<-?\\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\\1[^\\n]*\\n([\\s\\S]*?)\\n\\s*\\2\\s*(?:\\n|$)") "g")
+        groups  (fn [re idx]
+                  (loop [acc []]
+                    (if-let [m (.exec re s)]
+                      (recur (conj acc (aget m idx)))
+                      acc)))]
+    (vec (remove (fn [x] (or (nil? x) (= "" (.trim (str x)))))
+                 (concat (groups dash-c 2)
+                         (groups here-q 2)
+                         (groups here-b 1)
+                         (groups heredoc 3))))))
+
 ;; ── Obfuscation detection ────────────────────────────────────
 
 (def obfuscation-patterns
@@ -245,7 +286,7 @@
        (if (and (= (:piped-from group) "|")
                 (seq (:tokens group))
                 (contains? interpreter-commands
-                    (first (strip-privilege-wrapper (:tokens group)))))
+                           (first (strip-privilege-wrapper (:tokens group)))))
          (conj reasons (str "piped output to interpreter: "
                             (first (strip-privilege-wrapper (:tokens group)))))
          reasons))
@@ -280,10 +321,14 @@
             privilege-reasons   (when (:block-privilege-escalation config)
                                   (check-privilege-escalation cmd-str))
             ;; (c) Recursively classify subshell bodies; take highest risk
+            ;; Inline interpreter scripts (`bash -c`, `<<<`, heredoc) go
+            ;; through the SAME bounded recursion as subshells: they are
+            ;; just another place a shell command can hide.
             subshell-results    (when (pos? max-depth)
                                   (mapv #(classify-command
                                           % (update config :max-subshell-depth dec))
-                                        (extract-subshells cmd-str)))
+                                        (concat (extract-subshells cmd-str)
+                                                (extract-inline-scripts cmd-str))))
             subshell-max        (reduce higher-risk :safe (map :level subshell-results))
             subshell-reasons    (into [] (mapcat :reasons
                                                  (filter #(= (:level %) :destructive)
@@ -294,43 +339,43 @@
             {:level :destructive :reasons obfuscation-reasons :command cmd-str}
             (if (seq privilege-reasons)
               {:level :destructive :reasons privilege-reasons :command cmd-str}
-            (if (= subshell-max :destructive)
-              {:level   :destructive
-               :reasons (or (seq subshell-reasons) ["destructive command in subshell"])
-               :command cmd-str}
+              (if (= subshell-max :destructive)
+                {:level   :destructive
+                 :reasons (or (seq subshell-reasons) ["destructive command in subshell"])
+                 :command cmd-str}
               ;; Parse with shell-quote for structural analysis
-              (try
-                (let [parsed (.parse shell-quote cmd-str)
+                (try
+                  (let [parsed (.parse shell-quote cmd-str)
                       ;; Check pipe-to-interpreter (uses raw JS array)
-                      pipe-reasons (when (:block-network-exec config)
-                                     (check-pipe-to-interpreter parsed))
+                        pipe-reasons (when (:block-network-exec config)
+                                       (check-pipe-to-interpreter parsed))
                       ;; Split into subcommand groups at operators
-                      groups  (atom [])
-                      current (atom [])]
+                        groups  (atom [])
+                        current (atom [])]
                   ;; Build subcommand groups — iterate JS array directly
-                  (doseq [token parsed]
-                    (if (and (not (string? token)) (.-op token))
-                      (do
-                        (when (seq @current) (swap! groups conj @current))
-                        (reset! current []))
-                      (swap! current conj (str token))))
-                  (when (seq @current) (swap! groups conj @current))
+                    (doseq [token parsed]
+                      (if (and (not (string? token)) (.-op token))
+                        (do
+                          (when (seq @current) (swap! groups conj @current))
+                          (reset! current []))
+                        (swap! current conj (str token))))
+                    (when (seq @current) (swap! groups conj @current))
                   ;; Classify each group and take highest risk
-                  (let [group-levels (map classify-token-group @groups)
-                        max-level    (reduce higher-risk subshell-max group-levels)
-                        final-level  (if (seq pipe-reasons) :destructive max-level)
-                        all-reasons  (into (or pipe-reasons [])
-                                           (when (= final-level :destructive)
-                                             destructive-reasons))]
-                    {:level   final-level
-                     :reasons (if (seq all-reasons) all-reasons
-                                  [(str "classified as " (str final-level))])
-                     :command cmd-str}))
-                (catch :default _e
+                    (let [group-levels (map classify-token-group @groups)
+                          max-level    (reduce higher-risk subshell-max group-levels)
+                          final-level  (if (seq pipe-reasons) :destructive max-level)
+                          all-reasons  (into (or pipe-reasons [])
+                                             (when (= final-level :destructive)
+                                               destructive-reasons))]
+                      {:level   final-level
+                       :reasons (if (seq all-reasons) all-reasons
+                                    [(str "classified as " (str final-level))])
+                       :command cmd-str}))
+                  (catch :default _e
                   ;; Fail-closed: unparseable commands treated as destructive
-                  {:level   :destructive
-                   :reasons ["unparseable command (fail-closed)"]
-                   :command cmd-str}))))))))))
+                    {:level   :destructive
+                     :reasons ["unparseable command (fail-closed)"]
+                     :command cmd-str}))))))))))
 
 (defn should-block?
   "Determine if a classified command should be blocked based on config."
