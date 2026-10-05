@@ -133,6 +133,28 @@
       (when @seen out))
     :else nil))
 
+(defn http-transport-opts
+  "Options for the HTTP/SSE transports. Pure.
+
+   `redirectPolicy` is passed through when a server config asks for it.
+   @modelcontextprotocol/sdk 1.32 changed the default to follow only
+   SAME-ORIGIN redirects, so an MCP server that redirects to another host
+   stops working on upgrade. The new default is kept deliberately — following
+   a cross-origin redirect would send this server's headers, bearer token
+   included, to whatever host it points at — and a server that genuinely needs
+   it opts in per server with `\"redirectPolicy\": \"follow\"` in `.mcp.json`.
+
+   Only the two values the SDK accepts are passed; anything else is dropped,
+   leaving the safe default, rather than handed to the SDK to reject."
+  [cfg]
+  (let [hdrs   (normalize-headers (:headers cfg))
+        policy (some-> (or (:redirect-policy cfg) (get cfg "redirectPolicy")) str)
+        opts   #js {}]
+    (when hdrs (aset opts "requestInit" #js {:headers hdrs}))
+    (when (contains? #{"same-origin" "follow"} policy)
+      (aset opts "redirectPolicy" policy))
+    opts))
+
 (defn transport-kind
   "Decide which transport to construct for cfg. Mirrors Claude Code's
    precedence: explicit `:type` wins; else `:command` → stdio; else
@@ -170,20 +192,14 @@
       (when-not (:url cfg)
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :url (http transport requires url)."))))
-      (let [hdrs (normalize-headers (:headers cfg))
-            opts (cond-> #js {}
-                   hdrs (doto (aset "requestInit" #js {:headers hdrs})))]
-        (sdk-http/StreamableHTTPClientTransport. (js/URL. (:url cfg)) opts)))
+      (sdk-http/StreamableHTTPClientTransport. (js/URL. (:url cfg)) (http-transport-opts cfg)))
 
     :sse
     (do
       (when-not (:url cfg)
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :url (sse transport requires url)."))))
-      (let [hdrs (normalize-headers (:headers cfg))
-            opts (cond-> #js {}
-                   hdrs (doto (aset "requestInit" #js {:headers hdrs})))]
-        (sdk-sse/SSEClientTransport. (js/URL. (:url cfg)) opts)))))
+      (sdk-sse/SSEClientTransport. (js/URL. (:url cfg)) (http-transport-opts cfg)))))
 
 ;; ── Lifecycle ────────────────────────────────────────────────────
 
