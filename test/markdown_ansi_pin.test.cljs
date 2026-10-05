@@ -128,7 +128,7 @@
                            ["> q1\n> q2\n> q3"                   ["| q1" "| q2" "| q3"]]
                            ["- a\n  - b\n    more\n- c"          ["* a" "* b" "more" "* c"]]
                            ["- a\ncont lazy\n- b"                ["* a" "cont lazy" "* b"]]
-                           ["- x\n\n  ```\n  a\n  b\n  ```"      ["* x" "| a" "| b"]]
+                           ["- x\n\n  ```\n  a\n  b\n  ```"      ["* x" "a" "b"]]
                            ;; Bun breaks inside a code span itself; a backslash
                            ;; there would print.
                            ["use `a\nb` here\nnext"              ["use a" "b here" "next"]]]]
@@ -142,3 +142,44 @@
                       (-> (expect #js [md (.includes out "\\")]) (.toEqual #js [md false]))
                       (-> (expect #js [md (clj->js (filterv (set want) got))])
                           (.toEqual #js [md (clj->js want)]))))))))
+
+(defn- render-plain [md cols]
+  (let [prev (aget js/process.env "NO_COLOR")]
+    (aset js/process.env "NO_COLOR" "1")
+    (try (:rendered (mb/incremental-render md nil {} cols))
+         (finally (if (some? prev) (aset js/process.env "NO_COLOR" prev)
+                      (js-delete js/process.env "NO_COLOR"))))))
+
+(describe "code blocks: indent, not a frame"
+          (fn []
+            (it "Bun still frames code — the shape unframe-code expects"
+                (fn []
+                  (-> (expect (js/Bun.markdown.ansi "```js\nx\n```" #js {:colors false}))
+                      (.toBe "+- js\n| x\n+-\n"))
+                  (let [out (.replace (js/Bun.markdown.ansi "```js\nx\n```" #js {:colors true})
+                                      (js/RegExp. (str ESC "\\[[0-9;]*m") "g") "")]
+                    (-> (expect out) (.toBe "┌─ js\n│ x\n└─\n")))))
+
+            (it "no frame glyph on any code line, colours on or off; label kept"
+                (fn []
+                  (doseq [plain? [true false]]
+                    (let [md  "```js\nconst a = 1;\n\nlet b = 2;\n```"
+                          out (if plain? (render-plain md 40)
+                                  (:rendered (mb/incremental-render md nil {} 40)))
+                          bare (.replace out (js/RegExp. (str ESC "\\[[0-9;]*m") "g") "")]
+                      (-> (expect #js [plain? bare])
+                          (.toEqual #js [plain? "  js\n  const a = 1;\n  \n  let b = 2;"]))))))
+
+            (it "code that contains │ keeps it"
+                (fn []
+                  (-> (expect (render-plain "```\na │ b\n| c\n```" 40)) (.toBe "  a │ b\n  | c"))))
+
+            (it "a fence inside a list item is unframed too"
+                (fn []
+                  (-> (expect (render-plain "- step\n\n  ```py\n  x = 1\n  ```" 40))
+                      (.toBe "  * step\n\n      py\n      x = 1"))))
+
+            (it "tables keep their borders"
+                (fn []
+                  (let [out (render-plain "| a | b |\n|---|---|\n| 1 | 2 |" 40)]
+                    (-> (expect (.includes out "+---")) (.toBe true)))))))

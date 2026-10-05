@@ -38,7 +38,7 @@
 (def ^:private reply
   (str "Here:\n\n| name | description | 名前 |\n|---|---|---|\n"
        "| alpha | " (.repeat "a very long description cell that must wrap " 3) "| 漢字テキスト |\n"
-       "| beta | short | 日本語 |\n\nDone 漢字漢字漢字."))
+       "| beta | short | 日本語 |\n\n```js\nconst wide = 1;\n```\n\nDone 漢字漢字漢字."))
 
 (defn- frame-rows
   "Table body rows in `text`: lines that start, after the gutter, with `│`."
@@ -75,6 +75,10 @@
       (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "Done") 15000))) (.toBe true))
       ;; Box-drawn at 120: Bun.markdown.ansi, not the old width-blind render.
       (-> (expect (str/includes? (strip @buf) "┌")) (.toBe true))
+      ;; Code is indented, not framed: a terminal selection must not carry
+      ;; `│ ` into the paste.
+      (-> (expect (str/includes? (strip @buf) "const wide = 1;")) (.toBe true))
+      (-> (expect (boolean (re-find #"[│|] *const wide" (strip @buf)))) (.toBe false))
 
       (let [mark (count @buf)]
         (.resize (.-terminal proc) 50 40)

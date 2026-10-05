@@ -78,6 +78,55 @@
           (.push out (if break? (str line "\\") line))
           (recur (inc i) (if fence? (not in-fence) in-fence) ticks))))))
 
+(def ^:private sgr "(?:\u001b\\[[0-9;]*m)*")
+(def ^:private sgr-re (js/RegExp. "\u001b\\[[0-9;]*m" "g"))
+(def ^:private frame-top-re
+  (js/RegExp. (str "^" sgr "(\\s*)" sgr "(?:┌─|\\+-) ?" "(?:\u001b\\[0m)?")))
+(def ^:private frame-line-re
+  (js/RegExp. (str "^" sgr "(\\s*)" sgr "(?:│|\\|) ?" "(?:\u001b\\[0m)?")))
+
+(defn- bare [l] (.replace l sgr-re ""))
+
+(defn- frame-end
+  "Index of the line closing a code frame opened at line i, or nil. The
+   frame is `┌─[ lang]` … `└─` at one indent, with `│` opening every line
+   between. A table border (`┌───┬`) is not a frame: after `┌─` comes `─`."
+  [lines i]
+  (when-let [[_ indent] (.exec (js/RegExp. "^(\\s*)(?:┌─|\\+-)(?: \\S.*)?$") (.trimEnd (bare (aget lines i))))]
+    (let [n (.-length lines)]
+      (loop [j (inc i)]
+        (when (< j n)
+          (let [b (.trimEnd (bare (aget lines j)))]
+            (cond
+              (or (= b (str indent "└─")) (= b (str indent "+-"))) j
+              (or (.startsWith b (str indent "│")) (.startsWith b (str indent "|"))) (recur (inc j))
+              :else nil)))))))
+
+(defn unframe-code
+  "Replace Bun's box around a code block with a plain two-space indent.
+
+   Bun draws `┌─ lang` / `│ code` / `└─` (`+-` / `| ` with colours off), so
+   every line selected in the terminal carried `│ ` into the paste. The
+   language label stays; highlighting is untouched. Works wherever the
+   frame sits — a fence inside a list item is rendered by the list block.
+   Only the frame's top and bottom lines and each line's leading glyph are
+   touched, so code that itself contains `│` survives. Shape pinned by
+   test/markdown_ansi_pin."
+  [rendered]
+  (let [lines (.split rendered "\n")
+        n     (.-length lines)
+        out   #js []]
+    (loop [i 0]
+      (if (>= i n)
+        (.join out "\n")
+        (if-let [end (frame-end lines i)]
+          (let [top (.replace (aget lines i) frame-top-re "$1  ")]
+            (when (seq (.trim (bare top))) (.push out top))
+            (doseq [k (range (inc i) end)]
+              (.push out (.replace (aget lines k) frame-line-re "$1  ")))
+            (recur (inc end)))
+          (do (.push out (aget lines i)) (recur (inc i))))))))
+
 (defn render-block
   "Render a single block's raw markdown to ANSI string.
    If custom-renderers has a matching renderer for the block type+lang,
@@ -93,14 +142,17 @@
                           (get custom-renderers type))
          raw          (if (contains? #{"paragraph" "list" "blockquote"} type)
                         (keep-line-breaks (:raw block))
-                        (:raw block))]
+                        (:raw block))
+         default      (fn []
+                        (cond-> (md/render-markdown raw columns)
+                          (contains? #{"code" "list" "blockquote"} type) unframe-code))]
      (if custom-fn
        (let [result (try (custom-fn block) (catch :default _ nil))]
          (if (some? result)
            (str result)
           ;; Custom returned nil → fall back to default
-           (md/render-markdown raw columns)))
-       (md/render-markdown raw columns)))))
+           (default)))
+       (default)))))
 
 ;;; ─── Incremental render ───────────────────────────────────────
 
