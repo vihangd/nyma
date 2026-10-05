@@ -7,6 +7,13 @@
 //    discovery stub `fetch` and opt back in explicitly.
 process.env.NYMA_NO_MODEL_DISCOVERY ??= "1";
 
+//    Same for herdr: run inside a herdr pane, agent_state found HERDR_BIN_PATH
+//    and HERDR_PANE_ID in the ambient env and every full-load test reported
+//    idle/release into the developer's REAL pane — and under `--parallel`
+//    load those calls stalled four loader_smoke tests past their timeout.
+//    ext_agent_state sets the variables it needs itself.
+for (const k of Object.keys(process.env)) if (k.startsWith("HERDR_")) delete process.env[k];
+
 // 1. process.exit inside a test is a silent green: bun stops mid-run, prints
 //    no summary, and returns 0. (rpc-mode's stdin-EOF exit did exactly that.)
 //    Make it loud. A test that needs to observe an exit stubs process.exit

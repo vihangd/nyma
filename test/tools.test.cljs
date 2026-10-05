@@ -213,8 +213,10 @@
       (-> (expect result) (.toContain "     5\tfive"))
       (-> (expect result) (.toContain "     6\tfive-b"))
       (-> (expect result) (.toContain "     8\tl7"))
-      (-> (expect result) (.not.toContain "l1"))
-      (-> (expect result) (.not.toContain "l8")))
+      ;; With the tab: a bare "l8" also matches the mkdtemp path in the
+      ;; header (seen: `nyma-tool-test-5ol80J`), a 1-in-few-hundred flake.
+      (-> (expect result) (.not.toContain "\tl1"))
+      (-> (expect result) (.not.toContain "\tl8")))
     (cleanup tmp-dir)))
 
 (defn ^:async test-edit-window-delete []
