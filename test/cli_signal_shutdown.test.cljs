@@ -45,7 +45,7 @@
               ;; into for exactly that reason.
               #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "pipe"
                    :env #js {"HOME" home
-                             "PATH" (.-PATH js/process.env)
+                             "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)
                              "NYMA_NO_MODEL_DISCOVERY" "1"}})
         exited (atom false)
         _      (.then (.-exited proc) (fn [_] (reset! exited true)))
@@ -65,7 +65,7 @@
         proc (js/Bun.spawn
               #js ["bun" cli-entry "--model" "nope/nope"]
               #js {:cwd home
-                   :env #js {"HOME" home "PATH" (.-PATH js/process.env)
+                   :env #js {"HOME" home "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)
                              "NYMA_NO_MODEL_DISCOVERY" "1" "TERM" "xterm-256color"}
                    :terminal #js {:cols 100 :rows 30 :data (fn [_ _])}})
         exited (atom false)
@@ -84,7 +84,7 @@
         proc (js/Bun.spawn
               #js ["nohup" "bun" cli-entry "--mode" "rpc" "--model" "nope/nope"]
               #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "pipe"
-                   :env #js {"HOME" home "PATH" (.-PATH js/process.env)
+                   :env #js {"HOME" home "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)
                              "NYMA_NO_MODEL_DISCOVERY" "1"}})
         _      (js-await (js/Bun.sleep 4000))
         _      (.kill proc "SIGHUP")

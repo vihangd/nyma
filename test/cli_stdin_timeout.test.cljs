@@ -97,7 +97,7 @@
                                                             :stdout "pipe" :stderr "pipe"
                                                             :env #js {"NYMA_NO_MODEL_DISCOVERY" "1"
                                                                       "HOME" home
-                                                                      "PATH" (.-PATH js/process.env)}})
+                                                                      "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)}})
                                                  code (js-await (.-exited proc))
                                                  ms   (- (js/Date.now) started)]
                                              (try (.kill holder) (catch :default _e nil))
