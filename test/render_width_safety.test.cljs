@@ -8,8 +8,8 @@
    A real session died this way: tab-indented Go source under an `Allow 'edit'?`
    permission overlay produced a line 3 columns per tab too wide. A tab is
    measured differently by every layer — Bun.stringWidth 0, pi-tui visibleWidth
-   1, pi-tui's overlay compositor 3, a terminal 4-8 — so a line containing one
-   has no single true width.
+   3 (this said 1; re-measured on pi-tui 1.0: `a\tb` is 5), a terminal 4-8 — so
+   a line containing one has no single true width.
 
    These tests measure with pi-tui's own `visibleWidth`, because that is the
    function whose verdict crashes us."

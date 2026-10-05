@@ -91,9 +91,12 @@
 (defn- close-styles
   "Terminate every styled line with RESET.
 
-   `truncateToWidth` re-emits pending SGR but never closes it, and `fit-lines`
-   pads AFTER truncating \u2014 so without this the padding, and then the row below,
-   inherit whatever colour was still open."
+   When it truncates, `truncateToWidth` does close what it opened (pi-tui
+   1.0.0 appends a reset — measured), so this is NOT about truncation any more.
+   It is about a line that already FITS: that comes back unchanged, and if it
+   arrived with a style still open, `fit-lines` pads it afterwards and the
+   padding, then the row below, inherit the colour. Still needed; the reason
+   recorded here before was stale."
   [lines]
   (mapv (fn [l] (if (styled? l) (str l RESET) l)) lines))
 

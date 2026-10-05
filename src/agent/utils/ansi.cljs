@@ -10,9 +10,15 @@
   "ANSI-aware visual column width of text.
 
    NOTE: treats a TAB as ZERO columns (Bun.stringWidth does). Nothing else in
-   the stack agrees — pi-tui's `visibleWidth` says 1, its overlay compositor
-   says 3, a terminal says 4-8 — so any string measured here must already be
-   tab-free or the number is fiction. See `expand-tabs`."
+   the stack agrees — pi-tui's `visibleWidth` counts it as 3 (measured: `a\tb`
+   is 5 there, 2 here), a terminal says 4-8 — so any string measured here must
+   already be tab-free or the number is fiction. See `expand-tabs`.
+
+   Bun and pi-tui also disagree on a lone regional indicator (1 vs 2) and on
+   Devanagari conjuncts (`क्षि`, 2 vs 3) — always with Bun LOWER, so a line Bun
+   says fits can still exceed pi-tui's crash check. That is why the width guard
+   clamps with pi-tui's own functions, never these. Pinned by
+   `test/width_parity.test.cljs`."
   [s]
   (if (nil? s) 0 (js/Bun.stringWidth (str s))))
 

@@ -264,7 +264,6 @@ src/
     resources/     Resource discovery (prompts, skills, themes)
 test/              Test files (.cljs and .ts)
   integration/     Integration tests (tool pipeline, extension lifecycle, state+events)
-built-in/themes/   Default dark/light themes
 dist/              Compiled output (generated, gitignored)
 ```
 
