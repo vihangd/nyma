@@ -9,6 +9,7 @@
             [agent.ui.themes :refer [default-dark]]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
+            [agent.utils.markdown-blocks :as mb]
             [agent.commands.parser :as cmd-parser]
             [agent.commands.resolver :refer [resolve-command]]
             [agent.keybinding-registry :as kbr]
@@ -82,6 +83,38 @@
                   (str "Branched from: " label)
                   "Branched"))
     entry-id))
+
+(defn copy-target
+  "What `/copy` puts on the clipboard, from the last reply's `text` and the
+   command's args. Pure.
+     []            the whole reply           → {:text :receipt}
+     [\"code\"]      its last code block       → {:text :receipt}
+     [\"code\" \"N\"]  the Nth-from-last block   → {:text :receipt}
+   or {:error msg}. A code block is copied as its exact source — what a
+   terminal selection, with its indent and wrapping, cannot give."
+  [text args]
+  (let [[sub n] (vec args)]
+    (cond
+      (empty? args) {:text text :receipt "Copied to clipboard"}
+
+      (= sub "code")
+      (let [blocks (mb/code-blocks text)
+            k      (if (some? n) (js/parseInt n 10) 1)]
+        (cond
+          (empty? blocks) {:error "No code block in the last reply"}
+          (not (and (js/Number.isInteger k) (pos? k)))
+          {:error (str "/copy code " n ": expected a positive number")}
+          (> k (count blocks))
+          {:error (str "Only " (count blocks) " code block"
+                       (when (not= 1 (count blocks)) "s") " in the last reply")}
+          :else
+          (let [{:keys [lang text]} (nth blocks (- (count blocks) k))
+                lines (count (.split text "\n"))]
+            {:text    text
+             :receipt (str "Copied code block (" (if (seq lang) (str lang ", ") "")
+                           lines (if (= 1 lines) " line" " lines") ")")})))
+
+      :else {:error (str "Unknown /copy argument: " sub " — try /copy or /copy code [N]")})))
 
 (defn positional-args
   "The flag-free tokens interactive mode's shared splitter put on `ctx`, or
@@ -1188,13 +1221,22 @@
                                         "--------------------"))))}
 
           "copy"
-          {:description "Copy last assistant message to clipboard"
-           :handler (fn [_args ctx]
+          {:description "Copy the last reply to the clipboard; `code [N]` copies its last (or Nth-from-last) code block exactly"
+           :handler (fn [args ctx]
                       (let [msgs     (:messages @(:state agent))
-                            last-asst (last (filter #(= (:role %) "assistant") msgs))]
-                        (if-not last-asst
+                            last-asst (last (filter #(= (:role %) "assistant") msgs))
+                            target   (when last-asst
+                                       (copy-target (share/content->text (:content last-asst))
+                                                    (vec (or args []))))]
+                        (cond
+                          (not last-asst)
                           (notify ctx "No assistant message to copy" "error")
-                          (let [text     (share/content->text (:content last-asst))
+
+                          (:error target)
+                          (notify ctx (:error target) "error")
+
+                          :else
+                          (let [text     (:text target)
                                 platform (.-platform js/process)
                                 cmd      (case platform
                                            "darwin" "pbcopy"
@@ -1207,7 +1249,7 @@
                             (.then (.-exited proc)
                                    (fn [code]
                                      (if (zero? code)
-                                       (notify ctx "Copied to clipboard")
+                                       (notify ctx (:receipt target))
                                        (notify ctx (str "Clipboard command failed (" cmd
                                                         " exited " code ")") "error"))))))))}
 

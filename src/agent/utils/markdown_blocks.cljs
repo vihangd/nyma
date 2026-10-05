@@ -29,6 +29,21 @@
       (catch :default _e
         [{:type "paragraph" :raw content}]))))
 
+(defn code-blocks
+  "Code blocks in `text`, in order, as {:lang :text} — the source exactly,
+   no ANSI, no indent. Walks nested tokens, so a fence inside a list item
+   counts. Behind `/copy code`."
+  [text]
+  (let [out  #js []
+        walk (fn walk [tokens]
+               (doseq [t (or tokens [])]
+                 (if (= "code" (.-type t))
+                   (.push out {:lang (or (.-lang t) "") :text (str (.-text t))})
+                   (do (walk (.-tokens t)) (walk (.-items t))))))]
+    (when (seq text)
+      (try (walk (md/lexer text)) (catch :default _ nil)))
+    (vec out)))
+
 ;;; ─── Single block rendering ───────────────────────────────────
 
 (def ^:private fence-re #"^\s*(>\s*)*(```|~~~)")
