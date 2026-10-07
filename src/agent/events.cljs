@@ -316,7 +316,13 @@
    :emit-collect awaits handlers and merges non-nil return values."
   []
   (let [handlers     (atom {})
-        sorted-cache (atom {})]
+        sorted-cache (atom {})
+        ;; event → how many times it has been emitted, by any of the three
+        ;; emitters. Lets state that must reset on an event (e.g. a session's
+        ;; permission grants) notice it WITHOUT registering a handler — a fresh
+        ;; agent owns zero handlers, which the leak tests rely on.
+        emitted      (atom {})
+        count!       (fn [event] (swap! emitted update event (fnil inc 0)))]
     {:on   (fn [event handler & [priority]]
              (swap! handlers update event (fnil conj [])
                     {:handler handler :priority (or priority 0)})
@@ -324,6 +330,7 @@
              (swap! sorted-cache dissoc event))
 
      :emit (fn [event data]
+             (count! event)
              (let [hs (get-sorted-handlers handlers sorted-cache event)]
                (doseq [{:keys [handler]} hs]
                  (try
@@ -333,10 +340,14 @@
                       (str "[nyma] Extension handler error on '" event "':") e))))))
 
      :emit-async (fn [event data]
+                   (count! event)
                    (run-handlers-async handlers sorted-cache event data))
 
      :emit-collect (fn [event data]
+                     (count! event)
                      (run-handlers-collect handlers sorted-cache event data))
+
+     :emit-count (fn [event] (get @emitted event 0))
 
      :off  (fn [event handler]
              (swap! handlers update event

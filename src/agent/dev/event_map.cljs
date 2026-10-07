@@ -38,14 +38,16 @@
   [re source]
   (set (map second (re-seq re (str source)))))
 
+;; `(?!-count)`: `((:emit-count events) "x")` READS how often x was
+;; emitted; it is not an emit site.
 (def ^:private emit-re
-  #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
+  #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)(?!-count)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"")
 
 (def ^:private payload-re
   ;; An emit whose payload is a literal map: the keys are the contract, or
   ;; the closest thing this codebase has to one. A payload passed as a
   ;; variable contributes nothing (the column shows `-`), which is honest.
-  #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"\s+(?:#js\s*)?\{([^}]*)\}")
+  #"(?:emit|emit-async|emit-collect|emitGlobal|emit-fn|emit!)(?!-count)[^\n\"]{0,40}\"([a-zA-Z][a-zA-Z0-9_]*)\"\s+(?:#js\s*)?\{([^}]*)\}")
 
 (defn- payload-keys
   "{event #{key}} for every literal-map emit in `source`."

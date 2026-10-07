@@ -602,11 +602,19 @@
         approval-checks (atom [])
         ;; This agent's "Allow for this session" grants: they end with the
         ;; session — /new, /resume and /fork emit session_start, a branch
-        ;; switch emits session_switch.
-        session-allows  (atom #{})]
-    (when (fn? (:on events))
-      (doseq [ev ["session_start" "session_switch"]]
-        ((:on events) ev (fn [& _] (reset! session-allows #{}) nil))))
+        ;; switch emits session_switch. Noticed through the bus's emit count,
+        ;; not a handler, so a fresh agent still owns zero handlers.
+        session-allows  (atom #{})
+        epoch           (fn [] (if (fn? (:emit-count events))
+                                 (+ ((:emit-count events) "session_start")
+                                    ((:emit-count events) "session_switch"))
+                                 0))
+        seen-epoch      (atom (epoch))
+        sync-epoch!     (fn []
+                          (let [e (epoch)]
+                            (when (not= e @seen-epoch)
+                              (reset! seen-epoch e)
+                              (reset! session-allows #{}))))]
     {:add
      (fn [interceptor & [opts]]
        (let [position (if opts (:position opts) nil)]
@@ -624,6 +632,7 @@
 
      :execute
      (fn [tool-name tool args]
+       (sync-epoch!)
        (let [agent    (when agent-ref @agent-ref)
              ext-ctx  (when agent (create-extension-context agent))
              ctx      {:tool-name         tool-name
