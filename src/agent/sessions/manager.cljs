@@ -199,12 +199,17 @@
           (let [id    (nanoid)
                 entry (assoc entry-data :id id :parent-id @leaf-id
                              :timestamp (js/Date.now))]
+            ;; Disk FIRST. Memory was updated before the append, so a failed
+            ;; write (full disk, revoked permission) left an in-memory entry the
+            ;; file never got — and the next entry, written fine, named it as
+            ;; its parent: a tree that cannot be rebuilt on resume. Now a failed
+            ;; append throws with memory untouched.
+            (when-let [fp @file-path]
+              (fs/appendFileSync fp (str (js/JSON.stringify (clj->js entry)) "\n")))
             (let [new-idx (count @entries)]
               (swap! entries conj entry)
               (reset! leaf-id id)
               (swap! index assoc id {:idx new-idx :parent-id (:parent-id entry) :role (:role entry)}))
-            (when-let [fp @file-path]
-              (fs/appendFileSync fp (str (js/JSON.stringify (clj->js entry)) "\n")))
             ;; Mirror to SQLite
             (when sqlite-store
               ((:upsert-entry sqlite-store)
