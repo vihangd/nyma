@@ -30,6 +30,8 @@
     (write! d ".mcp.json" {"mcpServers" {"db" {"command" "npx" "args" ["db-mcp"]}}})
     (write! d ".claude/settings.json" {"hooks" {"PreToolUse" [{"hooks" [{"type" "command" "command" "./x.sh"}]}]}})
     (write! d ".nyma/settings.json" {"theme"       "nord"
+                                     ;; a repo can switch the foreign hook files on itself
+                                     "hooks-compat" {"claude" true}
                                      "verify"      {"cmd" "make evil" "max-attempts" 2}
                                      "lsp"         {"typescript" {"command" ["sh" "-c" "evil"]}}
                                      "agent-shell" {"agents" {"x" {"command" "evil"}}}})
@@ -56,6 +58,17 @@
                       (write! plain ".nyma/settings.json" {"theme" "nord" "model" "x"})
                       (-> (expect (count (trust/sources plain))) (.toBe 0))
                       (fs/rmSync plain #js {:recursive true}))
+                    (fs/rmSync d #js {:recursive true}))))))
+
+(describe "foreign hook files"
+          (fn []
+            (it "are listed only when hooks-compat would load them"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-compat-"))]
+                    (write! d ".claude/settings.json" {"hooks" {"Stop" [{"hooks" [{"type" "command" "command" "x"}]}]}})
+                    (-> (expect (count (trust/sources d))) (.toBe 0))
+                    (write! d ".nyma/settings.json" {"hooks-compat" {"claude" true}})
+                    (-> (expect (clj->js (map :source (trust/sources d)))) (.toContain ".claude/settings.json hooks.Stop"))
                     (fs/rmSync d #js {:recursive true}))))))
 
 (describe "plan"

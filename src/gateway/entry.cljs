@@ -9,7 +9,8 @@
 
    Environment variables required by channels are specified in gateway.json using
    the `${VAR_NAME}` interpolation syntax (see gateway.config for schema)."
-  (:require [gateway.core :as core]
+  (:require [agent.trust :as trust]
+            [gateway.core :as core]
             [gateway.config :as config]
             [gateway.tools :as tools]
             [gateway.channels.telegram :as telegram-ch]
@@ -50,7 +51,8 @@
                             (aget (clj->js rest-args) (inc idx)))))]
     {:command     command
      :config-path config-path
-     :help?       (some #(or (= % "--help") (= % "-h")) args)}))
+     :help?       (some #(or (= % "--help") (= % "-h")) args)
+     :trust?      (some #(= % "--trust") args)}))
 
 (defn- print-help []
   (js/console.log
@@ -60,6 +62,8 @@ Usage:
   nyma-gateway setup [--config=<path>]     Run interactive channel setup flows
   nyma-gateway validate [--config=<path>]  Validate config file and exit
   nyma-gateway --help                      Show this help
+  --trust (or NYMA_TRUST=1)                Run this folder's project-defined commands
+                                           (MCP servers, hooks, LSP, .nyma/extensions)
 
 Config file (gateway.json) example:
   {
@@ -136,10 +140,24 @@ See docs/gateway.md for the full schema and channel adapter guide."))
           (.on js/process "SIGTERM" (fn [] (shutdown "SIGTERM")))))))))
 
 (defn ^:async main []
-  (let [{:keys [command config-path help?]} (parse-args)]
+  (let [{:keys [command config-path help? trust?]} (parse-args)]
     (when help?
       (print-help)
       (.exit js/process 0))
+
+    ;; Workspace trust, decided before anything reads project files. The CLI
+    ;; does this in resolve-trust!; the gateway never did, so a folder with
+    ;; .mcp.json or hooks silently dropped them. A daemon cannot prompt: the
+    ;; headless policy — untrusted unless --trust / NYMA_TRUST=1, one line.
+    (let [cwd  (js/process.cwd)
+          srcs (trust/sources cwd)
+          d    (trust/plan {:srcs srcs
+                            :stored (when (seq srcs) (trust/stored cwd srcs))
+                            :flag? (or trust? (= "1" (.. js/process -env -NYMA_TRUST)))
+                            :interactive? false})]
+      (when (and (= d :untrusted) (seq srcs))
+        (.write (.-stderr js/process) (trust/ignored-note srcs)))
+      (trust/decide! (if (= d :trusted) :trusted :untrusted)))
 
     (let [cfg-path (or config-path "gateway.json")
           exit-code

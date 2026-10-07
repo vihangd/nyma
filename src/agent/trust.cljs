@@ -81,6 +81,19 @@
         (for [ev (js/Object.keys h)] {:source (str rel " hooks." ev) :detail (js/JSON.stringify (aget h ev))})
         []))))
 
+(defn- hooks-compat
+  "Which foreign hook files the hook bridge would load: `hooks-compat` from
+   the first settings file that has it (project local, project, global) — the
+   bridge's own rule (claude_hook_bridge/config load-compat-flags). Read here
+   rather than required, so core does not depend on an extension."
+  [cwd]
+  (let [c (some (fn [f] (some-> (read-json f) (aget "hooks-compat")))
+                [(path/join cwd ".nyma" "settings.local.json")
+                 (path/join cwd ".nyma" "settings.json")
+                 (path/join (home/dir) ".nyma" "settings.json")])]
+    {:claude (boolean (and c (aget c "claude")))
+     :agents (boolean (and c (aget c "agents")))}))
+
 (defn sources
   "Every project-controlled entry in `cwd` that would make nyma run something.
    [{:source \".mcp.json db\" :detail \"npx db-mcp\"} …], in a stable order."
@@ -93,7 +106,15 @@
       (when (seq files)
         [{:source extensions-dir :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))}]))
     (mapcat #(settings-entries % (read-json (path/join cwd %))) settings-files)
-    (mapcat #(command-file-entries % (read-json (path/join cwd %))) command-files)))))
+    ;; .claude/ and .agents/ hooks only when hooks-compat would load them:
+    ;; asking about commands that can never run is noise that teaches people
+    ;; to click Trust without reading.
+    (let [compat (hooks-compat cwd)
+          live?  (fn [rel] (cond (.startsWith rel ".claude/") (:claude compat)
+                                 (.startsWith rel ".agents/") (:agents compat)
+                                 :else true))]
+      (mapcat #(command-file-entries % (read-json (path/join cwd %)))
+              (filter live? command-files)))))))
 
 (defn fingerprint [srcs]
   (-> (crypto/createHash "sha256") (.update (js/JSON.stringify (clj->js srcs))) (.digest "hex")))

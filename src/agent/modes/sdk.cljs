@@ -1,6 +1,7 @@
 (ns agent.modes.sdk
   "Programmatic SDK mode."
-  (:require [agent.core :refer [create-agent]]
+  (:require [agent.trust :as trust]
+            [agent.core :refer [create-agent]]
             [agent.loop :refer [run steer follow-up]]
             [agent.resources.loader :refer [discover]]
             [agent.sessions.manager :refer [create-session-manager attach-session-persistence! new-session-path]]
@@ -33,11 +34,18 @@
      :require-capabilities  — #{kw} filter builtin tools by capability
      :exclude-capabilities  — #{kw} exclude tools with any of these capabilities
      :modes                 — #{kw} filter tools by allowed runtime mode
+     :trust                 — true runs the cwd's project-defined commands
+                              (MCP servers, hooks, LSP, .nyma/extensions);
+                              also NYMA_TRUST=1. Otherwise the folder's stored
+                              decision (agent.trust) applies — untrusted when
+                              there is none. An embedder cannot be prompted.
 
    Returned map: :send :send-and-wait :steer :follow-up :on :on-many
    :interrupt! :agent-state :state :agent :session, and :close — deactivates
    the extensions this session loaded; call it when the session is done."
   [opts]
+  (when (or (:trust opts) (= "1" (.. js/process -env -NYMA_TRUST)))
+    (trust/decide! :trusted))
   (let [settings  (create-settings-manager)
         resources (js-await (discover {:context-files (:context-files ((:get settings)))
                                      :max-skill-description (:max-description-length (:skills ((:get settings))))}))
