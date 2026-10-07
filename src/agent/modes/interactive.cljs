@@ -626,8 +626,19 @@
         args      (:args parsed)
         commands  @(:commands agent)]
     (if-let [entry (resolve-command commands cmd)]
-      (let [h (:handler entry)]
-        (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
+      (let [h    (:handler entry)
+            ;; A command that throws, or whose promise rejects, says so in the
+            ;; transcript. It used to vanish — e.g. a settings save refusing an
+            ;; unparseable file looked exactly like a save that worked.
+            fail (fn [e]
+                   (update-messages!
+                    (fn [prev]
+                      (conj (vec prev)
+                            {:role "error" :id (new-id) :local-only true
+                             :content (str "/" cmd ": " (or (.-message e) (str e)))})))
+                   nil)]
+        (try
+          (let [r (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
                      ;; Aborted by Escape while the command runs.
                      :signal         (when-let [c (:abort-controller agent)] (.-signal @c))
                      :agent          agent
@@ -637,7 +648,9 @@
                      :append-message (fn [msg]
                                        (update-messages!
                                         (fn [prev]
-                                          (conj (vec prev) (assoc msg :id (new-id))))))}))
+                                          (conj (vec prev) (assoc msg :id (new-id))))))})]
+            (if (instance? js/Promise r) (.catch r fail) r))
+          (catch :default e (fail e))))
       ;; Was a bare `when-let`: an unrecognised command did nothing at all,
       ;; which is indistinguishable from one that ran and had nothing to say.
       (update-messages!

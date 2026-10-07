@@ -389,11 +389,39 @@
           (d/warn "settings" (str "Failed to parse " file-path ": " (.-message e)))
           nil)))))
 
-(defn- save-json [file-path data]
-  (let [dir (path/dirname file-path)]
+(defn read-for-write
+  "A settings file's contents for a read-modify-write: {} when it is missing
+   or blank, the parsed map when it is valid, and a THROWN error when it
+   exists but does not parse.
+
+   Writers merged into the in-memory copy, which `load-json` leaves nil for a
+   file it cannot parse — so one trailing comma in ~/.nyma/settings.json, then
+   any `/model` or `/theme` save, replaced the whole file with the one key
+   being saved. Refusing is the only answer that cannot lose data; the error
+   names the file so the user can fix it. Same rule as
+   utils/credentials `read-for-write`."
+  [file-path]
+  (if-not (fs/existsSync file-path)
+    {}
+    (let [text (fs/readFileSync file-path "utf8")]
+      (if (str/blank? text)
+        {}
+        (try
+          (normalize-keys (js/JSON.parse text))
+          (catch :default e
+            (throw (js/Error. (str "Not saving to " file-path ": it does not parse ("
+                                   (.-message e) "). Fix or remove it, then retry.")))))))))
+
+(defn- save-json
+  "Write `data` as JSON, atomically: a temp file in the same directory, then
+   rename — so a crash or a full disk leaves the old file, never half a file."
+  [file-path data]
+  (let [dir (path/dirname file-path)
+        tmp (str file-path ".tmp-" (.-pid js/process))]
     (when-not (fs/existsSync dir)
       (fs/mkdirSync dir #js {:recursive true}))
-    (fs/writeFileSync file-path (js/JSON.stringify (clj->js data) nil 2))))
+    (fs/writeFileSync tmp (js/JSON.stringify (clj->js data) nil 2))
+    (fs/renameSync tmp file-path)))
 
 (def inert-keys
   "Settings keys that are parsed and read by NOTHING, with the reason.
@@ -591,22 +619,29 @@
 
       ;; The in-memory map follows the file, so `:get` answers with what was
       ;; just written instead of waiting for a restart or `:reload`.
+      ;; Merged into what is ON DISK (read-for-write), not the in-memory copy:
+      ;; that copy is nil for an unparseable file, and stale after an edit
+      ;; made outside nyma.
       :save-global (fn [settings]
-                     (let [m (merge @global-settings settings)]
-                       (reset! global-settings m)
-                       (save-json global-path m)))
+                     (let [m (merge (read-for-write global-path) settings)]
+                       (save-json global-path m)
+                       (reset! global-settings m)))
 
       :save-project (fn [settings]
                       ;; Same file as the global one? Then this IS the global
                       ;; file, and writing the (empty) project layer over it
                       ;; would drop everything the user has in it.
+                      ;; The project layer in memory is the permission-STRIPPED
+                      ;; copy; writing it back deleted a committed file's
+                      ;; `permissions` block. Merge into the raw file instead,
+                      ;; then reload the stripped view.
                       (if same-file?
-                        (let [m (merge @global-settings settings)]
-                          (reset! global-settings m)
-                          (save-json global-path m))
-                        (let [m (merge @project-settings settings)]
-                          (reset! project-settings m)
-                          (save-json project-path m))))
+                        (let [m (merge (read-for-write global-path) settings)]
+                          (save-json global-path m)
+                          (reset! global-settings m))
+                        (let [m (merge (read-for-write project-path) settings)]
+                          (save-json project-path m)
+                          (reset! project-settings (load-project-json project-path)))))
 
       :tool-allowed? (fn [tool-name]
                       ;; Union of the user's global allow-list and the user's
@@ -627,7 +662,7 @@
                            ;; not in .nyma/settings.json — the project file cannot
                            ;; grant, so a grant the user makes must live where a
                            ;; checked-out repo cannot forge it. Idempotent.
-                            (let [gs       (or @global-settings #js {})
+                            (let [gs       (clj->js (read-for-write global-path))
                                   cwd      (js/process.cwd)
                                   perms    (or (.-permissions gs) #js {})
                                   projects (or (.-projects perms) #js {})

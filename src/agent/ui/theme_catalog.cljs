@@ -127,12 +127,23 @@
   [name]
   (let [dir (path/join (js/process.cwd) ".nyma")
         f   (path/join dir "settings.json")
-        raw (try (js/JSON.parse (fs/readFileSync f "utf8")) (catch :default _ nil))
+        ;; A file that exists but does not parse is NOT replaced: resetting it
+        ;; to {theme} silently deleted everything else in it.
+        raw (when (fs/existsSync f)
+              (let [text (fs/readFileSync f "utf8")]
+                (when-not (= "" (.trim text))
+                  (try (js/JSON.parse text)
+                       (catch :default e
+                         (throw (js/Error. (str "Not saving to " f ": it does not parse ("
+                                                (.-message e) "). Fix or remove it, then retry."))))))))
         ;; Only merge into a real JSON object; null/array/scalar → fresh object.
         cur (if (and (object? raw) (not (.isArray js/Array raw))) raw #js {})]
     (aset cur "theme" name)
     (fs/mkdirSync dir #js {:recursive true})
-    (fs/writeFileSync f (js/JSON.stringify cur nil 2))
+    ;; Atomic, as settings/manager save-json: never half a file.
+    (let [tmp (str f ".tmp-" (.-pid js/process))]
+      (fs/writeFileSync tmp (js/JSON.stringify cur nil 2))
+      (fs/renameSync tmp f))
     name))
 
 ;; ── Live switching ─────────────────────────────────────────────────
