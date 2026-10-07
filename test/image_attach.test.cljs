@@ -89,3 +89,12 @@
 
 ((.skipIf describe (not (fs/existsSync cli))) "image attach end to end"
                                               (fn [] (it "@shot.png reaches the model as an image" test-image-reaches-model 45000)))
+
+(describe "clipboard fallback"
+          (fn []
+            ;; pi-tui's native helper cannot load in the compiled binary
+            ;; (computed .node path); macOS falls back to osascript.
+            (it "parses osascript's PNG data"
+                (fn []
+                  (-> (expect (vec (fm/parse-osascript-png "«data PNGf89504E47»"))) (.toEqual [0x89 0x50 0x4E 0x47]))
+                  (-> (expect (fm/parse-osascript-png "")) (.toBeFalsy))))))

@@ -4,7 +4,7 @@
             [agent.utils.home :as home]
             [agent.model-info :as model-info]
             [agent.debug :as d]
-            ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor getNativeClipboard
+            ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
                                               matchesKey]]
             [agent.loop :refer [run steer follow-up run-turn-with-update-handler]]
@@ -1198,16 +1198,15 @@
                 :description (get-in kbr/default-actions ["app.paste.image" :description])
                 :handler
                 (fn []
-                  (if-let [clip (getNativeClipboard)]
-                    (-> (.getImage clip)
-                        (.then (fn [bytes]
-                                 (if-let [token (file-mentions/save-pasted-image!
-                                                 bytes (path/join (home/dir) ".nyma" "pasted"))]
-                                   (do (.insertTextAtCursor editor (str token " "))
-                                       (.requestRender tui))
-                                   (note "No image on the clipboard."))))
-                        (.catch (fn [e] (note (str "Could not read the clipboard: " (or (.-message e) e))))))
-                    (note "Clipboard images are not available in this terminal session.")))}))
+                  (-> (file-mentions/read-clipboard-image)
+                      (.then (fn [bytes]
+                               (if-let [token (when bytes
+                                                (file-mentions/save-pasted-image!
+                                                 bytes (path/join (home/dir) ".nyma" "pasted")))]
+                                 (do (.insertTextAtCursor editor (str token " "))
+                                     (.requestRender tui))
+                                 (note "No image on the clipboard."))))
+                      (.catch (fn [e] (note (str "Could not read the clipboard: " (or (.-message e) e)))))))}))
 
       ;; alt+enter: queue what is typed for AFTER the turn, rather than
       ;; steering into it. Same mechanism as ctrl+o above — a `(:shortcuts

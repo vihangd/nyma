@@ -6,7 +6,8 @@
    and the file is appended after it in a `<file path=…>` block — so sessions
    keep `:content` an opaque string and the transcript shows exactly what the
    model saw."
-  (:require [agent.multimodal :as multimodal]
+  (:require ["@earendil-works/pi-tui" :refer [getNativeClipboard]]
+            [agent.multimodal :as multimodal]
             [agent.utils.home :as home]
              ["node:fs" :as fs]
             ["node:path" :as path]
@@ -223,3 +224,43 @@
       (fs/mkdirSync dir #js {:recursive true})
       (fs/writeFileSync f bytes)
       (str "@" (if (.startsWith f (str home "/")) (str "~/" (subs f (inc (count home)))) f)))))
+
+(defn parse-osascript-png
+  "Bytes of `the clipboard as «class PNGf»` as osascript prints it
+   (`«data PNGf89504E47…»`), or nil. Pure."
+  [out]
+  (when-let [[_ hex] (re-find #"«data PNGf([0-9A-Fa-f]+)»" (str out))]
+    (js/Uint8Array. (js/Buffer.from hex "hex"))))
+
+(defn- clipboard-image-via-tools
+  "The clipboard image through the platform's own tools, or nil. pi-tui's
+   native helper loads a .node file by a computed path the bundler cannot
+   follow, so in the compiled binary it is unavailable (measured): this is
+   what makes ctrl+v work there. macOS needs nothing installed; Linux uses
+   wl-paste (Wayland) or xclip."
+  []
+  (let [run (fn [argv]
+              (try
+                (let [r (js/Bun.spawnSync (clj->js argv) #js {:stdout "pipe" :stderr "ignore"})]
+                  (when (zero? (.-exitCode r)) (.-stdout r)))
+                (catch :default _ nil)))]
+    (case (.-platform js/process)
+      "darwin" (parse-osascript-png
+                (some-> (run ["osascript" "-e" "try" "-e" "the clipboard as «class PNGf»"
+                              "-e" "on error" "-e" "return \"\"" "-e" "end try"])
+                        (.toString)))
+      "linux"  (let [b (cond
+                         (js/Bun.which "wl-paste") (run ["wl-paste" "--no-newline" "--type" "image/png"])
+                         (js/Bun.which "xclip")    (run ["xclip" "-selection" "clipboard" "-t" "image/png" "-o"])
+                         :else nil)]
+                 (when (and b (pos? (.-length b))) (js/Uint8Array. b)))
+      nil)))
+
+(defn ^:async read-clipboard-image
+  "The clipboard image as a Uint8Array, or nil: pi-tui's native helper when it
+   loads (running from source), else the platform tools."
+  []
+  (let [native (try (getNativeClipboard) (catch :default _ nil))
+        img    (when native (try (js-await (.getImage native)) (catch :default _ nil)))]
+    (or (when (and img (pos? (.-length img))) img)
+        (clipboard-image-via-tools))))
