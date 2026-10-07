@@ -2,7 +2,7 @@
   "Unit tests for the per-server MCP client. The SDK is mocked via a
    thin fake so we can exercise state transitions, restart backoff,
    and call-tool dispatch without spawning real subprocesses."
-  (:require ["bun:test" :refer [describe it expect beforeEach]]
+  (:require ["bun:test" :refer [describe it expect beforeEach beforeAll]]
             [agent.extensions.mcp-client.client :as mcp]))
 
 ;; ─── Test fixtures: fake SDK Client + Transport ──────────────────
@@ -133,6 +133,8 @@
             (it "case-insensitive type"
                 (fn []
                   (-> (expect (mcp/transport-kind {:name "x" :type "HTTP" :url "https://e.com"})) (.toBe :http))))))
+
+(beforeAll ^:async (fn [] (js-await (mcp/load-sdk!))))
 
 (describe "client/build-transport"
           (fn []

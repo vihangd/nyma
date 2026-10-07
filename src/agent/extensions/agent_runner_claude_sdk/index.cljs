@@ -167,22 +167,31 @@
 
 ;;; ─── Extension entry point ───────────────────────────────────
 
-(defn ^:async ^:export default [api]
-  (let [sdk-mod (try
-                  (js-await (js/import "@anthropic-ai/claude-agent-sdk"))
-                  (catch :default e
-                    (d/warn "[agent-runner-claude-sdk] SDK unavailable:" (.-message e))
-                    nil))]
-    (when sdk-mod
-      (let [create-fn  (fn [agent-key agent-def api]
-                         (js/Promise.resolve
-                          (create-in-process-connection agent-key agent-def api sdk-mod)))
-            registered (registry/register-agent!
-                        "claude-sdk"
-                        (assoc claude-sdk-def :create-fn create-fn))]
-        (when-not registered
-          (d/warn "[agent-runner-claude-sdk] Failed to register claude-sdk agent"))
-        (fn []
-          (when (= @shared/active-agent "claude-sdk")
-            (pool/disconnect "claude-sdk"))
-          (registry/unregister-agent! "claude-sdk"))))))
+(defonce ^:private sdk-module (atom nil))
+
+(defn ^:async load-sdk
+  "The SDK module, imported on FIRST USE and cached.
+
+   It was imported (and awaited) at activation: ~45 ms on every launch, in
+   every mode, for a runner most sessions never select. Throws with a plain
+   message when the package is missing, which the agent switch reports."
+  []
+  (or @sdk-module
+      (let [m (try (js-await (js/import "@anthropic-ai/claude-agent-sdk"))
+                   (catch :default e
+                     (throw (js/Error. (str "claude-sdk runner: @anthropic-ai/claude-agent-sdk is unavailable ("
+                                            (.-message e) ")")))))]
+        (reset! sdk-module m))))
+
+(defn ^:export default [api]
+  (let [create-fn  ^:async (fn [agent-key agent-def api]
+                             (create-in-process-connection agent-key agent-def api (js-await (load-sdk))))
+        registered (registry/register-agent!
+                    "claude-sdk"
+                    (assoc claude-sdk-def :create-fn create-fn))]
+    (when-not registered
+      (d/warn "[agent-runner-claude-sdk] Failed to register claude-sdk agent"))
+    (fn []
+      (when (= @shared/active-agent "claude-sdk")
+        (pool/disconnect "claude-sdk"))
+      (registry/unregister-agent! "claude-sdk"))))

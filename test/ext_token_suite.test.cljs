@@ -205,20 +205,23 @@
     (-> (expect @seen-system) (.toContain "Repository Map"))))
 
 (describe "ext-repo-map" (fn []
-                           (it "activates and indexes current directory"
+                           ;; The index is built on the first turn, not at
+                           ;; activation: it reads every source file, and
+                           ;; activation runs on every launch.
+                           (it "does not index at activation"
                                (fn []
+                                 (swap! shared/suite-stats assoc :repo-map {:files 0 :symbols 0 :last-index-ms 0})
                                  (let [agent (make-agent)
                                        api   (make-api agent)
                                        deact (repo-map/activate api)]
-                                   (-> (expect (:files (:repo-map @shared/suite-stats))) (.toBeGreaterThan 0))
+                                   (-> (expect (:files (:repo-map @shared/suite-stats))) (.toBe 0))
                                    (deact))))
 
-                           (it "extracts symbols from source files"
-                               (fn []
-                                 (let [agent (make-agent)
-                                       api   (make-api agent)
-                                       _deact (repo-map/activate api)]
-                                   (-> (expect (:symbols (:repo-map @shared/suite-stats))) (.toBeGreaterThan 0)))))
+                           (it "indexes files and symbols on the first turn"
+                               ^:async (fn []
+                                 (js-await (test-repo-map-injects-prompt))
+                                 (-> (expect (:files (:repo-map @shared/suite-stats))) (.toBeGreaterThan 0))
+                                 (-> (expect (:symbols (:repo-map @shared/suite-stats))) (.toBeGreaterThan 0))))
 
                            (it "injects prompt-section via before_agent_start" test-repo-map-injects-prompt)))
 

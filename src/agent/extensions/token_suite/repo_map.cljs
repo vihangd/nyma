@@ -122,20 +122,21 @@
                   :symbols total-symbols
                   :last-index-ms elapsed)))
 
-      {:symbols @symbols
-       :ref-count @ref-count
-       :file-count (count files)
-       :symbol-count total-symbols})))
+      (let [rc @ref-count]
+        {:symbols @symbols
+         :ref-count rc
+         ;; Ranked ONCE here (most referenced first). render-repo-map sorted
+         ;; the whole list — a reduce per file in the key — on every call, and
+         ;; the budget search calls it ~8 times a turn: ~28 ms per turn.
+         :ranked (vec (sort-by (fn [s] (- (reduce + 0 (map #(get rc % 0) (or (:imports s) [])))))
+                               @symbols))
+         :file-count (count files)
+         :symbol-count total-symbols}))))
 
 (defn- render-repo-map
   "Render the repo map as a compact text representation."
   [index max-files]
-  (let [;; Sort by reference count (most referenced first)
-        sorted (->> (:symbols index)
-                    (sort-by (fn [s]
-                               (- (reduce + 0 (map #(get (:ref-count index) % 0)
-                                                    (or (:imports s) []))))))
-                    (take max-files))
+  (let [sorted (take max-files (:ranked index))
         lines  (atom [(str "## Repository Map (" (:file-count index) " files, "
                            (:symbol-count index) " symbols)")])]
     (doseq [{:keys [path defs classes]} sorted]
@@ -156,9 +157,10 @@
         index    (atom nil)
         dirty    (atom true)]
 
-    ;; Build initial index
-    (reset! index (build-index cwd (:extensions rm-cfg)))
-    (reset! dirty false)
+    ;; No index at activation: it walks and reads every source file (~55 ms
+    ;; on this repo, more on a big one), on every launch, before the user has
+    ;; typed anything. `dirty` starts true, so the first before_agent_start
+    ;; builds it.
 
     ;; Mark dirty on file edits
     (when (:reindex-on-edit rm-cfg)

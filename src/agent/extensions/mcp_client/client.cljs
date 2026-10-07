@@ -21,11 +21,28 @@
      (state client)            — :stopped|:starting|:running|...
      (last-error client)       — string or nil
      (on-state-change! client f) — register a one-arg listener; useful
-                                   for the status line atom"
-  (:require ["@modelcontextprotocol/sdk/client/index.js"          :as sdk-client]
-            ["@modelcontextprotocol/sdk/client/stdio.js"          :as sdk-stdio]
-            ["@modelcontextprotocol/sdk/client/streamableHttp.js" :as sdk-http]
-            ["@modelcontextprotocol/sdk/client/sse.js"            :as sdk-sse]))
+                                   for the status line atom")
+
+
+;; The MCP SDK (and the ajv it pulls in) loaded statically on every launch —
+;; ~40 ms with the LSP client's jsonrpc — even with no server configured. It is
+;; imported the first time a server starts; build-transport needs it loaded.
+(defonce ^:private sdk (atom nil))
+
+(defn ^:async load-sdk!
+  "Import the SDK client modules once. Idempotent."
+  []
+  (or @sdk
+      (let [[c st h se] (js-await (js/Promise.all
+                                   #js [(js/import "@modelcontextprotocol/sdk/client/index.js")
+                                        (js/import "@modelcontextprotocol/sdk/client/stdio.js")
+                                        (js/import "@modelcontextprotocol/sdk/client/streamableHttp.js")
+                                        (js/import "@modelcontextprotocol/sdk/client/sse.js")]))]
+        (reset! sdk {:client c :stdio st :http h :sse se}))))
+
+(defn- sdk-mod [k]
+  (or (get @sdk k)
+      (throw (js/Error. "MCP SDK not loaded: await (load-sdk!) before building a transport"))))
 
 (def ^:private default-max-restarts 3)
 (def ^:private default-call-timeout-ms 30000)
@@ -180,26 +197,26 @@
       (when-not (:command cfg)
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :command (stdio transport requires command/args)."))))
-      (sdk-stdio/StdioClientTransport.
+      (let [Transport (.-StdioClientTransport (sdk-mod :stdio))] (Transport.
        #js {:command (:command cfg)
             :args    (clj->js (or (:args cfg) []))
             :env     (env-merge (:env cfg))
             :cwd     (or (:cwd cfg) (js/process.cwd))
-            :stderr  "pipe"}))
+            :stderr  "pipe"})))
 
     :http
     (do
       (when-not (:url cfg)
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :url (http transport requires url)."))))
-      (sdk-http/StreamableHTTPClientTransport. (js/URL. (:url cfg)) (http-transport-opts cfg)))
+      (let [Transport (.-StreamableHTTPClientTransport (sdk-mod :http))] (Transport. (js/URL. (:url cfg)) (http-transport-opts cfg))))
 
     :sse
     (do
       (when-not (:url cfg)
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :url (sse transport requires url)."))))
-      (sdk-sse/SSEClientTransport. (js/URL. (:url cfg)) (http-transport-opts cfg)))))
+      (let [Transport (.-SSEClientTransport (sdk-mod :sse))] (Transport. (js/URL. (:url cfg)) (http-transport-opts cfg))))))
 
 ;; ── Lifecycle ────────────────────────────────────────────────────
 
@@ -214,8 +231,10 @@
     (reset! (:stopping? client) false)
     (transition! client :starting)
     (try
-      (let [transport (build-transport cfg)
-            sdk-c     (sdk-client/Client.
+      (let [_         (js-await (load-sdk!))
+            transport (build-transport cfg)
+            Client    (.-Client (sdk-mod :client))
+            sdk-c     (Client.
                        #js {:name    (str "nyma-mcp-client/" (:name cfg))
                             :version "0.1.0"})]
         (reset! (:transport client) transport)

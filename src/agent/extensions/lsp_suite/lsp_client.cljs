@@ -4,10 +4,14 @@
    Uses node:child_process for Node.js-compatible streams + vscode-jsonrpc."
   (:require ["node:child_process" :as cp]
             ["node:path" :as path]
-            ["vscode-jsonrpc/node.js" :refer [createMessageConnection
-                                              StreamMessageReader
-                                              StreamMessageWriter]]
             [agent.extensions.lsp-suite.lsp-formatters :as fmt]))
+
+;; vscode-jsonrpc loads when the first server starts, not at launch: lsp_suite
+;; activates on every run and most never spawn a server.
+(defonce ^:private jsonrpc (atom nil))
+
+(defn ^:async load-jsonrpc! []
+  (or @jsonrpc (reset! jsonrpc (js-await (js/import "vscode-jsonrpc/node.js")))))
 
 ;; ── State ─────────────────────────────────────────────────────────
 
@@ -38,15 +42,17 @@
   (js/Promise. (fn [resolve _] (js/setTimeout resolve ms))))
 
 (defn command-on-path?
-  "Returns true if cmd is findable via 'which' (macOS/Linux).
+  "Returns true if cmd is on PATH (or an existing path).
 
    Public because the tool gate needs the same question answered before any
    server is spawned: nine tool schemas ride on every request, and a binary that
    is not installed can never serve one."
   [cmd]
   (when (and (string? cmd) (pos? (.-length cmd)))
+    ;; Bun.which, not a `which` subprocess: ~5 ms per probe at activation for
+    ;; a lookup Bun does in-process (tools.cljs measured 0.018 ms vs 5.1 ms).
     (try
-      (= 0 (.-status (.spawnSync cp "which" #js [cmd] #js {:encoding "utf8"})))
+      (some? (js/Bun.which cmd))
       (catch :default _ false))))
 
 (defn- client-capabilities []
@@ -97,6 +103,7 @@
     (when-not (command-on-path? (first command))
       (reset! state :error)
       (throw (js/Error. (str "LSP server not found in PATH: " (first command)))))
+    (js-await (load-jsonrpc!))
     (try
       (let [proc-inst (.spawn cp
                               (first command)
@@ -104,9 +111,12 @@
                               #js {:cwd   cwd
                                    :env   (build-env env)
                                    :stdio #js ["pipe" "pipe" "pipe"]})
-            reader    (StreamMessageReader. (.-stdout proc-inst))
-            writer    (StreamMessageWriter. (.-stdin proc-inst))
-            conn-inst (createMessageConnection reader writer)]
+            rpc       @jsonrpc
+            Reader    (.-StreamMessageReader rpc)
+            Writer    (.-StreamMessageWriter rpc)
+            reader    (Reader. (.-stdout proc-inst))
+            writer    (Writer. (.-stdin proc-inst))
+            conn-inst ((.-createMessageConnection rpc) reader writer)]
 
         ;; Absorb process error events so they don't crash the host process
         (.on proc-inst "error"

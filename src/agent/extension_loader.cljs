@@ -1,7 +1,6 @@
 (ns agent.extension-loader
   "Dual .cljs/.ts loader with scoped APIs."
   (:require [agent.debug :as d]
-            ["squint-cljs" :refer [compileString]]
             ["node:path" :as path]
             ["node:fs/promises" :as fsp]
             ["node:fs" :as fs]
@@ -96,6 +95,14 @@
                   (str "from " q abs q)
                   match)))))
 
+(defn ^:async compile-string
+  "squint's compileString, imported on first use. A static import loaded the
+   whole compiler (~23 ms) on every launch, though only user .cljs extensions
+   and /eval need it."
+  [src opts]
+  (let [m (js-await (js/import "squint-cljs"))]
+    ((.-compileString m) src opts)))
+
 (defn ^:async load-squint-extension
   "Compile a .cljs extension file with squint and evaluate it.
    Uses content-hash caching to avoid recompilation when source unchanged."
@@ -107,10 +114,9 @@
     (when-not (fs/existsSync cache-path)
       ;; Compile, rewrite bare imports to absolute (cache dir is outside any
       ;; node_modules tree), and cache.
-      (let [compiled (-> (compileString source
-                                        #js {:context       "expr"
-                                             :elide-imports false})
-                         (absolutize-imports))]
+      (let [compiled (absolutize-imports
+                      (js-await (compile-string source #js {:context       "expr"
+                                                           :elide-imports false})))]
         (ensure-cache-dir)
         (js-await (js/Bun.write cache-path compiled))))
     ;; Import from cache (or freshly written)
@@ -433,8 +439,8 @@
    gate; it runs with the process's own authority."
   [form-str]
   (let [src      (str "(defn ^:export nyma-eval [] " form-str ")")
-        compiled (-> (compileString src #js {:context "expr" :elide-imports false})
-                     (absolutize-imports))
+        compiled (absolutize-imports
+                  (js-await (compile-string src #js {:context "expr" :elide-imports false})))
         p        (str cache-dir "/eval-" (js/Date.now) "-" (.toString (js/Bun.hash src) 16) ".mjs")]
     (ensure-cache-dir)
     (js-await (js/Bun.write p compiled))
