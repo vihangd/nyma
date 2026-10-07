@@ -816,8 +816,10 @@
     (-> (expect (session-allowed? "bash")) (.toBe true))
     ;; nothing persisted to settings …
     (-> (expect (count @persisted)) (.toBe 0))
-    ;; … and the next call never even emits permission_request
-    (-> (expect @fired) (.toBe 0))
+    ;; … and the next call is not prompted. For bash, permission_request
+    ;; still fires — skipping it skipped bash_suite's denylist — and the
+    ;; session grant answers the ask.
+    (-> (expect @fired) (.toBe 1))
     (-> (expect (:cancelled ctx2)) (.toBeFalsy))
     (reset-session-allows!)))
 

@@ -7,6 +7,7 @@
             [agent.utils.ansi :refer [truncate-text]]
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.debug :as d]
+            [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
 (defn normalize-tool-result
@@ -473,13 +474,25 @@
           ;; "came back to nothing".
           _      (when-let [emit (some-> (:events ctx) :emit)]
                    (emit "permission_prompt" {:tool tool-name}))
+          ;; bash: "Allow always" remembers a command PATTERN (`git push *`),
+          ;; never the whole tool — one click on `ls` used to approve every
+          ;; future command in the project. A compound command gets no
+          ;; always-option at all.
+          bash?  (= tool-name "bash")
+          base   (when bash? (shell-grant/grant-base (get (or (:original-args ctx) (:args ctx)) :command)))
+          always (cond
+                   (not bash?) "Allow always (this tool, this project)"
+                   base        (str "Allow always: " base " * (this project)")
+                   :else       nil)
           choice (js-await
                   (.select ui prompt
-                           (clj->js ["Allow once"
-                                     "Allow for this session"
-                                     "Allow always (this tool, this project)"
-                                     "Deny"])))]
+                           (clj->js (cond-> ["Allow once" "Allow for this session"]
+                                      always (conj always)
+                                      true   (conj "Deny")))))]
       (cond
+        (and choice (.startsWith choice "Allow always") bash?)
+        (do (when (and settings (:append-bash-allow! settings)) ((:append-bash-allow! settings) base)) ctx)
+
         (and choice (.startsWith choice "Allow always"))
         (do (when settings ((:append-allow-tool! settings) tool-name)) ctx)
 
@@ -513,8 +526,11 @@
     ;; to ask, and a deny here would clobber the hook's reason/result.
     ;; Fast-path: tool is in the persistent allow-list — skip the prompt.
     (if (or (:cancelled ctx) (:skip? ctx)
-            (contains? @(allows-of ctx) tool-name)
-            (and settings ((:tool-allowed? settings) tool-name)))
+            ;; Never for bash: skipping permission_request skipped bash_suite's
+            ;; denylist with it. A bash grant answers an `ask` below instead.
+            (and (not= tool-name "bash")
+                 (or (contains? @(allows-of ctx) tool-name)
+                     (and settings ((:tool-allowed? settings) tool-name)))))
       ctx
       (let [result   (js-await
                       ((:emit-collect events) "permission_request"
@@ -532,9 +548,18 @@
           ;; already answered the question for the user — but only the ask.
           ;; A deny is decided above and a skill cannot lift it.
           (= decision "ask")
-          (if (skill-allows-tool? (agent-state (:agent ctx)) tool-name)
+          (cond
+            (skill-allows-tool? (agent-state (:agent ctx)) tool-name) ctx
+            ;; bash grants: a remembered pattern, this session's allow, or a
+            ;; whole-tool grant from before patterns existed. Answers the ask
+            ;; only — a deny (denylist, destructive) above still wins.
+            (and (= tool-name "bash")
+                 (or (contains? @(allows-of ctx) "bash")
+                     (and settings ((:tool-allowed? settings) "bash"))
+                     (and settings (:bash-allowed? settings)
+                          ((:bash-allowed? settings) (get args :command)))))
             ctx
-            (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason)))
+            :else (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason)))
 
           (= decision "allow_always_project")
           (do

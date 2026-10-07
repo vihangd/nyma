@@ -1293,6 +1293,34 @@
                         (.then (js/Bun.write out-path content)
                                (fn [_] (notify ctx (str "Exported to " out-path))))))}
 
+          "permissions"
+          {:group       :session
+           :description "What you have allowed always for this project; `/permissions revoke <entry>` takes one back"
+           :handler (fn [args ctx]
+                      (let [sm (:settings agent)]
+                        (cond
+                          (not (and sm (:grants sm)))
+                          (notify ctx "No settings manager in this session" "error")
+
+                          (= (first args) "revoke")
+                          (let [entry (-> (str/join " " (rest args)) str/trim (str/replace #"\s+\*$" ""))]
+                            (cond
+                              (str/blank? entry) (notify ctx "Usage: /permissions revoke <bash pattern or tool>" "error")
+                              ((:revoke-grant! sm) entry) (notify ctx (str "Revoked: " entry))
+                              :else (notify ctx (str "No grant named \"" entry "\" for this project") "error")))
+
+                          :else
+                          (let [{:keys [global-tools project-tools bash]} ((:grants sm))
+                                row (fn [label xs] (str "  " label (if (seq xs) (str/join ", " xs) "—")))]
+                            (show-info ctx
+                                       (str "Allowed always — " (js/process.cwd) "\n"
+                                            (row "bash commands:  " (map #(str % " *") bash)) "\n"
+                                            (row "tools:          " project-tools) "\n"
+                                            "Allowed everywhere:\n"
+                                            (row "tools:          " global-tools) "\n\n"
+                                            "\"Allow for this session\" grants end with the session.\n"
+                                            "Take one back: /permissions revoke <bash pattern or tool>"))))))}
+
           "resume"
           {:group       :session
            :description "Resume a previous session; `/resume <words>` finds sessions that mention them"

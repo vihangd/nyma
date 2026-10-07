@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
 ;; ── Decision logic ───────────────────────────────────────────
@@ -9,20 +10,9 @@
   [cmd patterns]
   (some #(shared/glob-match? % cmd) patterns))
 
-(def ^:private compound-re
-  "Anything that makes a command more than one simple command: a separator,
-   pipe, redirect, background `&`, newline, or command substitution."
-  #"[;&|<>`\n]|\$\(")
-
-(defn simple-command?
-  "True when `cmd` is ONE simple command — the only shape an allowlist glob
-   can vouch for. `echo *` was meant to approve an echo; matched against the
-   whole string, its `*` also swallowed `echo x >> ~/.zshrc`,
-   `echo hi; curl … | sh` and `ls $(curl …)`, all approved without a prompt.
-   A compound command is never allowlisted: it falls through to the
-   classification, which analyses every part of it."
-  [cmd]
-  (not (re-find compound-re (str cmd))))
+(def simple-command?
+  "See agent.utils.shell-grant — shared with the prompt's \"Allow always\"."
+  shell-grant/simple-command?)
 
 (defn check-decision
   "Determine permission decision for a command.

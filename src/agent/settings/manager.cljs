@@ -2,6 +2,7 @@
   "Two-scope settings."
   (:require [agent.utils.home :as home]
             [agent.trust :as trust]
+            [agent.utils.shell-grant :as shell-grant]
             ["node:path" :as path]
             ["node:fs" :as fs]
             [agent.debug :as d]
@@ -548,6 +549,23 @@
                               " — set these in ~/.nyma/settings.json or on the command line")))
     stripped))
 
+(defn- update-project-grants!
+  "Read-modify-write permissions.projects.<cwd>.<k> in the user's file with
+   `f` (vector → vector), then reload the in-memory copy."
+  [global-path global-settings k f]
+  (let [gs       (clj->js (read-for-write global-path))
+        cwd      (js/process.cwd)
+        perms    (or (.-permissions gs) #js {})
+        projects (or (.-projects perms) #js {})
+        mine     (js/Object.assign #js {} (or (aget projects cwd) #js {}))
+        cur      (vec (js/Array.from (or (aget mine k) #js [])))]
+    (aset mine k (clj->js (f cur)))
+    (aset projects cwd mine)
+    (aset perms "projects" projects)
+    (aset gs "permissions" perms)
+    (save-json global-path gs)
+    (reset! global-settings (load-json global-path))))
+
 (defn create-settings-manager
   "Two-scope settings: global + project. Project overrides global.
    Supports :reload to re-read files from disk without restarting.
@@ -658,6 +676,39 @@
                              all-allowed   (into #{} (concat (js/Array.from global-allow)
                                                              (js/Array.from project-allow)))]
                          (contains? all-allowed tool-name)))
+
+      ;; bash command PATTERNS granted with "Allow always" — in the USER's
+      ;; file under permissions.projects.<cwd>.bash-allow, like tool grants,
+      ;; where a checked-out repo cannot forge one.
+      :bash-allowed? (fn [cmd]
+                       (let [bases (some-> @global-settings .-permissions .-projects
+                                           (aget (js/process.cwd)) (aget "bash-allow"))]
+                         (boolean (some #(shell-grant/grant-matches? % cmd)
+                                        (js/Array.from (or bases #js []))))))
+
+      :append-bash-allow! (fn [base]
+                            (update-project-grants! global-path global-settings "bash-allow"
+                                                    (fn [cur] (if (some #{base} cur) cur (conj cur base)))))
+
+      ;; Every grant this file holds for cwd, for /permissions.
+      :grants (fn []
+                (let [gs  @global-settings
+                      prj (some-> gs .-permissions .-projects (aget (js/process.cwd)))]
+                  {:global-tools  (vec (js/Array.from (or (some-> gs .-permissions .-allow) #js [])))
+                   :project-tools (vec (js/Array.from (or (some-> prj .-allow) #js [])))
+                   :bash          (vec (js/Array.from (or (some-> prj (aget "bash-allow")) #js [])))}))
+
+      ;; Remove one grant for cwd (a tool name or a bash pattern). Returns
+      ;; true when something was removed.
+      :revoke-grant! (fn [entry]
+                       (let [prj  (some-> @global-settings .-permissions .-projects (aget (js/process.cwd)))
+                             had? (some #{entry} (concat (js/Array.from (or (some-> prj .-allow) #js []))
+                                                         (js/Array.from (or (some-> prj (aget "bash-allow")) #js []))))]
+                         (when had?
+                           (doseq [k ["allow" "bash-allow"]]
+                             (update-project-grants! global-path global-settings k
+                                                     (fn [cur] (vec (remove #{entry} cur))))))
+                         (boolean had?)))
 
       :append-allow-tool! (fn [tool-name]
                            ;; "Allow always for this project": recorded in the

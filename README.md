@@ -674,6 +674,12 @@ itself shell. Your own "allow always for this project" answers are therefore sto
 `~/.nyma/settings.json` under `permissions.projects.<absolute project path>.allow`, never
 in the project file.
 
+For `bash`, "Allow always" remembers a command pattern rather than the whole tool —
+`git push *` for `git push origin main`, `pytest *` for `pytest -x tests/` — under
+`permissions.projects.<path>.bash-allow`. A compound command (`;`, `&&`, `|`, redirects,
+`$(…)`) is never offered one, and no grant of any kind skips the deny list. `/permissions`
+lists what you have allowed; `/permissions revoke git push` takes one back.
+
 `compaction.strategy` names a summarisation strategy an extension registered with
 `api.registerCompactionStrategy(name, {systemPrompt, buildUserPrompt(opts)})` (capability
 `context`); absent or `"default"` keeps the built-in six-section prompts. The split,

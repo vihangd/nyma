@@ -173,10 +173,10 @@
                         perm-fired   (atom false)
                         _            ((:on events) "permission_request"
                                                    (fn [_] (reset! perm-fired true)))
-                        mgr          (make-manager nil {:permissions {:projects {(js/process.cwd) {:allow ["bash"]}}}})
+                        mgr          (make-manager nil {:permissions {:projects {(js/process.cwd) {:allow ["write"]}}}})
                         pipeline     (create-pipeline events nil nil mgr)
                         tool         #js {:execute (fn [_] "ok")}]
-                    (-> ((:execute pipeline) "bash" tool {})
+                    (-> ((:execute pipeline) "write" tool {})
                         (.then (fn [ctx]
                                  (-> (expect @perm-fired) (.toBe false))
                                  (-> (expect (:result ctx)) (.toBe "ok"))))))))
@@ -190,7 +190,7 @@
                         mgr          (make-manager) ;; empty allow-list
                         pipeline     (create-pipeline events nil nil mgr)
                         tool         #js {:execute (fn [_] "ok")}]
-                    (-> ((:execute pipeline) "bash" tool {})
+                    (-> ((:execute pipeline) "write" tool {})
                         (.then (fn [_ctx]
                                  (-> (expect @perm-fired) (.toBe true))))))))))
 
@@ -206,16 +206,16 @@
                         mgr      (make-manager)
                         pipeline (create-pipeline events nil nil mgr)
                         tool     #js {:execute (fn [_] "result")}]
-                    (-> ((:execute pipeline) "bash" tool {})
+                    (-> ((:execute pipeline) "write" tool {})
                         (.then (fn [ctx]
                        ;; Tool should not be cancelled
                                  (-> (expect (:cancelled ctx)) (.toBeFalsy))
                        ;; Tool should be in allow-list now
-                                 (-> (expect ((:tool-allowed? mgr) "bash")) (.toBe true))
+                                 (-> (expect ((:tool-allowed? mgr) "write")) (.toBe true))
                        ;; The user's file should hold it under this project
                                  (let [data (read-global-json)]
                                    (-> (expect (some? data)) (.toBe true))
-                                   (-> (expect (some #(= % "bash") (project-allow data))) (.toBe true)))))))))
+                                   (-> (expect (some #(= % "write") (project-allow data))) (.toBe true)))))))))
 
             (it "second call skips prompt because tool is now pre-allowed"
                 (fn []
@@ -228,12 +228,12 @@
                         mgr        (make-manager)
                         pipeline   (create-pipeline events nil nil mgr)
                         tool       #js {:execute (fn [_] "ok")}]
-                    (-> ((:execute pipeline) "bash" tool {})
+                    (-> ((:execute pipeline) "write" tool {})
                         (.then (fn [_]
                        ;; First call prompted once
                                  (-> (expect @call-count) (.toBe 1))
                        ;; Second call should skip the prompt
-                                 ((:execute pipeline) "bash" tool {})))
+                                 ((:execute pipeline) "write" tool {})))
                         (.then (fn [_]
                                  (-> (expect @call-count) (.toBe 1))))))))))
 
