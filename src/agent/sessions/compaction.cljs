@@ -671,6 +671,13 @@ with every section below present.
             _       (when dump
                       (aset evt-ctx "precompactJsonPath" (:json-path dump))
                       (aset evt-ctx "precompactTextPath" (:text-path dump)))]
+        ;; Cleanup on EVERY exit, success or throw. The dump holds the whole
+        ;; conversation being summarised, as JSON and text; it was removed on
+        ;; the success paths and (later) around the model call, so a throw from
+        ;; a before_compact handler or from the session append still left a
+        ;; `nyma-precompact-*` directory behind — 363 had accumulated on one
+        ;; machine before the first fix.
+        (try
         (js-await ((:emit-async events) "before_compact" evt-ctx))
 
         (if (and (.-summary evt-ctx)
@@ -698,7 +705,6 @@ with every section below present.
                          :files-read     files-read
                          :files-modified files-modified}})
             (apply-to-live-state! state-atom ext-summary to-keep)
-            (cleanup-precompact-dump dump)
             ;; Both paths must announce it: subscribers (kv_cache's cache-miss
             ;; reset) treat "compact" as the point where a full cache miss is
             ;; expected, and only the built-in path was emitting.
@@ -730,25 +736,8 @@ with every section below present.
                                :to-summarize        to-summarize
                                :files-read          files-read
                                :files-modified      files-modified})
-                ;; Cleanup on FAILURE too. The dump holds the full conversation
-                ;; being summarised, as JSON and text, and it was removed only
-                ;; on the success path below — so every compaction whose model
-                ;; call threw (unreachable provider, auth error, `/compact` with
-                ;; no model) left a `nyma-precompact-*` directory with both
-                ;; files in $TMPDIR. 363 had accumulated on one machine. Found by
-                ;; fixing a test whose cleanup assertion had been checking a
-                ;; directory name the code no longer used.
-                ;;
-                ;; ponytail: covers the model call, which is where the leak was
-                ;; measured; a throw from session append after this would still
-                ;; leak. A try/finally over the whole body is the upgrade if
-                ;; that ever shows up.
-                summary-text (try
-                               (js-await
-                                (compact-with-retry model user-prompt files-read files-modified gen-fn strat))
-                               (catch :default e
-                                 (cleanup-precompact-dump dump)
-                                 (throw e)))]
+                summary-text (js-await
+                              (compact-with-retry model user-prompt files-read files-modified gen-fn strat))]
 
             ((:append session)
              {:role     "compaction"
@@ -756,7 +745,6 @@ with every section below present.
               :metadata {:tokens-before  usage
                          :files-read     files-read
                          :files-modified files-modified}})
-            (cleanup-precompact-dump dump)
             (apply-to-live-state! state-atom summary-text to-keep)
 
             ;; Log every compaction. It is a HARD semantic break for prompt
@@ -778,7 +766,8 @@ with every section below present.
                                :before  usage
                                :after   after})
               {:before usage :after after :summariser :built-in
-               :rejected rejected-errors})))))))
+               :rejected rejected-errors})))
+          (finally (cleanup-precompact-dump dump)))))))
 
 (defn compaction-receipt
   "What /compact tells the user, from what `compact` returned.

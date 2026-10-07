@@ -218,6 +218,21 @@
       (-> (expect (fs/existsSync text)) (.toBe false))
       (-> (expect (fs/existsSync dir)) (.toBe false)))))
 
+(defn ^:async test-dump-cleanup-on-append-failure []
+  ;; The case the old ponytail note named: the summary succeeds, then the
+  ;; session append throws (full disk). Cleanup ran only around the model
+  ;; call, so this still leaked the dump.
+  (let [sm     (assoc (make-session (make-large-messages 400))
+                      :append (fn [_] (throw (js/Error. "ENOSPC: no space left on device"))))
+        events (make-events-no-summary)]
+    (try (js-await (compact sm "mock-model" events {:gen-fn (make-stub-gen valid-gen-summary)}))
+         (catch :default _e nil))
+    (let [{:keys [json text dir]} (dump-paths ((:get-captured events)))]
+      (-> (expect (string? json)) (.toBe true))
+      (-> (expect (fs/existsSync json)) (.toBe false))
+      (-> (expect (fs/existsSync text)) (.toBe false))
+      (-> (expect (fs/existsSync dir)) (.toBe false)))))
+
 (defn ^:async test-dump-unique-names []
   (let [paths       (atom #{})
         make-ev     (fn []
@@ -244,4 +259,5 @@
                                                           (it "dump text file contains formatted messages with [Role]: prefix" test-dump-text-content)
                                                           (it "dump files are cleaned up after main-path (non-extension) append" test-dump-cleanup-main-path)
                                                           (it "dump is cleaned up when the summarisation call THROWS" test-dump-cleanup-on-failure)
+                                                          (it "dump is cleaned up when the session append THROWS" test-dump-cleanup-on-append-failure)
                                                           (it "two back-to-back compactions produce distinct dump filenames" test-dump-unique-names)))
