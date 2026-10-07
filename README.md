@@ -458,6 +458,25 @@ pilish builds its argv as `<executable> --mode rpc <extra-args>`, and a repeated
 pilish probes `--version` and warns when it is below pi's own `0.85.0`. It is a
 warning, not a gate.
 
+### ACP Mode (Zed, JetBrains and other editors)
+
+`--mode acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com),
+so nyma runs as the agent inside any ACP editor. In Zed's `settings.json`:
+
+```json
+"agent_servers": {
+  "nyma": { "command": "/path/to/nyma", "args": ["--mode", "acp"] }
+}
+```
+
+It implements `initialize`, `session/new`, `session/prompt`, `session/cancel` and
+`session/set_mode` (nyma's permission modes). A run streams back as
+`session/update`: `agent_message_chunk`, `agent_thought_chunk`, `tool_call` (with
+kind and file location) and `tool_call_update`. Where nyma's permission gate would
+ask, it sends `session/request_permission` and the editor asks you; the session
+starts in the `default` mode, which asks before writes and shell commands. One
+process serves one session; `session/load` is not offered yet.
+
 ### Gateway Mode (`nyma-gateway`)
 
 The gateway runs nyma as a long-lived daemon that listens on chat platforms — Telegram, Slack, HTTP webhooks, IMAP/SMTP email — and routes inbound messages to per-conversation agent sessions.
@@ -531,7 +550,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 |------|-------------|---------|
 | `-m, --model` | LLM model to use | `claude-sonnet-5-5` |
 | `--provider` | Provider id (`anthropic`, `openai`, `google`, or any extension-registered one) | `anthropic` |
-| `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc`; anything else exits 2 | `interactive` |
+| `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc` \| `acp`; anything else exits 2 | `interactive` |
 | `-p, --print` | Print mode shorthand | — |
 | `--output-format` | With `-p`: `text`, `json` (one claude-style result object) or `stream-json` (JSONL progress events, then that object). Every format exits 1 when the run fails; an unknown format exits 2 | `text` |
 | `--permission-mode` | `default` \| `accept-edits` \| `plan` \| `full-auto` | `default` (headless: `full-auto`) |

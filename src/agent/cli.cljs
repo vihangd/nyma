@@ -32,7 +32,8 @@
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
             [agent.modes.rpc :as rpc]
-            [agent.modes.pi-rpc :as pi-rpc]))
+            [agent.modes.pi-rpc :as pi-rpc]
+            [agent.modes.acp :as acp]))
 
 (defn agent-stats
   "Snapshot of agent stats used by the session_end_summary / session_end events."
@@ -242,7 +243,9 @@ Modes (default: interactive):
                          the same result object as the last line. Every format
                          exits 1 when the run fails (is_error true).
       --mode <mode>      Explicit mode: interactive | print | json | rpc |
-                         pi-rpc (JSONL protocol for the pi Emacs frontend).
+                         pi-rpc (JSONL protocol for the pi Emacs frontend) |
+                         acp (Agent Client Protocol: run inside Zed, JetBrains
+                         and other ACP editors).
       --approve, --no-approve
                          Accepted for compatibility with the pi frontend and
                          ignored; permissions come from --permission-mode.
@@ -415,7 +418,7 @@ Examples:
              (not (contains? output-formats f)))
     "nyma: --output-format must be text, json or stream-json"))
 
-(def modes #{"interactive" "print" "json" "rpc" "pi-rpc"})
+(def modes #{"interactive" "print" "json" "rpc" "pi-rpc" "acp"})
 
 (defn mode-error
   "The stderr line for an unaccepted `--mode`, nil when it is fine. A typo
@@ -1160,7 +1163,10 @@ Examples:
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
           "rpc"         (js-await (rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
-          "pi-rpc"      (js-await (pi-rpc/start agent)))
+          "pi-rpc"      (js-await (pi-rpc/start agent))
+          ;; Agent Client Protocol: run inside Zed, JetBrains and other ACP
+          ;; editors. Stdin EOF means the editor closed the agent.
+          "acp"         (js-await (acp/start agent {:on-eof (fn [] (js/process.exit 0))})))
         (catch :default e
           (.write (.-stderr js/process)
                   (if (d/enabled?)

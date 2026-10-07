@@ -57,6 +57,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/middleware.cljs` | `agent.middleware` | Middleware pipeline for tool execution. |
 | `src/agent/middleware/self_reminder.cljs` | `agent.middleware.self-reminder` | Self-reminder helper — injects a text block into the system prompt every N turns when a configurable action-predicate has not fired. |
 | `src/agent/model_info.cljs` | `agent.model-info` | — |
+| `src/agent/modes/acp.cljs` | `agent.modes.acp` | Agent Client Protocol server: `nyma --mode acp` runs inside Zed, JetBrains and any other ACP editor. |
 | `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | Pi-tui based interactive mode. |
 | `src/agent/modes/pi_rpc.cljs` | `agent.modes.pi-rpc` | Adapter mode that speaks the pi-coding-agent Emacs frontend's JSONL-over-stdio RPC protocol, so the existing `pi-coding-agent.el` package… |
 | `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode. |
@@ -707,6 +708,7 @@ Settings are resolved in priority order:
 | json | `--mode json` | Run once, output JSON messages |
 | rpc | `--mode rpc` | JSONL protocol over stdio |
 | pi-rpc | `--mode pi-rpc` | JSONL protocol for the pi Emacs frontend |
+| acp | `--mode acp` | Agent Client Protocol server (Zed, JetBrains, other ACP editors) |
 | sdk | (import) | Programmatic embedding |
 
 ## Quick Reference: DOs and DON'Ts
