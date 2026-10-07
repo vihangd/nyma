@@ -392,10 +392,15 @@
          (:skill-allowed-tools state))))
 
 (defonce ^:private session-allowed
-  ;; "Allow for this session": per process, never written to settings. Checked
-  ;; in the same fast path as the project allow-list. Module-level so a test
-  ;; can reset it.
+  ;; "Allow for this session" FALLBACK, for callers that hand
+  ;; permission-check-enter a ctx without a pipeline (tests). A real pipeline
+  ;; owns its own set (`:session-allows` on the ctx, see create-pipeline):
+  ;; this used to be the only set, process-wide and never reset — so a grant
+  ;; outlived /new and /resume, and in the gateway, where one process serves
+  ;; many conversations, one chat's grant applied to every chat.
   (atom #{}))
+
+(defn- allows-of [ctx] (or (:session-allows ctx) session-allowed))
 
 (defn session-allowed? [tool-name] (contains? @session-allowed tool-name))
 (defn allow-for-session! [tool-name] (swap! session-allowed conj tool-name))
@@ -467,7 +472,7 @@
         (do (when settings ((:append-allow-tool! settings) tool-name)) ctx)
 
         (and choice (.startsWith choice "Allow for this session"))
-        (do (allow-for-session! tool-name) ctx)
+        (do (swap! (allows-of ctx) conj tool-name) ctx)
 
         (and choice (.startsWith choice "Allow")) ctx
 
@@ -496,7 +501,7 @@
     ;; to ask, and a deny here would clobber the hook's reason/result.
     ;; Fast-path: tool is in the persistent allow-list — skip the prompt.
     (if (or (:cancelled ctx) (:skip? ctx)
-            (session-allowed? tool-name)
+            (contains? @(allows-of ctx) tool-name)
             (and settings ((:tool-allowed? settings) tool-name)))
       ctx
       (let [result   (js-await
@@ -594,7 +599,14 @@
                                agent-ref (conj (tool-persistence-interceptor agent-ref))))
         ;; Approval pipeline — empty by default (approve everything).
         ;; Gateway adapters register check-fns here; :tui never touches this.
-        approval-checks (atom [])]
+        approval-checks (atom [])
+        ;; This agent's "Allow for this session" grants: they end with the
+        ;; session — /new, /resume and /fork emit session_start, a branch
+        ;; switch emits session_switch.
+        session-allows  (atom #{})]
+    (when (fn? (:on events))
+      (doseq [ev ["session_start" "session_switch"]]
+        ((:on events) ev (fn [& _] (reset! session-allows #{}) nil))))
     {:add
      (fn [interceptor & [opts]]
        (let [position (if opts (:position opts) nil)]
@@ -615,6 +627,7 @@
        (let [agent    (when agent-ref @agent-ref)
              ext-ctx  (when agent (create-extension-context agent))
              ctx      {:tool-name         tool-name
+                       :session-allows    session-allows
                        :tool              tool
                        :args              args
                        :cancelled         false
