@@ -20,7 +20,10 @@
 
    For :ephemeral policy sessions the sdk-session is cleared after each run,
    giving per-message stateless behaviour."
-  (:require [gateway.session-pool :as sp]
+  (:require [agent.utils.content :as content]
+            [clojure.string :as str]
+            ["node:fs" :as fs]
+            [gateway.session-pool :as sp]
             [gateway.streaming :as streaming]
             [gateway.pipelines :as pipelines]
             [gateway.tools :as gtools]))
@@ -50,6 +53,25 @@
                     (let [bundle {:sdk-session s :tool-set tool-set}]
                       (sp/set-data! pool session-key :session-bundle bundle)
                       bundle))))))))
+
+(defn msg->content
+  "What the agent receives for an inbound message: its text, plus any image
+   attachment as an image part. Telegram downloaded photos and then the loop
+   sent `(:text msg)` alone, so a photo sent to the bot never reached the
+   model. Non-image attachments are left out. The downloaded temp file is
+   removed once read. Accepts `:local-path` (the protocol's name) and
+   `:local` (what telegram writes)."
+  [msg]
+  (let [imgs (->> (:attachments msg)
+                  (keep (fn [a]
+                          (let [f  (or (:local-path a) (:local a))
+                                mt (str (or (:mime-type a) ""))]
+                            (when (and f (str/starts-with? mt "image/") (fs/existsSync f))
+                              (let [b64 (.toString (fs/readFileSync f) "base64")]
+                                (try (fs/unlinkSync f) (catch :default _ nil))
+                                #js {:data b64 :mimeType mt})))))
+                  vec)]
+    (content/prompt-content (:text msg) (clj->js imgs))))
 
 (defn ^:async handle-message
   "Process one inbound message within its session lane.
@@ -124,7 +146,7 @@
         (js-await ((:meta! response-ctx) :typing-start {})))
 
       ;; Run the agent
-      (js-await (send-fn (:text msg)))
+      (js-await (send-fn (msg->content msg)))
 
       (catch :default e
         (js/console.error

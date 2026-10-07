@@ -13,7 +13,8 @@
 
    stdout is the protocol channel — only JSONL goes there. Everything else
    (errors, debug) goes to stderr via js/console.error."
-  (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
+  (:require [agent.utils.content :as content]
+            [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.sessions.manager :as sessions]
             [agent.loop :refer [run steer follow-up]]
             [agent.commands.builtins :as builtins]
@@ -52,6 +53,11 @@
   (cond
     (= (:type p) "text")
     {:type "text" :text (or (:text p) "")}
+
+    ;; pi's own image shape. It became an empty text item, so a resumed or
+    ;; mirrored session lost its screenshots in the frontend.
+    (content/image-part? p)
+    {:type "image" :data (or (:image p) (:data p) "") :mimeType (or (:mediaType p) "image/png")}
 
     (or (= (:type p) "tool-call") (= (:type p) "toolCall"))
     {:type "toolCall"
@@ -401,16 +407,16 @@
         ;; a second `run` sharing the same accumulator/state atoms and interleave
         ;; deltas. Deliver it as a follow-up (after the current turn) instead.
         (if @(:running? st)
-          (do (follow-up agent {:role "user" :content (.-message cmd)})
+          (do (follow-up agent {:role "user" :content (content/prompt-content (.-message cmd) (.-images cmd))})
               (write-response! cmd))
           (do (reset! (:running? st) true)
               (write-response! cmd)
-              (-> (run agent (.-message cmd))
+              (-> (run agent (content/prompt-content (.-message cmd) (.-images cmd)))
                   (.catch (fn [e] (js/console.error "[pi-rpc] run error:" e)))
                   (.finally (fn [] (reset! (:running? st) false))))))
 
         "steer"
-        (do (steer agent {:role "user" :content (.-message cmd)})
+        (do (steer agent {:role "user" :content (content/prompt-content (.-message cmd) (.-images cmd))})
             (write-response! cmd))
 
         "clear_queue"

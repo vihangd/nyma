@@ -46,3 +46,20 @@
    ~1.6k for a 1092x1092 image); a fixed figure keeps budgets honest without
    decoding the image."
   1600)
+
+(defn prompt-content
+  "A prompt's :content from text plus attached images, as protocols send them
+   — `{data, mimeType}` (pi) or `{data|image, mediaType}`, base64. A plain
+   string when there are none, so text-only prompts are exactly as before;
+   else the AI-SDK parts [text, image…]."
+  [text images]
+  (let [imgs (->> (or images [])
+                  (keep (fn [i]
+                          (let [data (or (aget i "data") (aget i "image"))
+                                mt   (or (aget i "mimeType") (aget i "mediaType") "image/png")]
+                            (when (string? data)
+                              #js {:type "image" :image data :mediaType mt :name (aget i "name")}))))
+                  vec)]
+    (if (empty? imgs)
+      (str (or text ""))
+      (clj->js (into [#js {:type "text" :text (str (or text ""))}] imgs)))))

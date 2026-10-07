@@ -2,13 +2,15 @@
   "JSONL stdio RPC mode."
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
-            [agent.events :refer [wire-event-types]]))
+            [agent.events :refer [wire-event-types]]
+            [agent.utils.content :as content]))
 
 (defn ^:async handle-line [agent line]
   (try
     (let [cmd (js/JSON.parse line)]
       (case (.-type cmd)
-        "prompt"       (js-await (run agent (.-message cmd)))
+        ;; `images: [{data, mimeType}]` rides along as image parts.
+        "prompt"       (js-await (run agent (content/prompt-content (.-message cmd) (.-images cmd))))
         "abort"        nil
         "get_commands" (println (js/JSON.stringify (clj->js @(:commands agent))))
         "get_settings" (println (js/JSON.stringify (clj->js (:config agent))))
