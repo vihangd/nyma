@@ -561,7 +561,12 @@ Examples:
                 dst (new-session-path sessions-dir)]
             (if (fs/existsSync src)
               (do (fs/mkdirSync sessions-dir #js {:recursive true})
-                  (fs/copyFileSync src dst))
+                  (fs/copyFileSync src dst)
+                  ;; Attached images live beside the session file
+                  ;; (sessions.images); the fork needs its own copy or every
+                  ;; image in it reads back as [image missing].
+                  (when (fs/existsSync (str src ".images"))
+                    (fs/cpSync (str src ".images") (str dst ".images") #js {:recursive true})))
               (.write (.-stderr js/process)
                       (str "warning: --fork source not found: " src "; starting fresh\n")))
             dst)

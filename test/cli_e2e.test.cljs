@@ -15,7 +15,8 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
-            [test-util.fake-model-server :as fms]))
+            [test-util.fake-model-server :as fms]
+            [agent.sessions.manager :as sm]))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
 
@@ -114,6 +115,21 @@
           res  (some #(when (= "tool" (:role %)) %) msgs)]
       (-> (expect (get-in call [:tool_calls 0 :function :name])) (.toBe "bash"))
       (-> (expect (str (:content res))) (.toContain "hi")))))
+
+(defn ^:async t-fork-carries-images []
+  ;; Images sit beside the session file; a fork without them read every image
+  ;; back as [image missing].
+  (let [home (fms/temp-home! (:base-url @server))
+        src  (path/join home "src.jsonl")
+        s    (sm/create-session-manager src)
+        _    ((:append s) {:role "user" :content #js [#js {:type "text" :text "look"}
+                                                     #js {:type "image" :image "AQID" :mediaType "image/png"}]})
+        {:keys [exit]} (js-await (run-cli (concat ["--mode" "rpc" "--fork" src] model-args) {:home home}))
+        dir  (path/join home ".nyma" "sessions")
+        dst  (first (filter #(.endsWith % ".jsonl") (fs/readdirSync dir)))]
+    (-> (expect exit) (.toBe 0))
+    (-> (expect (fs/existsSync (path/join dir (str dst ".images")))) (.toBe true))
+    (-> (expect (count (fs/readdirSync (path/join dir (str dst ".images"))))) (.toBe 1))))
 
 (defn ^:async t-append-system-prompt []
   (let [{:keys [exit]} (js-await (run-cli (concat ["-p" "hi" "--no-session"
@@ -285,6 +301,7 @@
                (it "-r with no sessions says so" (fresh t-resume-with-no-sessions) t)
                (it "resuming a session that ends in a tool call without its result sends no dangling tool call"
                    (fresh t-resume-drops-dangling-tool-call) t)
+               (it "--fork copies the session's attached images" (fresh t-fork-carries-images) t)
                (it "--append-system-prompt reaches the system prompt" (fresh t-append-system-prompt) t)
                (it "--max-steps caps the tool loop" (fresh t-max-steps) t)
                (it "--max-steps rejects a non-number with exit 2" (fresh t-max-steps-bad) t))))
