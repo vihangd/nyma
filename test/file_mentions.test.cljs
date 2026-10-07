@@ -148,11 +148,13 @@
                                           (it "a binary file (NUL bytes) is skipped with a marker, not pasted"
                                               (fn []
                                                 (let [dir (fixture)
-                                                      _   (fs/writeFileSync (path/join dir "img.png")
+                                                      ;; .bin, not .png: an image is now ATTACHED
+                                                      ;; (image_attach.test); other binaries skip.
+                                                      _   (fs/writeFileSync (path/join dir "data.bin")
                                                                             (js/Buffer.from #js [137 80 78 71 0 13 10 26 0 65]))
-                                                      r   (fm/expand-mentions "see @img.png" dir)]
-                                                  (-> (expect (:text r)) (.toBe "see @img.png\n\n<file path=\"img.png\" skipped=\"binary\"/>"))
-                                                  (-> (expect (:skipped r)) (.toEqual ["img.png"]))
+                                                      r   (fm/expand-mentions "see @data.bin" dir)]
+                                                  (-> (expect (:text r)) (.toBe "see @data.bin\n\n<file path=\"data.bin\" skipped=\"binary\"/>"))
+                                                  (-> (expect (:skipped r)) (.toEqual ["data.bin"]))
                                                   (-> (expect (:files r)) (.toEqual [])))))
 
                                           (it "a symlink loop terminates and the mention is left alone"

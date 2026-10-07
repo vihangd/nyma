@@ -6,7 +6,8 @@
    and the file is appended after it in a `<file path=…>` block — so sessions
    keep `:content` an opaque string and the transcript shows exactly what the
    model saw."
-  (:require [agent.utils.home :as home]
+  (:require [agent.multimodal :as multimodal]
+            [agent.utils.home :as home]
              ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.utils.git-files :as gf]
@@ -60,10 +61,23 @@
 (defn- binary? [buf]
   (>= (.indexOf (.subarray buf 0 8192) 0) 0))
 
+(def ^:private max-image-bytes
+  "Anthropic's per-image limit; bigger is refused by the provider anyway."
+  (* 5 1024 1024))
+
 (defn- render-block [cwd abs]
   (let [st   (fs/statSync abs)
-        disp (display-path cwd abs)]
+        disp (display-path cwd abs)
+        mt   (multimodal/media-type-for abs)]
     (cond
+      ;; An image is ATTACHED, not inlined: it was skipped as binary, so
+      ;; `@shot.png` gave the model a marker instead of the screenshot.
+      (and mt (.startsWith mt "image/") (.isFile st))
+      (if (> (.-size st) max-image-bytes)
+        {:kind :skipped :block (str "<file path=\"" disp "\" skipped=\"image over 5 MB\"/>")}
+        {:kind :image :name disp :media-type mt
+         :data (.toString (fs/readFileSync abs) "base64")})
+
       (.isDirectory st)
       {:kind :dir :block (str "<dir path=\"" disp "\">\n" (dir-listing abs) "\n</dir>")}
 
@@ -93,14 +107,28 @@
               (let [abs (resolve-mention cwd token)
                     r   (try (when (fs/existsSync abs) (render-block cwd abs))
                              (catch :default _ nil))]
-                (if-not r
-                  acc
+                (cond
+                  (not r) acc
+                  (= :image (:kind r))
+                  (update acc :images conj {:name (:name r) :media-type (:media-type r) :data (:data r)})
+                  :else
                   (-> acc
                       (update :text str "\n\n" (:block r))
                       (update (if (= :skipped (:kind r)) :skipped :files)
                               conj (display-path cwd abs))))))
-            {:text (str text) :files [] :skipped []}
+            {:text (str text) :files [] :skipped [] :images []}
             (find-mentions text))))
+
+(defn ->content
+  "What a submitted prompt becomes: the expanded text, or — when images were
+   mentioned — the AI-SDK parts array [text, image…]."
+  [{:keys [text images]}]
+  (if (seq images)
+    (clj->js (into [{:type "text" :text text}]
+                   (map (fn [{:keys [name media-type data]}]
+                          {:type "image" :image data :mediaType media-type :name name})
+                        images)))
+    text))
 
 ;;; ─── Autocomplete listing ────────────────────────────────────────────────
 
@@ -180,3 +208,18 @@
   (if fd-path
     (do (aset provider "fdPath" fd-path) provider)
     (install-fallback! provider cwd)))
+
+;;; ─── Pasted images ─────────────────────────────────────────────────────
+
+(defn save-pasted-image!
+  "Write clipboard image `bytes` (a Uint8Array) under `dir` and return the
+   `@` token that attaches it — `@~/.nyma/pasted/<stamp>.png` when `dir` is in
+   HOME. nil when the bytes are not a recognised image."
+  [bytes dir]
+  (when-let [mt (and bytes (pos? (.-length bytes)) (multimodal/sniff-media-type bytes))]
+    (let [ext  (case mt "image/png" "png" "image/jpeg" "jpg" "image/gif" "gif" "image/webp" "webp")
+          f    (path/join dir (str (.replace (.toISOString (js/Date.)) (js/RegExp. "[:.]" "g") "-") "." ext))
+          home (home/dir)]
+      (fs/mkdirSync dir #js {:recursive true})
+      (fs/writeFileSync f bytes)
+      (str "@" (if (.startsWith f (str home "/")) (str "~/" (subs f (inc (count home)))) f)))))

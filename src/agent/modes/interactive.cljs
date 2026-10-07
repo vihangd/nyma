@@ -1,8 +1,10 @@
 (ns agent.modes.interactive
   "Pi-tui based interactive mode."
-  (:require [agent.model-info :as model-info]
+  (:require ["node:path" :as path]
+            [agent.utils.home :as home]
+            [agent.model-info :as model-info]
             [agent.debug :as d]
-            ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
+            ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor getNativeClipboard
                                               CombinedAutocompleteProvider
                                               matchesKey]]
             [agent.loop :refer [run steer follow-up run-turn-with-update-handler]]
@@ -899,8 +901,9 @@
           :run-command!     (fn [trimmed] (run-command! agent trimmed update-messages!))
           :exec-bash!       (fn [command] (editor-bash/run-bash! agent command))
           :eval-expr!       (fn [expr] (editor-eval/run-eval! expr events))
+          ;; A string, or [text image…] parts when an image was mentioned.
           :expand-mentions  (fn [text]
-                              (:text (file-mentions/expand-mentions text (js/process.cwd))))})
+                              (file-mentions/->content (file-mentions/expand-mentions text (js/process.cwd))))})
 
         ;; An extension handling "input" streams straight into the pane. Its
         ;; messages carry :role/:content/:prompt-id but no :id, and chat-pane
@@ -1180,6 +1183,31 @@
                {:action      "app.tools.expand"
                 :description (get-in kbr/default-actions ["app.tools.expand" :description])
                 :handler     (fn [] (update-messages! reducers/tool-toggle-expanded))}))
+
+      ;; ctrl+v: an image on the clipboard becomes an `@` mention of a saved
+      ;; copy, so it attaches through the same path as `@shot.png`. The
+      ;; editor's paste is text-only (bracketed paste), so an image needs a
+      ;; key; pi-tui's native helper reads the clipboard and loads lazily.
+      (let [combo (or (kbr/get-binding @(:keybinding-registry agent) "app.paste.image")
+                      "ctrl+v")
+            note  (fn [text]
+                    (update-messages! (fn [msgs] (conj (vec msgs) {:role "info" :id (new-id) :local-only true :content text})))
+                    (.requestRender tui))]
+        (swap! (:shortcuts agent) assoc combo
+               {:action      "app.paste.image"
+                :description (get-in kbr/default-actions ["app.paste.image" :description])
+                :handler
+                (fn []
+                  (if-let [clip (getNativeClipboard)]
+                    (-> (.getImage clip)
+                        (.then (fn [bytes]
+                                 (if-let [token (file-mentions/save-pasted-image!
+                                                 bytes (path/join (home/dir) ".nyma" "pasted"))]
+                                   (do (.insertTextAtCursor editor (str token " "))
+                                       (.requestRender tui))
+                                   (note "No image on the clipboard."))))
+                        (.catch (fn [e] (note (str "Could not read the clipboard: " (or (.-message e) e))))))
+                    (note "Clipboard images are not available in this terminal session.")))}))
 
       ;; alt+enter: queue what is typed for AFTER the turn, rather than
       ;; steering into it. Same mechanism as ctrl+o above — a `(:shortcuts

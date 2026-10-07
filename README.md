@@ -381,7 +381,7 @@ Launches the full terminal UI with message display, text input, and keyboard sho
 tool call's output (rebind it in `~/.nyma/keybindings.json` as
 `{"ctrl+t": "app.tools.expand"}`).
 
-In the editor, `@path` mentions a file or directory: on submit each one is appended to your message as a `<file path="…">` block (a directory becomes a one-level `<dir>` listing; files over 200 KB and binary files are marked skipped). A path with spaces is quoted, `@"my notes.txt"`, and an `@` inside a ``` fenced block is left literal. Typing `@` opens fuzzy path completion (Tab accepts) — gitignore-aware via `fd` when it is on your PATH, otherwise from `git ls-files` or a directory walk. Emails and `@scope/pkg` names that resolve to nothing are left alone.
+In the editor, `@path` mentions a file or directory: on submit each one is appended to your message as a `<file path="…">` block (a directory becomes a one-level `<dir>` listing; files over 200 KB and binary files are marked skipped). An image — `@shot.png`, `.jpg`, `.gif`, `.webp`, up to 5 MB — is **attached** for the model to see, not inlined; **Ctrl+V** pastes an image from the clipboard the same way (saved under `~/.nyma/pasted/` and inserted as an `@` mention). Images need a vision-capable model; in the session file they are stored beside it (`<session>.jsonl.images/`), not inside it. A path with spaces is quoted, `@"my notes.txt"`, and an `@` inside a ``` fenced block is left literal. Typing `@` opens fuzzy path completion (Tab accepts) — gitignore-aware via `fd` when it is on your PATH, otherwise from `git ls-files` or a directory walk. Emails and `@scope/pkg` names that resolve to nothing are left alone.
 
 ### Print Mode
 

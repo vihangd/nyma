@@ -60,6 +60,10 @@
                          :category     :editor
                          :bound-by     "the editor"
                          :fixed?       true}
+   "app.paste.image"    {:description  "Paste an image from the clipboard (attached as @~/.nyma/pasted/…)"
+                         :default-keys ["ctrl+v"]
+                         :category     :editor
+                         :bound-by     "interactive mode"}
    "app.paste.expand"   {:description  "Expand collapsed paste marker"
                          :default-keys ["ctrl+e"]
                          :category     :editor}
