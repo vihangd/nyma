@@ -7,7 +7,7 @@
             [agent.sessions.manager :refer [session->seed-messages new-session-path]]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.themes :refer [default-dark]]
-            [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
+            [agent.sessions.listing :refer [list-sessions scope-to-project format-row matching-sessions]]
             [agent.commands.share :as share :refer [messages->html messages->markdown]]
             [agent.utils.markdown-blocks :as mb]
             [agent.commands.parser :as cmd-parser]
@@ -1295,20 +1295,24 @@
 
           "resume"
           {:group       :session
-           :description "Resume a previous session"
-           :handler (fn [_args ctx]
+           :description "Resume a previous session; `/resume <words>` finds sessions that mention them"
+           :handler (fn [args ctx]
                       (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
-                            all      (list-sessions dir)
+                            query    (str/trim (str/join " " (or args [])))
+                            ;; A query searches EVERY project's sessions: what
+                            ;; you remember is the conversation, not where it was.
+                            all      (cond-> (list-sessions dir)
+                                       (seq query) (matching-sessions query))
                             ;; Same scoping as `nyma -r`: this project first,
                             ;; falling back to everything when none match so the
                             ;; command never shows an empty list.
-                            scoped   (scope-to-project all (js/process.cwd))
+                            scoped   (if (seq query) [all []] (scope-to-project all (js/process.cwd)))
                             mine     (first scoped)
                             other    (second scoped)
                             sessions (if (seq mine) mine all)
                             hidden   (if (seq mine) (count other) 0)]
                         (if (empty? sessions)
-                          (notify ctx "No sessions found" "error")
+                          (notify ctx (if (seq query) (str "No sessions mention \"" query "\"") "No sessions found") "error")
                           (if-not (and ctx (.-ui ctx) (.-select (.-ui ctx)))
                        ;; Non-interactive: just list sessions
                             (show-info ctx

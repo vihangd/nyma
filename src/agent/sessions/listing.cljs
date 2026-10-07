@@ -120,6 +120,27 @@
            (sort-by :modified >)
            vec))))
 
+(defn matching-sessions
+  "The `sessions` (from list-sessions) whose user or assistant messages
+   contain `query`, case-insensitively — archived ones included.
+
+   SessionManager's :search and the SQLite FTS behind it were never reachable
+   (the SQLite entries table has no writer), so `/resume` could only list
+   titles: finding \"the session where we fixed the auth bug\" meant opening
+   them one by one."
+  [sessions query]
+  (let [q (str/lower-case (str/trim (str query)))]
+    (if (str/blank? q)
+      (vec sessions)
+      (filterv (fn [s]
+                 (when-let [text (try (archive/read-text (:path s)) (catch :default _ nil))]
+                   (some (fn [e]
+                           (and (contains? #{"user" "assistant"} (:role e))
+                                (let [c (:content e)]
+                                  (str/includes? (str/lower-case (if (string? c) c (js/JSON.stringify c))) q))))
+                         (parse-lines text))))
+               sessions))))
+
 (defn scope-to-project
   "Split sessions into [in-project other] for `cwd`.
 
