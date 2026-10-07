@@ -7,6 +7,8 @@
    scoped and in-memory — a trust net for accept-edits/full-auto, not a VCS."
   (:require ["node:fs" :as fs]
             ["node:path" :as path]
+            ["node:crypto" :as crypto]
+            [agent.utils.home :as home]
             [clojure.string :as str]
             [agent.utils.git-files :as git]
             [agent.tool-metadata :as tool-metadata]))
@@ -76,6 +78,19 @@
       (swap! checkpoints* dissoc turn)
       [turn (vec (keys group))])))
 
+(defn restore-through!
+  "Restore every group from the newest back to `turn` inclusive — the state
+   before `turn` ran. Returns [[turn paths] …] newest first. Deletes the
+   persisted files of the restored groups."
+  [checkpoints* dir turn]
+  (loop [acc []]
+    (let [newest (when (seq @checkpoints*) (apply max (map js/Number (keys @checkpoints*))))]
+      (if (and newest (>= newest (js/Number turn)))
+        (let [r (restore! checkpoints*)]
+          (delete-turn! dir newest)
+          (recur (conj acc r)))
+        acc))))
+
 (defn describe
   "Human list of rewind points, newest first."
   [checkpoints*]
@@ -84,6 +99,67 @@
        (map (fn [turn]
               (str "turn " turn ": " (.join (clj->js (vec (keys (get @checkpoints* turn)))) ", "))))
        vec))
+
+;;; ─── Persistence ──────────────────────────────────────────────
+;;; Rewind points were in memory only: gone on exit, on a crash, on /resume.
+;;; Each turn group is one JSON file, keyed by project and session, OUTSIDE
+;;; the repo (~/.nyma/checkpoints/<project>/<session>/<turn>.json) so there is
+;;; nothing to gitignore or commit by accident.
+
+(defn store-dir
+  "Where `session-file`'s rewind points live, or nil for an ephemeral session."
+  [cwd session-file]
+  (when (seq (str session-file))
+    (path/join (home/dir) ".nyma" "checkpoints"
+               (-> (crypto/createHash "sha1") (.update (path/resolve cwd)) (.digest "hex") (subs 0 12))
+               (path/basename (str session-file) ".jsonl"))))
+
+(defn- state->json [st] (if (= st :absent) nil st))
+(defn- json->state [v] (if (nil? v) :absent v))
+
+(defn save-turn!
+  "Write turn `turn`'s group to `dir`. Atomic."
+  [dir turn group]
+  (when dir
+    (fs/mkdirSync dir #js {:recursive true})
+    (let [f   (path/join dir (str turn ".json"))
+          tmp (str f ".tmp")]
+      (fs/writeFileSync tmp (js/JSON.stringify
+                             (clj->js {:turn turn
+                                       :files (into {} (map (fn [[p st]] [p (state->json st)]) group))})))
+      (fs/renameSync tmp f))))
+
+(defn delete-turn! [dir turn]
+  (when dir (try (fs/unlinkSync (path/join dir (str turn ".json"))) (catch :default _ nil))))
+
+(defn load-all
+  "Every saved turn group in `dir` as {turn {path state}}; {} when none."
+  [dir]
+  (if-not (and dir (fs/existsSync dir))
+    {}
+    (into {}
+          (keep (fn [n]
+                  (when (.endsWith n ".json")
+                    (try
+                      (let [j (js/JSON.parse (fs/readFileSync (path/join dir n) "utf8"))
+                            files (.-files j)]
+                        [(.-turn j) (into {} (map (fn [k] [k (json->state (aget files k))])
+                                                  (js/Object.keys files)))])
+                      (catch :default _ nil)))))
+          (fs/readdirSync dir))))
+
+(defn record-state!
+  "Record a pre-turn `state` for `path` in `turn`'s group (first wins), prune
+   old groups, and persist. Used for edits the tools announced and for files a
+   shell command changed."
+  [checkpoints* dir turn path state]
+  (when-not (get-in @checkpoints* [turn path])
+    (swap! checkpoints* assoc-in [turn path] state)
+    (save-turn! dir turn (get @checkpoints* turn))
+    (let [ks (sort-by js/Number (keys @checkpoints*))]
+      (when (> (count ks) max-turn-groups)
+        (delete-turn! dir (first ks))
+        (swap! checkpoints* dissoc (first ks))))))
 
 ;;; ─── /diff ────────────────────────────────────────────────────
 

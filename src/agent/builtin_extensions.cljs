@@ -87,7 +87,7 @@
     :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
    {:namespace "checkpoints"
     :module    ext-checkpoints
-    :manifest  #js {"namespace" "checkpoints" "description" "Snapshots a file's pre-turn state; `/rewind` restores it" "capabilities" #js ["events" "commands"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "checkpoints" "description" "Persistent per-turn file checkpoints (edits and bash changes); /undo restores, /diff reviews the session" "capabilities" #js ["events" "commands" "session"] "dependsOn" #js []}}
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
     :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["commands" "events" "state" "messages" "ui" "session"] "dependsOn" #js ["agent-shell" "token-suite"]}}

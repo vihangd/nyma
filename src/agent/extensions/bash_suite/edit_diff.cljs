@@ -15,7 +15,8 @@
 
    Cost: two `git status` calls per bash command — the cheap end of what the
    command itself usually costs."
-  (:require ["node:fs" :as fs]
+  (:require ["node:child_process" :as cp]
+            ["node:fs" :as fs]
             [agent.extensions.bash-suite.shared :as shared]
             [agent.utils.git-files :as git]
             [clojure.string :as str]))
@@ -114,6 +115,26 @@
     (when (seq rows)
       (str "Files changed by this command:\n" (str/join "\n" rows)))))
 
+(defn pre-states
+  "For each changed path, what it was BEFORE the command, when that is
+   knowable without a content snapshot: a path absent from the before-status
+   was clean (its content is HEAD's) or did not exist. A path already dirty
+   before the command is left out — its pre-command content was never seen.
+   Returns [{:path abs :state content-or-nil}], nil meaning \"did not exist\"."
+  [before after paths]
+  (let [root (or (:root after) (:root before))]
+    (vec (keep (fn [p]
+                 (when-not (contains? (:status before) p)
+                   (let [abs     (if root (str root "/" p) p)
+                         tracked (seq (git/run-git (str "ls-tree --name-only HEAD -- '" (str/replace p "'" "'\\''") "'") root))]
+                     {:path abs
+                      :state (when tracked
+                               (try (str (cp/execFileSync "git" #js ["show" (str "HEAD:" p)]
+                                                          #js {:cwd root :encoding "utf8" :maxBuffer (* 64 1024 1024)
+                                                               :stdio #js ["ignore" "pipe" "ignore"]}))
+                                    (catch :default _ nil)))})))
+               paths))))
+
 (defn with-summary
   "The bash result with the summary attached. The result is the bash tool's
    JSON envelope; the summary goes in as a `filesChanged` field so the
@@ -156,7 +177,9 @@
                                           (when (seq paths)
                                             (when-let [emit (some-> (.-events api) .-emit)]
                                               (emit "bash:files-changed"
-                                                    #js {:paths (clj->js (map #(if root (str root "/" %) %) paths))}))))))
+                                                    #js {:paths (clj->js (map #(if root (str root "/" %) %) paths))
+                                                         ;; what checkpoints can restore them to
+                                                         :pre   (clj->js (pre-states before after paths))}))))))
                                     ctx))})
     (fn []
       (.removeMiddleware api "bash-suite/edit-diff")

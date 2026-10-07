@@ -1,7 +1,10 @@
 (ns agent.extensions.checkpoints.index
-  "File checkpoints + /rewind: snapshot a file's pre-turn state before any
-   editing tool touches it; /rewind restores the newest turn's files (repeat
-   to go further back). Session-scoped, in-memory."
+  "File checkpoints + /rewind (/undo) + /diff.
+
+   Before any editing tool touches a file its pre-turn state is captured;
+   files a bash command changed are captured too, when their prior state is
+   knowable (bash_suite reports it). Rewind points persist per session under
+   ~/.nyma/checkpoints/, so they survive a restart and follow /resume."
   (:require [agent.extensions.checkpoints.shared :as shared]
             ["node:path" :as path]
             [agent.tool-metadata :as tool-metadata]))
@@ -10,24 +13,39 @@
   (let [checkpoints* (atom {})
         pending*     (atom {})   ;; path → pre-state, awaiting confirmation
         turn*        (atom 0)
+        loaded-for   (atom ::none)
         ;; Every file this session changed — edit tools and bash alike — for
         ;; /diff. Never pruned with the rewind groups.
         touched*     (atom #{})
         touch!       (fn [p] (when p (swap! touched* conj (path/resolve (str p)))))
-        on-bash-files (fn [data] (doseq [p (or (.-paths data) [])] (touch! p)) nil)
+
+        session-file (fn [] (try (.getSessionFile api) (catch :default _ nil)))
+        dir          (fn [] (shared/store-dir (js/process.cwd) (session-file)))
+
+        ;; Load the current session's saved points the first time they are
+        ;; needed, and again whenever the session changes (/resume, /new).
+        ensure-loaded!
+        (fn []
+          (let [sf (session-file)]
+            (when (not= sf @loaded-for)
+              (reset! loaded-for sf)
+              (reset! checkpoints* (shared/load-all (dir)))
+              (reset! pending* {})
+              (reset! turn* (if (seq @checkpoints*)
+                              (inc (apply max (map js/Number (keys @checkpoints*))))
+                              0)))))
 
         ;; before_tool_call fires for EVERY handler regardless of another
-        ;; handler blocking the call (emit-collect merges block afterwards),
-        ;; and the permission gate's deny doesn't stop the event either. So:
-        ;; capture the pre-state here (the file is still untouched), but only
-        ;; PROMOTE it to a rewind point once tool_complete confirms the tool
-        ;; actually ran — otherwise a denied edit creates a phantom rewind
-        ;; point that shadows the previous turn's real one.
+        ;; handler blocking the call, and the permission gate's deny doesn't
+        ;; stop the event either. So: capture the pre-state here (the file is
+        ;; still untouched), but only RECORD it once tool_complete confirms the
+        ;; tool actually ran — otherwise a denied edit creates a phantom point.
         on-before-tool
         (fn [event _ctx]
+          (ensure-loaded!)
           (when (shared/edit-tool? (.-toolName event))
-            (when-let [path (tool-metadata/tool-path (.-args event))]
-              (shared/capture-pending! pending* path)))
+            (when-let [p (tool-metadata/tool-path (.-args event))]
+              (shared/capture-pending! pending* p)))
           nil)
 
         on-complete
@@ -36,8 +54,20 @@
                      (not (.-cancelled event))
                      (not (.-isError event)))
             (when-let [p (tool-metadata/tool-path (.-args event))]
-              (shared/promote! pending* checkpoints* @turn* p)
+              (when-let [st (get @pending* p)]
+                (shared/record-state! checkpoints* (dir) @turn* p st))
               (touch! p)))
+          nil)
+
+        ;; Files a shell command changed (bash_suite edit-diff), with their
+        ;; prior state where it is knowable.
+        on-bash-files
+        (fn [data]
+          (ensure-loaded!)
+          (doseq [p (or (.-paths data) [])] (touch! p))
+          (doseq [e (or (.-pre data) [])]
+            (shared/record-state! checkpoints* (dir) @turn* (.-path e)
+                                  (if (nil? (.-state e)) :absent (.-state e))))
           nil)
 
         on-finalize
@@ -49,7 +79,6 @@
     (.on api "before_tool_call" on-before-tool)
     (.on api "tool_complete" on-complete)
     (.on api "turn_finalize" on-finalize)
-    ;; Files a shell command changed (bash_suite edit-diff).
     (when-let [ev (.-events api)] (when (.-on ev) (.on ev "bash-suite__bash:files-changed" on-bash-files)))
 
     (.registerCommand api "diff"
@@ -65,28 +94,42 @@
                                text))})
 
     (.registerCommand api "rewind"
-                      ;; `undo` is what anyone reaches for; `rewind` is what it
-                      ;; was called. The resolver already resolves aliases and
-                      ;; extension_scope passes opts through untouched.
                       #js {:aliases #js ["undo"]
-                           :description "Restore files edited in the last turn. Usage: /rewind | /undo | /rewind list"
+                           :description "Restore files to before a turn. /undo picks the point; /rewind last undoes the newest; /rewind list shows them"
                            :handler
+                           ^:async
                            (fn [args ctx]
-                             (let [notify (fn [m l] (when-let [ui (.-ui ctx)]
-                                                      (when (.-notify ui) (.notify ui m l))))
-                                   sub    (some-> (first args) str)]
-                               (if (= sub "list")
-                                 (let [points (shared/describe checkpoints*)]
-                                   (notify (if (seq points)
-                                             (str "Rewind points (newest first):\n"
-                                                  (.join (clj->js points) "\n"))
-                                             "No rewind points in this session.")
-                                           "info"))
-                                 (if-let [[turn paths] (shared/restore! checkpoints*)]
-                                   (notify (str "Rewound turn " turn " — restored: "
-                                                (.join (clj->js paths) ", "))
-                                           "info")
-                                   (notify "Nothing to rewind." "warning")))))})
+                             (ensure-loaded!)
+                             (let [ui     (some-> ctx .-ui)
+                                   notify (fn [m l] (when (and ui (.-notify ui)) (.notify ui m l)))
+                                   sub    (some-> (first args) str)
+                                   points (shared/describe checkpoints*)
+                                   turns  (->> (keys @checkpoints*) (map js/Number) sort reverse vec)
+                                   report (fn [restored]
+                                            (if (seq restored)
+                                              (notify (str "Restored to before turn " (first (last restored)) ": "
+                                                           (.join (clj->js (distinct (mapcat second restored))) ", "))
+                                                      "info")
+                                              (notify "Nothing to rewind." "warning")))]
+                               (cond
+                                 (= sub "list")
+                                 (notify (if (seq points)
+                                           (str "Rewind points (newest first):\n" (.join (clj->js points) "\n"))
+                                           "No rewind points in this session.")
+                                         "info")
+
+                                 (empty? turns) (notify "Nothing to rewind." "warning")
+
+                                 ;; A picker when there is a choice to make.
+                                 (and (not= sub "last") ui (.-select ui) (> (count turns) 1))
+                                 (let [choice (js-await (.select ui "Restore files to before which turn? (everything after it is undone too)"
+                                                                 (clj->js (conj points "Cancel"))))
+                                       idx    (.indexOf (clj->js points) choice)]
+                                   (if (neg? idx)
+                                     (notify "Rewind cancelled." "info")
+                                     (report (shared/restore-through! checkpoints* (dir) (nth turns idx)))))
+
+                                 :else (report (shared/restore-through! checkpoints* (dir) (first turns))))))})
 
     (fn []
       (.off api "before_tool_call" on-before-tool)

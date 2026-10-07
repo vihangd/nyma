@@ -124,10 +124,11 @@
       (fs/writeFileSync f "v2")
       (emit "tool_complete" #js {:toolName "edit" :args #js {:path f} :cancelled false :isError false})
       (emit "turn_finalize" #js {})
-      ((command agent "rewind") [] (ui-ctx notes))
+      ;; Async now (it may show a picker), so awaited.
+      (js-await ((command agent "rewind") [] (ui-ctx notes)))
       (-> (expect (fs/readFileSync f "utf8")) (.toBe "v1"))
-      (-> (expect (last @notes)) (.toContain "Rewound turn 0"))
-      ((command agent "rewind") [] (ui-ctx notes))
+      (-> (expect (last @notes)) (.toContain "Restored to before turn 0"))
+      (js-await ((command agent "rewind") [] (ui-ctx notes)))
       (-> (expect (last @notes)) (.toBe "Nothing to rewind."))
       (finally
         (js-await (deactivate-all loaded))

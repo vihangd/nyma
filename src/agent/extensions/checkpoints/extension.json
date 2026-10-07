@@ -1,9 +1,10 @@
 {
   "namespace": "checkpoints",
-  "description": "Snapshots a file's pre-turn state; `/rewind` restores it",
+  "description": "Persistent per-turn file checkpoints (edits and bash changes); /undo restores, /diff reviews the session",
   "capabilities": [
     "events",
-    "commands"
+    "commands",
+    "session"
   ],
   "dependsOn": []
 }

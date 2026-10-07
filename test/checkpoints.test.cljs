@@ -49,7 +49,7 @@
 
 (describe "checkpoints extension" (fn []
                                     (it "snapshots on before_tool_call and rewinds via /rewind"
-                                        (fn []
+                                        ^:async (fn []
                                           (let [handlers (atom {})
                                                 commands (atom {})
                                                 api      #js {:on  (fn [evt h] (swap! handlers assoc evt h))
@@ -69,12 +69,12 @@
           ;; /rewind restores
                                             (let [rewind (.-handler (get @commands "rewind"))
                                                   notes  (atom [])]
-                                              (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}})
+                                              (js-await (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}}))
                                               (-> (expect (fs/readFileSync f "utf8")) (.toBe "original"))
-                                              (-> (expect (first @notes)) (.toContain "Rewound"))))))
+                                              (-> (expect (first @notes)) (.toContain "Restored to before turn"))))))
 
                                     (it "a denied edit creates no phantom rewind point"
-                                        (fn []
+                                        ^:async (fn []
                                           (let [handlers (atom {})
                                                 commands (atom {})
                                                 api      #js {:on  (fn [evt h] (swap! handlers assoc evt h))
@@ -93,5 +93,5 @@
                                             ((get @handlers "turn_finalize") #js {} nil)
                                             (let [rewind (.-handler (get @commands "rewind"))
                                                   notes  (atom [])]
-                                              (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}})
+                                              (js-await (rewind [] #js {:ui #js {:notify (fn [m _l] (swap! notes conj m))}}))
                                               (-> (expect (first @notes)) (.toContain "Nothing to rewind"))))))))
