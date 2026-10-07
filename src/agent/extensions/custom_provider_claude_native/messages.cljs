@@ -1,6 +1,7 @@
 (ns agent.extensions.custom-provider-claude-native.messages
   "Convert LanguageModelV3Prompt → Anthropic Messages API request body."
-  (:require [agent.utils.data :as data]
+  (:require [agent.thinking :as thinking-util]
+            [agent.utils.data :as data]
             [clojure.string :as str]))
 
 (def ^:private default-max-tokens 8192)
@@ -143,13 +144,23 @@
         ;; key @ai-sdk/anthropic uses — agent.thinking routes `claude-native` to
         ;; the anthropic dialect, and this provider is hand-rolled, so without
         ;; this the block was built and silently dropped.
-        thinking   (let [po (.-providerOptions opts)
-                         a  (when po (aget po "anthropic"))
-                         t  (when a (aget a "thinking"))]
-                     (when (and t (= "enabled" (str (.-type t))))
-                       {"type" "enabled"
-                        "budget_tokens" (or (.-budgetTokens t)
-                                            (aget t "budget_tokens"))}))
+        anth       (some-> (.-providerOptions opts) (aget "anthropic"))
+        t          (when anth (aget anth "thinking"))
+        ;; enabled+budget for older models; ADAPTIVE (+ effort below) for
+        ;; current ones, which reject budget_tokens. Only "enabled" was read,
+        ;; so agent.thinking's adaptive request was silently dropped here.
+        thinking   (case (str (some-> t .-type))
+                     "enabled"  {"type" "enabled"
+                                 "budget_tokens" (or (.-budgetTokens t) (aget t "budget_tokens"))}
+                     "adaptive" (cond-> {"type" "adaptive"}
+                                  (.-display t) (assoc "display" (.-display t)))
+                     "disabled" {"type" "disabled"}
+                     nil)
+        effort     (when anth (aget anth "effort"))
+        ;; Current Claude models reject non-default sampling parameters with
+        ;; a 400, and settings default temperature to 0.2 — every request
+        ;; failed. @ai-sdk/anthropic strips them for these models; so must this.
+        sampling?  (not (thinking-util/rejects-sampling? model-id))
         budget     (get thinking "budget_tokens")
         ;; Anthropic counts reasoning against max_tokens and rejects a request
         ;; whose budget is not strictly smaller.
@@ -160,7 +171,8 @@
              "stream"     true
              "messages"   messages}
       thinking                         (assoc "thinking" thinking)
+      effort                           (assoc "output_config" {"effort" effort})
       system-str                       (assoc "system" system-str)
-      (some? (.-temperature opts))     (assoc "temperature" (.-temperature opts))
-      (some? (.-topP opts))            (assoc "top_p" (.-topP opts))
+      (and sampling? (some? (.-temperature opts))) (assoc "temperature" (.-temperature opts))
+      (and sampling? (some? (.-topP opts)))        (assoc "top_p" (.-topP opts))
       (.-stopSequences opts)           (assoc "stop_sequences" (.-stopSequences opts)))))

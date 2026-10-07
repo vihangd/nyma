@@ -80,6 +80,13 @@
   [model]
   (boolean (re-find #"claude-(fable|mythos)-|claude-(opus|sonnet)-(4-[6-9]|[5-9])" (model-id model))))
 
+(defn rejects-sampling?
+  "Current Claude models refuse non-default temperature/top_p with a 400:
+   Opus 4.7+, Sonnet 5+, Fable, Mythos. Sonnet/Opus 4.6 still accept them.
+   (The same split as @ai-sdk/anthropic's capability table.)"
+  [model]
+  (boolean (re-find #"claude-(fable|mythos)-|claude-opus-(4-[7-9]|[5-9])|claude-sonnet-[5-9]" (model-id model))))
+
 (defn- always-thinks?
   "Models that reject disabling thinking outright (a 400): `off` can only
    lower effort."
@@ -92,8 +99,12 @@
 
 (defn- anthropic-options [level model]
   (cond
+    ;; `off` is EVERYONE's default level, so on models that cannot disable
+    ;; thinking it must mean "leave the model at its own default" — sending
+    ;; effort low here dropped every default session on Sonnet 5.5 from high
+    ;; to low. An explicit minimal/low still lowers it (below).
     (and (= "off" level) (always-thinks? model))
-    #js {:anthropic #js {:effort "low"}}
+    nil
 
     ;; Opus 5 / Sonnet 5 think when `thinking` is omitted; they accept an
     ;; explicit disable, so `off` must say so.

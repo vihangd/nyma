@@ -168,9 +168,12 @@
            ["claude-fable-5-1"  "medium" {:type "adaptive" :display "summarized"} "medium"]
            ;; off: Opus/Sonnet 5 think unless told not to — and accept the disable.
            ["claude-opus-5"     "off"    {:type "disabled"} nil]
-           ;; off: these reject a disable (400), so effort is lowered instead.
-           ["claude-opus-5-5"   "off"    nil "low"]
-           ["claude-fable-5-1"  "off"    nil "low"]]]
+           ;; off: these reject a disable (400) and `off` is the default level,
+           ;; so nothing is sent — the model's own default effort applies.
+           ["claude-opus-5-5"   "off"    nil nil]
+           ["claude-fable-5-1"  "off"    nil nil]
+           ;; an explicit low still lowers it
+           ["claude-sonnet-5-5" "low"    {:type "adaptive" :display "summarized"} "low"]]]
     (let [body (js-await (send-with (anthropic-model-id id) level))]
       (-> (expect #js [id level (or (some-> (.-thinking body) js/JSON.stringify) "none")])
           (.toEqual #js [id level (or (some-> want-thinking clj->js js/JSON.stringify) "none")]))

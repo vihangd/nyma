@@ -60,3 +60,29 @@
                       (.toBe "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AQID\"}}"))
                   (-> (expect (native/image-part->anthropic #js {:type "file" :mediaType "application/pdf" :data "x"}))
                       (.toBeFalsy))))))
+
+(describe "claude-native request body on current models"
+          (fn []
+            ;; Adaptive thinking was dropped (only "enabled" was read), and
+            ;; temperature was always sent — a 400 on current models, with
+            ;; settings defaulting it to 0.2.
+            (it "sends adaptive thinking + effort and no sampling parameters"
+                (fn []
+                  (let [b (native/build-request-body
+                           "claude-opus-5-5"
+                           #js {:prompt #js [#js {:role "user" :content #js [#js {:type "text" :text "hi"}]}]
+                                :temperature 0.2
+                                :providerOptions #js {:anthropic #js {:thinking #js {:type "adaptive" :display "summarized"}
+                                                                      :effort "high"}}})]
+                    (-> (expect (get-in b ["thinking" "type"])) (.toBe "adaptive"))
+                    (-> (expect (get-in b ["output_config" "effort"])) (.toBe "high"))
+                    (-> (expect (contains? b "temperature")) (.toBe false)))))
+            (it "older models keep the budget and their temperature"
+                (fn []
+                  (let [b (native/build-request-body
+                           "claude-haiku-4-5"
+                           #js {:prompt #js [#js {:role "user" :content #js [#js {:type "text" :text "hi"}]}]
+                                :temperature 0.2
+                                :providerOptions #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens 4000}}}})]
+                    (-> (expect (get-in b ["thinking" "budget_tokens"])) (.toBe 4000))
+                    (-> (expect (get b "temperature")) (.toBe 0.2)))))))

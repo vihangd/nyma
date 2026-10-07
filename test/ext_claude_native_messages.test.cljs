@@ -268,11 +268,14 @@
             (-> (expect (get body "thinking")) (.toBeUndefined))
             (-> (expect (get body "max_tokens")) (.toBe 2048)))))
 
-    (it "ignores a disabled thinking block"
+    ;; Forwarded, not ignored: Opus 5 / Sonnet 5 THINK when the field is
+    ;; omitted, so agent.thinking sends an explicit disable for `off`, and
+    ;; dropping it here turned `off` into thinking at full effort.
+    (it "forwards a disabled thinking block"
         (fn []
           (let [body (msgs/build-request-body
                       "claude-opus-5"
                       #js {:prompt #js [#js {:role "user"
                                              :content #js [#js {:type "text" :text "hi"}]}]
                            :providerOptions #js {:anthropic #js {:thinking #js {:type "disabled"}}}})]
-            (-> (expect (get body "thinking")) (.toBeUndefined)))))))
+            (-> (expect (get-in body ["thinking" "type"])) (.toBe "disabled")))))))
