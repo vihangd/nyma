@@ -1,5 +1,5 @@
 (ns agent.sessions.images
-  "Attached images live beside the session file, not inside it.
+  "Attached images and PDFs live beside the session file, not inside it.
 
    A user turn with an image carries its base64 bytes (megabytes). Written into
    the JSONL as-is, every /resume listing, title and search would read them,
@@ -16,7 +16,10 @@
 
 (defn- ext-for [media-type]
   (case (str media-type)
-    "image/png" "png" "image/jpeg" "jpg" "image/gif" "gif" "image/webp" "webp" "bin"))
+    "image/png" "png" "image/jpeg" "jpg" "image/gif" "gif" "image/webp" "webp"
+    "application/pdf" "pdf" "bin"))
+
+(defn- attached? [p] (or (content/image-part? p) (content/file-part? p)))
 
 (defn- part-bytes [p] (or (aget p "image") (aget p "data")))
 
@@ -25,12 +28,12 @@
    dir and replaced by `{:type image :ref … :mediaType … :name …}`. Strings and
    non-image parts pass through. No session file → unchanged."
   [content session-file]
-  (if (or (nil? session-file) (zero? (content/image-count content)))
+  (if (or (nil? session-file) (zero? (+ (content/image-count content) (content/file-count content))))
     content
     (let [dir (images-dir session-file)]
       (clj->js
        (map (fn [p]
-              (let [b64 (when (content/image-part? p) (part-bytes p))]
+              (let [b64 (when (attached? p) (part-bytes p))]
                 (if-not (string? b64)
                   p
                   (let [mt  (or (aget p "mediaType") "image/png")
@@ -40,7 +43,9 @@
                     (let [full (path/join dir f)]
                       (when-not (fs/existsSync full)
                         (fs/writeFileSync full (js/Buffer.from b64 "base64"))))
-                    #js {:type "image" :ref f :mediaType mt :name (aget p "name")}))))
+                    (if (content/file-part? p)
+                      #js {:type "file" :ref f :mediaType mt :filename (aget p "filename") :pages (aget p "pages")}
+                      #js {:type "image" :ref f :mediaType mt :name (aget p "name")})))))
             content)))))
 
 (defn rehydrate
@@ -54,9 +59,15 @@
        (map (fn [p]
               (if-let [ref (and (not (string? p)) (aget p "ref"))]
                 (let [full (path/join dir (path/basename (str ref)))]
-                  (if (fs/existsSync full)
+                  (cond
+                    (not (fs/existsSync full))
+                    #js {:type "text" :text (str "[" (if (= "file" (aget p "type")) "file" "image") " missing: "
+                                                 (or (aget p "name") (aget p "filename") ref) "]")}
+                    (= "file" (aget p "type"))
+                    #js {:type "file" :data (.toString (fs/readFileSync full) "base64")
+                         :mediaType (aget p "mediaType") :filename (aget p "filename") :pages (aget p "pages")}
+                    :else
                     #js {:type "image" :image (.toString (fs/readFileSync full) "base64")
-                         :mediaType (aget p "mediaType") :name (aget p "name")}
-                    #js {:type "text" :text (str "[image missing: " (or (aget p "name") ref) "]")}))
+                         :mediaType (aget p "mediaType") :name (aget p "name")}))
                 p))
             content)))))

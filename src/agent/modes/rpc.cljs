@@ -10,7 +10,7 @@
     (let [cmd (js/JSON.parse line)]
       (case (.-type cmd)
         ;; `images: [{data, mimeType}]` rides along as image parts.
-        "prompt"       (js-await (run agent (content/prompt-content (.-message cmd) (.-images cmd))))
+        "prompt"       (js-await (run agent (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))))
         "abort"        nil
         "get_commands" (println (js/JSON.stringify (clj->js @(:commands agent))))
         "get_settings" (println (js/JSON.stringify (clj->js (:config agent))))

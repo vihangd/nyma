@@ -59,6 +59,9 @@
     (content/image-part? p)
     {:type "image" :data (or (:image p) (:data p) "") :mimeType (or (:mediaType p) "image/png")}
 
+    (content/file-part? p)
+    {:type "text" :text (content/->text [p])}
+
     (or (= (:type p) "tool-call") (= (:type p) "toolCall"))
     {:type "toolCall"
      :id (or (:toolCallId p) (:id p) "")
@@ -407,16 +410,16 @@
         ;; a second `run` sharing the same accumulator/state atoms and interleave
         ;; deltas. Deliver it as a follow-up (after the current turn) instead.
         (if @(:running? st)
-          (do (follow-up agent {:role "user" :content (content/prompt-content (.-message cmd) (.-images cmd))})
+          (do (follow-up agent {:role "user" :content (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))})
               (write-response! cmd))
           (do (reset! (:running? st) true)
               (write-response! cmd)
-              (-> (run agent (content/prompt-content (.-message cmd) (.-images cmd)))
+              (-> (run agent (content/prompt-content (.-message cmd) (content/cmd-attachments cmd)))
                   (.catch (fn [e] (js/console.error "[pi-rpc] run error:" e)))
                   (.finally (fn [] (reset! (:running? st) false))))))
 
         "steer"
-        (do (steer agent {:role "user" :content (content/prompt-content (.-message cmd) (.-images cmd))})
+        (do (steer agent {:role "user" :content (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))})
             (write-response! cmd))
 
         "clear_queue"

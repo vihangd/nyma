@@ -147,7 +147,8 @@
     (when-let [doc (.-document msg-obj)]
       (let [local (js-await (download-attachment token (.-file_id doc)))]
         (when local
-          (swap! attachments conj {:local local :mime-type (or (.-mime_type doc) "application/octet-stream")}))))
+          (swap! attachments conj {:local local :mime-type (or (.-mime_type doc) "application/octet-stream")
+                                   :name (.-file_name doc)}))))
     @attachments))
 
 ;;; ─── Update → message conversion ─────────────────────────────────────

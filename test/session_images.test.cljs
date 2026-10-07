@@ -55,10 +55,15 @@
             (it "sends an attached image as an Anthropic image block"
                 (fn []
                   (-> (expect (js/JSON.stringify
-                               (native/image-part->anthropic #js {:type "file" :mediaType "image/png"
+                               (native/file-part->anthropic #js {:type "file" :mediaType "image/png"
                                                                   :data (js/Uint8Array. #js [1 2 3])})))
                       (.toBe "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"AQID\"}}"))
-                  (-> (expect (native/image-part->anthropic #js {:type "file" :mediaType "application/pdf" :data "x"}))
+                  ;; A PDF is a document block now; a docx is still nil.
+                  (-> (expect (js/JSON.stringify (native/file-part->anthropic #js {:type "file" :mediaType "application/pdf"
+                                                                                   :data "JVBERg==" :filename "a.pdf"})))
+                      (.toBe "{\"type\":\"document\",\"source\":{\"type\":\"base64\",\"media_type\":\"application/pdf\",\"data\":\"JVBERg==\"},\"title\":\"a.pdf\"}"))
+                  (-> (expect (native/file-part->anthropic #js {:type "file" :data "x"
+                                                                :mediaType "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}))
                       (.toBeFalsy))))))
 
 (describe "claude-native request body on current models"

@@ -74,7 +74,7 @@
               ;; Text of the parts, plus a fixed cost per image. `(str parts)`
               ;; counted a tool-call turn or an image as `[object Object]`.
               (+ total 4 (estimate-tokens (content/->text content))
-                 (* content/image-token-estimate (content/image-count content)))))
+                 (content/attachment-tokens content))))
           0 messages))
 
 ;;; ─── Gateway overhead, observed ────────────────────────────────

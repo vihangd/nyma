@@ -9,6 +9,7 @@
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
+            [agent.utils.pdf :as pdf]
             [clojure.string :as str]
             [agent.providers.builtins :as builtins]))
 
@@ -402,6 +403,10 @@
                                    msgs))
                          messages)
               effective-prompt (or (get send-result "system") effective-prompt)
+              ;; A PDF goes to the provider as a file part only if the model
+              ;; reads PDFs; otherwise its text. Done here, at the wire, so
+              ;; the session keeps the PDF for a later capable model.
+              messages (js-await (pdf/lower-for-model messages model-key))
 
               ;; Per-step usage sum: on abort the SDK resolves totalUsage as
               ;; null-usage (finish part never fires), which would record ZERO

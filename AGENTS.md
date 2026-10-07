@@ -77,7 +77,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/schema.cljs` | `agent.schema` | One data form for a tool's parameters, rendered three ways. |
 | `src/agent/sessions/archive.cljs` | `agent.sessions.archive` | Compressed session logs. |
 | `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction. |
-| `src/agent/sessions/images.cljs` | `agent.sessions.images` | Attached images live beside the session file, not inside it. |
+| `src/agent/sessions/images.cljs` | `agent.sessions.images` | Attached images and PDFs live beside the session file, not inside it. |
 | `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata. |
 | `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage. |
 | `src/agent/sessions/partial.cljs` | `agent.sessions.partial` | Keep the in-flight assistant response on disk while it streams. |
@@ -128,6 +128,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/jsonl_stdin.cljs` | `agent.utils.jsonl-stdin` | Reading a JSONL protocol channel off a stream. |
 | `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | Markdown → ANSI, via Bun.markdown.ansi; `marked` only for its lexer. |
 | `src/agent/utils/markdown_blocks.cljs` | `agent.utils.markdown-blocks` | Incremental markdown rendering via block-level tokenization. |
+| `src/agent/utils/pdf.cljs` | `agent.utils.pdf` | PDFs: who can read one natively, and text out of one for whoever can't. |
 | `src/agent/utils/reasoning_request.cljs` | `agent.utils.reasoning-request` | Translate nyma's thinking level into each provider's REQUEST dialect. |
 | `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |
 | `src/agent/utils/shell_grant.cljs` | `agent.utils.shell-grant` | What one shell command is, and what an "Allow always" for it covers. |

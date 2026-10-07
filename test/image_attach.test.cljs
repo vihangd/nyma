@@ -23,7 +23,7 @@
                     (fs/writeFileSync (path/join d "shot.png") png-bytes)
                     (let [r (fm/expand-mentions "what is wrong in @shot.png ?" d)
                           c (fm/->content r)]
-                      (-> (expect (count (:images r))) (.toBe 1))
+                      (-> (expect (count (:attachments r))) (.toBe 1))
                       (-> (expect (.includes (:text r) "skipped")) (.toBe false))
                       (-> (expect (.-type (aget c 1))) (.toBe "image"))
                       (-> (expect (.-mediaType (aget c 1))) (.toBe "image/png"))

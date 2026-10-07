@@ -36,35 +36,58 @@
       (let [arr #js []]
         (.forEach (.-value output)
                   (fn [p]
-                    (when (= (.-type p) "text")
-                      (.push arr #js {:type "text" :text (.-text p)}))))
+                    (let [t (.-type p)]
+                      (cond
+                        (= t "text") (.push arr #js {:type "text" :text (.-text p)})
+                        ;; A tool's image (view_image, a screenshot) was
+                        ;; dropped here; the model saw only the caption.
+                        (contains? #{"image-data" "media" "file-data"} t)
+                        (when-let [b (file-part->anthropic #js {:mediaType (.-mediaType p) :data (.-data p)
+                                                                :filename (.-filename p)})]
+                          (.push arr b))))))
         arr)
       :else "")))
 
-(defn image-part->anthropic
-  "An AI-SDK `file` part with an image media type → an Anthropic image block.
-   The SDK hands image data over as bytes, a base64 string or a URL. This
-   converter skipped every non-text part, so an attached image never reached
-   the model on this provider — silently."
+(defn- base64-of [data]
+  (if (string? data) data (.toString (js/Buffer.from data) "base64")))
+
+(defn file-part->anthropic
+  "An AI-SDK `file` part → an Anthropic block: an image, a PDF `document`, or
+   a plain-text `document`. The SDK hands data over as bytes, a base64 string
+   or a URL. This converter skipped every non-text part, so an attached image
+   or PDF never reached the model on this provider — silently. Other types
+   are nil (Anthropic rejects them; the caller inlines text instead)."
   [part]
   (let [mt   (str (or (.-mediaType part) ""))
         data (.-data part)]
-    (when (.startsWith mt "image/")
+    (when (some? data)
       (cond
         (instance? js/URL data)
-        #js {:type "image" :source #js {:type "url" :url (.-href data)}}
-        (string? data)
-        #js {:type "image" :source #js {:type "base64" :media_type mt :data data}}
-        (some? data)
-        #js {:type "image" :source #js {:type "base64" :media_type mt
-                                        :data (.toString (js/Buffer.from data) "base64")}}
+        (cond
+          (.startsWith mt "image/") #js {:type "image" :source #js {:type "url" :url (.-href data)}}
+          (= mt "application/pdf")  #js {:type "document" :source #js {:type "url" :url (.-href data)}}
+          :else nil)
+
+        (.startsWith mt "image/")
+        #js {:type "image" :source #js {:type "base64" :media_type mt :data (base64-of data)}}
+
+        (= mt "application/pdf")
+        (cond-> #js {:type "document" :source #js {:type "base64" :media_type mt :data (base64-of data)}}
+          (.-filename part) (doto (aset "title" (.-filename part))))
+
+        (= mt "text/plain")
+        #js {:type "document"
+             :source #js {:type "text" :media_type mt
+                          :data (if (string? data)
+                                  (.toString (js/Buffer.from data "base64") "utf-8")
+                                  (.toString (js/Buffer.from data) "utf-8"))}}
         :else nil))))
 
 (defn- content-part->anthropic [part]
   (case (.-type part)
     "text"      (text-part->anthropic part)
     "tool-call" (tool-call-part->anthropic part)
-    "file"      (image-part->anthropic part)
+    "file"      (file-part->anthropic part)
     nil))
 
 (defn- content-parts->js-array

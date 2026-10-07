@@ -8,7 +8,8 @@
             [agent.multimodal :as mm]
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
-            [agent.utils.stream-drain :as drain]))
+            [agent.utils.stream-drain :as drain]
+            [agent.utils.pdf :as pdf]))
 
 (def read-default-line-cap 2000)
 
@@ -19,9 +20,29 @@
                        (str (.padStart (str (+ start i)) 6) "\t" line)))
          "\n"))
 
+(def read-pdf-page-cap 20)
+
+(defn ^:async read-pdf
+  "A PDF's text, `range` as PAGES (default the first 20). It returned PDF
+   syntax, which is no use to anyone."
+  [path buf range]
+  (let [[from to] (or range [1 read-pdf-page-cap])
+        r         (js-await (pdf/extract-text buf {:from from :to to}))]
+    (if (:error r)
+      (throw (js/Error. (str path ": " (:error r))))
+      (let [total (:pages r)]
+        (str (:text r)
+             (when (and total (< to total))
+               (str "\n… [" (- total to) " more pages — read with range [" (inc to) ", " (min total (+ to read-pdf-page-cap)) "]]")))))))
+
 (defn ^:async read-execute [{:keys [path range]}]
   (when-not (fs/existsSync path)
     (throw (js/Error. (str "File not found: " path))))
+  (if (.endsWith (.toLowerCase (str path)) ".pdf")
+    (let [buf (fs/readFileSync path)]
+      (if (pdf/pdf-bytes? buf)
+        (js-await (read-pdf path buf range))
+        (throw (js/Error. (str path " is not a PDF")))))
   (let [content (js-await (.text (js/Bun.file path)))
         lines   (.split content "\n")
         total   (.-length lines)
@@ -32,13 +53,14 @@
         body    (number-lines slice start)]
     (if (< end total)
       (str body "\n… [" (- total end) " more lines — read with range [" (inc end) ", " total "]]")
-      body)))
+      body))))
 
 (def read-tool
   (tool
    #js {:description (str "Read file contents with line numbers (cat -n format: `   N\\tcontent`). "
                           "Returns the first " read-default-line-cap " lines unless a range is given. "
-                          "When using edit, old_string must be the raw file text — never include the line-number prefix.")
+                          "When using edit, old_string must be the raw file text — never include the line-number prefix. "
+                          "A .pdf returns its text, and range is then a PAGE range (default the first " read-pdf-page-cap " pages).")
         :inputSchema  (schema/->zod {
                                     :path [:string "File path to read"]
                                     :range [:array :number {:optional true :length 2 :doc "Line range [start, end], 1-based inclusive"}]})

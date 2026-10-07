@@ -23,6 +23,7 @@
   (:require [agent.utils.content :as content]
             [clojure.string :as str]
             ["node:fs" :as fs]
+            ["node:path" :as path]
             [gateway.session-pool :as sp]
             [gateway.streaming :as streaming]
             [gateway.pipelines :as pipelines]
@@ -55,23 +56,24 @@
                       bundle))))))))
 
 (defn msg->content
-  "What the agent receives for an inbound message: its text, plus any image
-   attachment as an image part. Telegram downloaded photos and then the loop
-   sent `(:text msg)` alone, so a photo sent to the bot never reached the
-   model. Non-image attachments are left out. The downloaded temp file is
-   removed once read. Accepts `:local-path` (the protocol's name) and
-   `:local` (what telegram writes)."
+  "What the agent receives for an inbound message: its text, plus each
+   attachment as a part (`content/attachment-part`: image, PDF, inlined text,
+   or a note saying what was left out). Telegram downloaded a photo and the
+   loop sent `(:text msg)` alone; a PDF was dropped without a word. Every
+   downloaded temp file is removed, read or not. Accepts `:local-path` (the
+   protocol's name) and `:local` (what telegram writes)."
   [msg]
-  (let [imgs (->> (:attachments msg)
+  (let [atts (->> (:attachments msg)
                   (keep (fn [a]
                           (let [f  (or (:local-path a) (:local a))
                                 mt (str (or (:mime-type a) ""))]
-                            (when (and f (str/starts-with? mt "image/") (fs/existsSync f))
-                              (let [b64 (.toString (fs/readFileSync f) "base64")]
-                                (try (fs/unlinkSync f) (catch :default _ nil))
-                                #js {:data b64 :mimeType mt})))))
+                            (when (and f (fs/existsSync f))
+                              (try
+                                #js {:data (.toString (fs/readFileSync f) "base64") :mimeType mt
+                                     :name (or (:name a) (:filename a) (path/basename f))}
+                                (finally (try (fs/unlinkSync f) (catch :default _ nil))))))))
                   vec)]
-    (content/prompt-content (:text msg) (clj->js imgs))))
+    (content/prompt-content (:text msg) (clj->js atts))))
 
 (defn ^:async handle-message
   "Process one inbound message within its session lane.

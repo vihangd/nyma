@@ -8,6 +8,8 @@
    model saw."
   (:require ["@earendil-works/pi-tui" :refer [getNativeClipboard]]
             [agent.multimodal :as multimodal]
+            [agent.utils.content :as content]
+            [agent.utils.pdf :as pdf]
             [agent.utils.home :as home]
              ["node:fs" :as fs]
             ["node:path" :as path]
@@ -71,12 +73,24 @@
         disp (display-path cwd abs)
         mt   (multimodal/media-type-for abs)]
     (cond
+      ;; A PDF is attached too; it was inlined as text when small and free of
+      ;; NUL bytes in its first 8 KB — the model got PDF syntax, not the page.
+      (and (.isFile st) (.endsWith (.toLowerCase abs) ".pdf"))
+      (let [buf (fs/readFileSync abs)]
+        (cond
+          (not (pdf/pdf-bytes? buf))
+          {:kind :skipped :block (str "<file path=\"" disp "\" skipped=\"not a PDF\"/>")}
+          (> (.-length buf) pdf/max-bytes)
+          {:kind :skipped :block (str "<file path=\"" disp "\" skipped=\"PDF over 32 MB\"/>")}
+          :else
+          {:kind :attach :name disp :media-type "application/pdf" :data (.toString buf "base64")}))
+
       ;; An image is ATTACHED, not inlined: it was skipped as binary, so
       ;; `@shot.png` gave the model a marker instead of the screenshot.
       (and mt (.startsWith mt "image/") (.isFile st))
       (if (> (.-size st) max-image-bytes)
         {:kind :skipped :block (str "<file path=\"" disp "\" skipped=\"image over 5 MB\"/>")}
-        {:kind :image :name disp :media-type mt
+        {:kind :attach :name disp :media-type mt
          :data (.toString (fs/readFileSync abs) "base64")})
 
       (.isDirectory st)
@@ -110,25 +124,22 @@
                              (catch :default _ nil))]
                 (cond
                   (not r) acc
-                  (= :image (:kind r))
-                  (update acc :images conj {:name (:name r) :media-type (:media-type r) :data (:data r)})
+                  (= :attach (:kind r))
+                  (update acc :attachments conj {:name (:name r) :media-type (:media-type r) :data (:data r)})
                   :else
                   (-> acc
                       (update :text str "\n\n" (:block r))
                       (update (if (= :skipped (:kind r)) :skipped :files)
                               conj (display-path cwd abs))))))
-            {:text (str text) :files [] :skipped [] :images []}
+            {:text (str text) :files [] :skipped [] :attachments []}
             (find-mentions text))))
 
 (defn ->content
-  "What a submitted prompt becomes: the expanded text, or — when images were
-   mentioned — the AI-SDK parts array [text, image…]."
-  [{:keys [text images]}]
-  (if (seq images)
-    (clj->js (into [{:type "text" :text text}]
-                   (map (fn [{:keys [name media-type data]}]
-                          {:type "image" :image data :mediaType media-type :name name})
-                        images)))
+  "What a submitted prompt becomes: the expanded text, or — when images or
+   PDFs were mentioned — the AI-SDK parts array [text, attachment…]."
+  [{:keys [text attachments]}]
+  (if (seq attachments)
+    (clj->js (into [{:type "text" :text text}] (map content/attachment-part attachments)))
     text))
 
 ;;; ─── Autocomplete listing ────────────────────────────────────────────────

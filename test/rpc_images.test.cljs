@@ -71,7 +71,7 @@
 (describe "gateway attachments"
           (fn []
             ;; Telegram downloaded the photo; the loop sent (:text msg) alone.
-            (it "an image attachment reaches the agent; others are left out; temp files go"
+            (it "image and PDF attachments reach the agent; temp files go"
                 (fn []
                   (let [d   (fs/mkdtempSync (path/join (os/tmpdir) "nyma-gw-att-"))
                         img (path/join d "p.jpg")
@@ -81,8 +81,10 @@
                     (let [c (gloop/msg->content {:text "what is this?"
                                                  :attachments [{:local img :mime-type "image/jpeg"}
                                                                {:local-path doc :mime-type "application/pdf"}]})]
-                      (-> (expect (.-length c)) (.toBe 2))
+                      (-> (expect (.-length c)) (.toBe 3))
                       (-> (expect (.-mediaType (aget c 1))) (.toBe "image/jpeg"))
-                      (-> (expect (fs/existsSync img)) (.toBe false)))
+                      (-> (expect (.-mediaType (aget c 2))) (.toBe "application/pdf"))
+                      (-> (expect (fs/existsSync img)) (.toBe false))
+                      (-> (expect (fs/existsSync doc)) (.toBe false)))
                     (-> (expect (gloop/msg->content {:text "plain"})) (.toBe "plain"))
                     (fs/rmSync d #js {:recursive true :force true}))))))
