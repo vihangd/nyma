@@ -784,7 +784,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `ast_tools` | `ast-tools` | Tree-sitter–backed code search and editing tools |
 | `bash_suite` | `bash-suite` | Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed) |
 | `budget` | `budget` | Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set) |
-| `checkpoints` | `checkpoints` | Snapshots a file's pre-turn state; `/rewind` restores it |
+| `checkpoints` | `checkpoints` | Persistent per-turn file checkpoints (edits and bash changes); /undo restores, /diff reviews the session |
 | `claude_hook_bridge` | `claude-hook-bridge` | Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt |
 | `custom_provider_claude_native` | `custom-provider-claude-native` | Native Anthropic SDK provider (direct API, no OpenAI shim) |
 | `custom_provider_deepseek` | `custom-provider-deepseek` | DeepSeek models via `api.deepseek.com/v1` |
