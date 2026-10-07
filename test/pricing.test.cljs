@@ -122,3 +122,19 @@
     (it "still returns 0 for a model with no pricing at all"
         (fn []
           (-> (expect (calculate-turn-cost "nope/nothing" (usage 1000 100 0 0))) (.toBe 0))))))
+
+(describe "current Claude rates"
+          (fn []
+            ;; Opus 4.8 and Sonnet 5 sat at the Opus 4 / Sonnet 4 prices ($15/$75,
+            ;; $3/$15), so /stats overstated their cost 3x and 1.5x. Pinned to the
+            ;; claude-api reference (2026-09-25): [in out cache-read cache-write].
+            (it "match the published per-MTok prices"
+                (fn []
+                  (doseq [[id want] [["claude-opus-5-5"   [4.0 20.0 0.2 5.0]]
+                                     ["claude-sonnet-5-5" [2.0 10.0 0.2 2.5]]
+                                     ["claude-fable-5-1"  [10.0 50.0 0.25 12.5]]
+                                     ["claude-haiku-4-5"  [1.0 5.0 0.1 1.25]]
+                                     ["claude-opus-4-8"   [5.0 25.0 0.5 6.25]]
+                                     ["claude-sonnet-5"   [2.0 10.0 0.2 2.5]]]]
+                    (-> (expect #js [id (clj->js (get @token-costs id))])
+                        (.toEqual #js [id (clj->js want)])))))))

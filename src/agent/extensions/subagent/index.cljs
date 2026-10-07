@@ -48,19 +48,19 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; while remaining user-overridable. Read-only by default (evidence
 ;; boundary: single-threaded edits + isolated read-only exploration).
 (def ^:private default-subagent-roles
-  {:scout      {:provider "anthropic" :model "claude-haiku-4-20250901"
+  {:scout      {:provider "anthropic" :model "claude-haiku-4-5"
                 :allowed-tools ["read" "glob" "grep" "ls"]
                 :description "Fast read-only codebase recon. Returns a compressed summary."
                 :system-prompt "You are a scout. Investigate the codebase read-only and return a compressed, structured summary (files, symbols, where things live). Do not propose edits."}
-   :planner    {:provider "anthropic" :model "claude-opus-4-20250514"
+   :planner    {:provider "anthropic" :model "claude-opus-5-5"
                 :allowed-tools ["read" "glob" "grep" "ls" "web_search" "web_fetch"]
                 :description "Read-only implementation planner. Returns a numbered plan."
                 :system-prompt "You are a planner. Analyze read-only and return a detailed numbered plan under a 'Plan:' header. Do not modify files."}
-   :reviewer   {:provider "anthropic" :model "claude-sonnet-4-20250514"
+   :reviewer   {:provider "anthropic" :model "claude-sonnet-5-5"
                 :allowed-tools ["read" "glob" "grep" "ls"]
                 :description "Read-only code reviewer. Returns findings, one per line."
                 :system-prompt "You are a reviewer. Examine the code read-only and return concise findings (path:line — problem — fix). Do not modify files."}
-   :researcher {:provider "anthropic" :model "claude-sonnet-4-20250514"
+   :researcher {:provider "anthropic" :model "claude-sonnet-5-5"
                 :allowed-tools ["read" "web_search" "web_fetch"]
                 :description "Web/docs research. Returns sourced findings."
                 :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}})

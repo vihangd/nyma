@@ -483,7 +483,7 @@ Once installed via `npm install -g .` (or `bun link`), the same commands work as
 ```json
 {
   "agent": {
-    "model":                "claude-sonnet-4-6",
+    "model":                "claude-sonnet-5-5",
     "modes":                ["gateway"],
     "exclude-capabilities": ["execution"]
   },
@@ -526,7 +526,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-m, --model` | LLM model to use | `claude-sonnet-4-20250514` |
+| `-m, --model` | LLM model to use | `claude-sonnet-5-5` |
 | `--provider` | Provider id (`anthropic`, `openai`, `google`, or any extension-registered one) | `anthropic` |
 | `--mode` | `interactive` \| `print` \| `json` \| `rpc` \| `pi-rpc`; anything else exits 2 | `interactive` |
 | `-p, --print` | Print mode shorthand | — |
@@ -553,7 +553,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 import { create_session } from "./dist/agent/modes/sdk.mjs";
 
 const session = await create_session({
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-5-5",
   "system-prompt": "You are a helpful assistant."
 });
 

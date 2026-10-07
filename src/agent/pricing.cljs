@@ -13,9 +13,21 @@
 ;; differs again. Guessing a ratio would replace a known-wrong number with an
 ;; unknown-wrong one.
 (def token-costs
-  (atom {"claude-opus-5"                 [5.0 25.0 0.5 6.25]
-         "claude-opus-4-8"              [15.0 75.0 1.5 18.75]
-         "claude-sonnet-5"              [3.0 15.0 0.3 3.75]
+  ;; Anthropic first-party rates, $/MTok [input output cache-read cache-write],
+  ;; from the claude-api reference cached 2026-09-25. Opus 4.8 and Sonnet 5
+  ;; were listed at $15/$75 and $3/$15 — the Opus 4 / Sonnet 4 prices, 3x and
+  ;; 1.5x too high.
+  (atom {"claude-fable-5-1"             [10.0 50.0 0.25 12.5]
+         "claude-fable-5"               [10.0 50.0 1.0 12.5]
+         "claude-opus-5-5"              [4.0 20.0 0.2 5.0]
+         "claude-opus-5"                [5.0 25.0 0.5 6.25]
+         "claude-opus-4-8"              [5.0 25.0 0.5 6.25]
+         "claude-opus-4-7"              [5.0 25.0 0.5 6.25]
+         "claude-opus-4-6"              [5.0 25.0 0.5 6.25]
+         "claude-sonnet-5-5"            [2.0 10.0 0.2 2.5]
+         "claude-sonnet-5"              [2.0 10.0 0.2 2.5]
+         "claude-sonnet-4-6"            [3.0 15.0 0.3 3.75]
+         "claude-haiku-4-5"             [1.0 5.0 0.1 1.25]
          "claude-haiku-4-5-20251001"    [1.0 5.0 0.1 1.25]
          "claude-sonnet-4-20250514"     [3.0 15.0 0.3 3.75]
          "claude-opus-4-20250514"       [15.0 75.0 1.5 18.75]

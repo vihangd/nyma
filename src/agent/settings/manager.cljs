@@ -9,7 +9,7 @@
             [clojure.string :as str]))
 
 (def defaults
-  {:model          "claude-sonnet-4-20250514"
+  {:model          "claude-sonnet-5-5"
    :provider       "anthropic"
    :thinking       "off"
    :compaction     {:enabled true :threshold 0.85}
@@ -137,11 +137,11 @@
    ;;   {:roles {:default {:provider "omlx" :model "qwen3.6-35b"
    ;;                      :fallback [{:provider "anthropic"
    ;;                                  :model "claude-sonnet-5"}]}}}
-   :roles {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
+   :roles {:default {:provider "anthropic" :model "claude-sonnet-5-5"
                      :policy {"write" "ask" "exec" "ask" "network" "ask"
                               "other" "ask"}}
-           :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
-           :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+           :fast    {:provider "anthropic" :model "claude-haiku-4-5"}
+           :deep    {:provider "anthropic" :model "claude-opus-5-5"}
            ;; Permission-mode roles (model-less → preserve the active model).
            ;; accept-edits waives the prompt for a KNOWN write; it does not
            ;; waive it for a tool that never said what it does.
@@ -153,11 +153,11 @@
                                    "network" "allow" "other" "allow"}}
            ;; Stronger reviewer for the `advisor` tool / `/advisor` cmd.
            ;; Falls back to :deep, then current model, if unset by user.
-           :advisor {:provider "anthropic" :model "claude-opus-4-20250514"}
-           :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
+           :advisor {:provider "anthropic" :model "claude-opus-5-5"}
+           :plan    {:provider "anthropic" :model "claude-opus-5-5"
                      :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch" "retrieve_result"]
                      :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
-           :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"
+           :commit  {:provider "anthropic" :model "claude-sonnet-5-5"
                      :allowed-tools ["read" "bash" "glob" "grep" "edit" "write" "retrieve_result"]}
            ;; `lead` (delegation-only primary, `/role lead`) is NOT here on
            ;; purpose: the model_roles extension owns it, prompt and all, in
@@ -167,26 +167,26 @@
            ;; Read-only by default: the evidence boundary for coding agents
            ;; is single-threaded edits + isolated read-only exploration.
            ;; A subagent role is just a role with :description + :system-prompt.
-           :scout      {:provider "anthropic" :model "claude-haiku-4-20250901"
+           :scout      {:provider "anthropic" :model "claude-haiku-4-5"
                         :allowed-tools ["read" "glob" "grep" "ls" "retrieve_result"]
                         :description "Fast read-only codebase recon. Returns a compressed map/summary."
                         :system-prompt "You are a scout. Investigate the codebase read-only and return a compressed, structured summary (files, symbols, where things live). Do not propose edits."}
-           :planner    {:provider "anthropic" :model "claude-opus-4-20250514"
+           :planner    {:provider "anthropic" :model "claude-opus-5-5"
                         :allowed-tools ["read" "glob" "grep" "ls" "web_search" "web_fetch" "retrieve_result"]
                         :description "Read-only implementation planner. Returns a numbered plan."
                         :system-prompt "You are a planner. Analyze read-only and return a detailed numbered plan under a 'Plan:' header. Do not modify files."}
-           :reviewer   {:provider "anthropic" :model "claude-sonnet-4-20250514"
+           :reviewer   {:provider "anthropic" :model "claude-sonnet-5-5"
                         :allowed-tools ["read" "glob" "grep" "ls" "retrieve_result"]
                         :description "Read-only code reviewer. Returns findings, one per line."
                         :system-prompt "You are a reviewer. Examine the code read-only and return concise findings (path:line — problem — fix). Do not modify files."}
-           :researcher {:provider "anthropic" :model "claude-sonnet-4-20250514"
+           :researcher {:provider "anthropic" :model "claude-sonnet-5-5"
                         :allowed-tools ["read" "web_search" "web_fetch" "retrieve_result"]
                         :description "Web/docs research. Returns sourced findings."
                         :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}
            ;; Editing subagent — DISABLED by default. Editing subagents
            ;; fragment shared state; prefer keeping edits on the single
            ;; main thread. Enable per-call only when truly independent.
-           :worker     {:provider "anthropic" :model "claude-sonnet-4-20250514"
+           :worker     {:provider "anthropic" :model "claude-sonnet-5-5"
                         :allowed-tools ["read" "glob" "grep" "ls" "edit" "write" "bash" "retrieve_result"]
                         :enabled false
                         :description "Implementation worker with edit tools (opt-in)."

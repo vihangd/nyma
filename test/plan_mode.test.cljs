@@ -105,7 +105,7 @@
                                         (it "produces a spec for :default (the bug — must NOT be nil)"
                                             (fn []
                                               (-> (expect (pm/role-model-spec defaults :default))
-                                                  (.toBe "anthropic/claude-sonnet-4-20250514"))))
+                                                  (.toBe "anthropic/claude-sonnet-5-5"))))
 
                                         (it "default restore differs from the plan (opus) model"
                                             (fn []

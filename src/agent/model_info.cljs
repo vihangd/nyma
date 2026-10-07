@@ -2,9 +2,17 @@
 
 ;; Built-in model context windows
 (def ^:private default-models
-  {"claude-opus-5"            {:context-window 1000000}
-   "claude-opus-4-8"          {:context-window 200000}
-   "claude-sonnet-5"          {:context-window 200000}
+  {"claude-fable-5-1"         {:context-window 1000000}
+   "claude-fable-5"           {:context-window 1000000}
+   "claude-opus-5-5"          {:context-window 1000000}
+   "claude-opus-5"            {:context-window 1000000}
+   "claude-opus-4-8"          {:context-window 1000000}
+   "claude-opus-4-7"          {:context-window 1000000}
+   "claude-opus-4-6"          {:context-window 1000000}
+   "claude-sonnet-5-5"        {:context-window 1000000}
+   "claude-sonnet-5"          {:context-window 1000000}
+   "claude-sonnet-4-6"        {:context-window 1000000}
+   "claude-haiku-4-5"         {:context-window 200000}
    "claude-haiku-4-5-20251001" {:context-window 200000}
    "claude-sonnet-4-20250514" {:context-window 200000}
    "claude-opus-4-20250514"   {:context-window 200000}

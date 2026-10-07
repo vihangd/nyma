@@ -19,10 +19,10 @@
 ;; subagent role never silently denies. accept-edits/full-auto are model-LESS
 ;; so they preserve whatever model is active (on-resolve skips setModel).
 (def default-roles
-  {:default {:provider "anthropic" :model "claude-sonnet-4-20250514"
+  {:default {:provider "anthropic" :model "claude-sonnet-5-5"
              :policy {"write" "ask" "exec" "ask" "network" "ask"}}
-   :fast    {:provider "anthropic" :model "claude-haiku-4-20250901"}
-   :deep    {:provider "anthropic" :model "claude-opus-4-20250514"}
+   :fast    {:provider "anthropic" :model "claude-haiku-4-5"}
+   :deep    {:provider "anthropic" :model "claude-opus-5-5"}
    ;; accept-edits: auto-approve edits, still ask before shell/network.
    :accept-edits {:policy {"write" "allow" "exec" "ask" "network" "ask"}}
    ;; full-auto: allow everything (Claude's bypass). No model → keep current.
@@ -34,10 +34,10 @@
    ;; floor that keeps plan mode read-only even when the user's roles map
    ;; omits :plan. Without it, enter! would switch to a :plan role with no
    ;; allowed-tools/permissions and plan mode could edit/write/bash.
-   :plan    {:provider "anthropic" :model "claude-opus-4-20250514"
+   :plan    {:provider "anthropic" :model "claude-opus-5-5"
              :allowed-tools ["read" "glob" "grep" "ls" "think" "web_search" "web_fetch"]
              :permissions {"write" "deny" "edit" "deny" "bash" "deny"}}
-   :commit  {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+   :commit  {:provider "anthropic" :model "claude-sonnet-5-5"}
    ;; :lead — delegation-only primary, borrowed from apprentice's loop of the
    ;; same shape: the lead can locate things but cannot read files in depth,
    ;; edit, or run shell; every investigation and change goes through

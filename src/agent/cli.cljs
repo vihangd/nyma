@@ -156,7 +156,7 @@
    runtime /model swap (since the startup path doesn't go through
    setModel)."
   [provider-registry values merged]
-  (let [raw-model (or (:model values) (:model merged) "claude-sonnet-4-20250514")
+  (let [raw-model (or (:model values) (:model merged) "claude-sonnet-5-5")
         ;; A bare `--model build` is a ROLE name, not a model id. Roles are how
         ;; the rest of nyma talks about models (/role, escalate's chains,
         ;; bench's --model), and one-shot mode was the only place the word was
@@ -253,7 +253,7 @@ Modes (default: interactive):
 Model selection:
       --provider <name>  Provider id (anthropic, openai, google, or any
                          extension-registered provider). Default: anthropic.
-  -m, --model <id>       Model id. Default: claude-sonnet-4-20250514.
+  -m, --model <id>       Model id. Default: claude-sonnet-5-5.
       --thinking <level> Extended thinking: off, minimal, low, medium, high,
                          xhigh. Default: off. Anthropic and Google models, and
                          OpenAI models on /responses. Also /thinking at runtime.
@@ -300,7 +300,7 @@ Environment:
 Examples:
   nyma                                  Start the interactive UI
   nyma -p \"explain this repo\"           One-shot print mode
-  nyma -m claude-opus-4-20250514        Pick a model
+  nyma -m claude-opus-5-5               Pick a model
   nyma --provider openai -m gpt-5       Pick provider + model
 ")
 
