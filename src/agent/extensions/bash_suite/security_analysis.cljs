@@ -293,6 +293,33 @@
      []
      @groups)))
 
+(def ^:private output-redirect-ops #{">" ">>" ">|" "&>" "&>>"})
+
+(defn writes-via-redirect?
+  "True when parsed shell-quote `tokens` redirect output into a real file.
+
+   The group classifier sees only words, and the operators between them
+   split groups — so `echo x >> ~/.zshrc` classified as plain `echo`,
+   read-only, and `auto-approve-safe` ran it unprompted. A redirect target is
+   a write whatever the command is. Not writes: `> /dev/null`, and fd
+   duplication (`2>&1`, `>&2`, `>&-`)."
+  [tokens]
+  (let [ts (vec tokens)
+        n  (count ts)]
+    (boolean
+     (some (fn [i]
+             (let [t   (nth ts i)
+                   op  (when (and (some? t) (not (string? t))) (.-op t))
+                   nxt (when (< (inc i) n) (nth ts (inc i)))
+                   tgt (when (string? nxt) nxt)]
+               (cond
+                 (contains? output-redirect-ops op)
+                 (not= tgt "/dev/null")
+                 (= op ">&")
+                 (and tgt (not (re-matches #"\d+|-" tgt)) (not= tgt "/dev/null"))
+                 :else false)))
+           (range n)))))
+
 (defn classify-command
   "Parse and classify a shell command. Returns {:level :reasons :command}.
    Checks (in order): line-separator injection, redirect policy, destructive patterns,
@@ -361,7 +388,8 @@
                         (swap! current conj (str token))))
                     (when (seq @current) (swap! groups conj @current))
                   ;; Classify each group and take highest risk
-                    (let [group-levels (map classify-token-group @groups)
+                    (let [group-levels (cond-> (map classify-token-group @groups)
+                                         (writes-via-redirect? parsed) (conj :write))
                           max-level    (reduce higher-risk subshell-max group-levels)
                           final-level  (if (seq pipe-reasons) :destructive max-level)
                           all-reasons  (into (or pipe-reasons [])

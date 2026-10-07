@@ -101,6 +101,51 @@
           (ji/js->clj* suite)))
       (catch :default _e nil))))
 
+(def ^:private protective-flags
+  "Booleans where `true` is the safe value. A project file may turn these ON,
+   never off."
+  [[:permissions :enabled]
+   [:security-analysis :enabled]
+   [:security-analysis :block-destructive]
+   [:security-analysis :block-privilege-escalation]
+   [:security-analysis :block-obfuscated]
+   [:security-analysis :block-network-exec]
+   [:security-analysis :block-redirects]
+   [:env-filter :enabled]])
+
+(defn tighten-only
+  "A project `bash-suite` section with everything that would WIDEN the gate
+   removed.
+
+   The project file belongs to whatever repo is checked out, so it may add
+   protection but never lift it — the policy `settings/manager` enforces as
+   `strip-project-widening`, which this extension's own file reading bypassed.
+   Measured before this: a repo shipping
+   `{\"bash-suite\": {\"permissions\": {\"allowlist\": [\"*\"]}}}` got every
+   command classified `allow`, and an explicit allow outranks the permission
+   mode's `ask` (events/decision-order) — so nothing was ever prompted.
+   Dropped: the allowlist, `auto-approve-safe` true, any protective flag set
+   false, a lower `max-subshell-depth`. Deny list and stripped env vars are
+   unioned by the caller, never replaced."
+  [project]
+  (when project
+    (let [p (-> project
+                (update :permissions dissoc :allowlist)
+                (cond-> (true? (get-in project [:permissions :auto-approve-safe]))
+                  (update :permissions dissoc :auto-approve-safe))
+                (cond-> (some? (get-in project [:security-analysis :max-subshell-depth]))
+                  (update :security-analysis
+                          (fn [s]
+                            (if (>= (:max-subshell-depth s)
+                                    (get-in default-config [:security-analysis :max-subshell-depth]))
+                              s
+                              (dissoc s :max-subshell-depth))))))]
+      (reduce (fn [acc [sec k :as ks]]
+                (if (and (contains? (get acc sec) k) (not (true? (get-in acc ks))))
+                  (update acc sec dissoc k)
+                  acc))
+              p protective-flags))))
+
 (defn load-config
   "Load the `bash-suite` section, global then project, merged over the defaults.
 
@@ -111,7 +156,7 @@
    fixed twice elsewhere."
   []
   (let [global  (suite-section (path/join (home/dir) ".nyma" "settings.json"))
-        project (suite-section (path/join (js/process.cwd) ".nyma" "settings.json"))
+        project (tighten-only (suite-section (path/join (js/process.cwd) ".nyma" "settings.json")))
         ;; A project file may not SHRINK the deny list. `merge-with merge` is
         ;; two levels deep, so `permissions.denylist` was replaced wholesale —
         ;; meaning a cloned repo could ship a `.nyma/settings.json` naming one
@@ -127,14 +172,16 @@
         merged  (reduce (fn [acc sec] (if sec (merge-with merge acc sec) acc))
                         default-config
                         [global project])
-        denies  (->> [default-config global project]
-                     (keep (fn [c] (get-in c [:permissions :denylist])))
-                     (apply concat)
-                     distinct
-                     vec)]
-    (if (seq denies)
-      (assoc-in merged [:permissions :denylist] denies)
-      merged)))
+        union   (fn [ks] (->> [default-config global project]
+                              (keep (fn [c] (get-in c ks)))
+                              (apply concat)
+                              distinct
+                              vec))
+        denies  (union [:permissions :denylist])
+        strips  (union [:env-filter :strip-vars])]
+    (cond-> merged
+      (seq denies) (assoc-in [:permissions :denylist] denies)
+      (seq strips) (assoc-in [:env-filter :strip-vars] strips))))
 
 (defn is-bash-tool?
   "Check if a tool name refers to the bash tool."
