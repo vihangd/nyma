@@ -1063,6 +1063,18 @@
                        (sync-pane!))
 
           on-model-select   (fn [_] (sync-status!))
+          ;; Automatic compaction replaced the history without a word: the next
+          ;; reply forgetting a detail was the first sign. Manual /compact has
+          ;; its own receipt, so only "auto" is noted.
+          on-compact        (fn [data]
+                              (when (= "auto" (str (:trigger data)))
+                                (update-messages!
+                                 (fn [msgs]
+                                   (conj (vec msgs)
+                                         {:role "info" :id (new-id) :local-only true
+                                          :content (str "Context compacted automatically (~" (:before data)
+                                                        " → ~" (:after data) " tokens). /compact <focus> next time to choose what it keeps.")})))
+                                (.requestRender tui)))
           on-session-clear  (fn [_]
                               (reset! messages [])
                               (reset! widgets {})
@@ -1104,6 +1116,7 @@
       ((:on events) "tool_execution_end"    on-tool-end)
       ((:on events) "tool_execution_update" on-tool-update)
       ((:on events) "model_select"          on-model-select)
+      ((:on events) "compact"               on-compact)
       ((:on events) "session_clear"         on-session-clear)
       ((:on events) "session_start"         on-session-start)
       ((:on events) "turn_request"          on-turn-request)
@@ -1239,6 +1252,7 @@
                             ((:off events) "tool_execution_end"    on-tool-end)
                             ((:off events) "tool_execution_update" on-tool-update)
                             ((:off events) "model_select"          on-model-select)
+                            ((:off events) "compact"               on-compact)
                             ((:off events) "session_clear"         on-session-clear)
                             ((:off events) "session_start"         on-session-start)
                             ((:off events) "turn_request"          on-turn-request)

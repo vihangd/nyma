@@ -1075,8 +1075,8 @@
 
           "compact"
           {:group       :session
-           :description "Compact conversation context now, and say by how much"
-           :handler (fn [_args ctx]
+           :description "Compact conversation context now, and say by how much; `/compact <focus>` says what the summary must keep"
+           :handler (fn [args ctx]
                       ;; Returned, so the dispatcher's busy state and .catch
                       ;; cover it: this used to fire "Compaction complete"
                       ;; before compaction ran, and without :force? a manual
@@ -1094,6 +1094,12 @@
                                             {:model-registry (:model-registry agent)
                                              :state-atom     (:state agent)
                                              :force?         true
+                                             ;; `/compact keep the auth refactor details` — the
+                                             ;; words were accepted and dropped; compaction has
+                                             ;; always taken custom-instructions.
+                                             :custom-instructions (let [t (str/trim (str/join " " (or args [])))]
+                                                                    (when (seq t)
+                                                                      (str "Focus for this summary (from the user): " t)))
                                              :model-key      (model-info/config-model-key (:config agent))}))
                             (.then (fn [result] (notify ctx (compaction-receipt result)))))))}
 
