@@ -650,3 +650,16 @@
                     (esc/command-handler api #js ["status"] nil)
                     (-> (expect (.includes (apply str @notes) "Escalation:")) (.toBe true))
                     (-> (expect (:escalated-to @st)) (.toBeFalsy)))))))
+
+(describe "escalate.revert validation"
+          (fn []
+            ;; Only "next-request" was checked; anything else meant "never".
+            (it "an unknown value falls back to next-request instead of never"
+                (fn []
+                  (doseq [bad ["cooldown" "next_request" ""]]
+                    (-> (expect #js [bad (:revert (esc/config {:escalate {:revert bad}}))])
+                        (.toEqual #js [bad "next-request"])))))
+            (it "the two real values are kept"
+                (fn []
+                  (doseq [ok ["next-request" "never"]]
+                    (-> (expect (:revert (esc/config {:escalate {:revert ok}}))) (.toBe ok)))))))

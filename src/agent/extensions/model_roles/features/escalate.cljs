@@ -43,16 +43,28 @@
    :retries-before-escalate 1
    :revert          "next-request"  ; next-request | never
    :max-per-session 2
-   :fallback        {:default [] :cooldown-ms 300000 :revert "cooldown"}})
+   ;; (A `:revert "cooldown"` sat here, read by nothing: the cooldown only
+   ;; decides when a failed model may be RETRIED, never when to switch back.)
+   :fallback        {:default [] :cooldown-ms 300000}})
+
+(def revert-values #{"next-request" "never"})
 
 (defn config
   "Pure: settings → the escalate config, user keys merged over defaults.
    Nested :on and :fallback merge field-wise so setting one key keeps the rest."
   [settings]
-  (let [raw (or (:escalate settings) {})]
-    (-> (merge default-config raw)
-        (assoc :on       (merge (:on default-config)       (:on raw)))
-        (assoc :fallback (merge (:fallback default-config) (:fallback raw))))))
+  (let [raw (or (:escalate settings) {})
+        cfg (-> (merge default-config raw)
+                (assoc :on       (merge (:on default-config)       (:on raw)))
+                (assoc :fallback (merge (:fallback default-config) (:fallback raw))))]
+    ;; Only "next-request" was ever checked, so any other value — a typo, or
+    ;; "cooldown" copied from the fallback block — silently meant "never": an
+    ;; escalation to the expensive model that lasted the whole session.
+    (if (contains? revert-values (str (:revert cfg)))
+      cfg
+      (do (d/warn-quiet "escalate" (str "escalate.revert " (pr-str (:revert cfg))
+                                        " is not one of next-request, never — using next-request"))
+          (assoc cfg :revert "next-request")))))
 
 (defn mode [cfg] (str (or (:mode cfg) "ask")))
 
