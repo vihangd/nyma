@@ -1,6 +1,7 @@
 (ns agent.settings.manager
   "Two-scope settings."
   (:require [agent.utils.home :as home]
+            [agent.trust :as trust]
             ["node:path" :as path]
             ["node:fs" :as fs]
             [agent.debug :as d]
@@ -539,7 +540,9 @@
   "`load-json` for the project file, with permission-widening keys stripped
    and named in one warning."
   [path]
-  (let [[stripped warns] (strip-project-widening (load-json path))]
+  ;; trust/strip-settings: command-bearing keys (verify.cmd, hooks, lsp
+  ;; commands, agent commands) apply only in a trusted folder.
+  (let [[stripped warns] (strip-project-widening (trust/strip-settings (load-json path)))]
     (when (seq warns)
       (d/warn "settings" (str path " may not widen permissions; ignored: " (str/join ", " warns)
                               " — set these in ~/.nyma/settings.json or on the command line")))

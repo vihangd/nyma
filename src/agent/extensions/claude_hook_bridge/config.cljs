@@ -22,6 +22,7 @@
    another should produce [A, B] not [B]. We re-merge the hooks key
    ourselves with deep-concat semantics."
   (:require [agent.utils.home :as home]
+            [agent.trust :as trust]
              ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
@@ -157,7 +158,10 @@
                       (when-not (contains? @seen k)
                         (swap! seen conj k)
                         src)))
-                  (concat nyma-paths claude-paths agents-paths)))))))
+                  ;; A project file's hooks run commands: only in a trusted
+                  ;; folder (agent.trust). The user's own files always load.
+                  (filter #(trust/project-file-allowed? (:path %))
+                          (concat nyma-paths claude-paths agents-paths))))))))
 
 (defn handler-label
   "One-line label for a handler spec, as `/hooks` prints it:

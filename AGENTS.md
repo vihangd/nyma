@@ -89,6 +89,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/tool_registry.cljs` | `agent.tool-registry` | Active/inactive tool management. |
 | `src/agent/tool_result_policy.cljs` | `agent.tool-result-policy` | Per-tool result normalization and truncation policy. |
 | `src/agent/tools.cljs` | `agent.tools` | Built-in tools: read, write, edit, bash. |
+| `src/agent/trust.cljs` | `agent.trust` | Workspace trust: a checked-out repo may not make nyma run its commands until the user says so. |
 | `src/agent/ui/app_reducers.cljs` | `agent.ui.app-reducers` | Pure reducers for the interactive TUI state. |
 | `src/agent/ui/chat_pane.cljs` | `agent.ui.chat-pane` | Pi-tui Component for the chat message list. |
 | `src/agent/ui/chat_renderer.cljs` | `agent.ui.chat-renderer` | Pure: message map → string[] for pi-tui rendering. |

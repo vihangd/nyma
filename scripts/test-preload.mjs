@@ -96,6 +96,14 @@ try {
   restores.push(() => meta.reset_extension_metadata_BANG_());
   const theme = await import("../dist/agent/ui/theme_catalog.mjs");
   restores.push(() => theme.reset_theme_state_BANG_());
+  // Workspace trust: every file starts TRUSTED. Tests that exercise a
+  // project-config feature (MCP discovery, hooks, LSP) point cwd at a temp
+  // project, which would otherwise be untrusted — and one file running the CLI
+  // in-process decided `untrusted` for every file after it. Trust tests set
+  // their own state with decide!.
+  const trust = await import("../dist/agent/trust.mjs");
+  trust.decide_BANG_("trusted");
+  restores.push(() => trust.decide_BANG_("trusted"));
 } catch {
   // dist not built yet (bare `bun test` before a compile) — the freshness test
   // will say so; nothing to restore.

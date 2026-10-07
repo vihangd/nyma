@@ -1,6 +1,7 @@
 (ns agent.extensions.lsp-suite.lsp-config
   "Load and merge LSP server configuration from .nyma/settings.json."
   (:require [agent.tool-metadata :as tm]
+            [agent.trust :as trust]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.extensions.lsp-suite.lsp-servers-catalog :as catalog]))
@@ -21,7 +22,9 @@
   (let [settings-path (path/join (js/process.cwd) ".nyma" "settings.json")
         user-lsp      (when (fs/existsSync settings-path)
                         (try
-                          (let [p (js/JSON.parse (fs/readFileSync settings-path "utf8"))]
+                          ;; `command`/`env` from a project file spawn a process:
+                          ;; stripped unless the folder is trusted (agent.trust).
+                          (let [p (trust/strip-settings (js/JSON.parse (fs/readFileSync settings-path "utf8")))]
                             (.-lsp p))
                           (catch :default _ nil)))]
     ;; Merge catalog entries with user overrides

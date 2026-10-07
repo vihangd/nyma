@@ -12,6 +12,7 @@
    and forwarded to ACP subprocess agents at session/new."
   (:require [agent.utils.home :as home]
              [agent.debug :as d]
+            [agent.trust :as trust]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
@@ -200,10 +201,13 @@
   ([project-root home] (scan-mcp-servers project-root home nil))
   ([project-root home on-error]
    (let [[p-user p-nyma p-cursor p-project] (candidate-paths project-root home)
+         ;; Project files name commands to spawn: honoured only in a trusted
+         ;; folder (agent.trust). The user's own ~/.nyma/mcp.json always is.
+         read*           (fn [p] (when (trust/allow-file? p) (read-mcp-json p on-error)))
          user-global     (read-mcp-json p-user on-error)
-         nyma-project    (read-mcp-json p-nyma on-error)
-         cursor-servers  (read-mcp-json p-cursor on-error)
-         project-servers (read-mcp-json p-project on-error)
+         nyma-project    (read* p-nyma)
+         cursor-servers  (read* p-cursor)
+         project-servers (read* p-project)
          merged #js {}
          copy-into! (fn [src]
                       (when src

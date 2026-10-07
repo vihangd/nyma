@@ -1,6 +1,7 @@
 (ns agent.resources.loader
   "Resource discovery."
   (:require [agent.utils.home :as home]
+            [agent.trust :as trust]
             ["node:path" :as path]
             ["node:fs" :as fs]
             [clojure.string :as str]
@@ -400,9 +401,12 @@ When multiple independent tool calls are needed, make them in parallel.
      ;; User extension directories only. These are real directories on the
      ;; machine running nyma, so scanning them works from a source tree and from
      ;; a binary alike.
+     ;; The project's own dir is code from the checked-out repo, imported at
+     ;; startup — only for a trusted folder (agent.trust).
      :extension-dirs
-     (distinct-dirs [(path/join (global-dir) "extensions")
-                     (path/join project-dir "extensions")])
+     (distinct-dirs (cond-> [(path/join (global-dir) "extensions")]
+                      (trust/allow-file? (path/join project-dir "extensions"))
+                      (conj (path/join project-dir "extensions"))))
 
      ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them
      ;; off wholesale — it was the only thing the old dir-list branch did.

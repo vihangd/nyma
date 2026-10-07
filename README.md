@@ -540,6 +540,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--session` | Custom session path | a fresh file per launch |
 | `--fork` | Branch a copy of an existing session | — |
 | `--no-session` | Disable session persistence | — |
+| `--trust` | Run this folder's project-defined commands without asking, this run only (see Workspace Trust) | — |
 | `--discover` | With `-p`: fetch provider catalogues at startup | off in one-shot runs |
 | `--ext-<name>[=v]` | Set a flag registered by an extension | — |
 | `--debug` | Debug logging to `~/.nyma/debug.log` | — |
@@ -579,6 +580,32 @@ Settings are resolved in priority order:
 2. **Project settings** (`.nyma/settings.json`)
 3. **Global settings** (`~/.nyma/settings.json`)
 4. **Defaults**
+
+### Workspace Trust
+
+A project's files can name commands for nyma to run: code in `.nyma/extensions/`,
+MCP servers in `.mcp.json` (also `.nyma/mcp.json`, `.cursor/mcp.json`), hooks
+(`.nyma/settings*.json`, `.claude/settings*.json`, `.agents/hooks.json`), and in
+`.nyma/settings.json` the `lsp.<id>.command`/`env`, `verify.cmd` and
+`agent-shell.agents` keys. None of them runs until you trust the folder.
+
+The first interactive run in such a folder lists them and asks:
+
+```
+⚠  This folder's project files name commands nyma would run:
+   .mcp.json db                    npx db-mcp
+   .nyma/settings.json verify.cmd  make test
+
+   [t] Trust this folder   [i] Ignore them this session   [n] Never for this folder
+   Choice [i]:
+```
+
+The answer is kept in `~/.nyma/trust.json` per folder, keyed by a fingerprint of
+exactly those entries — if any of them changes, you are asked again. Headless runs
+(`-p`, `--mode json/rpc/pi-rpc`) never prompt: they skip the commands and print one
+line saying so, unless you pass `--trust` (or set `NYMA_TRUST=1`) for that run.
+Everything else in the project settings applies either way, and running nyma from
+your home directory never asks — `./.nyma` there is your own config.
 
 ### Workspace Config
 

@@ -1,5 +1,6 @@
 (ns agent.extensions.agent-shell.shared
   (:require ["node:path" :as path]
+            [agent.trust :as trust]
             ["node:fs" :as fs]
             [clojure.string :as str]
             [agent.utils.js-interop :as ji]))
@@ -90,7 +91,9 @@
     (if (fs/existsSync settings-path)
       (try
         (let [raw     (fs/readFileSync settings-path "utf8")
-              parsed  (js/JSON.parse raw)
+              ;; `agents.<k>.command` spawns a process: stripped unless the
+              ;; folder is trusted (agent.trust).
+              parsed  (trust/strip-settings (js/JSON.parse raw))
               section (aget parsed "agent-shell")]
           (if section
             (merge default-config (js->clj* section))

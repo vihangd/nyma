@@ -1,6 +1,7 @@
 (ns agent.cli
   "Entry point, arg parsing, mode dispatch."
   (:require [agent.dev.ext-watch :as ext-watch]
+            [agent.trust :as trust]
             [agent.debug :as d]
             [clojure.string :as str]
             ["node:util" :refer [parseArgs]]
@@ -266,6 +267,9 @@ Session:
       --session <path>   Use a specific session file (jsonl).
                          (Default: a fresh session file per launch.)
       --no-session       Don't read or write any session file.
+      --trust            Run this folder's project-defined commands (MCP servers,
+                         hooks, LSP commands, verify.cmd, .nyma/extensions) without
+                         asking, this run only. Also NYMA_TRUST=1.
       --discover         With -p: fetch provider catalogues at startup. Off by
                          default in one-shot runs, which only need the model
                          named on the command line (saves ~3s per launch).
@@ -440,6 +444,32 @@ Examples:
                                               :output   (.-stderr js/process)
                                               :terminal false})]
        (.question rl question (fn [ans] (.close rl) (resolve ans)))))))
+
+(defn ^:async resolve-trust!
+  "Decide whether this folder's project-defined commands (MCP servers, hooks,
+   LSP commands, verify.cmd, .nyma/extensions code…) may run, BEFORE anything
+   reads them: settings, resources and extensions all load after this.
+   Interactive with a terminal: ask once per folder (agent.trust stores the
+   answer). Anything else: untrusted unless --trust / NYMA_TRUST=1, with one
+   stderr line saying what was ignored."
+  [values mode]
+  (let [cwd    (js/process.cwd)
+        srcs   (trust/sources cwd)
+        p      (trust/plan {:srcs         srcs
+                            :stored       (when (seq srcs) (trust/stored cwd srcs))
+                            :flag?        (or (:trust values) (= "1" (.. js/process -env -NYMA_TRUST)))
+                            :interactive? (and (= mode "interactive")
+                                               (.-isTTY js/process.stdin)
+                                               (.-isTTY js/process.stderr))})]
+    (case p
+      :trusted   (trust/decide! :trusted)
+      :untrusted (do (when (seq srcs) (.write (.-stderr js/process) (trust/ignored-note srcs)))
+                     (trust/decide! :untrusted))
+      :ask       (let [ans (.toLowerCase (.trim (str (js-await (prompt-line (trust/prompt-text srcs))))))]
+                   (cond
+                     (= ans "t") (do (trust/remember! cwd srcs "trusted") (trust/decide! :trusted))
+                     (= ans "n") (do (trust/remember! cwd srcs "never") (trust/decide! :untrusted))
+                     :else       (trust/decide! :untrusted))))))
 
 (defn resume-listing
   "Which sessions to offer, and how many were held back.
@@ -626,7 +656,9 @@ Examples:
        ;; (it always appends one of these). Declared so strict parseArgs
        ;; doesn't crash; pi-rpc keeps its ask-baseline regardless.
        :approve      #js {:type "boolean"}
-       :no-approve   #js {:type "boolean"}})
+       :no-approve   #js {:type "boolean"}
+       ;; Trust this folder's project-defined commands for this run only.
+       :trust        #js {:type "boolean"}})
 
 (defn parse-cli-args!
   "argv → {:values :positionals}, exiting 2 with one line on a bad flag.
@@ -688,6 +720,7 @@ Examples:
         _ (when (and (contains? #{"print" "json"} mode)
                      (not (:discover values)))
             (aset js/process.env "NYMA_ONE_SHOT" "1"))
+        _         (js-await (resolve-trust! values mode))
         settings  (create-settings-manager)
         merged    ((:get settings))
         ;; Say so if the settings file contains keys that do nothing. Emitted
