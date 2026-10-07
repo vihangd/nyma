@@ -4,7 +4,7 @@
 
 ## What it does
 
-Watches turn-end and tool-complete events; when a prompt response takes longer than the threshold (default **3s**) or a tool runs more than **10s**, it emits an **OSC 777** escape sequence — the terminal-native "notify" protocol. Modern terminal emulators (Ghostty, iTerm2, WezTerm, Kitty) translate that into a real macOS / Linux notification. Terminals that don't support OSC 777 silently ignore it, so this extension is a safe no-op everywhere else.
+Watches turn-end and tool-complete events; when a prompt response takes longer than the threshold (default **3s**) or a tool runs past it, it raises a terminal notification. It also fires **immediately when a permission prompt is waiting** — a run blocked on an approval you have not seen — and rings the bell for that one. The escape sequence follows the terminal: **OSC 9** for iTerm2, **OSC 99** for Kitty, **OSC 777** otherwise (Ghostty, WezTerm). Terminals that support none of them ignore it.
 
 Useful when you've kicked off a long agent run and tabbed away.
 

@@ -1,7 +1,8 @@
 (ns agent.extensions.desktop-notify.index
-  "Desktop notifications via OSC 777 escape sequence.
-   Fires a terminal notification when a prompt response takes >N seconds.
-   Works in Ghostty, iTerm2, WezTerm, Kitty (silent on unsupported terminals).
+  "Desktop notifications via terminal escape sequences (OSC 9 / 99 / 777).
+   Fires when a response takes >N seconds, and at once when a permission
+   prompt is waiting. iTerm2 (OSC 9), Kitty (OSC 99), Ghostty and WezTerm
+   (OSC 777); silent elsewhere, except a waiting prompt also rings the bell.
 
    Config in .nyma/settings.json:
    {\"desktop-notify\": {\"enabled\": true, \"threshold-ms\": 3000}}
@@ -37,18 +38,37 @@
   (and (boolean (.-isTTY (.-stdout js/process)))
        (not (.. js/process -env -NYMA_ONE_SHOT))))
 
+(defn notification-sequence
+  "The escape sequence that raises a notification in THIS terminal. Pure over
+   `env`.
+
+   OSC 777 alone (`notify;title;body`) was sent everywhere, which iTerm2 and
+   Kitty ignore although the doc said they were covered: iTerm2 takes OSC 9,
+   Kitty OSC 99. `urgent?` adds a BEL — for a permission prompt, where a
+   silent sequence on an unrecognised terminal would defeat the point."
+  [env title body urgent?]
+  (let [g    (fn [k] (str (or (aget env k) "")))
+        term (g "TERM_PROGRAM")
+        msg  (str title ": " body)
+        seq* (cond
+               (= term "iTerm.app")                      (str "\u001b]9;" msg "\u0007")
+               (or (seq (g "KITTY_WINDOW_ID"))
+                   (= (g "TERM") "xterm-kitty"))         (str "\u001b]99;;" msg "\u001b\\")
+               :else                                     (str "\u001b]777;notify;" title ";" body "\u0007"))]
+    (if urgent? (str seq* "\u0007") seq*)))
+
 (defn- send-notification!
-  "Send OSC 777 terminal notification. Silent on unsupported terminals.
+  "Send a terminal notification (see notification-sequence).
 
    Written to STDERR. On stdout the escape sequence is part of the program's
    output: a terminal swallows it, but a pipe does not, so `nyma -p
    --output-format json | jq` got an OSC 777 glued to the front of the JSON
    and failed to parse. stderr is where out-of-band chatter belongs."
-  [title body]
+  [title body & [urgent?]]
   (when (notifications-possible?)
     (try
       (.write (.-stderr js/process)
-              (str "\u001b]777;notify;" title ";" body "\u0007"))
+              (notification-sequence js/process.env title body urgent?))
       (catch :default _ nil))))
 
 ;;; ─── Extension activation ──────────────────────────────────
@@ -95,6 +115,13 @@
                                   (str (.-toolName data) " completed ("
                                        (js/Math.round (/ dur 1000)) "s)")))))
 
+        ;; A permission prompt is waiting: no threshold — the run is blocked
+        ;; on the user from this moment.
+        on-permission-prompt
+        (fn [data _ctx]
+          (when (check-enabled)
+            (send-notification! "nyma" (str "approval needed: " (or (:tool data) (.-tool data))) true)))
+
         ;; Notify with session summary on exit
         on-session-end
         (fn [data _ctx]
@@ -114,10 +141,12 @@
     (.on api "turn_end" on-turn-end)
     (.on api "tool_complete" on-tool-complete)
     (.on api "session_end_summary" on-session-end)
+    (.on api "permission_prompt" on-permission-prompt)
 
     ;; Return deactivator
     (fn []
       (.off api "turn_start" on-turn-start)
       (.off api "turn_end" on-turn-end)
       (.off api "tool_complete" on-tool-complete)
-      (.off api "session_end_summary" on-session-end))))
+      (.off api "session_end_summary" on-session-end)
+      (.off api "permission_prompt" on-permission-prompt))))

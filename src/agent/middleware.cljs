@@ -468,6 +468,11 @@
                                           "' but no interactive approval is available")))
     (let [prompt (permission-prompt-text tool-name (categorize-tool tool-name)
                                          (or (:original-args ctx) (:args ctx)) reason)
+          ;; The run is now blocked on the user. Announced so desktop_notify
+          ;; can say so: a turn stuck on an unseen prompt was the classic
+          ;; "came back to nothing".
+          _      (when-let [emit (some-> (:events ctx) :emit)]
+                   (emit "permission_prompt" {:tool tool-name}))
           choice (js-await
                   (.select ui prompt
                            (clj->js ["Allow once"
