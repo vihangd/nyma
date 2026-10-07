@@ -114,3 +114,16 @@
 
 (describe "/permissions"
           (fn [] (it "lists grants and revokes one" test-permissions-command)))
+
+(defn ^:async test-legacy-bash-grant-flagged []
+  (let [settings (temp-settings)
+        a        (assoc (agent.core/create-agent {:model "m" :system-prompt "s"}) :settings settings)
+        shown    (atom nil)
+        ctx      #js {:ui #js {:available true :notify (fn [& _] nil) :showOverlay (fn [t] (reset! shown t))}}]
+    ((:append-allow-tool! settings) "bash")
+    (agent.commands.builtins/register-builtins a nil {})
+    ((:handler (get @(:commands a) "permissions")) [] ctx)
+    (-> (expect (str @shown)) (.toContain "approves every shell command"))))
+
+(describe "/permissions and old grants"
+          (fn [] (it "flags a whole-tool bash grant" test-legacy-bash-grant-flagged)))

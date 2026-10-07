@@ -1318,7 +1318,15 @@
                                             (row "bash commands:  " (map #(str % " *") bash)) "\n"
                                             (row "tools:          " project-tools) "\n"
                                             "Allowed everywhere:\n"
-                                            (row "tools:          " global-tools) "\n\n"
+                                            (row "tools:          " global-tools) "\n"
+                                            ;; A whole-tool bash grant predates patterns and
+                                            ;; still approves EVERY command (the deny list
+                                            ;; applies). Worth saying where people look.
+                                            (when (some #{"bash"} (concat project-tools global-tools))
+                                              (str "\n⚠  \"bash\" above approves every shell command — granted before\n"
+                                                   "   \"Allow always\" remembered patterns. /permissions revoke bash, and\n"
+                                                   "   the next prompts will offer patterns like `git push *` instead.\n"))
+                                            "\n"
                                             "\"Allow for this session\" grants end with the session.\n"
                                             "Take one back: /permissions revoke <bash pattern or tool>"))))))}
 
