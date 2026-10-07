@@ -57,8 +57,8 @@
         ;; and always re-renders — which is what we want.
         ;;
         ;; A WeakMap rather than an id-keyed map on purpose: /resume reassigns
-        ;; every message a fresh id, which is exactly how md-caches leaks its
-        ;; whole contents today. Entries here die with the messages.
+        ;; every message a fresh id, which is how id-keyed md-caches leaked
+        ;; (it is now pruned in setMessages). Entries here die with the messages.
         line-cache (atom (js/WeakMap.))
 
         render-msg
@@ -137,9 +137,23 @@
 
     (set! (.-setMessages pane)
           (fn [new-msgs]
-            (reset! messages (vec new-msgs))))
+            (let [v (vec new-msgs)]
+              (reset! messages v)
+              ;; Drop markdown caches whose message is gone. Keyed by id —
+              ;; not by object, as line-cache is, because the streaming tail
+              ;; is a fresh object per chunk and its cache must survive them.
+              ;; Nothing pruned it: /clear, /new and /resume (which re-ids
+              ;; every message) each left the whole previous transcript's
+              ;; caches behind for the life of the process.
+              (let [live (into #{} (keep :id) v)]
+                (when (some #(not (contains? live %)) (keys @md-caches))
+                  (swap! md-caches #(into {} (filter (fn [[id _]] (contains? live id))) %)))))))
 
     (set! (.-getMessages pane)
           (fn [] @messages))
+
+    ;; How many markdown caches are held — for the leak test.
+    (set! (.-mdCacheCount pane)
+          (fn [] (count @md-caches)))
 
     pane))

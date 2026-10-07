@@ -299,3 +299,17 @@
                 ;; A timing ratio: a cache that is not cleared fails every
                 ;; attempt, a loaded machine (bun test --parallel) one.
                 #js {:retry 2})))
+
+(describe "markdown caches follow the transcript"
+          (fn []
+            ;; Keyed by message id and never pruned: /clear, /new and /resume
+            ;; (which re-ids every message) each leaked a transcript's worth.
+            (it "replacing the messages drops the old ones' caches"
+                (fn []
+                  (let [pane (create-chat-pane theme)
+                        batch (fn [r] (clj->js (for [i (range 50)]
+                                                 {:role "assistant" :id (str "r" r "-" i) :content "x"})))]
+                    (doseq [r (range 3)]
+                      (.setMessages pane (batch r))
+                      (.render pane 80))
+                    (-> (expect (.mdCacheCount pane)) (.toBe 50)))))))
