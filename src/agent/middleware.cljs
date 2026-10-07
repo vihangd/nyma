@@ -192,17 +192,24 @@
                              (str modified-result)))
         ctx))))
 
+(defn- formatter-failed
+  "A display formatter threw. Still nil — a broken formatter must not break
+   the tool call — but logged: silent swallowing once hid 13 dead formatters."
+  [e]
+  (d/debug "middleware" (str "display formatter threw: " (or (.-message e) e)))
+  nil)
+
 (defn- safe-call
-  "Call f with arg, returning nil if f is nil or throws."
+  "Call f with arg, returning nil if f is nil or throws (logged at debug)."
   [f arg]
   (when f
-    (try (f arg) (catch :default _ nil))))
+    (try (f arg) (catch :default e (formatter-failed e)))))
 
 (defn- safe-call2
-  "Two-arg `safe-call`. Same swallow-and-return-nil contract."
+  "Two-arg `safe-call`. Same contract."
   [f a b]
   (when f
-    (try (f a b) (catch :default _ nil))))
+    (try (f a b) (catch :default e (formatter-failed e)))))
 
 (defn- extract-display-fields
   "Read .display from tool object, invoke formatters on data, return custom fields map.
