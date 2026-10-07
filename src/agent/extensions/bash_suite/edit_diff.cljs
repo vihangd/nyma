@@ -144,8 +144,19 @@
                                         before (get @befores id)]
                                     (when before
                                       (swap! befores dissoc id)
-                                      (when-let [s (summary nil before (snapshot nil))]
-                                        (aset ctx "result" (with-summary (.-result ctx) s))))
+                                      (let [after (snapshot nil)]
+                                        (when-let [s (summary nil before after)]
+                                          (aset ctx "result" (with-summary (.-result ctx) s)))
+                                        ;; Tell other extensions which files a shell
+                                        ;; command changed (checkpoints' /diff), as
+                                        ;; absolute paths. The edit tools are visible
+                                        ;; by name; a `sed -i` is visible only here.
+                                        (let [paths (changed-paths before after)
+                                              root  (or (:root after) (:root before))]
+                                          (when (seq paths)
+                                            (when-let [emit (some-> (.-events api) .-emit)]
+                                              (emit "bash:files-changed"
+                                                    #js {:paths (clj->js (map #(if root (str root "/" %) %) paths))}))))))
                                     ctx))})
     (fn []
       (.removeMiddleware api "bash-suite/edit-diff")

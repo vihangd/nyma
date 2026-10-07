@@ -3,12 +3,18 @@
    editing tool touches it; /rewind restores the newest turn's files (repeat
    to go further back). Session-scoped, in-memory."
   (:require [agent.extensions.checkpoints.shared :as shared]
+            ["node:path" :as path]
             [agent.tool-metadata :as tool-metadata]))
 
 (defn ^:export activate [api]
   (let [checkpoints* (atom {})
         pending*     (atom {})   ;; path → pre-state, awaiting confirmation
         turn*        (atom 0)
+        ;; Every file this session changed — edit tools and bash alike — for
+        ;; /diff. Never pruned with the rewind groups.
+        touched*     (atom #{})
+        touch!       (fn [p] (when p (swap! touched* conj (path/resolve (str p)))))
+        on-bash-files (fn [data] (doseq [p (or (.-paths data) [])] (touch! p)) nil)
 
         ;; before_tool_call fires for EVERY handler regardless of another
         ;; handler blocking the call (emit-collect merges block afterwards),
@@ -29,8 +35,9 @@
           (when (and (shared/edit-tool? (.-toolName event))
                      (not (.-cancelled event))
                      (not (.-isError event)))
-            (when-let [path (tool-metadata/tool-path (.-args event))]
-              (shared/promote! pending* checkpoints* @turn* path)))
+            (when-let [p (tool-metadata/tool-path (.-args event))]
+              (shared/promote! pending* checkpoints* @turn* p)
+              (touch! p)))
           nil)
 
         on-finalize
@@ -42,6 +49,20 @@
     (.on api "before_tool_call" on-before-tool)
     (.on api "tool_complete" on-complete)
     (.on api "turn_finalize" on-finalize)
+    ;; Files a shell command changed (bash_suite edit-diff).
+    (when-let [ev (.-events api)] (when (.-on ev) (.on ev "bash-suite__bash:files-changed" on-bash-files)))
+
+    (.registerCommand api "diff"
+                      #js {:description "Everything this session changed: git diff vs HEAD for the files it touched, plus new files"
+                           :handler
+                           (fn [_args ctx]
+                             (let [text (shared/diff-report (js/process.cwd) (vec @touched*))
+                                   ui   (some-> ctx .-ui)]
+                               (cond
+                                 (and ui (.-showOverlay ui)) (.showOverlay ui text)
+                                 (and ui (.-notify ui))      (.notify ui text "info")
+                                 :else                        (js/console.log text))
+                               text))})
 
     (.registerCommand api "rewind"
                       ;; `undo` is what anyone reaches for; `rewind` is what it
@@ -71,6 +92,8 @@
       (.off api "before_tool_call" on-before-tool)
       (.off api "tool_complete" on-complete)
       (.off api "turn_finalize" on-finalize)
+      (when-let [ev (.-events api)] (when (.-off ev) (.off ev "bash-suite__bash:files-changed" on-bash-files)))
+      (.unregisterCommand api "diff")
       (.unregisterCommand api "rewind"))))
 
 (def ^:export default activate)

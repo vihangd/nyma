@@ -6,6 +6,9 @@
    /rewind restores the newest group (repeat to go further back). Session-
    scoped and in-memory — a trust net for accept-edits/full-auto, not a VCS."
   (:require ["node:fs" :as fs]
+            ["node:path" :as path]
+            [clojure.string :as str]
+            [agent.utils.git-files :as git]
             [agent.tool-metadata :as tool-metadata]))
 
 (def max-snapshot-bytes (* 2 1024 1024))
@@ -81,3 +84,57 @@
        (map (fn [turn]
               (str "turn " turn ": " (.join (clj->js (vec (keys (get @checkpoints* turn)))) ", "))))
        vec))
+
+;;; ─── /diff ────────────────────────────────────────────────────
+
+(def max-diff-lines 4000)
+
+(defn- quote-path [p] (str "'" (str/replace p "'" "'\\''") "'"))
+
+(defn diff-report
+  "What `/diff` shows: git's diff against HEAD for the files this session
+   touched (`abs-paths`), plus the ones it created that git does not track
+   yet. Limited to those files on purpose — your own edits elsewhere in the
+   tree are not the session's. Outside a repo, the list of files.
+
+   Per-edit diffs were shown as they happened, and checkpoints knew every
+   touched file, but there was no way to review the whole session's change
+   before committing."
+  [cwd abs-paths]
+  (let [root (git/run-git "rev-parse --show-toplevel" cwd)]
+    (cond
+      (empty? abs-paths)
+      "No files changed by this session yet."
+
+      (str/blank? root)
+      (str "Not a git repository — files this session changed:\n"
+           (str/join "\n" (map #(str "  " %) (sort abs-paths))))
+
+      :else
+      (let [rels      (->> abs-paths
+                           (map #(path/relative root %))
+                           (remove #(str/starts-with? % ".."))
+                           distinct sort vec)
+            quoted    (str/join " " (map quote-path rels))
+            ;; vs HEAD: staged and unstaged alike. A repo with no commits has
+            ;; no HEAD, so fall back to the working-tree diff.
+            tracked   (let [d (git/run-git (str "diff HEAD -- " quoted) root)]
+                        (if (str/blank? d) (git/run-git (str "diff -- " quoted) root) d))
+            untracked (->> (str/split-lines (git/run-git (str "ls-files --others --exclude-standard -- " quoted) root))
+                           (remove str/blank?)
+                           vec)
+            new-files (for [u untracked]
+                        (let [n (try (count (str/split-lines (fs/readFileSync (path/join root u) "utf8")))
+                                     (catch :default _ "?"))]
+                          (str "new file: " u " (" n " lines)")))
+            body      (str/join "\n\n" (remove str/blank? [tracked (str/join "\n" new-files)]))
+            lines     (str/split-lines body)]
+        (cond
+          (str/blank? body)
+          (str "No changes left from this session's edits (" (count rels) " file(s) touched — reverted or committed).")
+
+          (> (count lines) max-diff-lines)
+          (str (str/join "\n" (take max-diff-lines lines))
+               "\n\n… " (- (count lines) max-diff-lines) " more lines — run `git diff HEAD` for all of it.")
+
+          :else body)))))
