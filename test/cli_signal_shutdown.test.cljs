@@ -82,11 +82,13 @@
                                   :data (fn [_ b] (swap! seen str (.decode dec b #js {:stream true})))}})
         exited (atom false)
         _      (.then (.-exited proc) (fn [_] (reset! exited true)))
-        ;; The first frame naming the model: the TUI is up, so the handlers
-        ;; (installed before interactive/start) are too.
+        ;; The status line's "ready": only the started TUI prints it, so the
+        ;; handlers (installed before interactive/start) are in. NOT the model
+        ;; name — a pre-TUI warning naming nope/nope matched first, and under
+        ;; full-suite load the HUP then beat the handler.
         _      (js-await (let [end (+ (js/Date.now) 15000)]
                            (loop []
-                             (when-not (or (.includes @seen "nope") (> (js/Date.now) end) @exited)
+                             (when-not (or (.includes @seen "ready") (> (js/Date.now) end) @exited)
                                (js-await (js/Bun.sleep 50))
                                (recur)))))
         early? @exited
