@@ -9,7 +9,8 @@
             [agent.extensions.model-roles.status-segment :as status-seg]
             [agent.extensions.model-roles.features.plan-mode :as plan-mode]
             [agent.extensions.model-roles.features.escalate :as escalate]
-            [agent.extensions.model-roles.features.commit :as commit]))
+            [agent.extensions.model-roles.features.commit :as commit]
+            [agent.extensions.model-roles.features.review :as review]))
 
 ;; Permission MODES are roles too (modes-as-roles): a role may carry a :policy
 ;; mapping a tool CATEGORY (exec|write|read|network — from categorize-tool, the
@@ -548,6 +549,10 @@
                       #js {:description "Draft a Conventional Commit message for the staged change with the commit role's model; commit on confirmation (never pushes)"
                            :handler (fn [_args ctx] (commit/run! api ctx))})
 
+    (.registerCommand api "review"
+                      #js {:description "Review uncommitted changes (or everything since <base>) with the deep role; ranked findings, then offer to have the agent fix them"
+                           :handler (fn [args ctx] (review/run! api args ctx))})
+
     (.registerCommand api "mode"
                       #js {:description "Switch permission mode: default | accept-edits | plan | full-auto | cycle"
                            :handler
@@ -595,6 +600,7 @@
       (.unregisterCommand api "roles")
       (.unregisterCommand api "mode")
       (.unregisterCommand api "commit")
+      (.unregisterCommand api "review")
       ;; Without this the binding survives deactivate/reload pointing at a
       ;; stale closure, and re-activating double-binds it.
       (doseq [k [(cycle-binding api) (mode-cycle-binding api)]]

@@ -32,6 +32,7 @@ out: `/role reset` is the escalation.
 |---|---|
 | `/model-roles__escalate` | `[/escalate]` — bare, it reports tier, target, budget and failover chain, plus the usage line. `/escalate now` hands the current task to the stronger model from a pruned context; `/escalate off` reverts and disarms for the session; `/escalate status` is the same report as bare |
 | `/model-roles__commit` | `[/commit]` — drafts a Conventional Commit message for the staged change with the `commit` role's model (falls back to the current model), shows it, and commits on confirmation; `Edit subject` rewrites the first line. With nothing staged it offers to stage tracked changes (never untracked files). Never pushes |
+| `/model-roles__review` | `[/review [base]]` — the `deep` role (falls back to the current model) reviews `git diff HEAD` plus untracked files, or `git diff <base>` when a base is given, and returns findings `path:line — severity — problem — fix`, most severe first, in the overlay. On confirmation the findings go to the agent to verify and fix |
 | `/model-roles__role` | `[/role <name>]` — switch the active role. With no arg, shows the current role and the list. `/role reset` reverts to `default` |
 | `/model-roles__roles` | List every available role |
 | `/model-roles__planmode` | Enter plan mode: bind the `plan` role (read-only tools, write/edit/bash denied), capture the plan, and hand off to execution on exit |
