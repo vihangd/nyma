@@ -68,11 +68,10 @@
                                                :data (fn [_ d] (swap! buf str (.decode dec d #js {:stream true})))}})]
     (try
       (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "ready") 15000))) (.toBe true))
-      (.write (.-terminal proc) "what is in @shot.png")
-      (js-await (js/Bun.sleep 300))
-      ;; Escape closes the @ autocomplete popup; Enter would pick from it.
-      (.write (.-terminal proc) "\u001b")
-      (js-await (js/Bun.sleep 200))
+      ;; A trailing space, then Enter — what a person types. The popup used
+      ;; to reopen on the space and Enter picked a file instead of submitting.
+      (.write (.-terminal proc) "what is in @shot.png ")
+      (js-await (js/Bun.sleep 400))
       (.write (.-terminal proc) "\u001b[13u")
       (-> (expect (js-await (wait-for #(pos? (count @(:requests srv))) 15000))) (.toBe true))
       (let [body (js/JSON.stringify (first @(:requests srv)))]

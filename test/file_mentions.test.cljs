@@ -191,3 +191,18 @@
                                           (it "an unterminated fence swallows the rest of the message"
                                               (fn []
                                                 (-> (expect (fm/find-mentions "@notes.txt\n```\n@src/main.cljs")) (.toEqual ["notes.txt"]))))))
+
+(describe "autocomplete after a space"
+          (fn []
+            ;; Every space re-listed the directory while the @ popup was open,
+            ;; and Enter picked from it instead of submitting.
+            (it "an empty word after a space suggests nothing unless forced"
+                ^:async (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-ac-"))
+                        _ (fs/writeFileSync (path/join d "shot.png") "x")
+                        p (fm/configure-provider! (new CombinedAutocompleteProvider #js [] d nil) d nil)
+                        line "what is in @shot.png "]
+                    (-> (expect (js-await (.getSuggestions p #js [line] 0 (count line) #js {}))) (.toBeNull))
+                    (-> (expect (some? (js-await (.getSuggestions p #js [line] 0 (count line) #js {:force true}))))
+                        (.toBe true))
+                    (fs/rmSync d #js {:recursive true}))))))

@@ -202,10 +202,26 @@
         (fn [query _opts] (js/Promise.resolve (fallback-suggestions cwd query))))
   provider)
 
+(defn- no-empty-prefix-on-space!
+  "Upstream returns an EMPTY path prefix after any whitespace, so once the @
+   popup was open, every space re-listed the directory — and Enter, meant to
+   submit, picked `.nyma/` or the next file instead. An empty prefix now
+   counts only for a forced (Tab) completion; typed `./`, `~/` and `a/b`
+   prefixes are unchanged."
+  [provider]
+  (let [orig (aget provider "extractPathPrefix")]
+    (when (fn? orig)
+      (aset provider "extractPathPrefix"
+            (fn [text force]
+              (let [r (.call orig provider text force)]
+                (if (and (= r "") (not force)) nil r))))))
+  provider)
+
 (defn configure-provider!
   "Wire `provider` for `@file` completion: fd when present, else the nyma
    enumerator. Returns the provider."
   [provider cwd fd-path]
+  (no-empty-prefix-on-space! provider)
   (if fd-path
     (do (aset provider "fdPath" fd-path) provider)
     (install-fallback! provider cwd)))
