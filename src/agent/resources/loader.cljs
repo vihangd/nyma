@@ -15,6 +15,16 @@
   (path/join (home/dir) ".nyma"))
 (def project-dir ".nyma")
 
+;; --append-system-prompt. Module-level, not passed through `discover`:
+;; /reload rebuilds the system prompt from fresh resources, which would
+;; silently drop a value handed in once at startup.
+(defonce ^:private cli-append (atom nil))
+
+(defn set-cli-append!
+  "Text appended to every system prompt this process builds; nil clears."
+  [s]
+  (reset! cli-append (when (and (string? s) (seq (str/trim s))) s)))
+
 (defn- distinct-dirs
   "Drop directories that name the same folder twice. `project-dir` is the
    relative \".nyma\", so running nyma from the home directory makes the
@@ -404,7 +414,8 @@ When multiple independent tool calls are needed, make them in parallel.
               env-block
               skills-block
               (when (seq agents-md) (str "\n\n" agents-md))
-              (when append (str "\n\n" append)))))
+              (when append (str "\n\n" append))
+              (when-let [extra @cli-append] (str "\n\n" extra)))))
 
      ;; User extension directories only. These are real directories on the
      ;; machine running nyma, so scanning them works from a source tree and from

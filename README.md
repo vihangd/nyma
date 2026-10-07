@@ -544,6 +544,8 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--fork` | Branch a copy of an existing session | — |
 | `--no-session` | Disable session persistence | — |
 | `--trust` | Run this folder's project-defined commands without asking, this run only (see Workspace Trust) | — |
+| `--max-steps <n>` | Cap model steps (tool-call rounds) per run; a capped run says so and stops | `100` (setting `max-steps`) |
+| `--append-system-prompt <text>` | Append text to the system prompt for this run (kept across `/reload`) | — |
 | `--discover` | With `-p`: fetch provider catalogues at startup | off in one-shot runs |
 | `--ext-<name>[=v]` | Set a flag registered by an extension | — |
 | `--debug` | Debug logging to `~/.nyma/debug.log` | — |

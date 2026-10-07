@@ -11,7 +11,7 @@
             [agent.core :refer [create-agent]]
             [agent.model-info :as model-info]
             [agent.loop :refer [run]]
-            [agent.resources.loader :refer [discover]]
+            [agent.resources.loader :as loader :refer [discover]]
             [agent.resources.skills :as skills]
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence! new-session-path]]
             [agent.sessions.partial :as session-partial]
@@ -267,6 +267,10 @@ Session:
       --session <path>   Use a specific session file (jsonl).
                          (Default: a fresh session file per launch.)
       --no-session       Don't read or write any session file.
+      --max-steps <n>    Cap model steps (tool-call rounds) per run. Default: 100
+                         (settings max-steps). A capped run says so and stops.
+      --append-system-prompt <text>
+                         Append text to the system prompt for this run.
       --trust            Run this folder's project-defined commands (MCP servers,
                          hooks, LSP commands, verify.cmd, .nyma/extensions) without
                          asking, this run only. Also NYMA_TRUST=1.
@@ -661,7 +665,10 @@ Examples:
        :approve      #js {:type "boolean"}
        :no-approve   #js {:type "boolean"}
        ;; Trust this folder's project-defined commands for this run only.
-       :trust        #js {:type "boolean"}})
+       :trust        #js {:type "boolean"}
+       ;; Headless controls: a step cap for this run, and extra system text.
+       :max-steps    #js {:type "string"}
+       :append-system-prompt #js {:type "string"}})
 
 (defn parse-cli-args!
   "argv → {:values :positionals}, exiting 2 with one line on a bad flag.
@@ -755,12 +762,23 @@ Examples:
                                   (str "archived " archived " session(s), "
                                        (js/Math.round (/ bytes-saved 1024)) "KB saved"))))))
 
+        ;; --max-steps: a positive integer or a usage error (exit 2). A
+        ;; non-number silently meaning "default" would hide a typo in CI.
+        max-steps (if-let [raw (:max-steps values)]
+                    (let [n (js/Number raw)]
+                      (if (and (js/Number.isInteger n) (pos? n))
+                        n
+                        (do (.write (.-stderr js/process)
+                                    (str "nyma: --max-steps expects a positive integer, got " (pr-str raw) "\n"))
+                            (js/process.exit 2))))
+                    (or (:max-steps merged) 100))
+        _ (loader/set-cli-append! (:append-system-prompt values))
         active-tools (resolve-tools values merged)
         ;; Create agent first, then resolve model via its provider registry
         agent (create-agent
                {:model         nil
                 :system-prompt ((:build-system-prompt resources))
-                :max-steps     (or (:max-steps merged) 100)
+                :max-steps     max-steps
                 ;; --thinking beats settings :thinking. Both were parsed and
                 ;; then dropped before this.
                 :thinking      (or (:thinking values) (:thinking merged))

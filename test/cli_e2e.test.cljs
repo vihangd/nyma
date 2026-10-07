@@ -115,6 +115,30 @@
       (-> (expect (get-in call [:tool_calls 0 :function :name])) (.toBe "bash"))
       (-> (expect (str (:content res))) (.toContain "hi")))))
 
+(defn ^:async t-append-system-prompt []
+  (let [{:keys [exit]} (js-await (run-cli (concat ["-p" "hi" "--no-session"
+                                                    "--append-system-prompt" "ZEBRA-RULE: answer in haiku"]
+                                                   model-args)))
+        sys (some #(when (= "system" (:role %)) (str (:content %))) (fms/request-messages @server 0))]
+    (-> (expect exit) (.toBe 0))
+    (-> (expect sys) (.toContain "ZEBRA-RULE: answer in haiku"))))
+
+(defn ^:async t-max-steps []
+  ;; The model keeps calling tools; --max-steps 1 stops after one round.
+  ((:script! @server)
+   {:tool-call {:name "bash" :args {:command "echo one"}}}
+   {:tool-call {:name "bash" :args {:command "echo two"}}}
+   {:text "never reached"})
+  (js-await (run-cli (concat ["-p" "loop" "--no-session" "--permission-mode" "full-auto"
+                              "--max-steps" "1"]
+                             model-args)))
+  (-> (expect (count @(:requests @server))) (.toBeLessThanOrEqual 2)))
+
+(defn ^:async t-max-steps-bad []
+  (let [{:keys [exit err]} (js-await (run-cli (concat ["-p" "hi" "--max-steps" "lots"] model-args)))]
+    (-> (expect exit) (.toBe 2))
+    (-> (expect err) (.toContain "--max-steps expects a positive integer"))))
+
 ;;; ─── stream-json ────────────────────────────────────────────
 
 (defn ^:async t-stream-json-mid-stream-failure []
@@ -260,4 +284,7 @@
                    (fresh t-fork-leaves-source-untouched) t)
                (it "-r with no sessions says so" (fresh t-resume-with-no-sessions) t)
                (it "resuming a session that ends in a tool call without its result sends no dangling tool call"
-                   (fresh t-resume-drops-dangling-tool-call) t))))
+                   (fresh t-resume-drops-dangling-tool-call) t)
+               (it "--append-system-prompt reaches the system prompt" (fresh t-append-system-prompt) t)
+               (it "--max-steps caps the tool loop" (fresh t-max-steps) t)
+               (it "--max-steps rejects a non-number with exit 2" (fresh t-max-steps-bad) t))))
