@@ -1,8 +1,12 @@
-(ns agent.model-info)
+(ns agent.model-info
+  (:require [agent.pricing-data :as pricing-data]))
 
-;; Built-in model context windows
+;; Built-in model context windows: the models.dev snapshot, with the rows
+;; below winning (retired ids it no longer lists, and our own figures).
 (def ^:private default-models
-  {"claude-fable-5-1"         {:context-window 1000000}
+  (merge
+   (into {} (map (fn [[k n]] [k {:context-window n}])) pricing-data/context)
+   {"claude-fable-5-1"         {:context-window 1000000}
    "claude-fable-5"           {:context-window 1000000}
    "claude-opus-5-5"          {:context-window 1000000}
    "claude-opus-5"            {:context-window 1000000}
@@ -19,7 +23,7 @@
    "claude-haiku-4-20250901"  {:context-window 200000}
    "gpt-4o"                   {:context-window 128000}
    "gpt-4o-mini"              {:context-window 128000}
-   "gemini-2.0-flash"         {:context-window 1000000}})
+   "gemini-2.0-flash"         {:context-window 1000000}}))
 
 (defn model-key
   "Registry lookup key for a model: `provider/id` when both are known.
@@ -81,12 +85,24 @@
       ;; any model whose own window is unknown would inherit whichever sibling
       ;; `some` reached first. Matching bare-to-bare keeps this doing what it was
       ;; written for: letting an unrecognised dated id find its family.
-      (let [target (or (bare-id id) id)]
-        (some (fn [[k v]]
-                (when-not (.includes k "/")
-                  (let [prefix (subs k 0 (min 15 (count k)))]
-                    (when (.startsWith target prefix) (usable v)))))
-              models))))
+      ;;
+      ;; The key sharing the LONGEST prefix wins, not the first one `some`
+      ;; reaches: with the models.dev snapshot, "claude-sonnet-4" opens 4-5,
+      ;; 4-6 and 4-20250514, whose windows differ. A tie takes the smaller
+      ;; window — compaction planned against too small a window is early;
+      ;; against too large a one it overflows.
+      (let [target (or (bare-id id) id)
+            common (fn [k] (loop [i 0] (if (and (< i (count k)) (< i (count target))
+                                                 (= (.charAt k i) (.charAt target i)))
+                                          (recur (inc i)) i)))]
+        (->> models
+             (keep (fn [[k v]]
+                     (when (and (not (.includes k "/")) (usable v))
+                       (let [n (common k)]
+                         (when (>= n (min 15 (count k))) [n v])))))
+             (sort-by (fn [[n v]] (- (:context-window v) (* n 1e12))))   ; longest first, then smallest window
+             first
+             second))))
 
 (defn create-model-registry
   "Creates a model registry with context window info.

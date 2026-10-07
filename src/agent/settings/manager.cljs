@@ -327,7 +327,7 @@
 
 ;; Maps whose KEYS are data (identifiers, ids) rather than config names.
 ;; Normalizing these corrupts them — see normalize-keys.
-(def ^:private data-keyed-maps #{"model-profiles" "model-routing" "projects"})
+(def ^:private data-keyed-maps #{"model-profiles" "model-routing" "projects" "pricing"})
 
 (defn- normalize-values
   "Normalize the VALUES of a data-keyed map, leaving its keys untouched."

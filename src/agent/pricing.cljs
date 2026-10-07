@@ -1,6 +1,7 @@
 (ns agent.pricing
   "Token cost table + `calculate-turn-cost` for all supported models."
-  (:require [agent.model-info :as model-info]))
+  (:require [agent.model-info :as model-info]
+            [agent.pricing-data :as pricing-data]))
 
 ;; Model pricing in USD per 1M tokens:
 ;;   [input output]                              — no cache rates known
@@ -12,31 +13,38 @@
 ;; 1.25x, OpenAI reads at roughly 0.1x with no separate write charge, Gemini
 ;; differs again. Guessing a ratio would replace a known-wrong number with an
 ;; unknown-wrong one.
+(def overrides
+  "Rows the models.dev snapshot (agent.pricing-data) lacks or gets wrong.
+   Each needs a reason: anything else belongs in the snapshot, refreshed
+   with 'bun run gen:prices'."
+  ;; Retired models models.dev no longer lists; kept so old sessions still
+  ;; price. Anthropic rates are [input output 0.1x-read 1.25x-write].
+  {"claude-sonnet-4-20250514" [3.0 15.0 0.3 3.75]
+   "claude-opus-4-20250514"   [15.0 75.0 1.5 18.75]
+   "claude-haiku-3-20240307"  [0.25 1.25 0.03 0.30]
+   "gemini-2.0-flash"         [0.1 0.4 0.025 nil]
+   "gemini-1.5-pro"           [1.25 5.0 0.3125 nil]})
+
 (def token-costs
-  ;; Anthropic first-party rates, $/MTok [input output cache-read cache-write],
-  ;; from the claude-api reference cached 2026-09-25. Opus 4.8 and Sonnet 5
-  ;; were listed at $15/$75 and $3/$15 — the Opus 4 / Sonnet 4 prices, 3x and
-  ;; 1.5x too high.
-  (atom {"claude-fable-5-1"             [10.0 50.0 0.25 12.5]
-         "claude-fable-5"               [10.0 50.0 1.0 12.5]
-         "claude-opus-5-5"              [4.0 20.0 0.2 5.0]
-         "claude-opus-5"                [5.0 25.0 0.5 6.25]
-         "claude-opus-4-8"              [5.0 25.0 0.5 6.25]
-         "claude-opus-4-7"              [5.0 25.0 0.5 6.25]
-         "claude-opus-4-6"              [5.0 25.0 0.5 6.25]
-         "claude-sonnet-5-5"            [2.0 10.0 0.2 2.5]
-         "claude-sonnet-5"              [2.0 10.0 0.2 2.5]
-         "claude-sonnet-4-6"            [3.0 15.0 0.3 3.75]
-         "claude-haiku-4-5"             [1.0 5.0 0.1 1.25]
-         "claude-haiku-4-5-20251001"    [1.0 5.0 0.1 1.25]
-         "claude-sonnet-4-20250514"     [3.0 15.0 0.3 3.75]
-         "claude-opus-4-20250514"       [15.0 75.0 1.5 18.75]
-         "claude-haiku-3-20240307"      [0.25 1.25 0.03 0.30]
-         "gpt-4o"                       [2.5 10.0 1.25 nil]
-         "gpt-4o-mini"                  [0.15 0.6 0.075 nil]
-         "gpt-4-turbo"                  [10.0 30.0]
-         "gemini-2.0-flash"             [0.1 0.4 0.025 nil]
-         "gemini-1.5-pro"               [1.25 5.0 0.3125 nil]}))
+  (atom (merge pricing-data/prices overrides)))
+
+(defn- rate-row? [r]
+  (and (or (vector? r) (js/Array.isArray r))
+       (<= 2 (count r) 4)
+       (every? #(or (nil? %) (and (number? %) (>= % 0))) r)
+       (number? (first r)) (number? (second r))))
+
+(defn apply-user-prices!
+  "Settings `pricing` — {\"model-id\": [in out cache-read cache-write]} —
+   on top of everything else: a gateway discount, or a model the snapshot
+   lacks, without a rebuild. Returns the keys it refused (not 2-4 numbers)."
+  [m]
+  (let [bad (atom [])]
+    (doseq [[k r] (when (map? m) m)]
+      (if (rate-row? r)
+        (swap! token-costs assoc (str k) (vec r))
+        (swap! bad conj (str k))))
+    @bad))
 
 (def unpriced-providers
   "Provider names whose per-token rates we don't know.

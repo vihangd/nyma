@@ -1,7 +1,9 @@
 (ns pricing.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.pricing :refer [calculate-turn-cost format-cost
-                                   format-tokens token-costs]]))
+            ["../scripts/gen-prices.mjs" :as gen]
+            [agent.pricing :as pricing :refer [calculate-turn-cost format-cost
+                                               format-tokens token-costs]]
+            [agent.pricing-data :as pricing-data]))
 
 (describe "calculate-turn-cost — uncached" (fn []
   (it "calculates cost for known model"
@@ -128,6 +130,8 @@
             ;; Opus 4.8 and Sonnet 5 sat at the Opus 4 / Sonnet 4 prices ($15/$75,
             ;; $3/$15), so /stats overstated their cost 3x and 1.5x. Pinned to the
             ;; claude-api reference (2026-09-25): [in out cache-read cache-write].
+            ;; Rows now come from the models.dev snapshot, so this also catches
+            ;; a bad `bun run gen:prices`.
             (it "match the published per-MTok prices"
                 (fn []
                   (doseq [[id want] [["claude-opus-5-5"   [4.0 20.0 0.2 5.0]]
@@ -138,3 +142,41 @@
                                      ["claude-sonnet-5"   [2.0 10.0 0.2 2.5]]]]
                     (-> (expect #js [id (clj->js (get @token-costs id))])
                         (.toEqual #js [id (clj->js want)])))))))
+
+(describe "price snapshot"
+          (fn []
+            (it "neighbouring ids keep their own rows — no prefix match"
+                (fn []
+                  ;; Fable 5 reads cache at $1.00, Fable 5.1 at $0.25.
+                  (-> (expect (nth (get pricing-data/prices "claude-fable-5") 2)) (.toBe 1))
+                  (-> (expect (nth (get pricing-data/prices "claude-fable-5-1") 2)) (.toBe 0.25))))
+
+            (it "overrides fill what the snapshot lacks"
+                (fn []
+                  (-> (expect (get pricing-data/prices "claude-opus-4-20250514")) (.toBeUndefined))
+                  (-> (expect (clj->js (get @token-costs "claude-opus-4-20250514")))
+                      (.toEqual #js [15 75 1.5 18.75]))))
+
+            (it "settings pricing beats both; junk rows are refused, not applied"
+                (fn []
+                  (let [orig (get @token-costs "claude-opus-5-5")
+                        bad  (pricing/apply-user-prices! {"claude-opus-5-5" [3 15]
+                                                          "x/broken" ["a" 1]
+                                                          "x/short" [1]})]
+                    (-> (expect (clj->js (get @token-costs "claude-opus-5-5"))) (.toEqual #js [3 15]))
+                    (-> (expect (clj->js (sort bad))) (.toEqual #js ["x/broken" "x/short"]))
+                    (-> (expect (get @token-costs "x/broken")) (.toBeUndefined))
+                    (swap! token-costs assoc "claude-opus-5-5" orig))))
+
+            (it "the generator keys first-party by bare id, hosts by provider/id"
+                (fn []
+                  (let [r (gen/extract #js {:anthropic #js {:models #js {"claude-x" #js {:cost #js {:input 1 :output 2 :cache_read 0.1}
+                                                                                          :limit #js {:context 1000}
+                                                                                          :modalities #js {:input #js ["text" "pdf"] :output #js ["text"]}}
+                                                                         "no-cost" #js {}}}
+                                            :groq #js {:models #js {"m" #js {:cost #js {:input 0 :output 0}}
+                                                                    "tts" #js {:cost #js {:input 1 :output 1}
+                                                                               :modalities #js {:output #js ["audio"]}}}}})]
+                    (-> (expect (.-prices r)) (.toEqual #js {"claude-x" #js [1 2 0.1] "groq/m" #js [0 0]}))
+                    (-> (expect (.-context r)) (.toEqual #js {"claude-x" 1000}))
+                    (-> (expect (.-pdf r)) (.toEqual #js ["claude-x"])))))))

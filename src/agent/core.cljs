@@ -11,7 +11,9 @@
             [agent.model-info :refer [create-model-registry]]
             [agent.tool-metadata :as tool-metadata]
             [agent.keybinding-registry :as kbr]
-            [agent.thinking :as thinking-util]))
+            [agent.thinking :as thinking-util]
+            [agent.pricing :as pricing]
+            [agent.debug :as d]))
 
 (defn- filter-tools-by-policy
   "Filter a tools map using capability/mode constraints.
@@ -106,7 +108,10 @@
         ;; applied. Tests pass a plain map, so accept both.
         merged-settings   (if (and settings (fn? (:get settings)))
                             ((:get settings))
-                            (or settings {}))]
+                            (or settings {}))
+        _                 (when-let [bad (seq (pricing/apply-user-prices! (get merged-settings :pricing)))]
+                            (d/warn "settings" (str "pricing: ignored " (.join (clj->js bad) ", ")
+                                                    " — each must be [input output] or [input output cache-read cache-write], USD per 1M")))]
     (let [agent {:events            events
                  :config            {:model                model
                                      :system-prompt        system-prompt
