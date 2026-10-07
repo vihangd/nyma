@@ -139,6 +139,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/toolcall_rescue.cljs` | `agent.utils.toolcall-rescue` | Rescue parser — normalize malformed tool-call formats to OpenAI JSON. |
 | `src/agent/utils/ui.cljs` | `agent.utils.ui` | Shared UI-capability predicates. |
 | `src/agent/utils/validation.cljs` | `agent.utils.validation` | Structured validation warnings with suggestions. |
+| `src/agent/utils/worktree.cljs` | `agent.utils.worktree` | A separate git checkout for work that must not touch the user's tree. |
 | `src/agent/version.cljs` | `agent.version` | The version, baked in at build time. |
 | `src/gateway/channels/email.cljs` | `gateway.channels.email` | Email channel adapter using imap-simple (IMAP polling) + nodemailer (SMTP). |
 | `src/gateway/channels/http.cljs` | `gateway.channels.http` | Generic HTTP webhook channel adapter using Bun's built-in HTTP server. |

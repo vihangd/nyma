@@ -22,6 +22,9 @@
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions.subagent.concurrency :as conc]
             [agent.extensions.subagent.agents-md :as agents-md]
+            [agent.utils.worktree :as wt]
+            ["node:fs" :as fs]
+            ["node:url" :as url]
             [clojure.string :as str]))
 
 (def ^:private MAX-PARALLEL 8)
@@ -107,6 +110,72 @@ intermediate tool calls, so put everything that matters in the summary.")
       :else (str c))))
 
 ;; ---------------------------------------------------------------------------
+;; Worktree isolation: a child PROCESS in its own checkout
+;; ---------------------------------------------------------------------------
+;;
+;; An in-process child shares process.cwd with the parent, and every tool
+;; resolves paths against it, so a child that edits files edits the user's
+;; tree. In a worktree the child is a separate `nyma -p` whose cwd is the
+;; checkout; its changes come back as a branch.
+
+(defn self-command
+  "argv prefix that runs this nyma: the compiled binary is process.execPath
+   alone; from dist it is the runtime plus cli.mjs beside this module."
+  []
+  (let [cli (try (url/fileURLToPath (js/URL. "../../cli.mjs" (.-url js/import.meta)))
+                 (catch :default _ nil))]
+    (if (and cli (fs/existsSync cli))
+      [js/process.execPath cli]
+      [js/process.execPath])))
+
+(defn worktree-args
+  "Flags for the child run, from the role config."
+  [{:keys [model sys allowed steps]}]
+  (cond-> ["-p" "--output-format" "json" "--no-session" "--permission-mode" "full-auto"
+           "--max-steps" (str (or steps 20)) "--model" model
+           "--append-system-prompt" sys]
+    (seq allowed) (into ["--tools" (str/join "," allowed)])))
+
+(defn ^:async run-in-worktree [opts cfg]
+  (let [{:keys [agent-name task model-override max-steps]} opts
+        provider (cfg-get cfg :provider "provider")
+        model-id (or model-override (cfg-get cfg :model "model"))
+        allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
+    (try
+      (let [tree (wt/create! (js/process.cwd) (str agent-name "-" (js/Date.now)))
+            argv (into (self-command)
+                       (conj (worktree-args {:model   (if provider (str provider "/" model-id) model-id)
+                                             :sys     (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
+                                             :allowed allowed
+                                             :steps   max-steps})
+                             task))
+            proc (js/Bun.spawn (clj->js argv)
+                               #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
+                                    :env js/process.env})
+            out  (js-await (.text (js/Response. (.-stdout proc))))
+            err  (js-await (.text (js/Response. (.-stderr proc))))
+            _    (js-await (.-exited proc))
+            res  (try (js/JSON.parse out) (catch :default _ nil))
+            done (wt/finish! tree (str "nyma subagent " agent-name ": " (subs (str task) 0 (min 60 (count (str task))))))]
+        {:agent agent-name
+         :ok    (and (some? res) (not (.-is_error res)))
+         :text  (str (if res (.-result res) (str "child produced no result: " (str/trim (str err out))))
+                     "
+
+"
+                     (if done
+                       (str "Worktree branch `" (:branch done) "` (" (:commits done) " commit(s)):
+" (:stat done)
+                            "
+Merge with: git merge " (:branch done))
+                       "No file changes; the worktree was removed."))
+         :usage {:input  (or (some-> res .-usage .-input_tokens) 0)
+                 :output (or (some-> res .-usage .-output_tokens) 0)
+                 :cost   (or (some-> res .-total_cost_usd) 0.0)}})
+      (catch :default e
+        {:agent agent-name :ok false :text (str "Subagent " agent-name " (worktree) failed: " (.-message e))}))))
+
+;; ---------------------------------------------------------------------------
 ;; Core: run one isolated child agent and return its summary + usage
 ;; ---------------------------------------------------------------------------
 
@@ -125,6 +194,11 @@ intermediate tool calls, so put everything that matters in the summary.")
       ;; Enforce :enabled false (e.g. the editing `worker` role, off by
       ;; default). A disabled role is only runnable if the user explicitly
       ;; sets :enabled true in settings.roles — keeps edits on the main thread.
+      ;; In a worktree the edits cannot reach the main thread's files, which
+      ;; is the reason it is off, so isolation runs it.
+      (= "worktree" (:isolation opts))
+      (js-await (run-in-worktree opts cfg))
+
       (false? (cfg-get cfg :enabled "enabled"))
       {:agent agent-name :ok false
        :text (str "Subagent role \"" agent-name "\" is disabled (:enabled false). "
@@ -312,7 +386,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                       :doc "Tool-call budget per subagent (default 20). Size it to the task: 3-4 for a lookup or a question about one file, 8-12 for a change spanning several. A subagent out of steps still reports what it has."}]
    :action [:enum ["run" "status"] {:optional true :doc "run (default) or status (list background jobs)."}]
    :async  [:boolean {:optional true :doc "Run in background; result is delivered as a follow-up message."}]
-   :model  [:string {:optional true :doc "Optional model id override (single mode)."}]})
+   :model  [:string {:optional true :doc "Optional model id override (single mode)."}]
+   :isolation [:enum ["worktree"] {:optional true :doc "worktree: each subagent works in its own git worktree (a separate checkout on branch nyma/<name>); its changes come back as that branch, never in your files. Use it to let a subagent EDIT (e.g. the worker role), or to run editing subagents in parallel."}]})
 
 (def ^:private tool-parameters
   ;; The item shape of tasks/chain is richer than the data form says
@@ -331,7 +406,7 @@ intermediate tool calls, so put everything that matters in the summary.")
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
           base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
-                                :steps-ceiling ceiling}
+                                :steps-ceiling ceiling :isolation (.-isolation args)}
                          (steps-arg (.-steps args) ceiling)
                          (assoc :max-steps (steps-arg (.-steps args) ceiling)))
           async?       (let [s    ((:get settings-mgr))
@@ -399,7 +474,9 @@ intermediate tool calls, so put everything that matters in the summary.")
              "to an earlier call. Ask for findings with file paths and line numbers, not "
              "narration. Send independent tasks together, but never give two of them the "
              "same file to edit. `steps` sizes each subagent's tool budget to the task. "
-             "async:true runs in the background. action:\"status\" lists jobs.")
+             "async:true runs in the background. action:\"status\" lists jobs. "
+             "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
+             "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
         :execute (fn [args] (tool-execute api args))})
 
@@ -413,7 +490,26 @@ intermediate tool calls, so put everything that matters in the summary.")
                               (str "Available subagents:\n" (format-agent-list agents))
                               "info")))})
 
+  (.registerCommand
+   api "worktrees"
+   #js {:description "List nyma's git worktrees; /worktrees rm <name> removes one (its branch too, if merged)"
+        :handler (fn [args ctx]
+                   (let [notify (fn [m l] (some-> ctx .-ui (.notify m l)))
+                         [sub nm] (vec args)]
+                     (if (= sub "rm")
+                       (case (wt/remove! (js/process.cwd) (str nm))
+                         "merged" (notify (str "Removed worktree " nm " and its merged branch.") "info")
+                         "kept"   (notify (str "Removed worktree " nm "; branch nyma/" (wt/safe-name nm)
+                                               " is not merged, so it was kept.") "warning")
+                         (notify (str "No worktree named " nm ".") "warning"))
+                       (let [all (wt/list-all (js/process.cwd))]
+                         (notify (if (seq all)
+                                   (str "Worktrees:\n" (str/join "\n" (map #(str "  " (:branch %) "  " (:path %)) all)))
+                                   "No nyma worktrees. Start one with nyma --worktree <name>.")
+                                 "info")))))})
+
   ;; deactivate
   (fn []
     (.unregisterTool api "subagent")
-    (.unregisterCommand api "agents")))
+    (.unregisterCommand api "agents")
+    (.unregisterCommand api "worktrees")))

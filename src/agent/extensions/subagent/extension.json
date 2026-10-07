@@ -1,6 +1,6 @@
 {
   "namespace": "subagent",
-  "description": "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs",
+  "description": "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs, and git-worktree isolation for editing children (/worktrees)",
   "capabilities": [
     "tools",
     "commands",

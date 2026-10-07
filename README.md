@@ -810,7 +810,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `small_model` | `small-model` | Adaptation layer for small/local models: quality monitor, per-model profiles, evidence store, self-tuning playbook (off unless enabled or `--ext-small-model`) |
 | `spec_driven` | `spec-driven` | Spec-driven development: durable plans surfaced from markdown specs |
 | `stats_dashboard` | `stats-dashboard` | Usage stats and cost aggregation dashboard |
-| `subagent` | `subagent` | Context-isolated delegation built on roles: parallel fan-out, chains, background jobs |
+| `subagent` | `subagent` | Context-isolated delegation built on roles: parallel fan-out, chains, background jobs, and git-worktree isolation for editing children (/worktrees) |
 | `thinking_renderer` | `thinking-renderer` | Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams |
 | `todos` | `todos` | Persistent todo ledger for session-scoped task tracking |
 | `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |

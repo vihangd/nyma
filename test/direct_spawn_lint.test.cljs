@@ -103,6 +103,7 @@
     "claude_hook_bridge"       ; runs user-configured hook commands
     "custom_provider_qwen_cli" ; drives the qwen CLI
     "lsp_suite"                ; lazily spawns language servers
+    "subagent"                 ; isolation:worktree runs the child as its own nyma
     "verify_gate"})            ; runs the configured verify command
 
 (describe "direct process spawning is allowlisted" (fn []

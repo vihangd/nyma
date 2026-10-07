@@ -1,6 +1,7 @@
 (ns agent.cli
   "Entry point, arg parsing, mode dispatch."
   (:require [agent.dev.ext-watch :as ext-watch]
+            [agent.utils.worktree :as worktree]
             [agent.trust :as trust]
             [agent.debug :as d]
             [clojure.string :as str]
@@ -271,6 +272,9 @@ Session:
                          (settings max-steps). A capped run says so and stops.
       --append-system-prompt <text>
                          Append text to the system prompt for this run.
+  -w, --worktree <name>  Work in git worktree <name> (.nyma/worktrees/<name>, branch
+                         nyma/<name>), created off HEAD the first time and reused
+                         after. Your checkout is never touched. /worktrees lists them.
       --trust            Run this folder's project-defined commands (MCP servers,
                          hooks, LSP commands, verify.cmd, .nyma/extensions) without
                          asking, this run only. Also NYMA_TRUST=1.
@@ -673,7 +677,9 @@ Examples:
        :trust        #js {:type "boolean"}
        ;; Headless controls: a step cap for this run, and extra system text.
        :max-steps    #js {:type "string"}
-       :append-system-prompt #js {:type "string"}})
+       :append-system-prompt #js {:type "string"}
+       ;; Run the whole session in a git worktree of this repo.
+       :worktree     #js {:type "string" :short "w"}})
 
 (defn parse-cli-args!
   "argv → {:values :positionals}, exiting 2 with one line on a bad flag.
@@ -713,6 +719,17 @@ Examples:
 
         ;; Same gate NYMA_DEBUG=1 opens; the flag is for the one-off run.
         _ (when (:debug values) (d/set-enabled! true))
+
+        ;; Before anything reads the cwd: settings, sessions, trust and every
+        ;; tool resolve against it, so the session simply lives in the worktree.
+        _ (when-let [w (:worktree values)]
+            (try
+              (let [t (worktree/open! (js/process.cwd) w)]
+                (js/process.chdir (:path t))
+                (.write (.-stderr js/process) (str "nyma: worktree " (:path t) " (branch " (:branch t) ")\n")))
+              (catch :default e
+                (.write (.-stderr js/process) (str "nyma: --worktree: " (.-message e) "\n"))
+                (js/process.exit 2))))
 
         mode      (or (:mode values)
                       (when (:print values) "print")
