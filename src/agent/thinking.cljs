@@ -63,6 +63,57 @@
     (boolean (or (re-find #"gemini-(2\.5|3)" id)
                  (str/includes? id "thinking")))))
 
+(defn- model-id [model]
+  (str (cond
+         (nil? model)    ""
+         (string? model) model
+         :else           (or (.-modelId model) ""))))
+
+(defn adaptive-model?
+  "Whether this Claude model takes ADAPTIVE thinking (`effort`), not a token
+   budget. Opus/Sonnet 4.6 and every later Claude, Fable and Mythos.
+
+   nyma sent `{type enabled, budgetTokens}` to every Claude. Opus 5, Opus
+   4.8/4.7 and Sonnet 5 reject `budget_tokens` with a 400; for Opus 5.5,
+   Sonnet 5.5 and Fable the AI SDK quietly swaps in adaptive thinking but
+   drops the level, so `/thinking high` and `/thinking low` behaved the same."
+  [model]
+  (boolean (re-find #"claude-(fable|mythos)-|claude-(opus|sonnet)-(4-[6-9]|[5-9])" (model-id model))))
+
+(defn- always-thinks?
+  "Models that reject disabling thinking outright (a 400): `off` can only
+   lower effort."
+  [model]
+  (boolean (re-find #"claude-(fable|mythos)-|claude-(opus|sonnet)-5-5" (model-id model))))
+
+;; Adaptive effort per level. 4.6 has no `xhigh`.
+(def ^:private anthropic-efforts
+  {"minimal" "low" "low" "low" "medium" "medium" "high" "high" "xhigh" "xhigh"})
+
+(defn- anthropic-options [level model]
+  (cond
+    (and (= "off" level) (always-thinks? model))
+    #js {:anthropic #js {:effort "low"}}
+
+    ;; Opus 5 / Sonnet 5 think when `thinking` is omitted; they accept an
+    ;; explicit disable, so `off` must say so.
+    (and (= "off" level) (re-find #"claude-(opus|sonnet)-5" (model-id model)))
+    #js {:anthropic #js {:thinking #js {:type "disabled"}}}
+
+    (= "off" level) nil
+
+    (adaptive-model? model)
+    (let [effort (get anthropic-efforts level)
+          effort (if (and (= effort "xhigh") (re-find #"-4-6" (model-id model))) "high" effort)]
+      ;; `summarized`: current models default to `omitted` — thinking blocks
+      ;; with empty text — and the reasoning view would show nothing.
+      #js {:anthropic #js {:thinking #js {:type "adaptive" :display "summarized"}
+                           :effort   effort}})
+
+    :else
+    (when-let [budget (get anthropic-budgets level)]
+      #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens budget}}})))
+
 (defn- provider-tag [model]
   (cond
     (nil? model)     ""
@@ -100,13 +151,13 @@
    Returns a plain JS object ready to hand to streamText."
   [level model]
   (let [level (str (or level "off"))]
-    (when (and (not= "off" level) (valid-level? level))
+    (when (valid-level? level)
       (case (provider-kind model)
         :anthropic
-        (when-let [budget (get anthropic-budgets level)]
-          #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens budget}}})
+        (anthropic-options level model)
 
         :google
+        (when (not= "off" level)
         ;; Only the thinking-capable Gemini lines, and clamped: `thinkingConfig`
         ;; is rejected outright by models that don't support it (the only
         ;; built-in Gemini, gemini-2.0-flash, is one), and 2.5 Flash caps the
@@ -117,7 +168,7 @@
           (when-let [budget (get anthropic-budgets level)]
             #js {:google #js {:thinkingConfig
                               #js {:thinkingBudget  (min budget gemini-max-budget)
-                                   :includeThoughts true}}}))
+                                   :includeThoughts true}}})))
 
         :openai-responses
         (when-let [effort (get openai-efforts level)]

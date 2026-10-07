@@ -20,9 +20,10 @@
               (reset! box (js/JSON.parse (.-body init)))
               (js/Response. "" #js {:status 400}))}))
 
-(defn- anthropic-model [f]
-  ((createAnthropic #js {:apiKey "k" :baseURL "https://relay.test/v1" :fetch f})
-   "claude-opus-5"))
+(defn- anthropic-model-id [id]
+  (fn [f] ((createAnthropic #js {:apiKey "k" :baseURL "https://relay.test/v1" :fetch f}) id)))
+
+(def ^:private anthropic-model (anthropic-model-id "claude-haiku-4-5"))
 
 (defn- openai-chat-model [f]
   (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1"
@@ -153,9 +154,34 @@
     (-> (expect (.. body -generationConfig -thinkingConfig -thinkingBudget))
         (.toBeGreaterThan 0))))
 
+;; Current Claude models take ADAPTIVE thinking + effort; `budget_tokens` is a
+;; 400 on Opus 5 / 4.8 / 4.7 / Sonnet 5, and the AI SDK's own rescue for
+;; Opus 5.5 / Sonnet 5.5 / Fable dropped the level. The old test here pinned
+;; claude-opus-5 + budget_tokens — the rejected shape.
+(defn ^:async test-adaptive-wire []
+  (doseq [[id level want-thinking want-effort]
+          [["claude-opus-5"     "medium" {:type "adaptive" :display "summarized"} "medium"]
+           ["claude-opus-4-8"   "xhigh"  {:type "adaptive" :display "summarized"} "xhigh"]
+           ["claude-sonnet-5"   "low"    {:type "adaptive" :display "summarized"} "low"]
+           ["claude-opus-5-5"   "high"   {:type "adaptive" :display "summarized"} "high"]
+           ["claude-sonnet-5-5" "high"   {:type "adaptive" :display "summarized"} "high"]
+           ["claude-fable-5-1"  "medium" {:type "adaptive" :display "summarized"} "medium"]
+           ;; off: Opus/Sonnet 5 think unless told not to — and accept the disable.
+           ["claude-opus-5"     "off"    {:type "disabled"} nil]
+           ;; off: these reject a disable (400), so effort is lowered instead.
+           ["claude-opus-5-5"   "off"    nil "low"]
+           ["claude-fable-5-1"  "off"    nil "low"]]]
+    (let [body (js-await (send-with (anthropic-model-id id) level))]
+      (-> (expect #js [id level (or (some-> (.-thinking body) js/JSON.stringify) "none")])
+          (.toEqual #js [id level (or (some-> want-thinking clj->js js/JSON.stringify) "none")]))
+      (-> (expect #js [id level (or (some-> body .-output_config .-effort) "none")])
+          (.toEqual #js [id level (or want-effort "none")])))))
+
 (describe "thinking reaches the request body" (fn []
-                                                (it "anthropic: off sends no thinking field" test-anthropic-off)
-                                                (it "anthropic: a level sends an enabled thinking block" test-anthropic-on)
+                                                (it "current Claude models: adaptive thinking + effort, never budget_tokens"
+                                                    test-adaptive-wire)
+                                                (it "budget models (Haiku 4.5): off sends no thinking field" test-anthropic-off)
+                                                (it "budget models (Haiku 4.5): a level sends an enabled thinking block" test-anthropic-on)
                                                 (it "openai /responses: a level sends reasoning effort" test-openai-responses-on)
                                                 (it "openai /chat: nothing is sent, even for a claude id" test-openai-chat-untouched)
                                                 (it "google: a level sends a thinking budget" test-google-on)))
