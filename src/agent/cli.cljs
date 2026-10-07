@@ -872,6 +872,11 @@ Examples:
     (when-not (:no-session values)
       (try
         (let [db-path (npath/join (.. js/process -env -HOME) ".nyma" "nyma.db")
+              ;; On a first run ~/.nyma does not exist yet, and SQLite will not
+              ;; create the directory: every new install printed "store
+              ;; unavailable: unable to open database file" and lost usage
+              ;; tracking for that session.
+              _       (fs/mkdirSync (npath/dirname db-path) #js {:recursive true})
               sqlite  (storage/create-sqlite-store db-path)]
           (aset api "__sqlite-store" sqlite)
           ((:subscribe (:store agent))

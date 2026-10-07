@@ -2,16 +2,29 @@
   "Default Anthropic/OpenAI/Google provider factories."
   (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
             ["@ai-sdk/openai" :refer [createOpenAI]]
-            ["@ai-sdk/google" :refer [createGoogleGenerativeAI]]))
+            ["@ai-sdk/google" :refer [createGoogleGenerativeAI]]
+            [agent.utils.credentials :as credentials]))
 
-(defn- create-anthropic-model
-  "Create an Anthropic model using ANTHROPIC_API_KEY env var."
-  [id]
-  (let [env-key (aget js/process.env "ANTHROPIC_API_KEY")]
-    (if env-key
-      ((createAnthropic #js {:apiKey env-key}) id)
-      (throw (js/Error.
-              "No Anthropic credentials found. Set ANTHROPIC_API_KEY env var.")))))
+(def key-env
+  "The env var each built-in provider reads its key from."
+  {"anthropic" "ANTHROPIC_API_KEY"
+   "openai"    "OPENAI_API_KEY"
+   "google"    "GOOGLE_GENERATIVE_AI_API_KEY"})
+
+(defn- api-key
+  "Env var first, then a key saved by `/login <provider>`. The built-ins read
+   only the env var, so `/login anthropic` wrote a key nothing read — while
+   the failure message told the user to run `/login`."
+  [provider]
+  (let [v (aget js/process.env (get key-env provider))]
+    (if (seq (str (or v ""))) v (credentials/read-credential provider))))
+
+(defn- builtin-model [provider create]
+  (fn [id]
+    (if-let [k (api-key provider)]
+      ((create #js {:apiKey k}) id)
+      (throw (js/Error. (str "No " provider " API key. Set " (get key-env provider)
+                             " or run /login " provider "."))))))
 
 ;; Model lists carry ids + display names only. Context windows come from
 ;; `agent.model-info` and pricing from `agent.pricing`, so those numbers keep a
@@ -37,9 +50,9 @@
 
 (def builtin-providers
   "Built-in LLM providers registered in the provider registry at startup."
-  {"anthropic" {:create-model create-anthropic-model
+  {"anthropic" {:create-model (builtin-model "anthropic" createAnthropic)
                 :models       anthropic-models}
-   "openai"    {:create-model (fn [id] ((createOpenAI) id))
+   "openai"    {:create-model (builtin-model "openai" createOpenAI)
                 :models       openai-models}
-   "google"    {:create-model (fn [id] ((createGoogleGenerativeAI) id))
+   "google"    {:create-model (builtin-model "google" createGoogleGenerativeAI)
                 :models       google-models}})

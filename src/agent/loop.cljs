@@ -9,7 +9,8 @@
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [agent.providers.builtins :as builtins]))
 
 (def stream-event-types
   "Maps AI SDK stream chunk types to internal event names."
@@ -285,12 +286,20 @@
                 ;; e.g. one declared in ~/.nyma/settings.json and then hidden by
                 ;; a project settings file replacing the whole local-models
                 ;; array.
-                (let [spec (or (:base-model-spec @state)
-                               (aget (:config agent) "active-provider-name"))]
+                (let [spec     (or (:base-model-spec @state)
+                                   (aget (:config agent) "active-provider-name"))
+                      ;; Name THIS provider's key and login, not Anthropic's
+                      ;; for everyone.
+                      provider (first (str/split (str (or spec "")) #"/"))
+                      env      (get builtins/key-env provider)]
                   (throw (js/Error.
                           (str "No model configured"
                                (when (seq (str (or spec ""))) (str " for '" spec "'"))
-                               ". Set ANTHROPIC_API_KEY or configure a provider via /login")))))
+                               ". "
+                               (cond
+                                 env               (str "Set " env " or run /login " provider ".")
+                                 (seq provider)    (str "Run /login " provider ", or check its entry in ~/.nyma/settings.json.")
+                                 :else             "Configure a provider with /login <provider>."))))))
 
             ;; Compute token budget for context_assembly
             model-id       (str (or (.-modelId active-model) active-model "unknown"))

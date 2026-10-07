@@ -137,7 +137,7 @@
 
            (has "401" "invalid api key" "invalid x-api-key" "invalid_api_key"
                 "api key" "api_key" "unauthorized" "authentication")
-           " — check ANTHROPIC_API_KEY or /login <provider>"
+           " — check the provider's API key, or run /login <provider>"
 
            (has "429" "rate limit" "rate_limit" "rate-limit")
            (if retrying? " — rate limited; retrying" " — try again")

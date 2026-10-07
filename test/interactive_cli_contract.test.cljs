@@ -6,7 +6,9 @@
                                              submit-seed-prompt!
                                              mark-streaming!
                                              notify-role
-                                             classify-error-message]]))
+                                             classify-error-message]]
+            ["node:fs" :as fs]
+            [agent.providers.builtins :as builtins]))
 
 ;;; ─── a prompt given on the command line runs as the first turn ────────────
 
@@ -116,7 +118,7 @@
                              "invalid x-api-key"
                              "Incorrect API key provided"]]
                     (-> (expect (.includes (classify-error-message m)
-                                           "check ANTHROPIC_API_KEY or /login <provider>"))
+                                           "check the provider's API key, or run /login <provider>"))
                         (.toBe true)))))
 
             (it "tells a rate-limited user to try again once retries are spent"
@@ -167,3 +169,32 @@
       (fn []
         (-> (expect (command-name "/spec import x --run")) (.toBe "spec"))
         (-> (expect (command-name "/help")) (.toBe "help"))))))
+
+(describe "built-in providers read /login keys"
+          (fn []
+            ;; The built-ins read only the env var: `/login anthropic` wrote a
+            ;; key nothing read, while the error said to run /login.
+            (it "a saved credential creates the model when the env var is unset"
+                (fn []
+                  (let [home (.. js/process -env -HOME)
+                        dir  (str home "/.nyma")
+                        prev (aget js/process.env "ANTHROPIC_API_KEY")]
+                    (js-delete js/process.env "ANTHROPIC_API_KEY")
+                    (fs/mkdirSync dir #js {:recursive true})
+                    (fs/writeFileSync (str dir "/credentials.json")
+                                    (js/JSON.stringify #js {:anthropic "sk-ant-test"}))
+                    (try
+                      (let [m ((:create-model (get builtins/builtin-providers "anthropic")) "claude-sonnet-5-5")]
+                        (-> (expect (.-modelId m)) (.toBe "claude-sonnet-5-5")))
+                      (finally
+                        (fs/rmSync (str dir "/credentials.json") #js {:force true})
+                        (when prev (aset js/process.env "ANTHROPIC_API_KEY" prev)))))))
+
+            (it "with no key at all, the error names this provider's env var and login"
+                (fn []
+                  (let [prev (aget js/process.env "OPENAI_API_KEY")]
+                    (js-delete js/process.env "OPENAI_API_KEY")
+                    (try
+                      (-> (expect (fn [] ((:create-model (get builtins/builtin-providers "openai")) "gpt-5")))
+                          (.toThrow "Set OPENAI_API_KEY or run /login openai"))
+                      (finally (when prev (aset js/process.env "OPENAI_API_KEY" prev)))))))))
