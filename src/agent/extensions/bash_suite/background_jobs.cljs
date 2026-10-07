@@ -98,27 +98,72 @@
 
 ;; ── Tools ────────────────────────────────────────────────────
 
+(defn jobs-table
+  "Every background job as a table, or \"No background jobs.\". Shared by the
+   model's list_jobs tool and the user's /jobs."
+  []
+  (let [all-jobs @jobs]
+    (if (empty? all-jobs)
+      "No background jobs."
+      (let [header "ID | Command | Status | Duration"
+            sep    "---|---------|--------|--------"
+            rows   (map (fn [[id job]]
+                          (let [status  @(:status job)
+                                dur     (format-duration (- (js/Date.now) (:started-at job)))
+                                exit-str (when (= status :exited)
+                                           (str " (exit: " @(:exit-code job) ")"))]
+                            (str id " | " (:command job) " | "
+                                 (str status) (or exit-str "") " | " dur)))
+                        all-jobs)]
+        (str/join "\n" (into [header sep] rows))))))
+
+(defn kill-job!
+  "Kill job `job-id`; a sentence saying what happened. Shared by kill_job and
+   /jobs kill."
+  [job-id]
+  (let [job (get @jobs job-id)]
+    (cond
+      (not job) (str "No job found with ID: " job-id)
+      (not= @(:status job) :running)
+      (str "Job #" job-id " is not running (status: " (str @(:status job)) ")")
+      :else (do (.kill (:process job))
+                (reset! (:status job) :killed)
+                (swap! shared/suite-stats update-in [:background-jobs :jobs-killed] inc)
+                (str "Job #" job-id " killed: " (:command job))))))
+
+(defn job-output
+  "Recent stdout/stderr of `job-id`, `lines` from each."
+  [job-id lines]
+  (if-let [job (get @jobs job-id)]
+    (let [stdout (vec (take-last lines @(:stdout-buffer job)))
+          stderr (vec (take-last lines @(:stderr-buffer job)))
+          parts  (cond-> []
+                   (seq stdout) (conj (str "=== stdout ===\n" (str/join "\n" stdout)))
+                   (seq stderr) (conj (str "=== stderr ===\n" (str/join "\n" stderr))))]
+      (if (empty? parts)
+        (str "Job #" job-id " has no output yet.")
+        (str/join "\n\n" parts)))
+    (str "No job found with ID: " job-id)))
+
+(defn jobs-command
+  "/jobs [output <id> | kill <id>] → text. Pure over `args` and the registry.
+   The jobs were the model's alone: a dev server it started could be seen and
+   stopped only by asking the model to do it."
+  [args]
+  (let [[sub id-str] (vec args)
+        id (when id-str (js/parseInt id-str 10))]
+    (cond
+      (empty? args)                                  (jobs-table)
+      (and (= sub "kill") (js/Number.isInteger id))   (kill-job! id)
+      (and (= sub "output") (js/Number.isInteger id)) (job-output id 30)
+      :else "Usage: /jobs | /jobs output <id> | /jobs kill <id>")))
+
 (defn- make-list-jobs-tool []
   (tool
     #js {:safety #js {:read-only? true :category "shell"}
          :description "List all background jobs with their status and duration."
          :inputSchema (.object z #js {})
-         :execute (fn [_args]
-                    (let [all-jobs @jobs]
-                      (if (empty? all-jobs)
-                        "No background jobs."
-                        (let [header "ID | Command | Status | Duration"
-                              sep    "---|---------|--------|--------"
-                              rows   (map (fn [[id job]]
-                                            (let [status  @(:status job)
-                                                  dur     (format-duration
-                                                            (- (js/Date.now) (:started-at job)))
-                                                  exit-str (when (= status :exited)
-                                                             (str " (exit: " @(:exit-code job) ")"))]
-                                              (str id " | " (:command job) " | "
-                                                   (str status) (or exit-str "") " | " dur)))
-                                          all-jobs)]
-                          (str/join "\n" (into [header sep] rows))))))}))
+         :execute (fn [_args] (jobs-table))}))
 
 (defn- make-job-output-tool []
   (tool
@@ -128,22 +173,7 @@
                         #js {:job_id (-> (.number z) (.describe "Job ID"))
                              :lines  (-> (.number z) (.optional)
                                          (.describe "Number of recent lines (default: 50)"))})
-         :execute (fn [args]
-                    (let [job-id (.-job_id args)
-                          lines  (or (.-lines args) 50)
-                          job    (get @jobs job-id)]
-                      (if-not job
-                        (str "No job found with ID: " job-id)
-                        (let [stdout (vec (take-last lines @(:stdout-buffer job)))
-                              stderr (vec (take-last lines @(:stderr-buffer job)))
-                              parts  (cond-> []
-                                       (seq stdout) (conj (str "=== stdout ===\n"
-                                                                (str/join "\n" stdout)))
-                                       (seq stderr) (conj (str "=== stderr ===\n"
-                                                                (str/join "\n" stderr))))]
-                          (if (empty? parts)
-                            (str "Job #" job-id " has no output yet.")
-                            (str/join "\n\n" parts))))))}))
+         :execute (fn [args] (job-output (.-job_id args) (or (.-lines args) 50)))}))
 
 (defn- make-kill-job-tool []
   (tool
@@ -154,18 +184,7 @@
                         #js {:job_id (-> (.number z) (.describe "Job ID to kill"))
                              :signal (-> (.string z) (.optional)
                                          (.describe "Signal to send (default: SIGTERM)"))})
-         :execute (fn [args]
-                    (let [job-id (.-job_id args)
-                          job    (get @jobs job-id)]
-                      (if-not job
-                        (str "No job found with ID: " job-id)
-                        (if (not= @(:status job) :running)
-                          (str "Job #" job-id " is not running (status: " (str @(:status job)) ")")
-                          (do
-                            (.kill (:process job))
-                            (reset! (:status job) :killed)
-                            (swap! shared/suite-stats update-in [:background-jobs :jobs-killed] inc)
-                            (str "Job #" job-id " killed: " (:command job)))))))}))
+         :execute (fn [args] (kill-job! (.-job_id args)))}))
 
 ;; ── Extension activation ─────────────────────────────────────
 
@@ -203,6 +222,13 @@
     (.registerTool api "list_jobs" (make-list-jobs-tool))
     (.registerTool api "job_output" (make-job-output-tool))
     (.registerTool api "kill_job" (make-kill-job-tool))
+    (.registerCommand api "jobs"
+                      #js {:description "Background jobs: list, `output <id>`, `kill <id>`"
+                           :handler (fn [args ctx]
+                                      (let [text (jobs-command (vec (or args [])))]
+                                        (when (and ctx (.-ui ctx) (.-available (.-ui ctx)))
+                                          (.notify (.-ui ctx) text "info"))
+                                        text))})
 
     ;; Process exit cleanup
     (let [cleanup-fn (fn []
@@ -218,6 +244,7 @@
         (.unregisterTool api "list_jobs")
         (.unregisterTool api "job_output")
         (.unregisterTool api "kill_job")
+        (.unregisterCommand api "jobs")
         ;; Kill running jobs
         (cleanup-fn)
         (.removeListener js/process "exit" cleanup-fn)

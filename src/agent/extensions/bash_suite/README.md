@@ -19,6 +19,7 @@
 | Command | What it does |
 |---|---|
 | `/bash-suite__bash-stats` | Show per-session bash stats: classifications, blocked commands, cache hits, output bytes saved |
+| `/bash-suite__jobs` | `[/jobs]` — background jobs (dev servers, watchers): bare lists them; `output <id>` shows recent output; `kill <id>` stops one |
 
 ## Hooks
 
