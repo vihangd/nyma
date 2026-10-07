@@ -21,7 +21,7 @@ both became unreachable after the Ink→pi-tui migration removed `src/agent/ui/a
 only intended consumer). If chord bindings become a real need, resurrect from git history or
 build on pi-tui's own `matchesKey`.
 
-### 1b. CommandRegistry aliases / hidden / enabled in `builtins.cljs`
+### 1b. CommandRegistry aliases / hidden / enabled in `builtins.cljs` — CLOSED (2026-09-30)
 
 - **What's ready:** `src/agent/commands/parser.cljs` supports `:aliases`, `:hidden?`, `:enabled?` on any command spec via `command-suggestions` / `visible-commands`. `autocomplete_builtins.cljs:slash-provider` already consumes the filtered, sorted suggestions list. Coverage in `test/commands_parser.test.cljs`. (`parse-command-line` was removed — it never had a caller; `modes/interactive.cljs:run-command!` + `commands/resolver.cljs` own dispatch, with an args *vector* and `ns__cmd` suffix resolution the cc-kit port did not match.)
 - **What's wired:** all of it, as of 2026-09-30. `builtins.cljs` declares `:aliases` (`/cls`→`/clear`, `/m`→`/model`), and `checkpoints` and `stats_dashboard` carry `["undo"]` and `["cost"]` for commands nobody guessed the names of. `resolver.cljs:16-20` resolves them and `extension_scope.cljs:226` passes `opts` through, so each one was pure data — one line. This entry sat open reading "doesn't declare any aliases" long enough that the work was re-estimated as expensive; it was not.
@@ -134,7 +134,11 @@ it into. A shared bar can be rebuilt when something actually wants one.
 
 These were identified in the Phase 12 audit but deliberately **not** implemented. Each has a revisit trigger. Source file references are to the cc-kit repo at `/Users/vihangd/projects/pers/cc-kit/packages/`.
 
-### 2a. React/ink-renderer-specific patterns (blocked on npm-ink vs custom reconciler)
+### 2a. React/ink-renderer-specific patterns — CLOSED (moot, 2026-10-07)
+
+*nyma moved from Ink to pi-tui (string-rendering components, no React reconciler), so none of
+these patterns has a place to land. Kept for the record.*
+
 
 cc-kit ships a custom `ink-renderer` package; nyma uses npm `ink` v6. These patterns live in cc-kit's reconciler layer and don't drop in:
 
@@ -515,7 +519,7 @@ Items identified in the caveman/dirac research (`/Users/vihangd/.claude/plans/dy
 
 | Item | Current state | Gap | Revisit when |
 |---|---|---|---|
-| **D24** Provider-specific context-window errors → auto-compact | Provider errors propagate up from `loop.cljs` / `core.cljs`. Verify whether nyma catches "context length exceeded" class errors and triggers compaction before failing. | Dirac's `context-error-handling.ts` has per-provider error matchers. If nyma relies only on pre-emptive compaction (at 85% threshold), an unexpectedly long prompt can exceed the window without triggering a compact. | A user reports "session failed after a long tool output" — likely a context-exceeded crash that should have auto-compacted. |
+| **D24** Provider-specific context-window errors → auto-compact — **CLOSED**: `loop.cljs:547` catches `context-overflow-error?`, compacts and retries once per turn | Provider errors propagate up from `loop.cljs` / `core.cljs`. Verify whether nyma catches "context length exceeded" class errors and triggers compaction before failing. | Dirac's `context-error-handling.ts` has per-provider error matchers. If nyma relies only on pre-emptive compaction (at 85% threshold), an unexpectedly long prompt can exceed the window without triggering a compact. | A user reports "session failed after a long tool output" — likely a context-exceeded crash that should have auto-compacted. |
 
 ### 5f. Testing infrastructure
 

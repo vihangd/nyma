@@ -296,6 +296,9 @@ Environment:
   NYMA_DEBUG=1           Debug logging to ~/.nyma/debug.log (same as --debug).
   NYMA_NO_MODEL_DISCOVERY=1
                          Never fetch provider catalogues at startup.
+  NYMA_TRUST=1           Same as --trust.
+  Extension providers (deepseek, groq, openrouter, …) read their own key
+  variable, named in each provider's README; /login <provider> works for all.
 
 Examples:
   nyma                                  Start the interactive UI

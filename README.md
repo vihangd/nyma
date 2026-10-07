@@ -357,12 +357,15 @@ harness refuses to score.
 
 ## Running the Agent
 
-Nyma ships **two binaries**:
+Nyma has **two entry points**:
 
-| Binary | Source | Purpose |
+| Command | Source | Purpose |
 |---|---|---|
 | `nyma` | `dist/agent/cli.mjs` | Interactive TUI / print / JSON / RPC modes |
 | `nyma-gateway` | `dist/gateway/entry.mjs` | Run nyma as a daemon behind chat channels (Telegram, Slack, HTTP, Email) |
+
+Both are installed as commands by `npm install -g .` / `bun link`. The standalone downloads on the
+releases page are `nyma` only; run the gateway from a source checkout (`bun dist/gateway/entry.mjs`).
 
 `nyma --help` lists every flag; `nyma --version` prints the version alone, so it composes in a
 shell substitution.
