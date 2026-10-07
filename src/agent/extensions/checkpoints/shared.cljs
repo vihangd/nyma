@@ -161,6 +161,52 @@
         (delete-turn! dir (first ks))
         (swap! checkpoints* dissoc (first ks))))))
 
+;;; ─── /fork ────────────────────────────────────────────────────
+;;; Each turn remembers the session entry it ended on, so a fork can tell
+;;; which turns' file changes belong to the branch it leaves behind.
+
+(defn load-turn-entries [dir]
+  (or (when (and dir (fs/existsSync (path/join dir "entries.json")))
+        (try (let [j (js/JSON.parse (fs/readFileSync (path/join dir "entries.json") "utf8"))]
+               (into {} (map (fn [k] [k (aget j k)]) (js/Object.keys j))))
+             (catch :default _ nil)))
+      {}))
+
+(defn save-turn-entries! [dir m]
+  (when dir
+    (fs/mkdirSync dir #js {:recursive true})
+    (fs/writeFileSync (path/join dir "entries.json") (js/JSON.stringify (clj->js m)))))
+
+(defn turns-after-fork
+  "Turns with saved file changes whose entry is NOT on the branch ending at
+   `new-leaf` — they happened after the fork point. `entries` are
+   {id parentId} rows. A turn with no recorded entry is left alone. Pure."
+  [checkpoint-turns turn-entries entries new-leaf]
+  (let [parent (into {} (map (fn [e] [(str (aget e "id")) (aget e "parentId")]) entries))
+        keep   (loop [id new-leaf acc #{}]
+                 (if (or (nil? id) (contains? acc (str id)))
+                   acc
+                   (recur (get parent (str id)) (conj acc (str id)))))]
+    (->> checkpoint-turns
+         (filter (fn [t] (when-let [e (get turn-entries (str t))] (not (contains? keep (str e))))))
+         (map js/Number)
+         sort
+         vec)))
+
+(defn restore-turns!
+  "Restore exactly `turns`, newest first; returns the restored paths."
+  [checkpoints* dir turns]
+  (vec (mapcat (fn [t]
+                 (let [group (get @checkpoints* t)]
+                   (doseq [[p st] group]
+                     (if (= st :absent)
+                       (when (fs/existsSync p) (fs/unlinkSync p))
+                       (fs/writeFileSync p st)))
+                   (swap! checkpoints* dissoc t)
+                   (delete-turn! dir t)
+                   (keys group)))
+               (reverse (sort-by js/Number turns)))))
+
 ;;; ─── /diff ────────────────────────────────────────────────────
 
 (def max-diff-lines 4000)

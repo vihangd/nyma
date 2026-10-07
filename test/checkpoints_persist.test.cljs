@@ -14,7 +14,8 @@
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-loader :refer [discover-and-load deactivate-all]]
             [agent.builtin-extensions :refer [registry]]
-            [agent.extensions.checkpoints.index :as cpx]))
+            [agent.extensions.checkpoints.index :as cpx]
+            [agent.extensions.checkpoints.shared :as shared]))
 
 (defn- mock-api [session-file]
   (let [handlers (atom {}) commands (atom {})]
@@ -99,3 +100,42 @@
             (it "survive a restart" test-survives-restart)
             (it "/undo picks the point and undoes everything after it" test-picker)
             (it "a file a bash command changed is restorable" test-bash-change-restorable 30000)))
+
+(describe "turns-after-fork"
+          (fn []
+            (it "names the turns whose entry the new branch does not keep"
+                (fn []
+                  ;; u0 → a0 → u1 → a1 ; fork back to a0
+                  (let [entries #js [#js {:id "u0" :parentId nil} #js {:id "a0" :parentId "u0"}
+                                     #js {:id "u1" :parentId "a0"} #js {:id "a1" :parentId "u1"}]]
+                    (-> (expect (clj->js (shared/turns-after-fork ["0" "1"] {"0" "a0" "1" "a1"} entries "a0")))
+                        (.toEqual #js [1]))
+                    ;; forking to the current leaf undoes nothing
+                    (-> (expect (clj->js (shared/turns-after-fork ["0" "1"] {"0" "a0" "1" "a1"} entries "a1")))
+                        (.toEqual #js [])))))))
+
+(defn ^:async test-fork-offers-restore []
+  (let [d      (fs/mkdtempSync (path/join (os/tmpdir) "nyma-cpp-fork-"))
+        f      (path/join d "f.txt")
+        leaf   (atom nil)
+        asked  (atom nil)
+        {:keys [handlers api]} (mock-api (path/join d "session-fork.jsonl"))
+        _      (do (aset api "getLeafId" (fn [] @leaf))
+                   (aset api "getSessionEntries"
+                         (fn [] #js [#js {:id "u0" :parentId nil} #js {:id "a0" :parentId "u0"}
+                                     #js {:id "u1" :parentId "a0"} #js {:id "a1" :parentId "u1"}]))
+                   (aset api "ui" #js {:confirm (fn [q] (reset! asked q) (js/Promise.resolve true))
+                                       :notify (fn [& _] nil)}))
+        m      {:handlers handlers}]
+    (fs/writeFileSync f "v0")
+    (cpx/activate api)
+    (reset! leaf "a0") (edit-turn! m f "v1")   ;; turn 0 ends on a0
+    (reset! leaf "a1") (edit-turn! m f "v2")   ;; turn 1 ends on a1
+    ;; /fork back to a0: turn 1's change belongs to the abandoned branch
+    (js-await ((get @handlers "session_before_fork") {:leaf-id "a1" :new-leaf "a0"} nil))
+    (-> (expect (str @asked)) (.toContain "Restore 1 file(s) changed after this point?"))
+    (-> (expect (fs/readFileSync f "utf8")) (.toBe "v1"))
+    (fs/rmSync d #js {:recursive true})))
+
+(describe "/fork and files"
+          (fn [] (it "offers to restore files changed after the fork point" test-fork-offers-restore)))

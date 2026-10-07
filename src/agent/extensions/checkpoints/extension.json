@@ -4,7 +4,8 @@
   "capabilities": [
     "events",
     "commands",
-    "session"
+    "session",
+    "ui"
   ],
   "dependsOn": []
 }

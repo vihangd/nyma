@@ -57,6 +57,8 @@
    :setSessionName :session
    :getSessionName :session
    :getSessionFile :session
+   :getLeafId :session
+   :getSessionEntries :session
    :unregisterStatusSegment :ui
    :unregisterProvider :providers
    :setModel :model

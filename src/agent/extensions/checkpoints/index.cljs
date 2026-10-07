@@ -13,6 +13,7 @@
   (let [checkpoints* (atom {})
         pending*     (atom {})   ;; path → pre-state, awaiting confirmation
         turn*        (atom 0)
+        turn-entries* (atom {})  ;; turn → the session entry it ended on (for /fork)
         loaded-for   (atom ::none)
         ;; Every file this session changed — edit tools and bash alike — for
         ;; /diff. Never pruned with the rewind groups.
@@ -30,6 +31,7 @@
             (when (not= sf @loaded-for)
               (reset! loaded-for sf)
               (reset! checkpoints* (shared/load-all (dir)))
+              (reset! turn-entries* (shared/load-turn-entries (dir)))
               (reset! pending* {})
               (reset! turn* (if (seq @checkpoints*)
                               (inc (apply max (map js/Number (keys @checkpoints*))))
@@ -73,12 +75,37 @@
         on-finalize
         (fn [_event _ctx]
           (reset! pending* {})   ;; denied/failed leftovers are dropped
+          (when-let [leaf (try (.getLeafId api) (catch :default _ nil))]
+            (swap! turn-entries* assoc (str @turn*) leaf)
+            (shared/save-turn-entries! (dir) @turn-entries*))
           (swap! turn* inc)
+          nil)
+
+        ;; /fork moves the conversation back; the files stayed where the
+        ;; abandoned branch left them. Offer to restore the ones changed after
+        ;; the fork point — asked, never done silently: a fork is also how
+        ;; people explore an alternative while KEEPING their work.
+        on-before-fork
+        ^:async
+        (fn [data _ctx]
+          (ensure-loaded!)
+          (let [new-leaf (or (:new-leaf data) (aget data "new-leaf"))
+                entries  (try (.getSessionEntries api) (catch :default _ nil))
+                turns    (when (and new-leaf entries)
+                           (shared/turns-after-fork (keys @checkpoints*) @turn-entries* entries new-leaf))
+                files    (distinct (mapcat #(keys (get @checkpoints* %)) turns))
+                ui       (.-ui api)]
+            (when (and (seq turns) ui (.-confirm ui))
+              (when (js-await (.confirm ui (str "Restore " (count files) " file(s) changed after this point?\n  "
+                                                (.join (clj->js (take 10 files)) "\n  "))))
+                (let [restored (shared/restore-turns! checkpoints* (dir) turns)]
+                  (when (.-notify ui) (.notify ui (str "Restored: " (.join (clj->js (distinct restored)) ", ")) "info"))))))
           nil)]
 
     (.on api "before_tool_call" on-before-tool)
     (.on api "tool_complete" on-complete)
     (.on api "turn_finalize" on-finalize)
+    (.on api "session_before_fork" on-before-fork)
     (when-let [ev (.-events api)] (when (.-on ev) (.on ev "bash-suite__bash:files-changed" on-bash-files)))
 
     (.registerCommand api "diff"
@@ -135,6 +162,7 @@
       (.off api "before_tool_call" on-before-tool)
       (.off api "tool_complete" on-complete)
       (.off api "turn_finalize" on-finalize)
+      (.off api "session_before_fork" on-before-fork)
       (when-let [ev (.-events api)] (when (.-off ev) (.off ev "bash-suite__bash:files-changed" on-bash-files)))
       (.unregisterCommand api "diff")
       (.unregisterCommand api "rewind"))))

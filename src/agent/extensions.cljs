@@ -277,6 +277,17 @@
                                 (when-let [f (:get-file-path session)]
                                   (f))))
 
+         ;; The current leaf entry id, and the tree as {id, parentId, role}
+         ;; rows — enough to tell which entries a branch keeps.
+         :getLeafId         (fn []
+                              (when-let [session @(:session agent)]
+                                (when-let [f (:leaf-id session)] (f))))
+         :getSessionEntries (fn []
+                              (when-let [session @(:session agent)]
+                                (when-let [f (:get-tree session)]
+                                  (clj->js (mapv (fn [e] {:id (:id e) :parentId (:parent-id e) :role (:role e)})
+                                                 (f))))))
+
        ;; ── Status line segments ────────────────────────────
          :registerStatusSegment
          (fn [id config]
