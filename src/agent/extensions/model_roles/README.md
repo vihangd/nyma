@@ -77,6 +77,7 @@ Read from `~/.nyma/settings.json` or `.nyma/settings.json`:
 | `roles` | map | Role name → `{provider?, model?, allowed-tools?, permissions?, system-prompt?}`. A role with no model inherits the active one (`lead`); a role with a `policy` and no model is a permission mode |
 | `escalate` | map | Escalation: `mode` (`ask`/`auto`/`off`), `to` (role or `provider/model`), `on`, `prune`, `revert`, `max-per-session`, `fallback` |
 | `cycle-key` | string | Key that cycles to the next role (one-keystroke model switching). Default `ctrl+g`; set `""` to disable. Avoid `ctrl+r` — `prompt_history` owns it. |
+| `mode-cycle-key` | string | Key that cycles the permission mode: default → accept-edits → plan → full-auto. Default `shift+tab`; set `""` to disable. |
 
 If `roles` is absent, a built-in fallback set is used.
 

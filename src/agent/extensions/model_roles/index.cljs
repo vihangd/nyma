@@ -109,6 +109,18 @@
                      (when mr (get mr "cycle-key")))]
     (if (some? k) (str k) "ctrl+g")))
 
+(defn mode-cycle-binding
+  "Key for cycling the permission mode, from `model-roles.mode-cycle-key`
+   (top-level `mode-cycle-key` also accepted); \"\" disables it. Default
+   shift+tab — the key Claude Code users already reach for. It was `/mode
+   cycle` only: four keystrokes and a submit to change how much to approve."
+  [api]
+  (let [settings (.settings api)
+        mr       (get settings "model-roles")
+        k        (or (get settings "mode-cycle-key")
+                     (when mr (get mr "mode-cycle-key")))]
+    (if (some? k) (str k) "shift+tab")))
+
 (defn cyclable-role-names
   "Role names the cycle shortcut may visit: MODEL roles only.
 
@@ -510,6 +522,14 @@
                (activate-role! next-r ui-notify))))
          #js {:description "Cycle to the next role (and its model)"})))
 
+    ;; Permission-mode cycle: default → accept-edits → plan → full-auto → …
+    (let [k (mode-cycle-binding api)]
+      (when (and (seq k) (.-registerShortcut api))
+        (.registerShortcut
+         api k
+         (fn [] (switch-mode! api (next-mode (current-mode api)) #js {:ui (.-ui api)}))
+         #js {:description "Cycle the permission mode"})))
+
     ;; /roles command — list all
     (.registerCommand api "roles"
                       #js {:description "List available model roles"
@@ -571,7 +591,7 @@
       (.unregisterCommand api "mode")
       ;; Without this the binding survives deactivate/reload pointing at a
       ;; stale closure, and re-activating double-binds it.
-      (let [k (cycle-binding api)]
+      (doseq [k [(cycle-binding api) (mode-cycle-binding api)]]
         (when (and (seq k) (.-unregisterShortcut api))
           (.unregisterShortcut api k)))
       (when @plan-deactivate (@plan-deactivate))

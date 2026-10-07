@@ -102,3 +102,38 @@
                                               (fn []
                                                 (it "a wide CJK table re-lays-out across a resize, no width crash"
                                                     t-wide-table-survives-resize 45000)))
+
+(defn ^:async t-shift-tab-cycles-mode []
+  ;; Shift+Tab arrives as ESC [ Z. It was `/mode cycle` only; the editor must
+  ;; not swallow the key before the shortcut sees it.
+  (let [srv  (fms/start!)
+        home (fms/temp-home! (:base-url srv))
+        dec  (js/TextDecoder.)
+        buf  (atom "")
+        proc (js/Bun.spawn
+              #js ["bun" cli "--model" "faketest/m1"]
+              #js {:cwd home
+                   :env (js/Object.assign #js {} js/process.env
+                                          #js {"HOME" home "NYMA_NO_MODEL_DISCOVERY" "1"
+                                               "TERM" "xterm-256color"})
+                   :terminal #js {:cols 120 :rows 40
+                                  :data (fn [_t d] (swap! buf str (.decode dec d #js {:stream true})))}})]
+    (try
+      ;; "ready", not the first frame: shortcuts register when extensions
+      ;; activate, after the TUI has already painted.
+      (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "ready") 15000))) (.toBe true))
+      (js-await (js/Bun.sleep 300))
+      (.write (.-terminal proc) "\u001b[Z")
+      (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "Mode: accept-edits") 5000))) (.toBe true))
+      (.write (.-terminal proc) "\u001b[Z")
+      (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "Plan mode ON") 5000))) (.toBe true))
+      (finally
+        (.kill proc)
+        (js-await (.-exited proc))
+        ((:stop srv))
+        (try (fs/rmSync home #js {:recursive true :force true}) (catch :default _ nil))))))
+
+((.skipIf describe (not (fs/existsSync cli))) "TUI keys in a pty"
+                                              (fn []
+                                                (it "shift+tab cycles the permission mode"
+                                                    t-shift-tab-cycles-mode 45000)))
