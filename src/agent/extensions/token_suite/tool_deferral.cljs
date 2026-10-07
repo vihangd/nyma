@@ -179,7 +179,10 @@
     (if-not enabled?
       (fn [] nil)
       (let [all-names
-            (fn [] (vec (or (try (js->clj (.getAllTools api)) (catch :default _e nil)) [])))
+            ;; Was `(js->clj …)`, which squint does not provide: a
+            ;; ReferenceError the catch turned into [], so every search found
+            ;; nothing and a deferred tool could never be revealed.
+            (fn [] (vec (or (try (.getAllTools api) (catch :default _e nil)) [])))
 
             search-tool
             #js {;; Read-only: it reveals schemas and flips a flag. Declared so

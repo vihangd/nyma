@@ -18,6 +18,9 @@
    - It is NOT exempt from a permission boundary. Plan mode withholding it is
      correct and must stay that way."
   (:require ["bun:test" :refer [test expect describe]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
             [agent.extensions.token-suite.tool-deferral :as td]
             [agent.extensions.token-suite.shared :as shared]
             [agent.tool-metadata :as tm]))
@@ -154,3 +157,36 @@
                       (-> (expect (count @registered)) (.toBe 0))
                       (-> (expect (fn? stop)) (.toBe true))
                       (stop))))))
+
+(defn- with-project-settings [settings f]
+  (let [dir  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-defer-"))
+        prev (js/process.cwd)]
+    (fs/mkdirSync (path/join dir ".nyma"))
+    (fs/writeFileSync (path/join dir ".nyma" "settings.json") (js/JSON.stringify (clj->js settings)))
+    (js/process.chdir dir)
+    (try (f)
+         (finally (js/process.chdir prev)
+                  (fs/rmSync dir #js {:recursive true :force true})))))
+
+(describe "tool_search over a real tool list"
+          (fn []
+            ;; The other tests mock getAllTools as #js [], which is why a
+            ;; ReferenceError turning every search into [] went unnoticed.
+            (test "finds and reveals a withheld tool"
+                  (fn []
+                    (with-project-settings
+                      {"token-suite" {"tool-deferral" {"enabled" true "defer" ["lsp_*"]}}}
+                      (fn []
+                        (let [tools {"read"      #js {:description "Read a file"}
+                                     "lsp_hover" #js {:description "Show hover information for a symbol"}}
+                              search (atom nil)
+                              api #js {:registerTool (fn [n t] (when (= n "tool_search") (reset! search t)))
+                                       :unregisterTool (fn [_] nil)
+                                       :on (fn [& _] nil) :off (fn [& _] nil)
+                                       :getAllTools (fn [] (clj->js (keys tools)))
+                                       :getTool (fn [n] (get tools n))}
+                              stop (td/activate api)
+                              out  (str ((.-execute @search) #js {:query "hover"}))]
+                          (-> (expect out) (.toContain "lsp_hover"))
+                          (-> (expect out) (.not.toContain "No deferred tools matched"))
+                          (stop))))))))
