@@ -76,6 +76,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/schema.cljs` | `agent.schema` | One data form for a tool's parameters, rendered three ways. |
 | `src/agent/sessions/archive.cljs` | `agent.sessions.archive` | Compressed session logs. |
 | `src/agent/sessions/compaction.cljs` | `agent.sessions.compaction` | Context window compaction. |
+| `src/agent/sessions/images.cljs` | `agent.sessions.images` | Attached images live beside the session file, not inside it. |
 | `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata. |
 | `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage. |
 | `src/agent/sessions/partial.cljs` | `agent.sessions.partial` | Keep the in-flight assistant response on disk while it streams. |

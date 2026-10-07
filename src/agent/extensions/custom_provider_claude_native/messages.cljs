@@ -40,10 +40,30 @@
         arr)
       :else "")))
 
+(defn image-part->anthropic
+  "An AI-SDK `file` part with an image media type → an Anthropic image block.
+   The SDK hands image data over as bytes, a base64 string or a URL. This
+   converter skipped every non-text part, so an attached image never reached
+   the model on this provider — silently."
+  [part]
+  (let [mt   (str (or (.-mediaType part) ""))
+        data (.-data part)]
+    (when (.startsWith mt "image/")
+      (cond
+        (instance? js/URL data)
+        #js {:type "image" :source #js {:type "url" :url (.-href data)}}
+        (string? data)
+        #js {:type "image" :source #js {:type "base64" :media_type mt :data data}}
+        (some? data)
+        #js {:type "image" :source #js {:type "base64" :media_type mt
+                                        :data (.toString (js/Buffer.from data) "base64")}}
+        :else nil))))
+
 (defn- content-part->anthropic [part]
   (case (.-type part)
     "text"      (text-part->anthropic part)
     "tool-call" (tool-call-part->anthropic part)
+    "file"      (image-part->anthropic part)
     nil))
 
 (defn- content-parts->js-array

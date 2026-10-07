@@ -1,6 +1,7 @@
 (ns agent.sessions.manager
   "JSONL tree session storage."
-  (:require [agent.utils.content :as content]
+  (:require [agent.sessions.images :as images]
+            [agent.utils.content :as content]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
             [agent.debug :as d]
@@ -193,7 +194,10 @@
                  (filter #(contains? #{"user" "assistant" "tool_call" "tool_result"
                                        "compaction" "branch-summary"}
                                      (:role %)))
-                 (mapv entry->core-message))))
+                 (mapv entry->core-message)
+                 ;; Images were written beside the file (sessions.images);
+                 ;; read their bytes back for the model.
+                 (mapv (fn [m] (update m :content images/rehydrate @file-path))))))
 
         append-fn
         (fn [entry-data]
@@ -206,7 +210,11 @@
             ;; its parent: a tree that cannot be rebuilt on resume. Now a failed
             ;; append throws with memory untouched.
             (when-let [fp @file-path]
-              (fs/appendFileSync fp (str (js/JSON.stringify (clj->js entry)) "\n")))
+              ;; Image bytes go to a sidecar file, not into the JSONL; memory
+              ;; keeps the inline bytes so this session's context is unchanged.
+              (fs/appendFileSync fp (str (js/JSON.stringify
+                                          (clj->js (update entry :content images/externalize fp)))
+                                         "\n")))
             (let [new-idx (count @entries)]
               (swap! entries conj entry)
               (reset! leaf-id id)
