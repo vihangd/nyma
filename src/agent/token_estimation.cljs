@@ -1,4 +1,6 @@
-(ns agent.token-estimation)
+(ns agent.token-estimation
+  "Heuristic token counts for text and message lists."
+  (:require [agent.utils.content :as content]))
 
 (defn- unicode-whitespace?
   "The non-ASCII half of JS whitespace. Split out so the hot loop below never
@@ -69,7 +71,10 @@
   [messages]
   (reduce (fn [total msg]
             (let [content (or (:content msg) (when (object? msg) (.-content msg)) "")]
-              (+ total 4 (estimate-tokens content))))
+              ;; Text of the parts, plus a fixed cost per image. `(str parts)`
+              ;; counted a tool-call turn or an image as `[object Object]`.
+              (+ total 4 (estimate-tokens (content/->text content))
+                 (* content/image-token-estimate (content/image-count content)))))
           0 messages))
 
 ;;; ─── Gateway overhead, observed ────────────────────────────────

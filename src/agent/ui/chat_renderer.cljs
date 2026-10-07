@@ -1,6 +1,7 @@
 (ns agent.ui.chat-renderer
   "Pure: message map → string[] for pi-tui rendering."
-  (:require [agent.utils.data :as data]
+  (:require [agent.utils.content :as content]
+            [agent.utils.data :as data]
             [clojure.string :as str]
             [agent.ui.themes :refer [icon]]
             ["@earendil-works/pi-tui" :refer [visibleWidth truncateToWidth]]
@@ -252,7 +253,9 @@
         ;; crashed the TUI on tab-indented Go under a permission overlay.
         ;; Expanding later, once a line is wrapped or composited, only widens
         ;; it further.
-        content (ansi/expand-tabs (or (:content msg) ""))
+        ;; A user turn with an image is a vector of parts: render its text and
+        ;; an [image] marker, never `[object Object]`.
+        content (ansi/expand-tabs (content/->text (:content msg)))
         w       (or width 80)
         pc      (fg (get-in theme [:colors :primary]   "#7aa2f7"))
         sc      (fg (get-in theme [:colors :secondary] "#9ece6a"))

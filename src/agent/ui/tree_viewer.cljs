@@ -1,6 +1,7 @@
 (ns agent.ui.tree-viewer
   "Session tree browser for `ctx.ui.custom()`."
-  (:require [agent.ui.picker-frame :refer [truncate-to]]
+  (:require [agent.utils.content :as content]
+            [agent.ui.picker-frame :refer [truncate-to]]
             [agent.utils.ansi :refer [terminal-width string-width]]))
 
 ;; Pi-mono render object for interactive session tree browsing.
@@ -37,7 +38,7 @@
         fold    (if has-kids? (if collapsed? "▶ " "▼ ") "  ")
         cursor  (if selected? "> " "  ")
         role    (str "[" (:role entry) "] ")
-        content (or (:content entry) "")
+        content (content/->text (:content entry))
         prefix  (str cursor indent fold role)
         max-len (max 10 (- w (string-width prefix) 2))
         ;; COLUMNS, not characters. max-len is a column budget (it comes

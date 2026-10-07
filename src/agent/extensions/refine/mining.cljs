@@ -13,12 +13,13 @@
    Not reusing small_model/quality_monitor: its predicates are private and shaped
    for live turn events (stream deltas, tool-call names as they happen), not for
    a JSONL tree read after the fact."
-  (:require [clojure.string :as str]))
+  (:require [agent.utils.content :as content]
+            [clojure.string :as str]))
 
 ;; ── Shaping ──────────────────────────────────────────────────────
 
 (defn- entry-role [e] (str (or (:role e) "")))
-(defn- entry-content [e] (str (or (:content e) "")))
+(defn- entry-content [e] (content/->text (:content e)))
 
 (defn- tool-name [e]
   (let [m (:metadata e)]

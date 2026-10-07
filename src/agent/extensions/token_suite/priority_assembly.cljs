@@ -27,7 +27,7 @@
                         "")))
 
 (defn- is-focus-summary? [msg]
-  (let [content (str (shared/msg-content msg))]
+  (let [content (shared/msg-text msg)]
     (.startsWith content "[Focus:")))
 
 (defn score-message
@@ -56,7 +56,7 @@
         current     (atom 0)
         _           (doseq [i (range total)]
                       (swap! current + 4
-                             (.estimateTokens api (str (shared/msg-content (aget messages i))))))
+                             (.estimateTokens api (shared/msg-text (aget messages i)))))
 
         ;; Under budget — no pruning
         over?       (> @current available)]
@@ -91,7 +91,7 @@
         ;; Remove lowest until under budget
         (doseq [{:keys [msg index]} prunable]
           (when (> @tokens available)
-            (let [t (+ 4 (.estimateTokens api (str (shared/msg-content msg))))]
+            (let [t (+ 4 (.estimateTokens api (shared/msg-text msg)))]
               (swap! removed conj index)
               (swap! tokens - t))))
 

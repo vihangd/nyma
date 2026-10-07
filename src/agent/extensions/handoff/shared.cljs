@@ -5,7 +5,8 @@
    purpose-built brief (goal, state, decisions, next steps, key files) and
    seed the NEXT session with it. Preserves intent better than mechanical
    compaction."
-  (:require ["node:path" :as path]
+  (:require [agent.utils.content :as content]
+            ["node:path" :as path]
             [clojure.string :as str]))
 
 (def brief-system-prompt
@@ -27,7 +28,7 @@
   (->> msgs
        (keep (fn [m]
                (let [role    (str (:role m))
-                     content (str (:content m))]
+                     content (content/->text (:content m))]
                  (when (seq content)
                    (str role ": "
                         (if (contains? #{"tool_call" "tool_result"} role)

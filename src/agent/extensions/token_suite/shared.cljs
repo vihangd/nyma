@@ -1,5 +1,6 @@
 (ns agent.extensions.token-suite.shared
-  (:require ["node:fs" :as fs]
+  (:require [agent.utils.content :as content]
+            ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.utils.js-interop :as ji]))
 
@@ -178,6 +179,12 @@
   (or (when (map? msg) (:content msg))
       (when (object? msg) (.-content msg))
       ""))
+
+(defn msg-text
+  "A message's content as text — tool-call and image parts labelled, never
+   `[object Object]` (agent.utils.content/->text)."
+  [msg]
+  (content/->text (msg-content msg)))
 
 (defn has-error-pattern? [text]
   (boolean (re-find #"(?i)error:|Error |FAIL|panic|exception|stack trace|TypeError|ReferenceError" (str text))))

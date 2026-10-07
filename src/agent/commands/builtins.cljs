@@ -1,6 +1,7 @@
 (ns agent.commands.builtins
   "Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.)."
-  (:require ["node:path" :as path]
+  (:require [agent.utils.content :as content]
+            ["node:path" :as path]
             [agent.utils.data :as data]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact compaction-receipt settings->opts resolve-settings]]
@@ -1066,8 +1067,8 @@
                                 lines (->> (take 20 tree)
                                            (map (fn [e]
                                                   (str "  " (:id e) " [" (:role e) "] "
-                                                       (subs (or (:content e) "") 0
-                                                             (min 60 (count (or (:content e) ""))))))))]
+                                                       (let [t (content/->text (:content e))]
+                                                         (subs t 0 (min 60 (count t))))))))]
                             (show-info ctx
                                        (str "Session tree (" (count tree) " entries):\n"
                                             (str/join "\n" lines)

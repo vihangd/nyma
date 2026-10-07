@@ -1,6 +1,7 @@
 (ns agent.sessions.manager
   "JSONL tree session storage."
-  (:require [agent.ui.think-tag-parser :refer [strip-think-tags]]
+  (:require [agent.utils.content :as content]
+            [agent.ui.think-tag-parser :refer [strip-think-tags]]
             ["node:fs" :as fs]
             [agent.debug :as d]
             [agent.sessions.partial :as partial]
@@ -109,7 +110,7 @@
                  (let [e (nth entries idx nil)]
                    (when (and e (= "user" (:role e)))
                      {:id    (:id e)
-                      :label (let [t (-> (str (or (:content e) ""))
+                      :label (let [t (-> (content/->text (:content e))
                                          (.replace (js/RegExp. "\\s+" "g") " ")
                                          (.trim))]
                                (if (> (count t) 72) (str (.slice t 0 71) "…") t))}))))
@@ -235,7 +236,7 @@
             ((:search-content sqlite-store) query)
             ;; Fallback: linear scan in memory
             (->> @entries
-                 (filter #(and (:content %) (.includes (str (:content %)) query)))
+                 (filter #(and (:content %) (.includes (content/->text (:content %)) query)))
                  (take 50)
                  vec)))
 

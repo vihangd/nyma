@@ -1,6 +1,6 @@
 (ns agent.commands.share
   "Session export to Markdown and HTML."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str] [agent.utils.content :as content]))
 
 (defn- escape-html
   "Escape a string for safe insertion into HTML content."
@@ -12,23 +12,9 @@
       (.replace "\"" "&quot;")))
 
 (defn content->text
-  "Flatten message :content to a string. Assistant turns that called tools
-   carry a VECTOR of content blocks — stringifying that yields
-   `[object Object],…`. Extract text blocks; label the rest by type."
+  "Flatten message :content to a string — see agent.utils.content/->text."
   [content]
-  (cond
-    (string? content) content
-    (or (vector? content) (js/Array.isArray content))
-    (->> content
-         (map (fn [b]
-                (cond
-                  (string? b) b
-                  (some? (or (:text b) (aget b "text"))) (str (or (:text b) (aget b "text")))
-                  :else (str "[" (or (:type b) (aget b "type") "content") "]"))))
-         (str/join "
-"))
-    (nil? content) ""
-    :else (str content)))
+  (content/->text content))
 
 (defn messages->markdown
   "Convert messages to a Markdown document."

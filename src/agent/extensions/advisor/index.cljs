@@ -30,7 +30,8 @@
 
    The advisor sees the full transcript but is invoked without tools,
    so it cannot recursively call advisor — loop-safe by construction."
-  (:require ["ai" :refer [generateText]]
+  (:require [agent.utils.content :as content]
+            ["ai" :refer [generateText]]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [clojure.string :as str]))
@@ -103,8 +104,8 @@ plain text; the executor will read it on its next turn.")
                (let [role    (:role m)
                      content (:content m)]
                  (case role
-                   "user"        {:role "user"      :content (str content)}
-                   "assistant"   {:role "assistant" :content (str content)}
+                   "user"        {:role "user"      :content (content/->text content)}
+                   "assistant"   {:role "assistant" :content (content/->text content)}
                    "tool_call"   {:role "assistant"
                                   :content (str "[tool call: " (:tool-name m)
                                                 " "
@@ -114,7 +115,7 @@ plain text; the executor will read it on its next turn.")
                                                 "]")}
                    "tool_result" {:role "user"
                                   :content (str "[tool result: "
-                                                (.slice (str content) 0 4000) "]")}
+                                                (.slice (content/->text content) 0 4000) "]")}
                    nil))))
        vec))
 

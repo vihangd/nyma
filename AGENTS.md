@@ -84,7 +84,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings. |
 | `src/agent/state.cljs` | `agent.state` | Event-sourced state store. |
 | `src/agent/thinking.cljs` | `agent.thinking` | Turn the session's thinking level into provider request options. |
-| `src/agent/token_estimation.cljs` | `agent.token-estimation` | — |
+| `src/agent/token_estimation.cljs` | `agent.token-estimation` | Heuristic token counts for text and message lists. |
 | `src/agent/tool_metadata.cljs` | `agent.tool-metadata` | Per-tool safety metadata. |
 | `src/agent/tool_registry.cljs` | `agent.tool-registry` | Active/inactive tool management. |
 | `src/agent/tool_result_policy.cljs` | `agent.tool-result-policy` | Per-tool result normalization and truncation policy. |
@@ -115,6 +115,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/ui/tree_viewer.cljs` | `agent.ui.tree-viewer` | Session tree browser for `ctx.ui.custom()`. |
 | `src/agent/ui/width_guard.cljs` | `agent.ui.width-guard` | Last line of defence between nyma's components and pi-tui's width check. |
 | `src/agent/utils/ansi.cljs` | `agent.utils.ansi` | ANSI-aware text utilities (`truncate-text`, `terminal-width`). |
+| `src/agent/utils/content.cljs` | `agent.utils.content` | Message :content as text, for every reader that wants text. |
 | `src/agent/utils/credentials.cljs` | `agent.utils.credentials` | Read API keys saved by `/login <provider>`. |
 | `src/agent/utils/data.cljs` | `agent.utils.data` | Two things every namespace kept re-deriving: reading a config key whose spelling depends on who wrote it, and parsing JSON that may not b… |
 | `src/agent/utils/error_class.cljs` | `agent.utils.error-class` | What KIND of provider failure is this? |

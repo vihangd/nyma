@@ -54,7 +54,7 @@ with every section below present.
     (->> messages
          (map (fn [m]
                 (let [role    (shared/msg-role m)
-                      content (str (shared/msg-content m))]
+                      content (shared/msg-text m)]
                   (case role
                     "user"       (str "[User]: " content)
                     "assistant"  (str "[Assistant]: " (strip-think-tags content))
@@ -92,7 +92,7 @@ with every section below present.
                         (filter #(= (shared/msg-role %) "user"))
                         first)]
     (when first-user
-      (let [content (str (shared/msg-content first-user))]
+      (let [content (shared/msg-text first-user)]
         (if (> (count content) 500)
           (subs content 0 500)
           content)))))
@@ -101,7 +101,7 @@ with every section below present.
   (let [ops (atom {:read [] :edit [] :write []})]
     (doseq [msg messages]
       (let [role (shared/msg-role msg)
-            content (str (shared/msg-content msg))]
+            content (shared/msg-text msg)]
         ;; Look for tool_call messages with metadata
         (when (= role "tool_call")
           (let [meta (or (when (map? msg) (:metadata msg))
@@ -127,7 +127,7 @@ with every section below present.
   (let [errors (atom [])]
     (doseq [msg messages]
       (when (= (shared/msg-role msg) "tool_result")
-        (let [content (str (shared/msg-content msg))]
+        (let [content (shared/msg-text msg)]
           (when (shared/has-error-pattern? content)
             (swap! errors conj
                    (if (> (count content) 200) (subs content 0 200) content))))))
@@ -138,7 +138,7 @@ with every section below present.
                             (filter #(= (shared/msg-role %) "assistant"))
                             last)]
     (when last-assistant
-      (let [content (str (shared/msg-content last-assistant))]
+      (let [content (shared/msg-text last-assistant)]
         (if (> (count content) 300) (subs content 0 300) content)))))
 
 (defn- build-background-summary [messages]

@@ -1,6 +1,7 @@
 (ns agent.sessions.listing
   "Scans `.jsonl` session files, returns sorted metadata."
-  (:require [agent.utils.data :as data]
+  (:require [agent.utils.content :as content]
+            [agent.utils.data :as data]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
@@ -30,7 +31,7 @@
 (defn- tidy
   "Collapse whitespace and clip to `title-max` display width."
   [s]
-  (let [t (str/trim (str/replace (str s) #"\s+" " "))]
+  (let [t (str/trim (str/replace (content/->text s) #"\s+" " "))]
     (when (seq t)
       (if (> (count t) title-max)
         (str (.slice t 0 (dec title-max)) "…")
@@ -137,7 +138,7 @@
                    (some (fn [e]
                            (and (contains? #{"user" "assistant"} (:role e))
                                 (let [c (:content e)]
-                                  (str/includes? (str/lower-case (if (string? c) c (js/JSON.stringify c))) q))))
+                                  (str/includes? (str/lower-case (content/->text c)) q))))
                          (parse-lines text))))
                sessions))))
 

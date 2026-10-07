@@ -19,7 +19,8 @@
    rather than clobbering it.
 
    Off by default; opt-in via small-model config :knowledge-inject {:enabled true}."
-  (:require ["node:path" :as path]
+  (:require [agent.utils.content :as content]
+            ["node:path" :as path]
             ["node:fs" :as fs]
             [clojure.string :as str]
             [agent.resources.skills :refer [parse-frontmatter first-skill-line]]))
@@ -99,8 +100,8 @@
 
 (defn- user-text [um]
   (cond (string? um) um
-        (map? um) (str (:content um))
-        (object? um) (str (.-content um))
+        (map? um) (content/->text (:content um))
+        (object? um) (content/->text (.-content um))
         :else ""))
 
 (defn- trim-to [s max-chars]

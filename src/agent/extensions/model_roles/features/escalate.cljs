@@ -19,7 +19,8 @@
    Squint notes: async work lives in top-level defns called by sync wrappers
    (named, so testable; `^:async (fn …)` with the meta on the FORM works too). Keywords ARE strings, so (:mode cfg) reads
    both CLJS defaults and user JSON."
-  (:require [clojure.string :as str]
+  (:require [agent.utils.content :as content]
+            [clojure.string :as str]
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.debug :as d]
             [agent.extensions.model-roles.features.plan-mode :as plan-mode]))
@@ -152,11 +153,7 @@
 ;; pruning (pure)
 ;; ---------------------------------------------------------------------------
 
-(defn- content->text [c]
-  (cond
-    (string? c) c
-    (nil? c)    ""
-    :else       (str c)))
+(defn- content->text [c] (content/->text c))
 
 (defn prune-tail
   "Pure: drop the last user message AND everything after it, appending an

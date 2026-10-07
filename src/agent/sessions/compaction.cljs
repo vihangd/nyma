@@ -1,6 +1,7 @@
 (ns agent.sessions.compaction
   "Context window compaction."
-  (:require ["ai" :refer [generateText]]
+  (:require [agent.utils.content :as content]
+            ["ai" :refer [generateText]]
             ["node:fs" :as fs]
             ["node:path" :as path]
             ["node:os" :as os]
@@ -30,7 +31,7 @@
                             (>= tokens limit))
                       i
                       (recur (inc i)
-                             (+ tokens (te/estimate-tokens (str (:content (nth context i))))))))
+                             (+ tokens (te/estimate-tokens (content/->text (:content (nth context i))))))))
         ;; Adjust forward to a valid boundary (user/assistant/compaction start)
         adjusted (loop [i raw-point]
                    (cond
@@ -91,7 +92,7 @@
   (->> messages
        (map (fn [m]
               (let [role    (:role m)
-                    content (cond-> (str (:content m))
+                    content (cond-> (content/->text (:content m))
                               (= role "assistant") strip-think-tags)]
                 (str "[" (str/capitalize (or role "unknown")) "]: "
                      (if (and (= role "tool_result") (> (count content) 2000))
