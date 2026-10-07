@@ -315,8 +315,16 @@ When multiple independent tool calls are needed, make them in parallel.
         home    (home/dir)
         skills  (discover-all-skills home cwd)
 
+        ;; Claude Code's `.claude/commands/*.md` are the same thing — a body
+        ;; with $ARGUMENTS and optional description/argument-hint frontmatter —
+        ;; so they load too, and a user's existing commands work unchanged.
+        ;; Lowest → highest: global over Claude's global, project over global,
+        ;; nyma's own dir winning a name clash at each level (same precedence as
+        ;; skills and MCP discovery). Top-level files only.
         prompts (merge
+                 (or (discover-prompts (path/join home ".claude" "commands")) {})
                  (or (discover-prompts (path/join (global-dir) "prompts")) {})
+                 (or (discover-prompts (path/join cwd ".claude" "commands")) {})
                  (or (discover-prompts (path/join project-dir "prompts")) {}))
 
         themes  (discover-themes [(path/join (global-dir) "themes")

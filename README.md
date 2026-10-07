@@ -1068,7 +1068,7 @@ Deactivating a skill removes its injected message, its tool grants and any tools
 
 ### Prompts
 
-Place `.md` files in `~/.nyma/prompts/` or `.nyma/prompts/`. Each one becomes a slash command named after the file: `review.md` is `/review`. Arguments fill `$ARGUMENTS` (all of them), `$1`…`$9` and `${N:-default}`, and the result is sent as your message. Optional frontmatter describes the command in `/help` and the autocomplete picker:
+Place `.md` files in `~/.nyma/prompts/` or `.nyma/prompts/` — Claude Code's `~/.claude/commands/` and `.claude/commands/` are read too, so existing commands work unchanged (nyma's own directory wins a name clash). Each one becomes a slash command named after the file: `review.md` is `/review`. Arguments fill `$ARGUMENTS` (all of them), `$1`…`$9` and `${N:-default}`, and the result is sent as your message. Optional frontmatter describes the command in `/help` and the autocomplete picker:
 
 ```markdown
 ---
