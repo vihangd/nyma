@@ -37,7 +37,9 @@ function ensureRustOnPath() {
     if (cargoPath) process.env.PATH = `${path.dirname(cargoPath)}:${process.env.PATH}`;
   } catch { /* no rustup: rust tasks will report skip via the probe */ }
 }
-ensureRustOnPath();
+// Called from main(), not at import: importing this module (bench_reap.test
+// does) ran cargo/rustc --version, and under a test's scratch HOME the rustup
+// shims downloaded a whole toolchain — ~15 s and a network fetch per test run.
 
 // One shared target dir instead of 30: every crate rebuilds the same handful of
 // dependencies otherwise, which is minutes of compile per task rather than one.
@@ -511,6 +513,7 @@ function parseUsage(stdout) {
 // ── main ──────────────────────────────────────────────────────────────────
 
 async function main() {
+  ensureRustOnPath();
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) { console.log(HELP); return; }
 

@@ -6,7 +6,7 @@
             ["ai" :refer [tool]]
             ["zod" :as z]
             ["@ai-sdk/provider-utils" :refer [asSchema]]
-            [agent.tools :refer [read-execute write-execute edit-execute bash-execute bash-tool-execute
+            [agent.tools :refer [reset-ddg-clock! read-execute write-execute edit-execute bash-execute bash-tool-execute
                                  think-execute ls-execute glob-execute grep-execute
                                  web-fetch-execute web-search-execute deep-research-execute
                                  builtin-tools read-tool write-tool edit-tool bash-tool
@@ -951,6 +951,7 @@
        "</table></body></html>"))
 
 (defn ^:async test-web-search-parses-results []
+  (reset-ddg-clock!)
   (let [saved js/globalThis.fetch]
     (set! js/globalThis.fetch
           (fn [_url _opts]
@@ -965,6 +966,7 @@
         (set! js/globalThis.fetch saved)))))
 
 (defn ^:async test-web-search-respects-num-results []
+  (reset-ddg-clock!)
   (let [saved js/globalThis.fetch]
     (set! js/globalThis.fetch
           (fn [_url _opts]
@@ -1167,6 +1169,7 @@
           (set! (.. js/process -env -TINYFISH_API_KEY) saved-tf))))))
 
 (defn ^:async test-web-search-auto-falls-through-to-ddg []
+  (reset-ddg-clock!)
   ;; Tinyfish key set but tinyfish 500s. Jina also 500s. DDG wins.
   (let [saved-fetch js/globalThis.fetch
         saved-tf    (.. js/process -env -TINYFISH_API_KEY)]

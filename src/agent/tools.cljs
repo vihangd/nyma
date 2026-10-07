@@ -660,6 +660,12 @@
 
 (def ^:private last-ddg-request (atom 0))
 
+(defn reset-ddg-clock!
+  "Forget the last DuckDuckGo request, so the next one does not wait out the
+   2 s politeness interval. For tests: three of them spent 4 s in real sleeps."
+  []
+  (reset! last-ddg-request 0))
+
 (defn ^:async ddg-search
   "Search DuckDuckGo Lite (no API key required)."
   [query num-results]

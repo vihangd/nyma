@@ -33,6 +33,17 @@
 
 (defn- built? [] (fs/existsSync cli-entry))
 
+(defn- ^:async rpc-ready!
+  "Ask a --mode rpc process for its commands and wait for the reply: by then
+   startup is done and the signal handlers are installed (cli.cljs installs
+   them before rpc/start). Replaces a fixed 4 s sleep — the suite's slowest."
+  [proc]
+  (.write (.-stdin proc) "{\"type\":\"get_commands\"}\n")
+  (.flush (.-stdin proc))
+  (let [reader (.getReader (.-stdout proc))]
+    (js-await (js/Promise.race #js [(.read reader) (js/Bun.sleep 15000)]))
+    (.releaseLock reader)))
+
 (defn- ^:async signal-run
   "Start a long-lived CLI (`--mode rpc` waits on stdin, no TTY needed), let it
    finish starting, send `sig`, and report how it ended."
@@ -49,9 +60,7 @@
                              "NYMA_NO_MODEL_DISCOVERY" "1"}})
         exited (atom false)
         _      (.then (.-exited proc) (fn [_] (reset! exited true)))
-        ;; Wait for the handlers to be installed: they register after
-        ;; extensions load, a few seconds in.
-        _      (js-await (js/Bun.sleep 4000))
+        _      (js-await (rpc-ready! proc))
         early? @exited
         _      (when-not early? (.kill proc sig))
         code   (js-await (.-exited proc))]
@@ -62,15 +71,24 @@
   "The interactive TUI in a pty — stdin IS a terminal — sent SIGHUP."
   []
   (let [home (fs/mkdtempSync (path/join (os/tmpdir) "nyma-sig-"))
+        seen (atom "")
+        dec  (js/TextDecoder.)
         proc (js/Bun.spawn
               #js ["bun" cli-entry "--model" "nope/nope"]
               #js {:cwd home
                    :env #js {"HOME" home "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)
                              "NYMA_NO_MODEL_DISCOVERY" "1" "TERM" "xterm-256color"}
-                   :terminal #js {:cols 100 :rows 30 :data (fn [_ _])}})
+                   :terminal #js {:cols 100 :rows 30
+                                  :data (fn [_ b] (swap! seen str (.decode dec b #js {:stream true})))}})
         exited (atom false)
         _      (.then (.-exited proc) (fn [_] (reset! exited true)))
-        _      (js-await (js/Bun.sleep 4000))
+        ;; The first frame naming the model: the TUI is up, so the handlers
+        ;; (installed before interactive/start) are too.
+        _      (js-await (let [end (+ (js/Date.now) 15000)]
+                           (loop []
+                             (when-not (or (.includes @seen "nope") (> (js/Date.now) end) @exited)
+                               (js-await (js/Bun.sleep 50))
+                               (recur)))))
         early? @exited
         _      (when-not early? (.kill proc "SIGHUP"))
         code   (js-await (.-exited proc))]
@@ -86,9 +104,11 @@
               #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "pipe"
                    :env #js {"HOME" home "PATH" (.-PATH js/process.env) "TMPDIR" (os/tmpdir)
                              "NYMA_NO_MODEL_DISCOVERY" "1"}})
-        _      (js-await (js/Bun.sleep 4000))
+        _      (js-await (rpc-ready! proc))
         _      (.kill proc "SIGHUP")
-        _      (js-await (js/Bun.sleep 1500))
+        ;; A handled hangup runs shutdown! and exits within a few hundred ms;
+        ;; the default action is immediate. Either would show by now.
+        _      (js-await (js/Promise.race #js [(.-exited proc) (js/Bun.sleep 800)]))
         alive? (nil? (.-exitCode proc))]
     (.kill proc "SIGTERM")
     (js-await (.-exited proc))

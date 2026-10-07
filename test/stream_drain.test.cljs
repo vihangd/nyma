@@ -46,13 +46,15 @@
   ;; Guard the guard. If this ever stops taking ~5 s, the platform changed and
   ;; the test above is no longer proving anything — better to hear it here than
   ;; to keep a green test that guards nothing.
-  (let [proc  (js/Bun.spawn #js ["bash" "-c" "sleep 2; true"]
+  ;; 0.6 s, not 2: the kill is at 100 ms, so anything well past that proves the
+  ;; read waited on the orphan — the extra 1.4 s proved nothing more.
+  (let [proc  (js/Bun.spawn #js ["bash" "-c" "sleep 0.6; true"]
                             #js {:stdout "pipe" :stderr "pipe"})
         start (js/Date.now)]
     (js/setTimeout (fn [] (try (.kill proc) (catch :default _ nil))) 100)
     (js-await (.-exited proc))
     (js-await (.text (js/Response. (.-stdout proc))))
-    (-> (expect (- (js/Date.now) start)) (.toBeGreaterThan 1500))))
+    (-> (expect (- (js/Date.now) start)) (.toBeGreaterThan 450))))
 
 (describe "read-text-until"
           (fn []
