@@ -23,7 +23,8 @@
             ["node:path" :as path]
             [agent.extensions.token-suite.tool-deferral :as td]
             [agent.extensions.token-suite.shared :as shared]
-            [agent.tool-metadata :as tm]))
+            [agent.tool-metadata :as tm]
+            [agent.schema :as schema]))
 
 (describe "pattern matching"
           (fn []
@@ -190,3 +191,17 @@
                           (-> (expect out) (.toContain "lsp_hover"))
                           (-> (expect out) (.not.toContain "No deferred tools matched"))
                           (stop))))))))
+
+(describe "schema->json"
+  (fn []
+    ;; A zod v4 schema has `.type` too, so it was returned as-is: the model got
+    ;; zod internals with every description dropped.
+    (test "converts an in-tree zod schema to JSON Schema, keeping descriptions"
+      (fn []
+        (let [j (td/schema->json (schema/->zod {:path [:string "File path"]}))]
+          (-> (expect (.. j -properties -path -description)) (.toBe "File path"))
+          (-> (expect (.-def j)) (.toBeUndefined)))))
+    (test "passes plain JSON Schema through"
+      (fn []
+        (let [s #js {:type "object" :properties #js {}}]
+          (-> (expect (td/schema->json s)) (.toBe s)))))))

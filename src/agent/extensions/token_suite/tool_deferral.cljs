@@ -136,6 +136,10 @@
   (when schema
     (try
       (cond
+        ;; Zod FIRST: a zod v4 schema also has `.type` ("object"), so the
+        ;; plain-object test below took every zod schema for JSON Schema and
+        ;; the converter never ran.
+        (aget schema "_zod")       (.toJSONSchema z schema)
         ;; Already JSON Schema (an MCP bridge hands us a plain object).
         (aget schema "type")       schema
         (aget schema "jsonSchema") (aget schema "jsonSchema")
