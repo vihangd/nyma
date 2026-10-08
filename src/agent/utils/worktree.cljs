@@ -69,14 +69,24 @@
         (try (git root "branch" "-d" br) :merged
              (catch :default _ :kept))))))
 
+(defn- staged?
+  "Anything in the index? (`diff --cached --quiet` exits 1 when there is.)"
+  [p]
+  (try (git p "diff" "--cached" "--quiet") false (catch :default _ true)))
+
 (defn- commit-all! [p message]
-  ;; .nyma/ is the child's own state (ext-state, plans), not its work.
+  ;; .nyma/ is the child's own state (ext-state, plans), not its work. A child
+  ;; that changed ONLY .nyma/ leaves nothing staged — committing then failed,
+  ;; twice, and the throw discarded the child's whole result.
   (git p "add" "-A" "--" "." ":!.nyma")
-  (try (git p "commit" "-q" "-m" message)
-       ;; No identity configured (a CI box, a fresh container): commit as nyma
-       ;; rather than lose the work.
-       (catch :default _
-         (git p "-c" "user.name=nyma" "-c" "user.email=nyma@localhost" "commit" "-q" "-m" message))))
+  (when (staged? p)
+    (try (git p "commit" "-q" "-m" message)
+         ;; No identity configured (a CI box, a fresh container), or a
+         ;; pre-commit hook that rejects work in progress: this is a scratch
+         ;; branch the user reviews before merging, so keep the work.
+         (catch :default _
+           (git p "-c" "user.name=nyma" "-c" "user.email=nyma@localhost"
+                "commit" "-q" "--no-verify" "-m" message)))))
 
 (defn finish!
   "Close worktree `wt`. Uncommitted changes are committed on its branch.

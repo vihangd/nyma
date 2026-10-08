@@ -52,6 +52,26 @@
                       (-> (expect (git d "branch" "--list" "nyma/idle")) (.toBe "")))
                     (fs/rmSync d #js {:recursive true :force true}))))
 
+            (it "a child that changed only .nyma/ leaves nothing, and does not throw"
+                (fn []
+                  (let [d (temp-repo)
+                        t (wt/create! d "state-only")]
+                    (fs/mkdirSync (path/join (:path t) ".nyma") #js {:recursive true})
+                    (fs/writeFileSync (path/join (:path t) ".nyma" "s.json") "{}")
+                    (-> (expect (wt/finish! t "x")) (.toBeFalsy))
+                    (-> (expect (git d "branch" "--list" "nyma/state-only")) (.toBe ""))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
+            (it "a pre-commit hook that rejects does not lose the work"
+                (fn []
+                  (let [d (temp-repo)
+                        _ (fs/writeFileSync (path/join d ".git" "hooks" "pre-commit") "#!/bin/sh\nexit 1\n")
+                        _ (fs/chmodSync (path/join d ".git" "hooks" "pre-commit") 493)
+                        t (wt/create! d "hooked")]
+                    (fs/writeFileSync (path/join (:path t) "w.txt") "w")
+                    (-> (expect (:commits (wt/finish! t "x"))) (.toBe 1))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
             (it "--worktree reuses a checkout; rm keeps an unmerged branch"
                 (fn []
                   (let [d  (temp-repo)
@@ -96,6 +116,24 @@
         ((:stop srv))
         (fs/rmSync d #js {:recursive true :force true})
         (try (fs/rmSync home #js {:recursive true :force true}) (catch :default _ nil))))))
+
+(defn ^:async test-noisy-child []
+  ;; 200 KB on stderr before any stdout: reading stdout to EOF first left the
+  ;; child blocked on a full stderr pipe and the parent waiting forever.
+  (let [d (temp-repo) prev (js/process.cwd)]
+    (js/process.chdir d)
+    (try
+      (let [r (js-await (sub/run-in-worktree
+                         {:agent-name "noisy" :task "t"
+                          :command ["sh" "-c" "head -c 200000 /dev/zero | tr '\\0' x >&2; echo '{\"result\":\"fine\"}'"]}
+                         {:provider "p" :model "m"}))]
+        (-> (expect (:text r)) (.toContain "fine")))
+      (finally
+        (js/process.chdir prev)
+        (fs/rmSync d #js {:recursive true :force true})))))
+
+(describe "worktree child process"
+          (fn [] (it "drains stderr and stdout together" test-noisy-child 20000)))
 
 ((.skipIf describe (not (fs/existsSync cli))) "subagent isolation: worktree"
                                               (fn [] (it "edits land on a branch, not in the user's tree" test-subagent-in-worktree 60000)))

@@ -136,14 +136,16 @@ intermediate tool calls, so put everything that matters in the summary.")
            "--append-system-prompt" sys]
     (seq allowed) (into ["--tools" (str/join "," allowed)])))
 
+(def ^:private worktree-timeout-ms (* 30 60 1000))
+
 (defn ^:async run-in-worktree [opts cfg]
-  (let [{:keys [agent-name task model-override max-steps]} opts
+  (let [{:keys [agent-name task model-override max-steps signal command]} opts
         provider (cfg-get cfg :provider "provider")
         model-id (or model-override (cfg-get cfg :model "model"))
         allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
     (try
       (let [tree (wt/create! (js/process.cwd) (str agent-name "-" (js/Date.now)))
-            argv (into (self-command)
+            argv (into (or command (self-command))   ;; :command — a test seam
                        (conj (worktree-args {:model   (if provider (str provider "/" model-id) model-id)
                                              :sys     (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
                                              :allowed allowed
@@ -151,24 +153,36 @@ intermediate tool calls, so put everything that matters in the summary.")
                              task))
             proc (js/Bun.spawn (clj->js argv)
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
-                                    :env js/process.env})
-            out  (js-await (.text (js/Response. (.-stdout proc))))
-            err  (js-await (.text (js/Response. (.-stderr proc))))
-            _    (js-await (.-exited proc))
+                                    :env js/process.env
+                                    ;; ponytail: fixed 30 min ceiling; a setting when a task needs longer
+                                    :timeout worktree-timeout-ms :killSignal "SIGTERM"})
+            ;; Cancelling the parent's turn ends the child too.
+            kill (fn [] (try (.kill proc) (catch :default _ nil)))
+            _    (some-> signal (.addEventListener "abort" kill #js {:once true}))
+            ;; Both pipes drained AT ONCE: reading stdout to EOF first left a
+            ;; child that filled the stderr pipe (64 KB of warnings) blocked on
+            ;; the write, stdout never closing, and the parent waiting forever.
+            [out err] (js-await (js/Promise.all #js [(.text (js/Response. (.-stdout proc)))
+                                                    (.text (js/Response. (.-stderr proc)))
+                                                    (.-exited proc)]))
+            _    (some-> signal (.removeEventListener "abort" kill))
             res  (try (js/JSON.parse out) (catch :default _ nil))
-            done (wt/finish! tree (str "nyma subagent " agent-name ": " (subs (str task) 0 (min 60 (count (str task))))))]
+            ;; Separately guarded: the child's answer is worth returning even
+            ;; when closing its checkout fails — which then stays for the user.
+            done (try (wt/finish! tree (str "nyma subagent " agent-name ": " (subs (str task) 0 (min 60 (count (str task))))))
+                      (catch :default e {:error (str (.-message e)) :path (:path tree) :branch (:branch tree)}))]
         {:agent agent-name
          :ok    (and (some? res) (not (.-is_error res)))
          :text  (str (if res (.-result res) (str "child produced no result: " (str/trim (str err out))))
-                     "
-
-"
-                     (if done
-                       (str "Worktree branch `" (:branch done) "` (" (:commits done) " commit(s)):
-" (:stat done)
-                            "
-Merge with: git merge " (:branch done))
-                       "No file changes; the worktree was removed."))
+                     "\n\n"
+                     (cond
+                       (:error done)
+                       (str "Could not close the worktree (" (str/trim (:error done)) "); it is left at "
+                            (:path done) " on branch " (:branch done) ".")
+                       done
+                       (str "Worktree branch `" (:branch done) "` (" (:commits done) " commit(s)):\n" (:stat done)
+                            "\nMerge with: git merge " (:branch done))
+                       :else "No file changes; the worktree was removed."))
          :usage {:input  (or (some-> res .-usage .-input_tokens) 0)
                  :output (or (some-> res .-usage .-output_tokens) 0)
                  :cost   (or (some-> res .-total_cost_usd) 0.0)}})
@@ -396,7 +410,7 @@ Merge with: git merge " (:branch done))
                (assoc-in [:properties "tasks" :items] task-item)
                (assoc-in [:properties "chain" :items] task-item))))
 
-(defn ^:async tool-execute [api args]
+(defn ^:async tool-execute [api args & [signal]]
   ;; action=status is a pure in-memory read — short-circuit BEFORE touching
   ;; the settings manager / agent .md files (synchronous disk IO), so a
   ;; status poll loop doesn't re-read settings + scan agent dirs each call.
@@ -406,7 +420,7 @@ Merge with: git merge " (:branch done))
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
           base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
-                                :steps-ceiling ceiling :isolation (.-isolation args)}
+                                :steps-ceiling ceiling :isolation (.-isolation args) :signal signal}
                          (steps-arg (.-steps args) ceiling)
                          (assoc :max-steps (steps-arg (.-steps args) ceiling)))
           async?       (let [s    ((:get settings-mgr))
@@ -478,7 +492,7 @@ Merge with: git merge " (:branch done))
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
-        :execute (fn [args] (tool-execute api args))})
+        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal)))})
 
   (.registerCommand
    api "agents"
