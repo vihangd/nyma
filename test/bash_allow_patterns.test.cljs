@@ -28,6 +28,15 @@
                                       ["cat a | sh" nil]
                                       ["" nil]]]
                     (-> (expect #js [cmd (or (sg/grant-base cmd) "none")]) (.toEqual #js [cmd (or want "none")])))))
+            (it "interpreters and wrappers never get a grant, and an old one matches nothing"
+                (fn []
+                  (doseq [c ["bash -c 'ls'" "/bin/sh -c 'ls'" "python3 -c 'print(1)'" "sudo ls" "env FOO=1 ls" "xargs rm"]]
+                    (-> (expect #js [c (boolean (sg/grant-base c))]) (.toEqual #js [c false])))
+                  (-> (expect (sg/grant-matches? "bash" "bash -c 'rm -rf ~/work'")) (.toBe false))
+                  (-> (expect (sg/grant-matches? "sudo" "sudo rm -rf /")) (.toBe false))
+                  ;; ordinary commands are unaffected
+                  (-> (expect (sg/grant-base "pytest -x")) (.toBe "pytest"))))
+
             (it "matches on a word boundary, simple commands only"
                 (fn []
                   (-> (expect (sg/grant-matches? "git push" "git push --force")) (.toBe true))

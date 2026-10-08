@@ -25,13 +25,29 @@
     "kubectl" "gh" "pip" "pip3" "uv" "poetry" "brew" "apt" "apt-get" "systemctl"
     "make" "dotnet" "mvn" "gradle" "terraform" "helm" "aws" "gcloud" "az"})
 
+(def code-runners
+  "Commands whose arguments are themselves arbitrary code or another command:
+   interpreters and wrappers. `bash *` after `bash -c 'ls'` also covered
+   `bash -c 'rm -rf ~/work'`; `sudo *` after `sudo ls` covered any root
+   command. No grant can vouch for what they run, so they never get one."
+  #{"bash" "sh" "zsh" "fish" "dash" "ksh" "csh" "tcsh"
+    "python" "python2" "python3" "node" "perl" "ruby" "php" "lua" "osascript" "awk"
+    "sudo" "doas" "su" "env" "xargs" "find" "eval" "exec" "nohup" "timeout" "nice"
+    "time" "watch" "ssh" "command" "builtin"})
+
+(defn- code-runner?
+  "First word of `c` — by name or path (`/bin/sh`) — is a code runner."
+  [c]
+  (let [w (first (str/split (str/trim (str c)) #"\s+"))]
+    (contains? code-runners (last (.split (str w) "/")))))
+
 (defn grant-base
   "What \"Allow always\" for `cmd` remembers: `git push` for `git push origin
-   main`, `pytest` for `pytest -x tests/`. nil for a compound command or an
-   empty one — those never get an always-allow."
+   main`, `pytest` for `pytest -x tests/`. nil for a compound command, an
+   empty one, or a code runner — those never get an always-allow."
   [cmd]
   (let [c (str/trim (str cmd))]
-    (when (and (seq c) (simple-command? c))
+    (when (and (seq c) (simple-command? c) (not (code-runner? c)))
       (let [[w sub] (str/split c #"\s+")]
         (if (and (contains? subcommand-tools w) sub (not (str/starts-with? sub "-")))
           (str w " " sub)
@@ -44,5 +60,7 @@
   [base cmd]
   (let [c (str/trim (str cmd))
         b (str base)]
-    (boolean (and (seq b) (simple-command? c)
+    ;; A code runner is refused even against a grant saved before they were
+    ;; excluded: the grant cannot know what it would be approving.
+    (boolean (and (seq b) (simple-command? c) (not (code-runner? c))
                   (or (= c b) (str/starts-with? c (str b " ")))))))
