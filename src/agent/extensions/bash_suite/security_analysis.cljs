@@ -109,11 +109,14 @@
    shell-quote 1.11 mis-tokenizes `<<` and leaves the body as plain words;
    shell-quote 1.12's real heredoc support would have hidden it.
 
-   Pure. Matches the interpreter as a whole command word, so `grep -c` — a
+   Pure. Matches the interpreter as a whole command word, by name or by path
+   (`/bin/sh`, `/usr/bin/env`'s target is a word too), so `grep -c` — a
    count, not an execution — is not mistaken for one."
   [cmd]
   (let [s       (str cmd)
-        interp  "(?:^|[\\s;&|(`])(?:bash|sh|zsh|fish|dash|ksh|csh|tcsh)"
+        ;; An optional directory: `/bin/sh -c '…'` hid the script, since the
+        ;; char before `sh` was `/`, not a separator.
+        interp  "(?:^|[\\s;&|(`])(?:[^\\s;&|(`'\"]*/)?(?:bash|sh|zsh|fish|dash|ksh|csh|tcsh)"
         ;; -c, including combined short flags like -lc / -ic
         dash-c  (js/RegExp. (str interp "\\s+(?:-[a-zA-Z]*c[a-zA-Z]*)\\s+(['\"])([\\s\\S]*?)\\1") "g")
         ;; here-string, quoted or bare

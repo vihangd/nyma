@@ -43,7 +43,11 @@
                   (doseq [c ["bash -c 'rm -rf /'"
                              "sh -c \"rm -rf ~\""
                              "zsh -c 'rm -rf /*'"
-                             "bash -lc 'rm -rf /'"]]
+                             "bash -lc 'rm -rf /'"
+                             ;; by path: the char before `sh` was `/`, not a separator
+                             "/bin/sh -c 'rm -rf /'"
+                             "/usr/bin/bash -c \"rm -rf ~\""
+                             "/usr/bin/env bash -c 'rm -rf /'"]]
                     (-> (expect #js [c (level c)]) (.toEqual #js [c :destructive])))))
 
             (it "here-strings fed to an interpreter"
