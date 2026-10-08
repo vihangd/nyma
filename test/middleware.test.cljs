@@ -813,7 +813,9 @@
         _         ((:on events) "permission_request" (fn [_] (swap! fired inc) #js {"decision" "ask"}))
         ctx2      (js-await (permission-check-enter events nil {:tool-name "bash" :args {:command "ls"} :cancelled false}))]
     (-> (expect (:cancelled ctx)) (.toBeFalsy))
-    (-> (expect (session-allowed? "bash")) (.toBe true))
+    ;; the session remembers `ls`, not the whole bash tool
+    (-> (expect (session-allowed? "bash")) (.toBe false))
+    (-> (expect (session-allowed? "bash:ls")) (.toBe true))
     ;; nothing persisted to settings …
     (-> (expect (count @persisted)) (.toBe 0))
     ;; … and the next call is not prompted. For bash, permission_request
@@ -821,6 +823,9 @@
     ;; session grant answers the ask.
     (-> (expect @fired) (.toBe 1))
     (-> (expect (:cancelled ctx2)) (.toBeFalsy))
+    ;; a different command is still asked (no UI here → denied, not allowed)
+    (let [ctx3 (js-await (permission-check-enter events nil {:tool-name "bash" :args {:command "git push --force"} :cancelled false}))]
+      (-> (expect (:cancelled ctx3)) (.toBe true)))
     (reset-session-allows!)))
 
 (describe "permission prompt text" (fn []

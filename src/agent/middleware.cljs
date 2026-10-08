@@ -496,6 +496,13 @@
         (and choice (.startsWith choice "Allow always"))
         (do (when settings ((:append-allow-tool! settings) tool-name)) ctx)
 
+        ;; bash: the session remembers the PATTERN, like Allow always — a
+        ;; session grant of the whole tool on `ls` answered every later ask,
+        ;; `git push --force` included. No pattern (compound, interpreter):
+        ;; it is this once.
+        (and choice (.startsWith choice "Allow for this session") bash?)
+        (do (when base (swap! (allows-of ctx) conj (str "bash:" base))) ctx)
+
         (and choice (.startsWith choice "Allow for this session"))
         (do (swap! (allows-of ctx) conj tool-name) ctx)
 
@@ -554,7 +561,9 @@
             ;; whole-tool grant from before patterns existed. Answers the ask
             ;; only — a deny (denylist, destructive) above still wins.
             (and (= tool-name "bash")
-                 (or (contains? @(allows-of ctx) "bash")
+                 (or (some #(and (str/starts-with? % "bash:")
+                                 (shell-grant/grant-matches? (subs % 5) (get args :command)))
+                           @(allows-of ctx))
                      (and settings ((:tool-allowed? settings) "bash"))
                      (and settings (:bash-allowed? settings)
                           ((:bash-allowed? settings) (get args :command)))))
