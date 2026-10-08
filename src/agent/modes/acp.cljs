@@ -7,14 +7,16 @@
    nyma streams the run back as `session/update` notifications (message and
    thought chunks, tool calls and their results) and asks the editor through
    `session/request_permission` whenever its permission gate would ask a
-   person. One process serves one session at a time: a second `session/new`
-   starts over, as /new does."
+   person. One process serves one session at a time, in the folder it was
+   started in: a second `session/new` starts over, as /new does, and one for
+   another folder is refused."
   (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
             [agent.utils.content :as content]
             [agent.version :as version]
             [agent.extensions.model-roles.policy :as policy]
             [agent.tool-metadata :as tm]
+            [agent.tool-result-policy :as policy-result]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]))
@@ -84,7 +86,8 @@
 (defn ^:async start
   "Serve ACP on stdio until stdin closes. Returns a cleanup thunk."
   [agent & [{:keys [on-eof]}]]
-  (let [session-id (atom nil)
+  (let [launch-dir (js/process.cwd)
+        session-id (atom nil)
         running    (atom nil)    ;; {:id rpc-id} while a prompt runs
         cancelled? (atom false)
         next-id    (atom 0)
@@ -149,7 +152,11 @@
                                          :rawInput args}
                                   p (assoc :locations [{:path (path/resolve (str p))}])))))]
          ["tool_execution_end"
-          (fn [data] (let [r (str (:result data))]
+          ;; The text the MODEL saw, not :result — that one is for a
+          ;; terminal: ANSI-wrapped to its width and capped at 500 lines.
+          (fn [data] (let [r (str (if-let [env (:resultEnvelope data)]
+                                    (policy-result/model-string env)
+                                    (:result data)))]
                        (update! {:sessionUpdate "tool_call_update" :toolCallId (str (:execId data))
                                  :status (if (:isError data) "failed" "completed")
                                  :content [{:type "content"
@@ -186,20 +193,42 @@
 
               (= m "authenticate") (reply! id {})
 
+              ;; One folder per process. Trust was decided, and settings,
+              ;; extensions and AGENTS.md were loaded, for the folder nyma
+              ;; started in; chdir-ing to another would run THAT folder's hooks
+              ;; and verify.cmd under the first folder's trust decision.
               (= m "session/new")
               (let [cwd (aget p "cwd")]
-                (when (and (string? cwd) (fs/existsSync cwd)) (js/process.chdir cwd))
-                (swap! (:state agent) assoc :messages [])
-                (reset! session-id (str "nyma-" (js/Date.now)))
-                (reply! id {:sessionId @session-id :modes (modes agent)}))
+                (if (and (string? cwd) (fs/existsSync cwd)
+                         (not= (fs/realpathSync cwd) (fs/realpathSync launch-dir)))
+                  (reply-error! id -32602 (str "nyma serves the folder it was started in (" launch-dir
+                                               "); start another nyma for " cwd))
+                  (do (swap! (:state agent) assoc :messages [])
+                      (reset! session-id (str "nyma-" (js/Date.now)))
+                      (reply! id {:sessionId @session-id :modes (modes agent)}))))
 
+              ;; Through /mode itself, not a bare state write: "plan" has to
+              ;; ENTER plan mode (plan file, plan model, approval gate), and
+              ;; leaving an unapproved plan is refused there.
               (= m "session/set_mode")
-              (let [mode (str (aget p "modeId"))]
-                (if (policy/mode? mode)
-                  (do (swap! (:state agent) assoc :permission-mode mode)
-                      (update! {:sessionUpdate "current_mode_update" :currentModeId mode})
-                      (reply! id {}))
-                  (reply-error! id -32602 (str "unknown mode: " mode))))
+              (let [mode  (str (aget p "modeId"))
+                    cmds  @(:commands agent)
+                    cmd   (or (get cmds "mode") (get cmds "model-roles__mode"))
+                    notes (atom [])
+                    ctx   #js {:ui (js/Object.assign #js {} (some-> (.-extension-api agent) .-ui)
+                                                 #js {:notify (fn [msg lvl] (swap! notes conj [msg lvl]))})}]
+                (cond
+                  (not (policy/mode? mode)) (reply-error! id -32602 (str "unknown mode: " mode))
+                  (nil? cmd) (reply-error! id -32603 "mode switching is unavailable")
+                  :else
+                  (-> (js/Promise.resolve ((:handler cmd) [mode] ctx))
+                      (.then (fn [_]
+                               (if (= mode (str (:permission-mode @(:state agent))))
+                                 (do (update! {:sessionUpdate "current_mode_update" :currentModeId mode})
+                                     (reply! id {}))
+                                 (reply-error! id -32603 (or (some (fn [[msg lvl]] (when (not= lvl "info") msg)) @notes)
+                                                             (str "could not switch to " mode))))))
+                      (.catch (fn [e] (reply-error! id -32603 (str (.-message e))))))))
 
               (= m "session/cancel") (cancel!)
 

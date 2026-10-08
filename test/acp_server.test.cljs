@@ -91,9 +91,21 @@
           (-> (expect (.-kind tc)) (.toBe "edit"))
           (-> (expect (str/ends-with? (.-path (aget (.-locations tc) 0)) "/acp.txt")) (.toBe true))
           (-> (expect (.-status tu)) (.toBe "completed"))
+          ;; the model's text, not the terminal rendering
+          (-> (expect (.includes (.. tu -content (at 0) -content -text) "\u001b")) (.toBe false))
           (-> (expect (fs/readFileSync (path/join home "acp.txt") "utf8")) (.toBe "from-acp"))
           (-> (expect (str/join "" (keep #(when (= "agent_message_chunk" (.-sessionUpdate %)) (.. % -content -text)) us)))
-              (.toContain "all done"))))
+              (.toContain "all done")))
+        ;; set_mode goes through /mode: plan mode is ENTERED, not just labelled
+        (send! {:jsonrpc "2.0" :id 4 :method "session/set_mode" :params {:sessionId sid :modeId "plan"}})
+        (js-await (wait-for #(by-id 4) 5000))
+        (-> (expect (.-error (by-id 4))) (.toBeUndefined))
+        (-> (expect (some #(and (= "current_mode_update" (.-sessionUpdate %)) (= "plan" (.-currentModeId %))) (updates)))
+            (.toBe true))
+        ;; another folder is refused: trust and settings belong to this one
+        (send! {:jsonrpc "2.0" :id 5 :method "session/new" :params {:cwd (js/process.cwd) :mcpServers []}})
+        (js-await (wait-for #(by-id 5) 5000))
+        (-> (expect (.. (by-id 5) -error -message)) (.toContain "serves the folder it was started in")))
       (finally
         (.kill proc)
         (js-await (.-exited proc))

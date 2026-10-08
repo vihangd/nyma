@@ -474,8 +474,11 @@ It implements `initialize`, `session/new`, `session/prompt`, `session/cancel` an
 `session/update`: `agent_message_chunk`, `agent_thought_chunk`, `tool_call` (with
 kind and file location) and `tool_call_update`. Where nyma's permission gate would
 ask, it sends `session/request_permission` and the editor asks you; the session
-starts in the `default` mode, which asks before writes and shell commands. One
-process serves one session; `session/load` is not offered yet.
+starts in the `default` mode, which asks before writes and shell commands.
+`set_mode` goes through `/mode`, so `plan` enters plan mode. One process serves
+one session in the folder it was started in — workspace trust and project
+settings were decided for that folder — so a `session/new` for another folder is
+refused. `session/load` is not offered yet.
 
 ### Gateway Mode (`nyma-gateway`)
 
