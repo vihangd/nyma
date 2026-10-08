@@ -128,3 +128,16 @@
   (it "works without a reason"
       (fn []
         (-> (expect (fb/announcement "a" "b" nil)) (.toContain "falling back to b"))))))
+
+(describe "should-fall-back?: status codes stand alone" (fn []
+  ;; "500" as a bare substring matched any number containing it.
+  (it "a number that merely contains 500/502 is not a server error"
+      (fn []
+        (doseq [m ["429 rate limit exceeded, retry after 5000ms"
+                   "Rate limited (request id req_5021abc)"
+                   "used 1500 of 1000 requests"]]
+          (-> (expect #js [m (fb/should-fall-back? m)]) (.toEqual #js [m false])))))
+  (it "a real status still counts"
+      (fn []
+        (doseq [m ["HTTP 503: try later" "status 502" "500 Internal"]]
+          (-> (expect #js [m (fb/should-fall-back? m)]) (.toEqual #js [m true])))))))

@@ -58,6 +58,15 @@
    ;; for — a bare substring suppressed it.
    "context length" "context_length" "context window" "too long" "maximum tokens"])
 
+(defn- matches?
+  "Does lower-cased message `m` contain pattern `p`? A status code must stand
+   alone: \"retry after 5000ms\" on a 429, or a request id with 502 in it,
+   matched the bare \"500\"/\"502\" and moved the turn to another model."
+  [m p]
+  (if (.test #"^\d+$" p)
+    (.test (js/RegExp. (str "(?:^|[^\\d.])" p "(?![\\d.])")) m)
+    (.includes m p)))
+
 (defn should-fall-back?
   "Is this failure a reason to try the next model in the chain?
 
@@ -67,7 +76,7 @@
    key. Availability is the permissive branch, so the restrictive one goes first."
   [message]
   (let [m (str/lower-case (str (or message "")))
-        has (fn [pats] (boolean (some (fn [p] (.includes m p)) pats)))]
+        has (fn [pats] (boolean (some (fn [p] (matches? m p)) pats)))]
     (cond
       (str/blank? m)              false
       (has request-patterns)      false
