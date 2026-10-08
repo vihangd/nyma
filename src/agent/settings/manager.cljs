@@ -418,7 +418,10 @@
   "Write `data` as JSON, atomically: a temp file in the same directory, then
    rename — so a crash or a full disk leaves the old file, never half a file."
   [file-path data]
-  (let [dir (path/dirname file-path)
+  ;; Through a symlink to its target: renaming over the link itself replaced a
+  ;; dotfiles-managed settings.json with a plain file, cutting it loose.
+  (let [file-path (try (fs/realpathSync file-path) (catch :default _ file-path))
+        dir (path/dirname file-path)
         tmp (str file-path ".tmp-" (.-pid js/process))]
     (when-not (fs/existsSync dir)
       (fs/mkdirSync dir #js {:recursive true}))

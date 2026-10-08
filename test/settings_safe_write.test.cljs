@@ -45,6 +45,16 @@
                       (-> (expect (.-theme j)) (.toBe "t")))
                     (fs/rmSync d #js {:recursive true}))))
 
+            (it "a symlinked settings file stays a symlink; the target gets the write"
+                (fn []
+                  (let [d (tmp-dir) g (path/join d "global.json") real (path/join d "dotfiles.json")]
+                    (fs/writeFileSync real "{\"model\": \"a\"}")
+                    (fs/symlinkSync real g)
+                    ((:save-global (manager d)) {:theme "t"})
+                    (-> (expect (.isSymbolicLink (fs/lstatSync g))) (.toBe true))
+                    (-> (expect (.-theme (js/JSON.parse (fs/readFileSync real "utf8")))) (.toBe "t"))
+                    (fs/rmSync d #js {:recursive true}))))
+
             (it "a missing or blank file is a fresh one"
                 (fn []
                   (let [d (tmp-dir) g (path/join d "global.json") m (manager d)]
