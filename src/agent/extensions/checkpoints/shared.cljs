@@ -2,7 +2,7 @@
   "Pure/state helpers for file checkpoints + /rewind.
 
    Model: before an editing tool touches a file, capture that file's pre-turn
-   state (content, or :absent if it didn't exist). Checkpoints group by turn;
+   state (content, or `absent` if it didn't exist). Checkpoints group by turn;
    /rewind restores the newest group (repeat to go further back). Session-
    scoped and in-memory — a trust net for accept-edits/full-auto, not a VCS."
   (:require ["node:fs" :as fs]
@@ -12,6 +12,12 @@
             [clojure.string :as str]
             [agent.utils.git-files :as git]
             [agent.tool-metadata :as tool-metadata]))
+
+(def absent
+  "The state of a file that did not exist. A Symbol, not `:absent`: in squint a
+   keyword IS the string \"absent\", so a file whose whole content was
+   `absent` was saved as \"did not exist\" and deleted on rewind."
+  (js/Symbol "absent"))
 
 (def max-snapshot-bytes (* 2 1024 1024))
 
@@ -24,13 +30,13 @@
   20)
 
 (defn- read-state
-  "Current state of `path`: content string, :absent, or nil (too big to hold)."
+  "Current state of `path`: content string, `absent`, or nil (too big to hold)."
   [path]
   (if (fs/existsSync path)
     (let [size (.-size (fs/statSync path))]
       (when (<= size max-snapshot-bytes)
         (fs/readFileSync path "utf8")))
-    :absent))
+    absent))
 
 (defn capture-pending!
   "Capture `path`'s pre-execution state into pending* ({path state}) — first
@@ -72,7 +78,7 @@
     (let [turn  (apply max (map js/Number (keys @checkpoints*)))
           group (get @checkpoints* turn)]
       (doseq [[path state] group]
-        (if (= state :absent)
+        (if (identical? state absent)
           (when (fs/existsSync path) (fs/unlinkSync path))
           (fs/writeFileSync path state)))
       (swap! checkpoints* dissoc turn)
@@ -114,8 +120,8 @@
                (-> (crypto/createHash "sha1") (.update (path/resolve cwd)) (.digest "hex") (subs 0 12))
                (path/basename (str session-file) ".jsonl"))))
 
-(defn- state->json [st] (if (= st :absent) nil st))
-(defn- json->state [v] (if (nil? v) :absent v))
+(defn- state->json [st] (if (identical? st absent) nil st))
+(defn- json->state [v] (if (nil? v) absent v))
 
 (defn save-turn!
   "Write turn `turn`'s group to `dir`. Atomic."
@@ -199,7 +205,7 @@
   (vec (mapcat (fn [t]
                  (let [group (get @checkpoints* t)]
                    (doseq [[p st] group]
-                     (if (= st :absent)
+                     (if (identical? st absent)
                        (when (fs/existsSync p) (fs/unlinkSync p))
                        (fs/writeFileSync p st)))
                    (swap! checkpoints* dissoc t)

@@ -139,3 +139,20 @@
 
 (describe "/fork and files"
           (fn [] (it "offers to restore files changed after the fork point" test-fork-offers-restore)))
+
+(defn ^:async test-content-absent []
+  ;; `:absent` is the string "absent" in squint, so a file whose content was
+  ;; exactly that was recorded as "did not exist" — and rewind deleted it.
+  (let [d  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-cpp-abs-"))
+        f  (path/join d "f.txt")
+        m  (mock-api (path/join d "session-abs.jsonl"))]
+    (fs/writeFileSync f "absent")
+    (cpx/activate (:api m))
+    (edit-turn! m f "changed")
+    (js-await ((.-handler (get @(:commands m) "rewind")) ["last"] (notes-ctx (atom []))))
+    (-> (expect (fs/existsSync f)) (.toBe true))
+    (-> (expect (fs/readFileSync f "utf8")) (.toBe "absent"))
+    (fs/rmSync d #js {:recursive true})))
+
+(describe "the absent sentinel"
+          (fn [] (it "a file whose content is 'absent' is restored, not deleted" test-content-absent)))

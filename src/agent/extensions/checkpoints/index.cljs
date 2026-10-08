@@ -69,7 +69,7 @@
           (doseq [p (or (.-paths data) [])] (touch! p))
           (doseq [e (or (.-pre data) [])]
             (shared/record-state! checkpoints* (dir) @turn* (.-path e)
-                                  (if (nil? (.-state e)) :absent (.-state e))))
+                                  (if (nil? (.-state e)) shared/absent (.-state e))))
           nil)
 
         on-finalize
