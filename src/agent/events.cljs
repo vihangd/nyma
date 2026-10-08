@@ -64,7 +64,7 @@
    ;; emitter lint, the event map, and rpc mode's advertised channel list.
    ["model_resolve"         {:kind :collect :wire? false :doc "Pick which model to use for this turn; return `{model}` to override the agent default"}]
    ["before_message_send"   {:kind :collect :wire? false :doc "Final transform after `context_assembly` and before the LLM call; same return shape"}]
-   ["provider_error"        {:kind :collect :wire? false :doc "Fires on LLM call failure; return `{retry: true}` to retry once"}]
+   ["provider_error"        {:kind :collect :wire? false :doc "Fires on every LLM call failure; return `{retry: true}` to retry (bounded: up to 4 for a thrown call, 2 for a stream error). A stream error's payload has `final: true` when no retry will be honoured"}]
    ["stream_filter"         {:kind :collect :wire? false :doc "Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries)"}]
    ["message_before_store"  {:kind :collect :wire? false :doc "Last chance to rewrite assistant content before it lands in the store"}]
    ;; Another extension asking model_roles (the owner of :active-role) to

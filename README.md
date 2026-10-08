@@ -992,7 +992,7 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 | `before_provider_request` | emit-collect | Receives the mutable streamText config; mutate in place or return `{block: true, reason}` to skip the LLM call |
 | `model_resolve` | emit-collect | Pick which model to use for this turn; return `{model}` to override the agent default |
 | `before_message_send` | emit-collect | Final transform after `context_assembly` and before the LLM call; same return shape |
-| `provider_error` | emit-collect | Fires on LLM call failure; return `{retry: true}` to retry once |
+| `provider_error` | emit-collect | Fires on every LLM call failure; return `{retry: true}` to retry (bounded: up to 4 for a thrown call, 2 for a stream error). A stream error's payload has `final: true` when no retry will be honoured |
 | `stream_filter` | emit-collect | Per text delta during streaming; receives `{delta, chunk, type}` and may return `{abort: true, reason, inject: [...]}` to abort the stream and re-run with the injected messages (max 2 retries) |
 | `message_before_store` | emit-collect | Last chance to rewrite assistant content before it lands in the store |
 | `role_change` | emit | Ask model_roles (owner of :active-role) to switch role |

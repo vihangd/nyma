@@ -75,3 +75,20 @@
           (fn []
             (it "names the provider's message instead of 'No output generated'"
                 t-run-surfaces-the-stream-error)))
+
+(defn ^:async t-final-attempt-still-reported []
+  ;; The emit was gated on the attempt count, so when a handler kept asking to
+  ;; retry, the LAST attempt's failure reached no listener at all.
+  (let [agent (make-test-agent)
+        seen  (atom [])]
+    (set! (.-model (:config agent)) (error-only-model "upstream overloaded"))
+    ((:on (:events agent)) "provider_error"
+                           (fn [d] (swap! seen conj (boolean (.-final d))) #js {:retry true}))
+    (try (js-await (run agent "say ok")) (catch :default _ nil))
+    ;; every attempt was reported, and the last one said it was final
+    (-> (expect (count @seen)) (.toBe 3))
+    (-> (expect (last @seen)) (.toBe true))
+    (-> (expect (first @seen)) (.toBe false))))
+
+(describe "provider_error on stream errors"
+          (fn [] (it "fires on every attempt, the last marked final" t-final-attempt-still-reported)))

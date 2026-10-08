@@ -652,20 +652,26 @@
                   ;; work to the bounded retry immediately below: same attempt
                   ;; cap, same st-config object the handler just mutated, and no
                   ;; second retry path to keep in step with this one.
-                    (when (and @stream-error
-                               (nil? @(:retry-state agent))
-                               (< attempt 2)
-                               (get (js-await
-                                     (emit-collect "provider_error"
-                                                   #js {:message @stream-error
-                                                        :source  "stream"
-                                                        :model   model-id
-                                                        :config  st-config}))
-                                    "retry"))
-                      (reset! stream-error nil)
-                      (reset! accumulated "")
-                      (reset! (:retry-state agent)
-                              {:reason "provider-fallback" :inject []}))
+                  ;;
+                  ;; Emitted for EVERY stream error, retryable or not: gating
+                  ;; the emit on the attempt count meant the last attempt's
+                  ;; failure reached no listener (claude_hook_bridge's
+                  ;; StopFailure among them). `:final` tells a handler its
+                  ;; retry will not be honoured.
+                    (when @stream-error
+                      (let [can-retry? (and (nil? @(:retry-state agent)) (< attempt 2))
+                            r          (js-await
+                                        (emit-collect "provider_error"
+                                                      #js {:message @stream-error
+                                                           :source  "stream"
+                                                           :model   model-id
+                                                           :final   (not can-retry?)
+                                                           :config  st-config}))]
+                        (when (and can-retry? (get r "retry"))
+                          (reset! stream-error nil)
+                          (reset! accumulated "")
+                          (reset! (:retry-state agent)
+                                  {:reason "provider-fallback" :inject []}))))
 
                   ;; Aborted → inject messages and retry (max 2 times)
                     (if-let [retry @(:retry-state agent)]
