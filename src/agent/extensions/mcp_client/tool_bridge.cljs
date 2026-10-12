@@ -69,6 +69,21 @@
              :isError (boolean (:is-error? r))}
         text))))
 
+(defn hint-safety
+  "Permission metadata from a tool's MCP annotations, or nil. A bridged tool
+   had none, so it fell into \"other\" and ran unasked — including tools a
+   server itself marks `destructiveHint` because they execute the target or
+   change a device. Only explicit hints count: most servers annotate nothing,
+   and treating silence as destructive would make every such tool ask."
+  [annotations]
+  (let [ro? (true? (some-> annotations (aget "readOnlyHint")))
+        de? (true? (some-> annotations (aget "destructiveHint")))]
+    (cond
+      ro? #js {:read-only? true :capabilities #js [] :category "mcp"}
+      de? #js {:destructive? true :requires-confirmation? true
+               :capabilities #js ["shell"] :category "mcp"}
+      :else nil)))
+
 (defn- build-tool-def
   "Convert a single MCP `{:name :description :input-schema}` tool
    to an AI-SDK `tool(...)` def, with a server-aware execute fn.
@@ -87,13 +102,14 @@
                        "[via MCP server: " server-name "]")
         input-schema (or (:input-schema mcp-tool)
                          #js {:type "object" :properties #js {}})]
-    (tool
-     #js {:description desc
-          :inputSchema (jsonSchema input-schema)
-          :execute (build-execute-fn cli (:name mcp-tool))
-          ;; Lets image-returning MCP tools (e.g. OfficeCLI render) surface the
-          ;; image to the model; text results take the text branch unchanged.
-          :toModelOutput mm/tool-model-output})))
+    (doto (tool
+           #js {:description desc
+                :inputSchema (jsonSchema input-schema)
+                :execute (build-execute-fn cli (:name mcp-tool))
+                ;; Lets image-returning MCP tools (e.g. OfficeCLI render) surface the
+                ;; image to the model; text results take the text branch unchanged.
+                :toModelOutput mm/tool-model-output})
+      (aset "safety" (hint-safety (:annotations mcp-tool))))))
 
 (defn register-all!
   "Walk the manager's running clients, register each of their tools

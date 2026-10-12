@@ -149,6 +149,20 @@
 
 ;;; ─── Format conversion ────────────────────────────────────────
 
+(defn- nyma-opts
+  "nyma-only per-server tuning from a .mcp.json entry, or nil. Kept under one
+   `:nyma` key so it can be stripped before the list goes to an ACP agent,
+   whose schema knows none of it."
+  [config]
+  (let [n   (fn [k] (let [v (aget config k)] (when (and (number? v) (pos? v)) v)))
+        strs (fn [k] (let [v (aget config k)] (when (js/Array.isArray v) (vec (filter string? v)))))
+        m   (cond-> {}
+              (n "startupTimeoutMs") (assoc :startup-timeout-ms (n "startupTimeoutMs"))
+              (n "callTimeoutMs")    (assoc :call-timeout-ms (n "callTimeoutMs"))
+              (seq (strs "allowTools")) (assoc :allow-tools (strs "allowTools"))
+              (seq (strs "denyTools"))  (assoc :deny-tools (strs "denyTools")))]
+    (when (seq m) m)))
+
 (defn object->array
   "Convert MCP servers from .mcp.json object format to ACP array format.
    Produces schema-valid objects:
@@ -169,17 +183,19 @@
                  (cond
                    ;; HTTP or SSE transport
                    (and url (or (= type- "http") (= type- "sse")))
-                   {:name    server-name
-                    :url     (expand-env url)
-                    :type    type-
-                    :headers (obj->name-value-array (.-headers config))}
+                   (cond-> {:name    server-name
+                            :url     (expand-env url)
+                            :type    type-
+                            :headers (obj->name-value-array (.-headers config))}
+                     (nyma-opts config) (assoc :nyma (nyma-opts config)))
 
                    ;; Stdio transport
                    command
-                   {:name    server-name
-                    :command command
-                    :args    (or (expand-env-args (.-args config)) [])
-                    :env     (obj->name-value-array (.-env config))}
+                   (cond-> {:name    server-name
+                            :command command
+                            :args    (or (expand-env-args (.-args config)) [])
+                            :env     (obj->name-value-array (.-env config))}
+                     (nyma-opts config) (assoc :nyma (nyma-opts config)))
 
                    :else nil)))
              ks)))
@@ -252,6 +268,109 @@
         "\n\n"
         (candidate-report project-root home))))
 
+;;; ─── /mcp add · /mcp remove ────────────────────────────────────
+
+(defn- kv [s]
+  (let [i (.indexOf (str s) "=")]
+    (when (pos? i) [(.slice s 0 i) (.slice s (inc i))])))
+
+(defn parse-add-args
+  "`/mcp add` tokens → {:name :entry :project?} or {:error}. Pure.
+   Flags come BEFORE the command; from the command on, every token is the
+   server's own argv, verbatim — so `npx … --flag` passes through. A `--`
+   may mark the switch explicitly. `--url` makes an http server instead."
+  [tokens]
+  (let [[nm & more] (vec tokens)]
+    (if (or (nil? nm) (str/starts-with? (str nm) "-"))
+      {:error "usage: /mcp add <name> [--env K=V] [--timeout ms] [--allow g] [--deny g] [--project] [--] <command> [args…]  |  /mcp add <name> --url <url> [--header K=V]"}
+      (loop [ts (vec more) acc {:env {} :headers {} :allow [] :deny []}]
+        (let [[t v] ts]
+          (cond
+            (and (nil? t) (nil? (:url acc)))
+            {:error (str "/mcp add " nm ": give a command to run, or --url")}
+
+            (or (nil? t) (and (= t "--") (seq (rest ts))) (and (not (str/starts-with? t "--")) (nil? (:url acc))))
+            (let [argv  (vec (if (= t "--") (rest ts) ts))
+                  entry (cond-> (if-let [u (:url acc)]
+                                  {"url" u}
+                                  {"command" (first argv) "args" (vec (rest argv))})
+                          (seq (:env acc))     (assoc "env" (:env acc))
+                          (seq (:headers acc)) (assoc "headers" (:headers acc))
+                          (:timeout acc)       (assoc "callTimeoutMs" (:timeout acc) "startupTimeoutMs" (:timeout acc))
+                          (seq (:allow acc))   (assoc "allowTools" (:allow acc))
+                          (seq (:deny acc))    (assoc "denyTools" (:deny acc)))]
+              (if (and (nil? (:url acc)) (str/blank? (str (first argv))))
+                {:error (str "/mcp add " nm ": give a command to run, or --url")}
+                {:name nm :entry entry :project? (boolean (:project acc))}))
+
+            (= t "--project") (recur (vec (rest ts)) (assoc acc :project true))
+            (nil? v) {:error (str "/mcp add: " t " needs a value")}
+            (= t "--url")     (recur (vec (drop 2 ts)) (assoc acc :url v))
+            (= t "--timeout") (let [n (js/Number v)]
+                                (if (and (js/Number.isFinite n) (pos? n))
+                                  (recur (vec (drop 2 ts)) (assoc acc :timeout n))
+                                  {:error (str "/mcp add: --timeout wants milliseconds, got " v)}))
+            (= t "--allow")   (recur (vec (drop 2 ts)) (update acc :allow conj v))
+            (= t "--deny")    (recur (vec (drop 2 ts)) (update acc :deny conj v))
+            (contains? #{"--env" "--header"} t)
+            (if-let [[k x] (kv v)]
+              (recur (vec (drop 2 ts)) (update acc (if (= t "--env") :env :headers) assoc k x))
+              {:error (str "/mcp add: " t " wants KEY=VALUE, got " v)})
+            :else {:error (str "/mcp add: unknown flag " t)}))))))
+
+(defn- read-mcp-file
+  "Raw JSON of an mcp config file for a read-modify-write — NOT the settings
+   reader, which kebab-cases keys (`mcpServers` → `mcp-servers`). Missing or
+   blank → {}; present but unparsable → thrown, so nothing is overwritten."
+  [f]
+  (if-not (fs/existsSync f)
+    #js {}
+    (let [text (fs/readFileSync f "utf8")]
+      (if (str/blank? text)
+        #js {}
+        (try (js/JSON.parse text)
+             (catch :default e
+               (throw (js/Error. (str "Not changing " f ": it does not parse (" (.-message e) ")")))))))))
+
+(defn- write-mcp-file!
+  "Atomic, and through a symlink to its target."
+  [f obj]
+  (let [f   (try (fs/realpathSync f) (catch :default _ f))
+        tmp (str f ".tmp-" (.-pid js/process))]
+    (fs/mkdirSync (path/dirname f) #js {:recursive true})
+    (fs/writeFileSync tmp (str (js/JSON.stringify obj nil 2) "\n"))
+    (fs/renameSync tmp f)))
+
+(defn mcp-file
+  "Where /mcp add writes: ~/.nyma/mcp.json, or the project's .mcp.json."
+  [project? cwd home]
+  (if project? (path/join cwd ".mcp.json") (path/join home ".nyma" "mcp.json")))
+
+(defn add-server!
+  "Write `entry` as server `nm` into `f`, keeping everything else. Returns
+   true when it replaced an existing entry."
+  [f nm entry]
+  (let [obj     (read-mcp-file f)
+        servers (or (aget obj "mcpServers") #js {})
+        existed (some? (aget servers nm))]
+    (aset servers nm (clj->js entry))
+    (aset obj "mcpServers" servers)
+    (write-mcp-file! f obj)
+    existed))
+
+(defn remove-server!
+  "Delete server `nm` from `f`. Returns false when it was not there."
+  [f nm]
+  (let [obj     (read-mcp-file f)
+        servers (aget obj "mcpServers")]
+    (if (and servers (some? (aget servers nm)))
+      (do (js-delete servers nm)
+          (write-mcp-file! f obj)
+          true)
+      false)))
+
+(defn- tilde [p home] (if (str/starts-with? p home) (str "~" (subs p (count home))) p))
+
 ;;; ─── Activation ────────────────────────────────────────────────
 
 (defn activate
@@ -268,7 +387,7 @@
 
   ;; Register /mcp command
   (.registerCommand api "mcp"
-                    #js {:description "List or refresh project MCP servers"
+                    #js {:description "MCP servers: list, refresh, add <name> [flags] <command…> (writes ~/.nyma/mcp.json, or .mcp.json with --project), remove <name>"
                          :handler (fn [args _ctx]
                                     (let [subcmd (first args)]
                                       (cond
@@ -282,8 +401,35 @@
                                           (notify api (str "Refreshed: " (count servers) " MCP server(s) found\n\n"
                                                            (candidate-report (js/process.cwd)))))
 
+                                        (= subcmd "add")
+                                        (let [r (parse-add-args (rest args))]
+                                          (if (:error r)
+                                            (notify api (:error r) "error")
+                                            (try
+                                              (let [f    (mcp-file (:project? r) (js/process.cwd) (home/dir))
+                                                    had? (add-server! f (:name r) (:entry r))]
+                                                (scan-and-store! (js/process.cwd) (fn [m] (notify api m "error")))
+                                                (notify api (str (if had? "Replaced " "Added ") (:name r) " in "
+                                                                 (tilde f (home/dir))
+                                                                 " — it starts with the next session; /mcp list to check"
+                                                                 (when (:project? r) ". A project file asks for folder trust before it runs."))))
+                                              (catch :default e (notify api (.-message e) "error")))))
+
+                                        (= subcmd "remove")
+                                        (let [nm       (second args)
+                                              project? (some #(= "--project" %) args)]
+                                          (if-not (and nm (not (str/starts-with? nm "-")))
+                                            (notify api "usage: /mcp remove <name> [--project]" "error")
+                                            (try
+                                              (let [f (mcp-file project? (js/process.cwd) (home/dir))]
+                                                (if (remove-server! f nm)
+                                                  (do (scan-and-store! (js/process.cwd) (fn [m] (notify api m "error")))
+                                                      (notify api (str "Removed " nm " from " (tilde f (home/dir)))))
+                                                  (notify api (str "No server named " nm " in " (tilde f (home/dir))) "warning")))
+                                              (catch :default e (notify api (.-message e) "error")))))
+
                                         :else
-                                        (notify api "Usage: /agent-shell__mcp [list|refresh]" "error"))))})
+                                        (notify api "Usage: /mcp [list|refresh|add|remove]" "error"))))})
 
   ;; Return deactivator
   (fn []

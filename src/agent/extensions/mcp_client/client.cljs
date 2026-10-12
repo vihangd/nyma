@@ -58,10 +58,31 @@
    claude_hook_bridge/handlers/command.cljs."
   [extra-env]
   (let [base (js/Object.assign #js {} js/process.env)]
-    (when extra-env
+    (cond
+      ;; mcp_discovery hands env over in ACP shape, [{name, value}]. Walked as
+      ;; an object, that set variables "0", "1"… to "[object Object]", and
+      ;; every `env` in a .mcp.json was silently lost.
+      (js/Array.isArray extra-env)
+      (doseq [e extra-env]
+        (when-let [k (aget e "name")] (aset base k (str (aget e "value")))))
+      extra-env
       (doseq [k (js-keys extra-env)]
         (aset base k (str (aget extra-env k)))))
     base))
+
+(defn- glob->re [g]
+  (js/RegExp. (str "^" (.replace (.replace (str g) (js/RegExp. "[.+?^${}()|[\\]\\\\]" "g") "\\$&")
+                                 (js/RegExp. "\\*" "g") ".*")
+                   "$")))
+
+(defn tool-allowed?
+  "Does a server's `allowTools` / `denyTools` (globs, from .mcp.json) admit
+   tool `nm`? Deny wins; an allow list, when present, is exhaustive. Pure."
+  [cfg nm]
+  (let [allow (:allow-tools cfg) deny (:deny-tools cfg)
+        hit?  (fn [gs] (some #(.test (glob->re %) (str nm)) gs))]
+    (and (not (hit? deny))
+         (or (empty? allow) (boolean (hit? allow))))))
 
 (defn- normalize-tools
   "MCP `listTools` returns `{tools: [{name, description, inputSchema}]}`.
@@ -75,7 +96,10 @@
        (let [t (aget tools i)]
          {:name         (.-name t)
           :description  (.-description t)
-          :input-schema (.-inputSchema t)})))))
+          :input-schema (.-inputSchema t)
+          ;; MCP hints (readOnlyHint / destructiveHint): the bridge turns
+          ;; them into permission categories.
+          :annotations  (.-annotations t)})))))
 
 ;; ── State ────────────────────────────────────────────────────────
 
@@ -268,8 +292,11 @@
           (js-await (js/Promise.race #js [connect-promise timeout-promise])))
 
         ;; Pull tools list once, cache.
+        ;; A tool the server's allow/deny excludes never enters the list, so
+        ;; it is neither bridged nor found by mcp_search.
         (let [list-result (js-await (.listTools sdk-c))]
-          (reset! (:tools client) (normalize-tools list-result)))
+          (reset! (:tools client) (vec (filter #(tool-allowed? cfg (:name %))
+                                               (normalize-tools list-result)))))
 
         (transition! client :running)
         ;; Reset restart counter only after a fully successful start.
@@ -352,6 +379,10 @@
     (throw (js/Error. (str "[mcp-client " (:name (:config client))
                            "] cannot call tool — state is "
                            (str @(:state client))))))
+  ;; …and mcp_call, which takes any name, cannot reach it either.
+  (when-not (tool-allowed? (:config client) tool-name)
+    (throw (js/Error. (str "[mcp-client " (:name (:config client)) "] tool " tool-name
+                           " is denied by this server's allowTools/denyTools"))))
   (let [c (or @(:client client)
               (throw (js/Error. "[mcp-client] client missing")))
         opts #js {:timeout (or timeout-ms

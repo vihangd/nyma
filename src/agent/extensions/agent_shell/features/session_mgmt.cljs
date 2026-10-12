@@ -126,7 +126,7 @@
                             :cwd        (js/process.cwd)
                             :mcpServers (let [servers @shared/mcp-servers]
                                           (if (seq servers)
-                                            (clj->js servers)
+                                            (clj->js (shared/acp-servers servers))
                                             []))})
       (.then (fn [_]
                (end-replay! conn)
@@ -170,7 +170,7 @@
                                   :cwd        (js/process.cwd)
                                   :mcpServers (let [servers @shared/mcp-servers]
                                                 (if (seq servers)
-                                                  (clj->js servers)
+                                                  (clj->js (shared/acp-servers servers))
                                                   []))})
             (.then (fn [_]
                      (reset! (:session-id conn) session-id)

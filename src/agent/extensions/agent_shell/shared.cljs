@@ -70,6 +70,12 @@
    [{:name \"server\" :command \"npx\" :args [...] :env {...}}]"
   (atom []))
 
+(defn acp-servers
+  "The server list as an ACP agent may receive it: nyma's own `:nyma` keys
+   (per-server timeouts, tool allow/deny) removed — no ACP schema has them."
+  [servers]
+  (mapv #(dissoc % :nyma) (or servers [])))
+
 ;;; ─── Config ────────────────────────────────────────────────
 
 (def default-config

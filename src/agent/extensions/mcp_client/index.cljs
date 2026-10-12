@@ -193,10 +193,16 @@
    settings."
   [raw-list settings]
   (mapv (fn [cfg]
-          (assoc cfg
-                 :max-restarts       (:max-restarts settings)
-                 :startup-timeout-ms (:startup-timeout-ms settings)
-                 :call-timeout-ms    (:call-timeout-ms settings)))
+          ;; A server's own .mcp.json values win: one slow server (a cold
+          ;; Ghidra or Hopper start, minutes) should not force every other
+          ;; server's timeout up, nor time out under the global 30 s.
+          (let [own (:nyma cfg)]
+            (assoc cfg
+                   :max-restarts       (:max-restarts settings)
+                   :startup-timeout-ms (or (:startup-timeout-ms own) (:startup-timeout-ms settings))
+                   :call-timeout-ms    (or (:call-timeout-ms own) (:call-timeout-ms settings))
+                   :allow-tools        (:allow-tools own)
+                   :deny-tools         (:deny-tools own))))
         raw-list))
 
 ;; ── Helpers ──────────────────────────────────────────────────────
