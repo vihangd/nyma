@@ -25,7 +25,7 @@ This is the most feature-rich extension in the tree. For details — wire format
 | `/auto-edit` | Auto-approve edits, prompt for shell |
 | `/effort` | Set thinking effort (low / medium / high / max / auto) |
 | `/agent handoff` | Hand the current ACP session off to a different agent, with context transfer. (Top-level `/handoff` belongs to the `handoff` extension, which writes a session brief — the two used to collide and make `/handoff` unresolvable.) |
-| `/mcp` | Discover and manage MCP servers from project config (`.mcp.json`, `.cursor/mcp.json`, …) |
+| `/mcp` | `list` / `refresh` the discovered MCP servers (`~/.nyma/mcp.json`, `.mcp.json`, `.cursor/mcp.json`, …); `add <name> [flags] -- <command…>` or `--url` writes one into `~/.nyma/mcp.json` (`--project`: `.mcp.json`); `remove <name>` deletes it |
 | `/sessions` | List, resume, or create new agent sessions |
 | `/plan-capture` | Write the agent's plan to `.nyma/plans/` and detach, so a cheap local model can execute it |
 
