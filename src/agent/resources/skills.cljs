@@ -176,8 +176,8 @@
    when the directory holds no SKILL.md. Nothing else rejects a skill: a
    spec violation is recorded in `:findings` and the skill still loads, so
    `/skills doctor` can report it without breaking someone's setup."
-  [skill-dir dir-name source]
-  (let [skill-md-path (path/join skill-dir "SKILL.md")]
+  [skill-dir dir-name source & [flat-file]]
+  (let [skill-md-path (or flat-file (path/join skill-dir "SKILL.md"))]
     (when (fs/existsSync skill-md-path)
       (let [raw       (fs/readFileSync skill-md-path "utf8")
             {:keys [frontmatter body malformed?]} (parse-frontmatter raw)
@@ -191,8 +191,11 @@
             name      dir-name
             description (or (get-fm frontmatter "description")
                             (first-skill-line body))
-            has-tools (or (fs/existsSync (path/join skill-dir "tools.ts"))
-                          (fs/existsSync (path/join skill-dir "tools.cljs")))
+            ;; A flat file shares its directory with other skills: tools.*
+            ;; there are not its own.
+            has-tools (and (not flat-file)
+                           (or (fs/existsSync (path/join skill-dir "tools.ts"))
+                               (fs/existsSync (path/join skill-dir "tools.cljs"))))
             findings  (cond-> []
                         malformed?
                         (conj "frontmatter is not valid YAML; it was ignored")
@@ -226,20 +229,40 @@
                :source      source
                :active      false}]))))
 
+(defn- flat-skill-file?
+  "A `<name>.md` directly in a skills dir that is meant as a skill: it has
+   frontmatter with a description. OfficeCLI installs itself this way
+   (`~/.claude/skills/officecli.md`) and was invisible; the frontmatter test
+   keeps a stray README.md from becoming one."
+  [file]
+  (try
+    (some? (get-fm (:frontmatter (parse-frontmatter (fs/readFileSync file "utf8"))) "description"))
+    (catch :default _ false)))
+
 (defn discover-skills
   "Scan a directory for skill packages. Each subdirectory containing a
-   SKILL.md becomes a skill entry keyed by its directory name."
+   SKILL.md becomes a skill entry keyed by its directory name; so does a flat
+   `<name>.md` with a frontmatter description, keyed by its file name. A
+   directory wins when both exist."
   ([dir] (discover-skills dir nil))
   ([dir source]
    (when (fs/existsSync dir)
-     (let [entries (fs/readdirSync dir #js {:withFileTypes true})]
-       (->> entries
-            (filter #(.isDirectory %))
-            (keep (fn [entry]
-                    (build-skill-record (path/join dir (.-name entry))
-                                        (.-name entry)
-                                        (or source dir))))
-            (into {}))))))
+     (let [entries (fs/readdirSync dir #js {:withFileTypes true})
+           flat    (->> entries
+                        (filter #(and (.isFile %) (str/ends-with? (.-name %) ".md")
+                                      (not= "SKILL.md" (.-name %))))
+                        (keep (fn [entry]
+                                (let [f (path/join dir (.-name entry))]
+                                  (when (flat-skill-file? f)
+                                    (build-skill-record dir (str/replace (.-name entry) #"\.md$" "")
+                                                        (or source dir) f))))))
+           dirs    (->> entries
+                        (filter #(.isDirectory %))
+                        (keep (fn [entry]
+                                (build-skill-record (path/join dir (.-name entry))
+                                                    (.-name entry)
+                                                    (or source dir)))))]
+       (into {} (concat flat dirs))))))
 
 ;;; ─── Activation ────────────────────────────────────────────────
 

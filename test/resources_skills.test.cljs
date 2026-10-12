@@ -500,3 +500,22 @@
                   (let [r (loader/agents-body-or-nil
                            "---\ndescription: Some rules\nglobs: [\"*.ts\"]\n---\nBody here.")]
                     (-> (expect (.includes r "Body here.")) (.toBe true)))))))
+
+(describe "flat skill files"
+          (fn []
+            ;; OfficeCLI installs `~/.claude/skills/officecli.md` — a flat file,
+            ;; which only <dir>/SKILL.md discovery never saw.
+            (it "a <name>.md with a frontmatter description is a skill; a README is not; a dir wins"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-flat-skill-"))]
+                    (fs/writeFileSync (path/join d "officecli.md") "---\nname: officecli\ndescription: Edit Office documents\n---\nUse officecli.\n")
+                    (fs/writeFileSync (path/join d "README.md") "# Skills here\nNot a skill.\n")
+                    (fs/writeFileSync (path/join d "both.md") "---\ndescription: flat\n---\nflat body\n")
+                    (fs/mkdirSync (path/join d "both"))
+                    (fs/writeFileSync (path/join d "both" "SKILL.md") "---\nname: both\ndescription: dir\n---\ndir body\n")
+                    (let [found (skills/discover-skills d)]
+                      (-> (expect (:description (get found "officecli"))) (.toBe "Edit Office documents"))
+                      (-> (expect (skills/skill-body (get found "officecli"))) (.toContain "Use officecli."))
+                      (-> (expect (get found "README")) (.toBeUndefined))
+                      (-> (expect (:description (get found "both"))) (.toBe "dir")))
+                    (fs/rmSync d #js {:recursive true}))))))
