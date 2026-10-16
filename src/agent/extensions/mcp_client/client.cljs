@@ -21,8 +21,10 @@
      (state client)            — :stopped|:starting|:running|...
      (last-error client)       — string or nil
      (on-state-change! client f) — register a one-arg listener; useful
-                                   for the status line atom")
-
+                                   for the status line atom"
+  (:require ["node:fs" :as fs]
+            ["node:path" :as path]
+            [agent.utils.home :as home]))
 
 ;; The MCP SDK (and the ajv it pulls in) loaded statically on every launch —
 ;; ~40 ms with the LSP client's jsonrpc — even with no server configured. It is
@@ -222,11 +224,11 @@
         (throw (js/Error. (str "MCP server '" (:name cfg)
                                "' has no :command (stdio transport requires command/args)."))))
       (let [Transport (.-StdioClientTransport (sdk-mod :stdio))] (Transport.
-       #js {:command (:command cfg)
-            :args    (clj->js (or (:args cfg) []))
-            :env     (env-merge (:env cfg))
-            :cwd     (or (:cwd cfg) (js/process.cwd))
-            :stderr  "pipe"})))
+                                                                  #js {:command (:command cfg)
+                                                                       :args    (clj->js (or (:args cfg) []))
+                                                                       :env     (env-merge (:env cfg))
+                                                                       :cwd     (or (:cwd cfg) (js/process.cwd))
+                                                                       :stderr  "pipe"})))
 
     :http
     (do
@@ -358,6 +360,77 @@
               ;; :stopped-error; nothing to do here.
               nil)))))))
 
+;; ── Embedded files ───────────────────────────────────────────────
+;; A tool can return a file (an email attachment, a rendered document) as an
+;; embedded resource with base64 `blob`. Only text and image items reached the
+;; model, so the file vanished — or, from a server that serialises the resource
+;; into a text item (eM Client), arrived as half a megabyte of base64 that the
+;; result cap cut to noise. Save it, and hand the model the path.
+
+(defn download-dir [] (path/join (home/dir) "Downloads" "nyma"))
+
+(def ^:private mime-ext
+  {"application/pdf" ".pdf" "text/plain" ".txt" "text/html" ".html" "text/csv" ".csv"
+   "application/json" ".json" "application/zip" ".zip" "image/png" ".png"
+   "image/jpeg" ".jpg" "image/gif" ".gif" "image/webp" ".webp"
+   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ".docx"
+   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ".xlsx"
+   "application/vnd.openxmlformats-officedocument.presentationml.presentation" ".pptx"})
+
+(defn- file-name
+  "A safe name for a resource. The uri is the server's, so only its last segment
+   is kept, stripped to [A-Za-z0-9._-] and capped; the extension comes from the
+   mime type when the uri has none."
+  [uri mime]
+  (let [seg  (-> (str uri) (.split "?") first (.split "/") last
+                 (.replace (js/RegExp. "[^A-Za-z0-9._-]" "g") "_")
+                 (.replace (js/RegExp. "^[._]+") ""))
+        stem (subs seg 0 (min 60 (count seg)))
+        stem (if (seq stem) stem "file")]
+    (if (seq (path/extname stem)) stem (str stem (get mime-ext mime "")))))
+
+(defn save-blob!
+  "Write base64 `blob` into `dir` without ever overwriting; returns the path."
+  [dir uri mime blob]
+  (fs/mkdirSync dir #js {:recursive true})
+  (let [nm  (file-name uri mime)
+        ext (path/extname nm)
+        buf (js/Buffer.from (str blob) "base64")]
+    (loop [i 0]
+      (let [f (path/join dir (if (zero? i) nm (str (path/basename nm ext) "-" i ext)))
+            ok (try (fs/writeFileSync f buf #js {:flag "wx" :mode 0600}) true
+                    (catch :default e (if (= "EEXIST" (.-code e)) false (throw e))))]
+        (if ok f (recur (inc i)))))))
+
+(defn- embedded-resource
+  "The resource object an item carries: a real `resource` item, or a text item
+   whose whole text is one serialised (cheap check before parsing)."
+  [it]
+  (let [t (str (.-text it))]
+    (cond
+      (= "resource" (.-type it)) (.-resource it)
+      (and (= "text" (.-type it)) (.startsWith (.trimStart t) "{") (.includes t "\"blob\""))
+      (let [j (try (js/JSON.parse t) (catch :default _ nil))]
+        (when (and j (= "resource" (.-type j))) (.-resource j))))))
+
+(defn materialize-item
+  "One content item as {:type :text :raw}; an embedded file becomes a text item
+   naming where it was saved, a text resource becomes its text."
+  [it dir]
+  (let [res (embedded-resource it)]
+    (cond
+      (and res (.-blob res))
+      (let [mime (or (.-mimeType res) "application/octet-stream")
+            f    (save-blob! dir (.-uri res) mime (.-blob res))
+            kb   (js/Math.ceil (/ (.-size (fs/statSync f)) 1024))]
+        {:type "text" :raw it
+         :text (str "Saved " mime " (" kb " KB) to " f
+                    " — read it with the read tool, or move it where the user wants.")})
+      (and res (string? (.-text res)))
+      {:type "text" :text (.-text res) :raw it}
+      :else
+      {:type (.-type it) :text (.-text it) :raw it})))
+
 ;; ── Tool invocation ──────────────────────────────────────────────
 
 (defn ^:async call-tool!
@@ -401,10 +474,7 @@
         content (.-content result)
         items   (when content
                   (vec (for [i (range (.-length content))]
-                         (let [it (aget content i)]
-                           {:type (.-type it)
-                            :text (.-text it)
-                            :raw  it}))))]
+                         (materialize-item (aget content i) (download-dir)))))]
     {:content items
      :is-error? (boolean (.-isError result))
      :structured-content (.-structuredContent result)}))

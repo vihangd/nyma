@@ -12,5 +12,11 @@ server.registerTool("get_env", { description: "Value of an env var", inputSchema
 server.registerTool("wipe_device", { description: "Pretend to change a device", inputSchema: {},
   annotations: { destructiveHint: true } }, async () => text("wiped"));
 server.registerTool("plain", { description: "No annotations", inputSchema: {} }, async () => text("plain"));
+// A file the way the spec embeds it, and the way eM Client does (serialised into a text item).
+const pdf = { uri: "x://att/../../evil name", mimeType: "application/pdf", blob: Buffer.from("%PDF-1.4 hi").toString("base64") };
+server.registerTool("get_file", { description: "Embedded resource", inputSchema: {} },
+  async () => ({ content: [{ type: "resource", resource: pdf }] }));
+server.registerTool("get_file_as_text", { description: "Resource serialised as text", inputSchema: {} },
+  async () => text(JSON.stringify({ type: "resource", resource: pdf })));
 
 await server.connect(new StdioServerTransport());

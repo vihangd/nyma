@@ -15,7 +15,8 @@
             [agent.extensions.mcp-client.client :as client]
             [agent.extensions.mcp-client.tool-bridge :as bridge]
             [agent.extensions.agent-shell.features.mcp-discovery :as disc]
-            [agent.extensions.agent-shell.shared :as shared]))
+            [agent.extensions.agent-shell.shared :as shared]
+            [clojure.string :as str]))
 
 (def ^:private fixture (path/resolve (js/process.cwd) "test" "fixtures" "echo_mcp_server.mjs"))
 
@@ -45,7 +46,10 @@
                   (-> (expect (.-category (bridge/hint-safety #js {:readOnlyHint true}))) (.toBe "mcp"))
                   (-> (expect (aget (bridge/hint-safety #js {:readOnlyHint true}) "read-only?")) (.toBe true))
                   (-> (expect (vec (.-capabilities (bridge/hint-safety #js {:destructiveHint true})))) (.toEqual ["shell"]))
-                  (-> (expect (bridge/hint-safety nil)) (.toBeFalsy))))))
+                  (-> (expect (bridge/hint-safety nil)) (.toBeFalsy))
+                  ;; explicitly not read-only (eM Client's create_email sends mail) asks too
+                  (-> (expect (aget (bridge/hint-safety #js {:readOnlyHint false}) "requires-confirmation?")) (.toBe true))
+                  (-> (expect (aget (bridge/hint-safety #js {:readOnlyHint true :destructiveHint true}) "destructive?")) (.toBe true))))))
 
 (defn ^:async test-live []
   (let [e (entry {:env {:ECHO_PROBE "from-mcp-json"} :denyTools ["wipe_*"]})
@@ -107,3 +111,43 @@
                     (-> (expect (fn [] (disc/add-server! f "x" {"command" "y"}))) (.toThrow "does not parse"))
                     (-> (expect (fs/readFileSync f "utf8")) (.toBe "{broken"))
                     (fs/rmSync d #js {:recursive true}))))))
+
+(describe "embedded files"
+          (fn []
+            (it "a blob is saved under the download dir; the uri cannot escape it; text passes through"
+                (fn []
+                  (let [d   (fs/mkdtempSync (path/join (os/tmpdir) "nyma-mcp-files-"))
+                        res #js {:uri "x://a/../../evil name" :mimeType "application/pdf"
+                                 :blob (.toString (js/Buffer.from "%PDF hi") "base64")}
+                        a   (client/materialize-item #js {:type "resource" :resource res} d)
+                        b   (client/materialize-item #js {:type "text" :text (js/JSON.stringify #js {:type "resource" :resource res})} d)
+                        fa  (second (re-find #"to (\S+)" (:text a)))
+                        fb  (second (re-find #"to (\S+)" (:text b)))]
+                    (-> (expect (path/dirname fa)) (.toBe d))
+                    (-> (expect (path/basename fa)) (.toBe "evil_name.pdf"))
+                    (-> (expect (fs/readFileSync fa "utf8")) (.toBe "%PDF hi"))
+                    ;; same name again: a new file, never an overwrite
+                    (-> (expect (path/basename fb)) (.toBe "evil_name-1.pdf"))
+                    (-> (expect (:text (client/materialize-item #js {:type "resource" :resource #js {:uri "u" :text "T"}} d))) (.toBe "T"))
+                    (-> (expect (:text (client/materialize-item #js {:type "text" :text "{\"blob\": 1}"} d))) (.toBe "{\"blob\": 1}"))
+                    (fs/rmSync d #js {:recursive true}))))))
+
+(defn ^:async test-live-file []
+  (let [home (fs/mkdtempSync (path/join (os/tmpdir) "nyma-mcp-home-"))
+        old  (.. js/process -env -HOME)
+        c    (client/create (assoc (entry {}) :startup-timeout-ms 15000))]
+    (aset (.-env js/process) "HOME" home)
+    (try
+      (js-await (client/start! c))
+      (doseq [t ["get_file" "get_file_as_text"]]
+        (let [r (js-await (client/call-tool! c {:tool-name t :arguments #js {}}))
+              f (second (re-find #"to (\S+)" (:text (first (:content r)))))]
+          (-> (expect (str/starts-with? f (path/join home "Downloads" "nyma"))) (.toBe true))
+          (-> (expect (fs/readFileSync f "utf8")) (.toBe "%PDF-1.4 hi"))))
+      (finally
+        (aset (.-env js/process) "HOME" old)
+        (js-await (client/stop! c))
+        (fs/rmSync home #js {:recursive true})))))
+
+(describe "a real stdio server returning a file"
+          (fn [] (it "lands in ~/Downloads/nyma, both shapes" test-live-file 30000)))

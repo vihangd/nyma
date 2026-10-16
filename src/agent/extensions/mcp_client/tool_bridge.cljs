@@ -74,14 +74,19 @@
    had none, so it fell into \"other\" and ran unasked — including tools a
    server itself marks `destructiveHint` because they execute the target or
    change a device. Only explicit hints count: most servers annotate nothing,
-   and treating silence as destructive would make every such tool ask."
+   and treating silence as destructive would make every such tool ask.
+
+   An explicit `readOnlyHint: false` asks too: the spec says the tool changes
+   its environment, and that change (a sent email, a moved folder) is outside
+   the workspace, where checkpoints cannot undo it — eM Client's create_email
+   sends mail and is marked exactly that way, not destructive."
   [annotations]
-  (let [ro? (true? (some-> annotations (aget "readOnlyHint")))
+  (let [ro (some-> annotations (aget "readOnlyHint"))
         de? (true? (some-> annotations (aget "destructiveHint")))]
     (cond
-      ro? #js {:read-only? true :capabilities #js [] :category "mcp"}
-      de? #js {:destructive? true :requires-confirmation? true
-               :capabilities #js ["shell"] :category "mcp"}
+      (and (true? ro) (not de?)) #js {:read-only? true :capabilities #js [] :category "mcp"}
+      (or de? (false? ro)) #js {:destructive? true :requires-confirmation? true
+                                :capabilities #js ["shell"] :category "mcp"}
       :else nil)))
 
 (defn- build-tool-def
