@@ -2055,3 +2055,13 @@ At ×1 (24 KB of bodies) there was nothing to save and no win (8 vs 9 steps). Wh
 
 Round 2 is not a measured win. Codemode took one step more than direct tools, and the direct baseline moved ~40% between rounds — more than the ~20% gap now left — so three runs cannot separate the two. Saved scripts and observed shapes were not exercised by this task at all. Every codemode run used the new helpers (`save-file` in 2 of 3, `strip-quotes`/`html->text` in 2 of 3), but codemode's own numbers did not move (12 steps / 138k vs 11 / 137k). The baseline did: 19 → 11 steps, 257k → 172k, same model and prompt. Nothing in the direct path changed what the model reads (MCP text results are the same strings), so that looks like run-to-run variance in the provider, and it narrows codemode's measured win to about 20% input tokens and 20% wall time at equal steps. Script errors: 0–2 per run (a missing `]`, an invented `vmap`, an attachment id passed as `save-file :from` — the error now says where the path is).
 
+**Rounds 3–4** (what the round-2 scripts tripped on): each script's result now lists what its calls returned (`shapes (observed): mail/get-email-data → [{…, html: str}] (list of 1)`, with the strip-quotes call beside an HTML field), the tool description documents attachments and helpers, scripts compile inside an async fn (an `await` in `(println (try …))` was a SyntaxError shown as bundle source), and a worker error is its `Error:` line. Medians of 3, every run correct:
+
+| codemode | steps | input tokens | scripts | helpers used | secs |
+|---|---|---|---|---|---|
+| round 2 | 12 | 138k | 8 | 2/3 runs | 92 |
+| round 3 (shapes line) | 11 | 129k | 9 | 3/3 | 111 |
+| round 4 (+ async wrapper) | 9 | 93k | 7 | 3/3 | 82 |
+
+The direct arm in round 4 ran 10, 16 and 60 steps (one run looped to 1.16M tokens), so its median (16 / 283k) says more about variance than about codemode. Against direct's best round (10–11 steps, ~165k), round 4 codemode is about 15–20% fewer steps and ~45% fewer input tokens. Remaining per-run losses are one or two scripts each: an unclosed bracket, the call cap hit by fetching attachments one call per mail, `Promise.then` invented, `select-keys` printing `{}`.
+
