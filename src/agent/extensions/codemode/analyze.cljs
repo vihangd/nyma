@@ -1,0 +1,118 @@
+(ns agent.extensions.codemode.analyze
+  "What a script names, before it runs. Pure.
+
+   The script is squint source, so it is also data — and the cheap reading of
+   it is enough here: scan the text for `ns/fn` references, interop, and the
+   squint traps AGENTS.md lists. A string that happens to look like a tool
+   reference over-approximates, which only widens what the approval shows and
+   what gets bound; it never lets a script reach a tool it does not name,
+   because only the named tools are bound at all.
+
+   Tool names map to script names generically:
+     mcp__github__list_issues  → github/list-issues   (any `<kind>__<ns>__<fn>`)
+     git-tools__status         → git-tools/status
+     read                      → nyma/read
+   and both sides are compared munged the way squint munges a symbol
+   (`-` → `_`), since `(github/list-issues …)` compiles to
+   `github.list_issues(…)`."
+  (:require [clojure.string :as str]))
+
+(defn munge-part
+  "A name the way squint emits it as a JS identifier/property."
+  [s]
+  (-> (str s)
+      (.replaceAll "-" "_")
+      (.replaceAll "?" "_QMARK_")
+      (.replaceAll "!" "_BANG_")))
+
+(defn script-name
+  "`[ns fn]` for a registered tool name."
+  [tool-name]
+  (let [parts (str/split (str tool-name) #"__")]
+    (case (count parts)
+      1 ["nyma" (first parts)]
+      2 parts
+      [(nth parts (- (count parts) 2)) (last parts)])))
+
+(defn display-name
+  "`github/list-issues` — how the catalog and the approval show a tool."
+  [tool-name]
+  (let [[n f] (script-name tool-name)]
+    (str n "/" (.replaceAll (str f) "_" "-"))))
+
+(defn binding-key
+  "The munged `[ns fn]` a compiled script will look up."
+  [tool-name]
+  (mapv munge-part (script-name tool-name)))
+
+(def ^:private ref-re
+  ;; `ns/fn` where ns is not `js` and the slash is not inside a path-ish token
+  ;; like `a/b/c` — the lookbehind keeps `foo/bar` in "x/foo/bar" out.
+  (js/RegExp. "(?<![\\w\\-/.:])([A-Za-z][\\w\\-]*)/([A-Za-z_][\\w\\-?!]*)" "g"))
+
+(defn references
+  "Munged `[ns fn]` pairs the source mentions, `js/…` excluded."
+  [src]
+  (->> (js/Array.from (.matchAll (str src) ref-re))
+       (map (fn [m] [(aget m 1) (aget m 2)]))
+       (remove (fn [[n _]] (= "js" n)))
+       (map (fn [[n f]] [(munge-part n) (munge-part f)]))
+       distinct
+       vec))
+
+(defn resolve-tools
+  "Registered tool names the source refers to, plus the references that match
+   no tool (for a did-you-mean)."
+  [src tool-names]
+  (let [by-key (into {} (map (fn [t] [(str/join "/" (binding-key t)) t]) tool-names))
+        refs   (references src)
+        found  (keep (fn [r] (get by-key (str/join "/" r))) refs)
+        ;; only refs whose ns is a known namespace count as misses: `str/join`
+        ;; is clojure.string, not a missing tool
+        nss    (set (map (fn [t] (first (binding-key t))) tool-names))
+        misses (->> refs
+                    (filter (fn [[n _ :as r]] (and (contains? nss n) (nil? (get by-key (str/join "/" r))))))
+                    (map (fn [[n f]] (str n "/" (.replaceAll f "_" "-")))))]
+    {:tools (vec (distinct found)) :unknown (vec misses)}))
+
+(def ^:private unrestricted-res
+  "Ways out of the bound-functions-only world. Any of them and the script is
+   approved as what it can be: arbitrary code, like bash."
+  [[#"(?<![\w\-])js/" "js/ interop"]
+   [#"\(\s*\.-?[A-Za-z]" "method/field interop"]
+   [#"\b(aget|aset|js\*|js-eval|eval|require|import)\b" "dynamic access"]
+   [#"\(\s*ns\b" "ns form"]
+   [#"\"(constructor|__proto__|prototype)\"" "prototype access"]])
+
+(defn unrestricted
+  "Why the source is not confined to its bound functions, or nil."
+  [src]
+  (seq (keep (fn [[re why]] (when (.test re (str src)) why)) unrestricted-res)))
+
+(def ^:private traps
+  "Clojure that squint compiles and then breaks at runtime (AGENTS.md)."
+  [[#"js->clj" "js->clj does not exist in squint: the value is already a plain object"]
+   [#"array-seq" "array-seq does not exist: pass the JS array directly"]
+   [#"&\s*\{\s*:keys" "keyword-args destructuring does not work: take an explicit opts map"]
+   ;; written as a char class so this file does not trip the hyphen lint
+   [#"[.][-][a-z]+-[a-z]" "a dashed field access reads the underscored property: use (get x \"some-key\")"]])
+
+(defn trap-errors [src]
+  (vec (keep (fn [[re fix]] (when (.test re (str src)) fix)) traps)))
+
+(defn analyze
+  "{:tools [registered names] :unknown [refs to missing tools]
+    :unrestricted [reasons] :traps [fixes]}"
+  [src tool-names]
+  (merge (resolve-tools src tool-names)
+         {:unrestricted (vec (or (unrestricted src) []))
+          :traps        (trap-errors src)}))
+
+(defn approval-line
+  "One line for the permission prompt: what the script will call."
+  [{:keys [tools unrestricted]} category-of]
+  (str (if (seq tools)
+         (str/join " · " (map (fn [t] (str (display-name t) " (" (category-of t) ")")) tools))
+         "no tools")
+       (when (seq unrestricted)
+         (str " · UNRESTRICTED: " (str/join ", " unrestricted)))))

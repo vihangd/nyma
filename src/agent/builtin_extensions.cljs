@@ -25,6 +25,7 @@
             [agent.extensions.budget.index :as ext-budget]
             [agent.extensions.checkpoints.index :as ext-checkpoints]
             [agent.extensions.claude-hook-bridge.index :as ext-claude-hook-bridge]
+            [agent.extensions.codemode.index :as ext-codemode]
             [agent.extensions.custom-provider-claude-native.index :as ext-custom-provider-claude-native]
             [agent.extensions.custom-provider-deepseek.index :as ext-custom-provider-deepseek]
             [agent.extensions.custom-provider-groq.index :as ext-custom-provider-groq]
@@ -91,6 +92,9 @@
    {:namespace "claude-hook-bridge"
     :module    ext-claude-hook-bridge
     :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["commands" "events" "state" "messages" "ui" "session"] "dependsOn" #js ["agent-shell" "token-suite"]}}
+   {:namespace "codemode"
+    :module    ext-codemode
+    :manifest  #js {"namespace" "codemode" "description" "Code mode — one `script` tool that runs squint code calling tools, MCP servers and OpenAPI endpoints as functions, in one round trip (off unless `codemode.enabled`)" "capabilities" #js ["tools" "events"] "dependsOn" #js ["token-suite"] "settings" #js {"codemode" #js {"enabled" false "catalog" #js ["mcp__*"] "apis" #js {} "timeout-ms" 60000 "max-calls" 50 "max-output-chars" 20000}}}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
     :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
