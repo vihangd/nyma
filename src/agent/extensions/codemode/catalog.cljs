@@ -18,6 +18,24 @@
   (let [t (first (str/split-lines (str s)))]
     (if (> (count t) n) (str (subs t 0 (dec n)) "…") t)))
 
+(def ^:private html-fields
+  "String fields that hold an HTML or email body, by the names servers use."
+  #{"html" "body_html" "content_html" "html_body" "body" "htmlBody"})
+
+(defn html-hint
+  "The helper to reach for when a result carries an HTML/email body, or nil.
+   Put beside the data, not in a list at the end: a benchmark model that saw
+   the helpers only in such a list wrote its own HTML regex instead."
+  [schema]
+  (let [obj   (if (= "array" (some-> schema (aget "type"))) (some-> schema (aget "items")) schema)
+        props (some-> obj (aget "properties"))
+        f     (when (object? props)
+                (some #(when (and (contains? html-fields %)
+                                  (= "string" (some-> (aget props %) (aget "type"))))
+                         %)
+                      (js/Object.keys props)))]
+    (when f (str "text of " f ": (nyma/strip-quotes (nyma/html->text (:" f " m)))"))))
+
 (defn line
   "`(ns/fn {sig}) → ret — description` for one entry
    `{:name :description :schema :output :observed?}`. `→ ~{…}` is a shape seen
@@ -25,6 +43,7 @@
   [{:keys [name description schema output observed?]}]
   (str "(" (an/display-name name) " " (if schema (schema/signature schema) "{}") ")"
        (when output (str " → " (when observed? "~") (schema/signature output)))
+       (when-let [h (and output (html-hint output))] (str " [" h "]"))
        (when (seq (str description)) (str " — " (one-line description 90)))))
 
 (defn- round-robin

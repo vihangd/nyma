@@ -34,15 +34,25 @@ function run(codemode) {
   // reach the model, so a call is nested while a codemode__script is open.
   let calls = 0, nested = 0, bytes = 0, steps = 0, inTok = 0, outTok = 0, open = 0, out = "";
   const names = {}, inner = new Set();
+  // what a script did: how many, which failed how, which used the helpers, which only probed
+  let scripts = 0, exploratory = 0; const errorKinds = {}, helpers = {};
   for (const l of p.stdout.toString().split("\n")) {
     let e; try { e = JSON.parse(l); } catch { continue; }
     // nested-ness is decided at START: a call still in flight when its script
     // fails ends after the script does, and must not count as top-level
     if (e.type === "tool_execution_start") {
-      if (e.toolName === "codemode__script") open++; else if (open) { nested++; inner.add(e.execId); }
+      if (e.toolName === "codemode__script") {
+        open++; scripts++;
+        const code = String(e.args?.code ?? "");
+        for (const h of code.match(/nyma\/(strip-quotes|html->text|html->md|save-file|pdf-text|truncate)/g) ?? []) helpers[h] = (helpers[h] || 0) + 1;
+        if (/\(keys |pr-str/.test(code)) exploratory++;
+      } else if (open) { nested++; inner.add(e.execId); }
     }
     if (e.type === "tool_execution_end") {
-      if (e.toolName === "codemode__script") open--;
+      if (e.toolName === "codemode__script") {
+        open--;
+        const k = String(e.result).match(/^\[(\w+)\]/); if (k) errorKinds[k[1]] = (errorKinds[k[1]] || 0) + 1;
+      }
       if (inner.has(e.execId)) continue;
       calls++; bytes += String(e.result).length; names[e.toolName] = (names[e.toolName] || 0) + 1;
     }
@@ -53,9 +63,15 @@ function run(codemode) {
   const found = truth.filter(i => out.includes(asks[i % 6]) || out.toLowerCase().includes(asks[i % 6].toLowerCase().split(" ").slice(0, 3).join(" ")));
   const attDir = path.join(proj, "attachments");
   const atts = fs.existsSync(attDir) ? fs.readdirSync(attDir).length : 0; // expected: truth.length
-  return { codemode, scale, model, secs, exit: p.exitCode, steps, inTok, outTok, calls, nested, toolResultKB: Math.round(bytes / 1024), names, attachments: atts, expectedAttachments: truth.length, mentionedTopics: found.length, outHead: out.slice(0, 400), stderrTail: p.stderr.toString().slice(-400) };
+  return { codemode, scale, model, secs, exit: p.exitCode, steps, inTok, outTok, calls, nested, toolResultKB: Math.round(bytes / 1024), names, scripts, exploratory, errorKinds, helpers, attachments: atts, expectedAttachments: truth.length, mentionedTopics: found.length, outHead: out.slice(0, 400), stderrTail: p.stderr.toString().slice(-400) };
 }
 const results = [];
 for (let r = 0; r < Number(runs); r++) for (const cm of [false, true]) { const x = run(cm); console.log(JSON.stringify(x)); results.push(x); }
 fs.mkdirSync(path.join(import.meta.dir, "results"), { recursive: true });
+const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+for (const cm of [false, true]) {
+  const rs = results.filter(r => r.codemode === cm), m = (k) => med(rs.map(r => r[k]));
+  console.log(`median ${cm ? "codemode" : "direct  "}: steps ${m("steps")} in ${Math.round(m("inTok") / 1000)}k calls ${m("calls")} KB ${m("toolResultKB")} secs ${Math.round(m("secs"))}` +
+    (cm ? ` scripts ${m("scripts")} exploratory ${m("exploratory")} helper-runs ${rs.filter(r => Object.keys(r.helpers).length).length}/${rs.length}` : ""));
+}
 fs.writeFileSync(path.join(import.meta.dir, "results", `${new Date().toISOString().slice(0, 16).replace(/:/g, "")}-${model.replace(/\W/g, "_")}-x${scale}.json`), JSON.stringify(results, null, 2));

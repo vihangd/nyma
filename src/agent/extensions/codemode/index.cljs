@@ -71,10 +71,15 @@
        "- Calls return promises: (js-await …) inside let, or just map over them — the result is "
        "awaited deeply, so (map #(gh/get-issue {:number %}) ids) runs in parallel. To filter or "
        "reduce fetched data, await the batch first: (js-await (js/Promise.all (mapv #(gh/get-issue {:number %}) ids))).\n"
-       "- Tool results arrive parsed when they are JSON, otherwise as strings.\n"
+       "- Tool results arrive parsed when they are JSON (or as the server's structuredContent), otherwise as strings. "
+       "An MCP attachment arrives as {:text … :files [{:path :mime :bytes}]}; copy it with "
+       "(nyma/save-file {:path \"out/x.pdf\" :from (:path (first (:files r)))}), read a PDF with (nyma/pdf-text {:path …}).\n"
+       "- Email/HTML bodies: (nyma/strip-quotes (nyma/html->text html)) is the new text without quoted history or "
+       "signature — use it rather than writing an HTML regex.\n"
        "- The last form is the result; (println …) goes to logs. A failed call throws — wrap in "
        "(try … (catch :default e …)) to continue.\n"
-       "- A catalog line's → is what the call returns; with no →, return (keys (first xs)) first rather than guessing fields.\n"
+       "- A catalog line's → is what the call returns, and each script's result lists the shape of every call "
+       "it made (shapes:) — build on those in the next script instead of probing with keys or pr-str.\n"
        "- Return the filtered data you need, not whole raw results — big output is truncated.\n"
        "- squint ≠ Clojure: maps are not functions (use get / :key), no js->clj, no array-seq; "
        "str/ and clojure.string/ work without a require."))
@@ -96,14 +101,26 @@
     (let [e (try (.get st (str "shape:" tool)) (catch :default _ nil))]
       (when (and e (= (.-hash e) (schema-hash api tool))) (.-schema e)))))
 
-(defn- observe! [api tool value]
+(defn- informative?
+  "An inferred shape that says something: not `[]` or `{}`. A nullable
+   field (`x?: any`) is fine — rejecting any `any` kept almost nothing."
+  [sig]
+  (not (contains? #{"any" "[any]" "{}" "[{}]"} sig)))
+
+(defn- richness [sig] (count (re-seq #":" (str sig))))
+
+(defn- observe!
+  "Keep the shape of `value` for `tool`: the first informative one, or a
+   richer one than what is kept (a first result whose fields were mostly
+   null would otherwise stick)."
+  [api tool value]
   (when-let [st (store api)]
     (let [inferred (schema/infer value)
-          sig      (schema/signature inferred)]
-      ;; an empty first result (`[]`, `{}`) says nothing: wait for one that does
+          sig      (schema/signature inferred)
+          kept     (observed-shape api tool)]
       (when (and (some? value) (not (some-> (.getTool api tool) .-nymaOutputSchema))
-                 (not (re-find #"any|\{\}" sig))
-                 (nil? (observed-shape api tool)))
+                 (informative? sig)
+                 (or (nil? kept) (> (richness sig) (richness (schema/signature kept)))))
         (try (.set st (str "shape:" tool) #js {:hash (schema-hash api tool) :schema inferred})
              (catch :default _ nil))))))
 
@@ -270,6 +287,7 @@
                                      r (js-await p)
                                      _ (.delete inflight p)]
                                  (aset entry "status" (if (.-ok r) "ok" (if (.-denied r) "denied" "error")))
+                                 (when (.-shape r) (aset entry "shape" (.-shape r)) (aset entry "hint" (.-hint r)))
                                  (when-not @done?
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok (.-ok r)
                                                         :ns (.-ns m) :fn (.-fn m) :label (.-tool entry)
@@ -303,6 +321,16 @@
         calls  (vec (or (.-calls m) []))
         ledger (when (seq calls)
                  (str "calls: " (str/join ", " (map #(str (.-tool %) " " (.-status %)) calls))))
+        ;; what each tool returned, once per tool, read now: the catalog only
+        ;; learns observed shapes at the next prompt
+        shapes (let [seen (atom #{})
+                     ls   (keep (fn [c]
+                                  (when (and (.-shape c) (not (contains? @seen (.-tool c))))
+                                    (swap! seen conj (.-tool c))
+                                    (str "  " (.-tool c) " → " (.-shape c)
+                                         (when (.-hint c) (str "  [" (.-hint c) "]")))))
+                                calls)]
+                 (when (seq ls) (str "shapes (observed):\n" (str/join "\n" ls))))
         body   (if (.-ok m)
                  (let [v (.-value m)]
                    (cond (string? v) (if (seq v) v "\"\" (empty string)")
@@ -316,13 +344,23 @@
                         (when (.includes (str (.-message e)) "[object Promise]")
                           " — a tool call returns a promise: (js-await (ns/fn …)) before using its value"))))
         body   (if (> (count body) max-chars)
-                 (let [f (spill! body)]
-                   (str (subs body 0 max-chars) "\n…[truncated: " (count body) " chars"
-                        (when f (str "; full result in " f)) "]"))
+                 (let [f (spill! body)
+                       v (when (.-ok m) (.-value m))
+                       tail (str "…[truncated: " (count body) " chars"
+                                 (when f (str "; full result in " f)) "]")]
+                   (if (array? v)
+                     ;; structure and one example beat a cut prefix: the model
+                     ;; sees what it has, and filters in the next script
+                     (str "count: " (.-length v) "\nshape: " (schema/signature (schema/infer v))
+                          "\nfirst: " (let [s (js/JSON.stringify (aget v 0) nil 1)]
+                                         (if (> (count (str s)) 2000) (str (subs s 0 2000) "…") s))
+                          "\n" tail)
+                     (str (subs body 0 max-chars) "\n" tail)))
                  body)]
     (str/join "\n" (cond-> [body]
                      (seq logs) (conj (str "logs:\n" (str/join "\n" (take 50 logs))))
-                     ledger     (conj ledger)))))
+                     ledger     (conj ledger)
+                     shapes     (conj shapes)))))
 
 (def last-ok
   "The last script that finished ok — what `/codemode save` keeps."
@@ -375,7 +413,18 @@
                              (-> (.executeTool api t a #js {:preapproved (clj->js (:tools result)) :signal signal})
                                  (.then #(mcp-error t %))
                                  (.then (fn [r]
-                                          (when (.-ok r) (observe! api t (maybe-json (.-result r))))
+                                          (when (.-ok r)
+                                            (let [v (maybe-json (.-result r))]
+                                              (observe! api t v)
+                                              ;; the shape this call returned, for the result's
+                                              ;; shapes: line — unless the tool declares one
+                                              (when (and (some? v) (not (some-> (.getTool api t) .-nymaOutputSchema)))
+                                                (let [s   (schema/infer v)
+                                                      sig (schema/signature s)]
+                                                  ;; a string result has no fields to learn
+                                                  (when (and (informative? sig) (not= "str" sig))
+                                                    (aset r "shape" sig)
+                                                    (aset r "hint" (catalog/html-hint s)))))))
                                           r)))))
                 m        (js-await (run-worker compiled bindings
                                                (assoc cfg

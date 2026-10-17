@@ -230,6 +230,58 @@
                                                              :components #js {:schemas #js {:Pet #js {:type "object" :properties #js {:name #js {:type "string"}} :required #js ["name"]}}}})]
                                               (-> (expect (schema/signature (:output op))) (.toBe "{name: str}")))))))
 
+;;; ─── fewer exploratory scripts ─────────────────────────────────
+
+(defn ^:async test-shapes-line []
+  (let [api (fake-api {"mcp__mail__get" (fn [_] (js/JSON.stringify #js [#js {:id 1 :html "<p>x</p>"}]))})
+        out (js-await (cm/execute-script api cfg #js {:code "(count (js-await (mail/get {})))"} nil))]
+    (-> (expect out) (.toContain "shapes (observed):\n  mail/get → [{id: int, html: str}]"))
+    (-> (expect out) (.toContain "(nyma/strip-quotes (nyma/html->text (:html m)))"))))
+
+(defn ^:async test-no-shape-when-declared []
+  (let [api #js {:getAllTools (fn [] #js ["mcp__mail__get"])
+                 :getTool     (fn [_] #js {:nymaOutputSchema #js {:type "object"}})
+                 :executeTool (fn [_ _ _] (js/Promise.resolve #js {:ok true :result "{\"a\":1}"}))}
+        out (js-await (cm/execute-script api cfg #js {:code "(mail/get {})"} nil))]
+    (-> (expect out) (.not.toContain "shapes"))))
+
+(defn ^:async test-big-array []
+  (let [api (fake-api {"mcp__mail__get" (fn [_] (js/JSON.stringify (clj->js (mapv (fn [i] {:id i :body (.repeat "x" 300)}) (range 100)))))})
+        out (js-await (cm/execute-script api (assoc cfg :max-output-chars 5000) #js {:code "(js-await (mail/get {}))"} nil))]
+    (-> (expect out) (.toContain "count: 100"))
+    (-> (expect out) (.toContain "shape: [{id: int, body: str}]"))
+    (-> (expect out) (.toContain "first: {"))
+    (-> (expect out) (.toContain "full result in"))))
+
+(defn ^:async test-observe-null-and-richer []
+  (let [n   (atom 0)
+        api (state-api (atom #js {:type "object"})
+                       (fn [] (js/JSON.stringify (case (swap! n inc)
+                                                   1 #js [#js {:id 1 :cc nil}]
+                                                   2 #js [#js {:id 1}]
+                                                   #js [#js {:id 1 :cc nil :subject "s"}]))))]
+    (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
+    (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int, cc?: any}]"))
+    (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
+    (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int, cc?: any}]"))
+    (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
+    (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int, cc?: any, subject: str}]"))))
+
+(describe "codemode: fewer exploratory scripts" (fn []
+  (it "the result lists each call's observed shape, with the helper hint for an html field" test-shapes-line)
+  (it "no shapes line for a tool that declares its return" test-no-shape-when-declared)
+  (it "a big array result is count, shape and first item, not a cut prefix" test-big-array)
+  (it "a null field is stored; a poorer later shape does not replace a richer one" test-observe-null-and-richer)
+  (it "the tool description documents files, save-file :from and strip-quotes"
+      (fn []
+        (doseq [s [":files [{:path" ":from (:path (first (:files r)))" "nyma/strip-quotes" "shapes:"]]
+          (-> (expect cm/tool-description) (.toContain s)))))
+  (it "a catalog line carries the helper hint when the return has an html field"
+      (fn []
+        (-> (expect (catalog/line {:name "mcp__mail__get" :schema #js {}
+                                   :output #js {:type "array" :items #js {:type "object" :properties #js {:html #js {:type "string"}}}}}))
+            (.toContain "[text of html: (nyma/strip-quotes"))))))
+
 ;;; ─── saved scripts ─────────────────────────────────────────────
 
 (defn ^:async test-saved-roundtrip []

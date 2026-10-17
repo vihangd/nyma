@@ -55,6 +55,14 @@ The catalog shows what a call returns: `(mail/search-emails {…}) → {emails: 
 - OpenAPI: the first 2xx JSON response schema.
 - Otherwise the shape of the first successful result, marked `→ ~{…}`, kept in `.nyma/ext-state/codemode.json` and dropped when the tool's input schema changes.
 - An MCP attachment the bridge saved arrives as `{:text … :files [{:path :mime :bytes :uri}]}`.
+- **Every script result lists what its calls returned**, once per tool with no declared type:
+  ```
+  calls: mail/search-emails ok, mail/get-email-data ok
+  shapes (observed):
+    mail/get-email-data → [{email_id: str, from: str, subject: str, html: str}]  [text of html: (nyma/strip-quotes (nyma/html->text (:html m)))]
+  ```
+  The catalog learns observed shapes only at the next prompt; this line reaches the model at once, so the next script builds on it instead of probing with `keys` or `pr-str`. A shape with an HTML body field carries the helper to use, next to the data.
+- A result over `max-output-chars` that is an array comes back as `count`, `shape` and the `first` item, plus the spill path, not a cut prefix.
 
 ## Saved scripts
 
