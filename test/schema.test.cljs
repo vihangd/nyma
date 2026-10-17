@@ -43,3 +43,48 @@
                            (let [rows (schema/->doc-rows {:path [:string "File path"] :mode [:enum ["a" "b"] {:optional true}]})]
                              (-> (expect rows) (.toContain "- `path` (string): File path"))
                              (-> (expect rows) (.toContain "- `mode` (enum: a | b, optional)")))))))
+
+;;; ─── JSON Schema → signature ───────────────────────────────────
+
+(def ^:private condition
+  ;; eM Client's search condition, cut down: a oneOf whose branches each carry
+  ;; the same long description — the shape that made one search answer 36 KB.
+  (let [long-doc (.repeat "A complete nested email search condition. " 15)]
+    (clj->js {:type "object"
+              :required ["location"]
+              :properties {:location {:type "object" :description "Where to search"
+                                      :properties {:account_ids {:type ["array" "null"] :items {:type "string"}}}}
+                           :per_page {:type "integer" :description "Page size"}
+                           :query {:description long-doc
+                                   :oneOf [{:type "object" :description long-doc
+                                            :properties {:and {:type "array" :items {:type "object"}}}}
+                                           {:type "object" :description long-doc
+                                            :properties {:properties {:type "object"
+                                                                      :properties {:from_contains {:type ["array" "null"] :items {:type "string"}}
+                                                                                   :importance {:enum ["LOW" "HIGH"]}}}}}]}}})))
+
+(describe "schema/signature" (fn []
+  (it "keeps real names, marks optional and nullable, renders enums and arrays"
+      (fn []
+        (-> (expect (schema/signature condition))
+            (.toBe (str "{location: {account_ids?: [str]}, per_page?: int, "
+                        "query?: {and?: [{}]} | {properties?: {from_contains?: [str], importance?: \"LOW\"|\"HIGH\"}}}")))))
+
+  (it "is a small fraction of the schema it renders"
+      (fn []
+        (-> (expect (< (* 10 (count (schema/signature condition)))
+                       (count (js/JSON.stringify condition))))
+            (.toBe true))))
+
+  (it "stops at the depth limit instead of unrolling recursion"
+      (fn []
+        (let [deep (reduce (fn [inner _] #js {:type "object" :properties #js {:x inner}})
+                           #js {:type "string"} (range 10))]
+          (-> (expect (.includes (schema/signature deep) "{…}")) (.toBe true)))))
+
+  (it "notes only top-level descriptions, cut to width"
+      (fn []
+        (let [notes (schema/param-notes condition 20)]
+          (-> (expect (.includes notes "location — Where to search")) (.toBe true))
+          (-> (expect (.includes notes "query — A complete nested e…")) (.toBe true))
+          (-> (expect (count (.split notes "\n"))) (.toBe 3)))))))

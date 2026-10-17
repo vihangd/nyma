@@ -103,3 +103,91 @@
                           (when (:optional? f) ", optional") ")"
                           (when (:doc f) (str ": " (:doc f))))))
                  fields)))
+
+;;; ─── JSON Schema → one-line signature ──────────────────────────
+;;
+;; The other direction: a JSON Schema someone else wrote (an MCP server, an
+;; OpenAPI spec) rendered compactly enough to sit in a search result or a
+;; catalog line. Measured on a real eM Client session: `search_emails` is
+;; 12,391 chars of JSON Schema because every nested `oneOf` branch repeats a
+;; 600-char description; three of them made one `mcp_search` answer 36 KB, and
+;; 14 searches put 244 KB in context. The shape is what a caller needs; the
+;; descriptions are prose, kept only one level down and only once.
+
+(def ^:private max-depth
+  "Nesting rendered before `…`. Recursive conditions (and/or/not of the same
+   shape) otherwise unroll until the depth guard of whoever renders them."
+  4)
+
+(def ^:private max-enum 8)
+
+(defn- js-get [o k] (when (and o (object? o)) (aget o k)))
+
+(defn- type-list
+  "`type` as a vector, nulls removed, plus whether null was allowed."
+  [s]
+  (let [t  (js-get s "type")
+        ts (cond (array? t) (vec t) (some? t) [t] :else [])]
+    [(vec (remove #(= "null" %) ts)) (boolean (some #(= "null" %) ts))]))
+
+(declare sig*)
+
+(defn- sig-object [s depth]
+  (let [props (js-get s "properties")
+        req   (set (or (js-get s "required") []))]
+    (if (and (object? props) (pos? (count (js/Object.keys props))))
+      (if (>= depth max-depth)
+        "{…}"
+        (str "{"
+             (str/join ", "
+                       (map (fn [k]
+                              (let [p (aget props k)
+                                    [_ nullable?] (type-list p)]
+                                (str k (when (or nullable? (not (contains? req k))) "?")
+                                     ": " (sig* p (inc depth)))))
+                            (js/Object.keys props)))
+             "}"))
+      "{}")))
+
+(defn- sig* [s depth]
+  (let [[ts _] (type-list s)
+        enum   (js-get s "enum")
+        alts   (or (js-get s "oneOf") (js-get s "anyOf"))
+        ref    (js-get s "$ref")]
+    (cond
+      (not (object? s)) "any"
+      (array? enum)
+      (let [vs (map #(js/JSON.stringify %) (remove nil? enum))]
+        (str (str/join "|" (take max-enum vs)) (when (> (count vs) max-enum) "|…")))
+      (array? alts)
+      (if (>= depth max-depth)
+        "…"
+        (str/join " | " (distinct (map #(sig* % depth) alts))))
+      (string? ref) (str "<" (last (str/split ref #"/")) ">")
+      (= "array" (first ts)) (str "[" (sig* (js-get s "items") (inc depth)) "]")
+      (or (= "object" (first ts)) (object? (js-get s "properties"))) (sig-object s depth)
+      (seq ts) (str/join "|" (map #(case % "string" "str" "integer" "int" "number" "num"
+                                         "boolean" "bool" %)
+                                  ts))
+      :else "any")))
+
+(defn signature
+  "Compact type of a JSON Schema: `{repo: str, state?: \"open\"|\"closed\", ids?: [str]}`.
+   Real property names are kept verbatim — a caller has to send `per_page`,
+   not a prettier spelling of it. `?` marks optional or nullable."
+  [schema]
+  (sig* schema 0))
+
+(defn param-notes
+  "`  name — description` per top-level property, each cut to `width` chars.
+   Only the top level: nested descriptions are where the repetition lives."
+  [schema width]
+  (let [props (js-get schema "properties")]
+    (when (object? props)
+      (->> (js/Object.keys props)
+           (keep (fn [k]
+                   (let [d (js-get (aget props k) "description")]
+                     (when (and (string? d) (seq d))
+                       (str "  " k " — "
+                            (if (> (count d) width) (str (subs d 0 (dec width)) "…") d))))))
+           (str/join "\n")))))

@@ -145,3 +145,12 @@
                                               (d/defer? cat (fn [s] (reset! seen s) 0) 2000)
                                               (-> (expect (.includes @seen "name_path")) (.toBe true))
                                               (-> (expect (.includes @seen "Find a symbol")) (.toBe true)))))))
+
+(describe "mcp deferred: compact rendering" (fn []
+  (it "renders a signature by default and the raw schema only on request"
+      (fn []
+        (let [compact (d/render-match (first cat))
+              full    (d/render-match (first cat) true)]
+          (-> (expect (.includes compact "args: {name_path?: str}")) (.toBe true))
+          (-> (expect (.includes compact "\"properties\"")) (.toBe false))
+          (-> (expect (.includes full "\"properties\"")) (.toBe true)))))))

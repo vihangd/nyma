@@ -30,6 +30,7 @@
   (:require ["ai" :refer [tool]]
             ["zod" :as z]
             [clojure.string :as str]
+            [agent.schema :as schema]
             [agent.extensions.mcp-client.manager :as mgr]
             [agent.extensions.mcp-client.client :as client]))
 
@@ -125,21 +126,33 @@
 ;;; ─── rendering ─────────────────────────────────────────────────
 
 (defn render-match
-  "One match, with its parameter schema inline. The schema is the whole point:
-   without it the model cannot construct a call, since there is no tool
-   definition to validate against."
-  [entry]
-  (str "### " (:server entry) " / " (:name entry) "\n"
-       (when (seq (:description entry)) (str (:description entry) "\n"))
-       "parameters: "
-       (try (js/JSON.stringify (:schema entry)) (catch :default _e "{}"))))
+  "One match, with its parameters inline. The parameters are the whole point:
+   without them the model cannot construct a call, since there is no tool
+   definition to validate against.
+
+   Compact by default — `schema/signature` plus one line per top-level
+   parameter. The raw JSON Schema is opt-in (`full?`): on a real eM Client
+   session three matches came back as 36 KB because each nested `oneOf`
+   branch repeats a 600-char description, and the signature carries the same
+   shape in a tenth of that."
+  [entry & [full?]]
+  (let [s (:schema entry)]
+    (str "### " (:server entry) " / " (:name entry) "\n"
+         (when (seq (:description entry)) (str (:description entry) "\n"))
+         (if full?
+           (str "parameters: " (try (js/JSON.stringify s) (catch :default _e "{}")))
+           (let [notes (schema/param-notes s 100)]
+             (str "args: " (schema/signature s)
+                  (when (seq notes) (str "\n" notes))))))))
 
 (defn render-results
-  [entries query]
+  [entries query & [full?]]
   (if (empty? entries)
     (str "No MCP tool matches \"" query "\". Try broader words, or a server name.")
-    (str "Call any of these with mcp_call(server, tool, args).\n\n"
-         (str/join "\n\n" (map render-match entries)))))
+    (str "Call any of these with mcp_call(server, tool, args)."
+         (when-not full? " `?` marks optional; detail:\"full\" returns the raw JSON Schema.")
+         "\n\n"
+         (str/join "\n\n" (map #(render-match % full?) entries)))))
 
 (defn server-summary
   "The one-line-per-server hint for the system prompt. Names the servers and
@@ -202,11 +215,14 @@
         :inputSchema
         (.object z #js {:query (-> (.string z) (.describe "What you are trying to do"))
                         :limit (-> (.number z) (.optional)
-                                   (.describe "Max matches (default 5)"))})
+                                   (.describe "Max matches (default 5)"))
+                        :detail (-> (.enum z #js ["compact" "full"]) (.optional)
+                                    (.describe "compact (default): typed signature; full: raw JSON Schema"))})
         :execute
         (fn [input]
           (let [q (str (:query input))]
-            (render-results (search (catalog-fn) q (:limit input)) q)))}))
+            (render-results (search (catalog-fn) q (:limit input)) q
+                            (= "full" (:detail input)))))}))
 
 (defn call-tool
   [manager]
