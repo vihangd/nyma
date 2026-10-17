@@ -23,7 +23,17 @@
   (-> (str s)
       (.replaceAll "-" "_")
       (.replaceAll "?" "_QMARK_")
-      (.replaceAll "!" "_BANG_")))
+      (.replaceAll "!" "_BANG_")
+      (.replaceAll ">" "_GT_")
+      (.replaceAll "<" "_LT_")
+      (.replaceAll "=" "_EQ_")
+      (.replaceAll "*" "_STAR_")
+      (.replaceAll "+" "_PLUS_")))
+
+(def helpers
+  "Pure functions the worker binds beside the tools, munged, by namespace
+   (`agent.utils.html`). Not tools: never approved, never a miss."
+  {"nyma" #{"html__GT_text" "html__GT_md" "strip_quotes" "truncate"}})
 
 (defn script-name
   "`[ns fn]` for a registered tool name."
@@ -75,7 +85,7 @@
 (def ^:private ref-re
   ;; `ns/fn`; ns may be dotted (`clojure.string`, `globalThis.Bun`), and the
   ;; lookbehind keeps `b/c` in `a/b/c` out
-  (js/RegExp. "(?<![\\w\\-/.:])([A-Za-z][\\w\\-.]*)/([A-Za-z_][\\w\\-?!.]*)" "g"))
+  (js/RegExp. "(?<![\\w\\-/.:])([A-Za-z][\\w\\-.]*)/([A-Za-z_][\\w\\-?!.<>=*+]*)" "g"))
 
 (defn- all-refs
   "[ns fn] pairs as written, from the masked code."
@@ -103,7 +113,8 @@
         ;; is clojure.string, not a missing tool
         nss    (set (map (fn [t] (first (binding-key t))) tool-names))
         misses (->> refs
-                    (filter (fn [[n _ :as r]] (and (contains? nss n) (nil? (get by-key (str/join "/" r))))))
+                    (filter (fn [[n f :as r]] (and (contains? nss n) (nil? (get by-key (str/join "/" r)))
+                                                   (not (contains? (get helpers n) f)))))
                     (map (fn [[n f]] (str n "/" (.replaceAll f "_" "-")))))]
     {:tools (vec (distinct found)) :unknown (vec misses)}))
 
@@ -122,7 +133,7 @@
 
 (def ^:private plain-namespaces
   "Non-tool namespaces a script may name: clojure.string, bound in the worker."
-  #{"str" "string" "clojure.string"})
+  #{"str" "string" "clojure.string" "nyma" "saved"})
 
 (defn unrestricted
   "Why the source is not confined to its bound functions, or nil. `tool-nss`

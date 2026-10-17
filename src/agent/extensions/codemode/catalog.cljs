@@ -19,9 +19,12 @@
     (if (> (count t) n) (str (subs t 0 (dec n)) "…") t)))
 
 (defn line
-  "`(ns/fn {sig}) — description` for one entry `{:name :description :schema}`."
-  [{:keys [name description schema]}]
+  "`(ns/fn {sig}) → ret — description` for one entry
+   `{:name :description :schema :output :observed?}`. `→ ~{…}` is a shape seen
+   in an earlier result, not one the tool declared."
+  [{:keys [name description schema output observed?]}]
   (str "(" (an/display-name name) " " (if schema (schema/signature schema) "{}") ")"
+       (when output (str " → " (when observed? "~") (schema/signature output)))
        (when (seq (str description)) (str " — " (one-line description 90)))))
 
 (defn- round-robin

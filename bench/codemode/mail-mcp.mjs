@@ -32,12 +32,15 @@ server.registerTool("search_emails", {
   description: "Search emails. Returns id, from, subject, received date and attachment names — not bodies.",
   inputSchema: { from_contains: z.string().optional().describe("Substring of the sender"), subject_contains: z.string().optional().describe("Substring of the subject"), date_from: z.string().optional().describe("ISO date, inclusive"), limit: z.number().optional() },
   annotations: { readOnlyHint: true },
+  // typed result (MCP 2025-06-18): code mode shows it as `→ {emails: […]}`
+  outputSchema: { emails: z.array(z.object({ email_id: z.string(), from: z.string(), subject: z.string(), received: z.string(),
+    attachments: z.array(z.object({ attachment_id: z.string(), name: z.string(), size: z.number() })) })) },
 }, async (a) => {
   const r = mails.filter(m => (!a.from_contains || m.from.toLowerCase().includes(a.from_contains.toLowerCase()))
     && (!a.subject_contains || m.subject.toLowerCase().includes(a.subject_contains.toLowerCase()))
     && (!a.date_from || m.received >= a.date_from)).slice(0, a.limit ?? 50)
     .map(({ html, ...m }) => m);
-  return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }], structuredContent: { emails: r } };
 });
 server.registerTool("get_email_data", {
   description: "Full email data including the HTML body for each id.",

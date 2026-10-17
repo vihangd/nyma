@@ -191,3 +191,23 @@
                        (str "  " k " — "
                             (if (> (count d) width) (str (subs d 0 (dec width)) "…") d))))))
            (str/join "\n")))))
+
+(defn infer
+  "A JSON Schema for an observed value, for `signature` to render: what a
+   tool returned once, when it never said what it returns. Keys are all
+   `required` (one sample cannot tell what is optional); arrays take their
+   first element's shape; at most 12 keys per object and 4 levels."
+  ([v] (infer v 0))
+  ([v depth]
+   (cond
+     (nil? v)     #js {:type "null"}
+     (string? v)  #js {:type "string"}
+     (boolean? v) #js {:type "boolean"}
+     (number? v)  #js {:type (if (js/Number.isInteger v) "integer" "number")}
+     (>= depth max-depth) #js {}
+     (array? v)   #js {:type "array" :items (if (pos? (.-length v)) (infer (aget v 0) (inc depth)) #js {})}
+     (object? v)  (let [ks    (take 12 (js/Object.keys v))
+                        props #js {}]
+                    (doseq [k ks] (aset props k (infer (aget v k) (inc depth))))
+                    #js {:type "object" :properties props :required (clj->js ks)})
+     :else #js {})))

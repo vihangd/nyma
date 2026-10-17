@@ -60,14 +60,26 @@
                        {:tool-name tool-name
                         :arguments (clj->js args)}))
           {:keys [text images]} (split-content (:content r))
-          text (if (:is-error? r) (str "[ERROR] " text) text)]
-      (if (seq images)
+          text (if (:is-error? r) (str "[ERROR] " text) text)
+          ;; data for a script calling this tool (api.executeTool reads
+          ;; details); the model still reads `text`
+          files   (keep :file (:content r))
+          details (when (or (some? (:structured-content r)) (seq files))
+                    (clj->js (cond-> {}
+                               (some? (:structured-content r)) (assoc :structured (:structured-content r))
+                               (seq files) (assoc :files (vec files)))))]
+      (cond
+        (seq images)
         #js {:content (clj->js (vec (concat (when (seq text) [(mm/text-part text)]) images)))
              :summary (if (seq text) text (str (count images) " image(s)"))
+             :details details
              ;; carry the error flag so middleware/UI see it (text path already
              ;; prefixes "[ERROR] "; the object path must set it explicitly).
              :isError (boolean (:is-error? r))}
-        text))))
+        ;; `summary`, not `content`: content parts would hand the model the
+        ;; structured result and skip the result policy's cap
+        details #js {:summary text :details details :isError (boolean (:is-error? r))}
+        :else text))))
 
 (defn hint-safety
   "Permission metadata from a tool's MCP annotations, or nil. A bridged tool
@@ -89,7 +101,7 @@
                                 :capabilities #js ["shell"] :category "mcp"}
       :else nil)))
 
-(defn- build-tool-def
+(defn build-tool-def
   "Convert a single MCP `{:name :description :input-schema}` tool
    to an AI-SDK `tool(...)` def, with a server-aware execute fn.
    Param `cli` (not `client`) avoids shadowing the namespace alias."
@@ -114,7 +126,8 @@
                 ;; Lets image-returning MCP tools (e.g. OfficeCLI render) surface the
                 ;; image to the model; text results take the text branch unchanged.
                 :toModelOutput mm/tool-model-output})
-      (aset "safety" (hint-safety (:annotations mcp-tool))))))
+      (aset "safety" (hint-safety (:annotations mcp-tool)))
+      (aset "outputSchema" (:output-schema mcp-tool)))))
 
 (defn register-all!
   "Walk the manager's running clients, register each of their tools

@@ -28,6 +28,46 @@ Off by default:
 
 Argument names are the tool's own, so `per_page` stays `per_page`. The system prompt carries a catalog of signatures for tools matching `codemode.catalog` (default `["mcp__*"]`) plus every API operation. It is capped at about 2k tokens, filled round-robin across namespaces. Any other registered tool can be called the same way.
 
+## Helpers
+
+Pure functions, bound under `nyma/` in every script, not tools, never approved:
+
+| call | does |
+|---|---|
+| `(nyma/html->text s)` | HTML to plain text (tables, entities) |
+| `(nyma/html->md s)` | HTML to Markdown (turndown) |
+| `(nyma/strip-quotes body)` | an email body without quoted history (Gmail, Outlook, Thunderbird, Yahoo markup; `On … wrote:`, `-----Original Message-----`, `>` lines) or signature; HTML or text in, text out. Heuristic: keep the raw body if the answer depends on what was quoted |
+| `(nyma/truncate s n)` | cut with an `…[+N chars]` marker |
+
+File helpers are registered tools, so the gate, checkpoints and `.nymaignore` apply (and they are script-only):
+
+| call | category | returns |
+|---|---|---|
+| `(nyma/save-file {:path p :from f})` / `{:path p :base64 b}` / `{:path p :text t}` | write | `{path, bytes}` |
+| `(nyma/pdf-text {:path p :from 1 :to 3})` | read | `{text, pages}` |
+
+`.nymaignore` covers any tool that declares the `filesystem` capability, on its `path` and `from` args, so a script cannot copy an ignored file out.
+
+## Typed returns
+
+The catalog shows what a call returns: `(mail/search-emails {…}) → {emails: [{email_id: str, …}]}`.
+- MCP `outputSchema`, and a server's `structuredContent` arrives in the script as data. The model-facing text is unchanged.
+- OpenAPI: the first 2xx JSON response schema.
+- Otherwise the shape of the first successful result, marked `→ ~{…}`, kept in `.nyma/ext-state/codemode.json` and dropped when the tool's input schema changes.
+- An MCP attachment the bridge saved arrives as `{:text … :files [{:path :mime :bytes :uri}]}`.
+
+## Saved scripts
+
+A script that ran ok can be kept and called again:
+
+```
+/codemode save find-renga-mail Renga's mails by topic        → .nyma/scripts/find-renga-mail.cljs
+/codemode save find-renga-mail --global …                    → ~/.nyma/scripts/
+/codemode scripts        /codemode rm find-renga-mail
+```
+
+`(saved/find-renga-mail {:topic "AML"})` runs it; inside, `args` is that map (`{}` at the top level, so a script reads the same either way). The approval lists the saved script and every tool it calls. Saving is a command, not a model tool: self-generated skills gave no average gain in SkillsBench (2026), while verifying before keeping is what CRAFT and ToolMaker gained from. A saved script cannot call another. Project scripts load only in a trusted folder, and `.nyma/scripts` is a trust source.
+
 ## Safety
 
 - **The script is gated like bash.** squint compiles code; it does not confine it. So `codemode__script` is in the exec category: it asks in default and accept-edits mode, runs in full-auto, and isn't offered in plan mode.

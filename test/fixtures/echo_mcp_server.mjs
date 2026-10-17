@@ -19,4 +19,9 @@ server.registerTool("get_file", { description: "Embedded resource", inputSchema:
 server.registerTool("get_file_as_text", { description: "Resource serialised as text", inputSchema: {} },
   async () => text(JSON.stringify({ type: "resource", resource: pdf })));
 
+// structuredContent with a declared outputSchema (MCP 2025-06-18)
+server.registerTool("get_structured", { description: "Typed result", inputSchema: {},
+  outputSchema: { count: z.number(), names: z.array(z.string()) } },
+  async () => ({ content: [{ type: "text", text: "2 names" }], structuredContent: { count: 2, names: ["a", "b"] } }));
+
 await server.connect(new StdioServerTransport());

@@ -162,9 +162,20 @@
                                                  ;; cut: a script filters it itself, and a
                                                  ;; tool_result/tool_complete rewrite must still
                                                  ;; apply. Structured results keep :result.
-                                                 (let [raw (:raw-result ctx)]
+                                                 ;; Data a tool attached in `details` (MCP
+                                                 ;; structuredContent, saved files) unless a
+                                                 ;; hook rewrote the text — then the rewrite.
+                                                 (let [raw     (:raw-result ctx)
+                                                       hooked  (:hooked-result ctx)
+                                                       orig    (if (string? raw) raw (some-> raw .-summary))
+                                                       d       (:result-details ctx)
+                                                       data    (when (and d (or (nil? hooked) (= hooked orig)))
+                                                                 (cond (some? (.-structured d)) (.-structured d)
+                                                                       (.-files d) #js {:text orig :files (.-files d)}))]
                                                    #js {:ok      (not (:result-is-error ctx))
-                                                        :result  (if (string? raw) (or (:hooked-result ctx) raw) (:result ctx))
+                                                        :result  (cond (some? data)  data
+                                                                       (string? raw) (or hooked raw)
+                                                                       :else         (:result ctx))
                                                         :error   (when (:result-is-error ctx) (str (:result ctx)))}))))
                                       (.catch (fn [e] #js {:ok false :error (str (or (.-message e) e))}))))))
          :setActiveTools    (fn [names]

@@ -2046,3 +2046,12 @@ owed here.
 
 At ×1 (24 KB of bodies) there was nothing to save and no win (8 vs 9 steps). What the first rounds measured and fixed: with `mcp_call` or the server's own tools on offer the model wrote no script; `def`, `js-await` inside a `fn`, `(js/JSON.stringify (map …))`, `#<Error>` printing, unbound `clojure.string` and an unlocated missing paren each cost scripts. Remaining script errors per run: 0–2 (an un-awaited call iterated; `js->clj`, caught by the trap lint).
 
+**Round 2** (helpers `nyma/strip-quotes`/`html->text`/`save-file`/`pdf-text`, typed returns, saved scripts; the stub's `search_emails` gained an `outputSchema` + `structuredContent`). Same command, medians of 3, every run correct:
+
+| | steps | input tokens | top-level calls | tool-result KB | secs |
+|---|---|---|---|---|---|
+| direct MCP tools | 11 | 172k | 56 | 36 | 116 |
+| codemode | 12 | 138k | 11 | 20 | 92 |
+
+Every codemode run used the new helpers (`save-file` in 2 of 3, `strip-quotes`/`html->text` in 2 of 3), but codemode's own numbers did not move (12 steps / 138k vs 11 / 137k). The baseline did: 19 → 11 steps, 257k → 172k, same model and prompt. Nothing in the direct path changed what the model reads (MCP text results are the same strings), so that looks like run-to-run variance in the provider, and it narrows codemode's measured win to about 20% input tokens and 20% wall time at equal steps. Script errors: 0–2 per run (a missing `]`, an invented `vmap`, an attachment id passed as `save-file :from` — the error now says where the path is).
+

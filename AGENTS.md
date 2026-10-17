@@ -125,6 +125,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/event_json.cljs` | `agent.utils.event-json` | Pure mappers from the AI SDK StepResult nyma hands to `turn_end` into the plain shapes any JSONL consumer (pi-rpc, `-p --output-format st… |
 | `src/agent/utils/git_files.cljs` | `agent.utils.git-files` | Synchronous git shell-outs shared by core and extensions. |
 | `src/agent/utils/home.cljs` | `agent.utils.home` | The one place nyma asks where HOME is. |
+| `src/agent/utils/html.cljs` | `agent.utils.html` | HTML → markdown or text, and quoted history out of an email body. |
 | `src/agent/utils/js_interop.cljs` | `agent.utils.js-interop` | Squint ships `clj->js` but NOT `js->clj`. |
 | `src/agent/utils/jsonl_stdin.cljs` | `agent.utils.jsonl-stdin` | Reading a JSONL protocol channel off a stream. |
 | `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | Markdown → ANSI, via Bun.markdown.ansi; `marked` only for its lexer. |

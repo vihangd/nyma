@@ -4,7 +4,9 @@
   "capabilities": [
     "tools",
     "tools-preapprove",
-    "events"
+    "events",
+    "commands",
+    "state"
   ],
   "dependsOn": [
     "token-suite"

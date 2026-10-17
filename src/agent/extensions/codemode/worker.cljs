@@ -16,7 +16,17 @@
      self → {type \"log\" line}               (each println, as it happens)
      self → {type \"done\" ok value error}"
   (:require ["squint-cljs/core.js" :as sc]
-            ["squint-cljs/string.js" :as sstr]))
+            ["squint-cljs/string.js" :as sstr]
+            [agent.utils.html :as html]))
+
+(def ^:private helpers
+  "Pure fns bound under `nyma/` beside its tools (analyze/helpers names them).
+   All synchronous, so a script can use them inline: html->md's turndown is
+   loaded before the script starts, and only when the script names it."
+  {"html__GT_text" html/html->text
+   "html__GT_md"   (fn [h] (or (html/html->markdown-sync h) (html/html->text h)))
+   "strip_quotes"  html/strip-quotes
+   "truncate"      html/truncate})
 
 (def ^:private AsyncFunction
   (.-constructor (js/Object.getPrototypeOf ^:async (fn [] nil))))
@@ -92,6 +102,9 @@
         (doseq [f (aget bindings n)]
           (aset o f (fn [args] (call n f args))))
         (aset out n o)))
+    (let [o (or (aget out "nyma") #js {})]
+      (doseq [[k f] helpers] (aset o k f))
+      (aset out "nyma" o))
     out))
 
 (defn ^:async realize
@@ -116,6 +129,8 @@
     :else (str v)))
 
 (defn ^:async run [m]
+  (when (.includes (str (.-body m)) "html__GT_md")
+    (try (js-await (html/load-html-mods!)) (catch :default _ nil)))
   (patch-json!)
   (printable-errors!)
   (capture!)
@@ -125,10 +140,13 @@
         ;; clojure.string without a require: `str/join`, `string/trim` and
         ;; `clojure.string/replace` compile to these three names
         f        (js/Reflect.construct AsyncFunction
-                                       (clj->js (concat ["squint_core" "str" "string" "clojure_DOT_string"]
+                                       ;; `args` is {} at the top level, the caller's map
+                                       ;; inside a saved script — so a script reads the
+                                       ;; same either way and saves as it ran
+                                       (clj->js (concat ["squint_core" "str" "string" "clojure_DOT_string" "args"]
                                                         names [(.-body m)])))]
     (try
-      (let [v (js-await (js/Reflect.apply f nil (clj->js (concat [sc sstr sstr sstr] (map #(aget nss %) names)))))
+      (let [v (js-await (js/Reflect.apply f nil (clj->js (concat [sc sstr sstr sstr #js {}] (map #(aget nss %) names)))))
             v (js-await (realize v 0))]
         (js/postMessage #js {:type "done" :ok true :value v}))
       (catch :default e

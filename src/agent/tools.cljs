@@ -9,7 +9,8 @@
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
             [agent.utils.stream-drain :as drain]
-            [agent.utils.pdf :as pdf]))
+            [agent.utils.pdf :as pdf]
+            [agent.utils.html :as html-util]))
 
 (def read-default-line-cap 2000)
 
@@ -464,62 +465,6 @@
 
 ;;; ─── web_fetch ─────────────────────────────────────────────
 
-(def ^:private html-mods
-  "Memoized {:parseHTML f :Turndown ctor}, loaded on first use.
-
-   These were top-level requires, so EVERY entry point — the gateway, headless
-   -p, the SDK, a test run — paid 26ms and 37MB of RSS (linkedom alone is +29MB,
-   the largest dependency cost in the process) for two libraries that only the
-   web_fetch markdown path below uses. deep_research never reaches them: it calls
-   Jina/Perplexity and gets prose back."
-  (atom nil))
-
-(defn ^:async load-html-mods!
-  []
-  (or @html-mods
-      (let [linkedom  (js-await (js/import "linkedom"))
-            turndown  (js-await (js/import "turndown"))
-            mods      {:parseHTML (.-parseHTML linkedom)
-                       :Turndown  (or (.-default turndown) turndown)}]
-        (reset! html-mods mods)
-        mods)))
-
-(defn ^:async html-to-markdown
-  "Convert HTML to Markdown using turndown + linkedom, both loaded on demand."
-  [html]
-  (let [{:keys [parseHTML Turndown]} (js-await (load-html-mods!))
-        parsed   (parseHTML html)
-        document (.-document parsed)
-        td       (Turndown. #js {:headingStyle "atx" :codeBlockStyle "fenced"})]
-    (.turndown td document)))
-
-(defn- html-to-text-fallback
-  "Strip HTML to plain text. Regex-based fallback, no external deps."
-  [html]
-  (-> html
-      ;; Remove script, style, noscript blocks
-      (.replace (js/RegExp. "<script[^>]*>[\\s\\S]*?</script>" "gi") "")
-      (.replace (js/RegExp. "<style[^>]*>[\\s\\S]*?</style>" "gi") "")
-      (.replace (js/RegExp. "<noscript[^>]*>[\\s\\S]*?</noscript>" "gi") "")
-      ;; Convert block elements to newlines
-      (.replace (js/RegExp. "<(br|p|div|li|tr|h[1-6])[^>]*>" "gi") "\n")
-      ;; Strip remaining tags
-      (.replace (js/RegExp. "<[^>]+>" "g") "")
-      ;; Decode common entities
-      (.replace (js/RegExp. "&amp;" "g") "&")
-      (.replace (js/RegExp. "&lt;" "g") "<")
-      (.replace (js/RegExp. "&gt;" "g") ">")
-      (.replace (js/RegExp. "&quot;" "g") "\"")
-      (.replace (js/RegExp. "&#39;" "g") "'")
-      (.replace (js/RegExp. "&nbsp;" "g") " ")
-      ;; Decode numeric entities
-      (.replace (js/RegExp. "&#(\\d+);" "g")
-                (fn [_ code] (js/String.fromCharCode (js/parseInt code 10))))
-      ;; Collapse whitespace
-      (.replace (js/RegExp. "[ \\t]+" "g") " ")
-      (.replace (js/RegExp. "\\n\\s*\\n" "g") "\n\n")
-      (.trim)))
-
 (defn- truncate-result [s max-len]
   (if (> (count s) max-len)
     (str (subs s 0 max-len) "\n[truncated — " (count s) " total characters]")
@@ -542,8 +487,8 @@
             result (cond
                      (= fmt "html") body
                      (not (.includes content-type "text/html")) body
-                     (= fmt "markdown") (js-await (html-to-markdown body))
-                     :else (html-to-text-fallback body))]
+                     (= fmt "markdown") (js-await (html-util/html->markdown body))
+                     :else (html-util/html->text body))]
         (truncate-result result max-len)))))
 
 (defn ^:async jina-fetch [url fmt max-len]

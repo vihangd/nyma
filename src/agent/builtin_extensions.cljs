@@ -94,7 +94,7 @@
     :manifest  #js {"namespace" "claude-hook-bridge" "description" "Claude-Code-shape hooks — runs your hook commands and folds their output into the prompt" "capabilities" #js ["commands" "events" "state" "messages" "ui" "session"] "dependsOn" #js ["agent-shell" "token-suite"]}}
    {:namespace "codemode"
     :module    ext-codemode
-    :manifest  #js {"namespace" "codemode" "description" "Code mode — one `script` tool that runs squint code calling tools, MCP servers and OpenAPI endpoints as functions, in one round trip (off unless `codemode.enabled`)" "capabilities" #js ["tools" "tools-preapprove" "events"] "dependsOn" #js ["token-suite"] "settings" #js {"codemode" #js {"enabled" false "catalog" #js ["mcp__*"] "script-only" #js [] "apis" #js {} "timeout-ms" 60000 "max-calls" 50 "max-output-chars" 20000}}}}
+    :manifest  #js {"namespace" "codemode" "description" "Code mode — one `script` tool that runs squint code calling tools, MCP servers and OpenAPI endpoints as functions, in one round trip (off unless `codemode.enabled`)" "capabilities" #js ["tools" "tools-preapprove" "events" "commands" "state"] "dependsOn" #js ["token-suite"] "settings" #js {"codemode" #js {"enabled" false "catalog" #js ["mcp__*"] "script-only" #js [] "apis" #js {} "timeout-ms" 60000 "max-calls" 50 "max-output-chars" 20000}}}}
    {:namespace "custom-provider-claude-native"
     :module    ext-custom-provider-claude-native
     :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}

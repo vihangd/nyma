@@ -74,6 +74,13 @@
                                                    (if d (js/Object.assign #js {} s #js {:description d}) s))])
                                       params))
                  props  (cond-> props body (assoc "body" body))
+                 ;; the first 2xx JSON response, for the catalog's `→ {…}`
+                 output (let [rs (or (aget op "responses") #js {})]
+                          (some (fn [code]
+                                  (when (re-find #"^2" code)
+                                    (some-> (resolve-refs spec (aget rs code) 0)
+                                            (aget "content") (aget "application/json") (aget "schema"))))
+                                (sort (js/Object.keys rs))))
                  req    (vec (concat (keep #(when (or (= "path" (aget % "in")) (aget % "required")) (aget % "name")) params)
                                      (when (and body (some-> op (aget "requestBody") (aget "required"))) ["body"])))]]
        {:name        (op-name m p op)
@@ -82,6 +89,7 @@
         :description (or (aget op "summary") (aget op "description") "")
         :params      (mapv (fn [prm] {:name (aget prm "name") :in (aget prm "in")}) params)
         :body?       (some? body)
+        :output      output
         :schema      (clj->js {:type "object" :properties props :required req})}))))
 
 (defn request
@@ -132,6 +140,7 @@
   (let [read? (contains? #{"GET" "HEAD"} (:method op))]
     #js {:description (str (:description op) " [" (:method op) " " (:path op) "]")
          :inputSchema (:schema op)
+         :outputSchema (:output op)
          :safety      (if read?
                         #js {:read-only? true :network? true :capabilities #js ["network"] :category "network"}
                         #js {:destructive? true :network? true :requires-confirmation? true

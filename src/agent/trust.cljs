@@ -110,6 +110,11 @@
     (let [files (code-files (path/join cwd extensions-dir))]
       (when (seq files)
         [{:source extensions-dir :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))}]))
+    ;; code-mode saved scripts: squint a script can call by name
+    (let [dir   (path/join cwd ".nyma" "scripts")
+          files (when (fs/existsSync dir) (filter #(.endsWith % ".cljs") (vec (fs/readdirSync dir))))]
+      (when (seq files)
+        [{:source ".nyma/scripts" :detail (str (count files) " saved script(s): " (str/join ", " (take 5 files)))}]))
     (mapcat #(settings-entries % (read-json (path/join cwd %))) settings-files)
     ;; .claude/ and .agents/ hooks only when hooks-compat would load them:
     ;; asking about commands that can never run is noise that teaches people

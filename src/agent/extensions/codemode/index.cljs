@@ -36,7 +36,11 @@
             [agent.extensions.token-suite.tool-deferral :as td]
             [agent.extensions.codemode.analyze :as an]
             [agent.extensions.codemode.catalog :as catalog]
-            [agent.extensions.codemode.openapi :as openapi]))
+            [agent.extensions.codemode.openapi :as openapi]
+            [agent.extensions.codemode.files :as files]
+            [agent.extensions.codemode.saved :as saved]
+            [agent.trust :as trust]
+            [agent.schema :as schema]))
 
 (def default-config
   {:enabled false :catalog ["mcp__*"] :script-only [] :apis {}
@@ -70,10 +74,34 @@
        "- Tool results arrive parsed when they are JSON, otherwise as strings.\n"
        "- The last form is the result; (println …) goes to logs. A failed call throws — wrap in "
        "(try … (catch :default e …)) to continue.\n"
-       "- Unsure of a result's fields? Return (keys (first xs)) first rather than guessing.\n"
+       "- A catalog line's → is what the call returns; with no →, return (keys (first xs)) first rather than guessing fields.\n"
        "- Return the filtered data you need, not whole raw results — big output is truncated.\n"
        "- squint ≠ Clojure: maps are not functions (use get / :key), no js->clj, no array-seq; "
        "str/ and clojure.string/ work without a require."))
+
+;;; ─── catalog ───────────────────────────────────────────────────
+
+;;; ─── observed result shapes ────────────────────────────────────
+;; Most MCP servers declare no outputSchema, so the model guessed fields. The
+;; shape of the first successful result is kept per tool, keyed by a hash of
+;; the tool's input schema so a server that changes drops the stale shape.
+
+(defn- schema-hash [api tool]
+  (str (js/Bun.hash (str (js/JSON.stringify (td/schema->json (some-> (.getTool api tool) .-inputSchema)))))))
+
+(defn- store [api] (try (.-state api) (catch :default _ nil)))
+
+(defn observed-shape [api tool]
+  (when-let [st (store api)]
+    (let [e (try (.get st (str "shape:" tool)) (catch :default _ nil))]
+      (when (and e (= (.-hash e) (schema-hash api tool))) (.-schema e)))))
+
+(defn- observe! [api tool value]
+  (when-let [st (store api)]
+    (when (and (some? value) (not (some-> (.getTool api tool) .-outputSchema))
+               (nil? (observed-shape api tool)))
+      (try (.set st (str "shape:" tool) #js {:hash (schema-hash api tool) :schema (schema/infer value)})
+           (catch :default _ nil)))))
 
 ;;; ─── catalog ───────────────────────────────────────────────────
 
@@ -82,19 +110,42 @@
        (remove #(= self-name %))
        (filter #(td/deferred? % patterns))
        (map (fn [n]
-              (let [t (.getTool api n)]
+              (let [t    (.getTool api n)
+                    decl (some-> t .-outputSchema)
+                    seen (when-not decl (observed-shape api n))]
                 {:name n
                  :description (some-> t .-description)
-                 :schema (td/schema->json (some-> t .-inputSchema))})))))
+                 :schema (td/schema->json (some-> t .-inputSchema))
+                 :output (or decl seen)
+                 :observed? (some? seen)})))))
+
+(defn- saved-block [api]
+  (let [names   (vec (or (.getAllTools api) []))
+        scripts (vals (saved/load-all))]
+    (when (seq scripts)
+      (str "\nsaved (" (count scripts) " scripts, call as (saved/<name> {args})):\n"
+           (str/join "\n"
+                     (map (fn [e]
+                            (let [b (saved/broken e names)]
+                              (str "  saved/" (:name e)
+                                   (when (seq (:returns e)) (str " → " (:returns e)))
+                                   (when (seq (:description e)) (str " — " (:description e)))
+                                   (when (seq b) (str " [broken: missing " (str/join ", " b) "]")))))
+                          (sort-by :name scripts)))))))
 
 (defn prompt-block [api cfg]
-  (let [es (entries api (conj (:catalog cfg) "codemode__*__*"))]
-    (when (seq es)
+  (let [es (entries api (conj (:catalog cfg) "codemode__*__*"))
+        sv (saved-block api)]
+    (when (or (seq es) sv)
       (str "\n\n## Script functions (codemode__script)\n"
-           "Call these from a `codemode__script` script as (ns/fn {args}); `?` marks optional. "
+           "Call these from a `codemode__script` script as (ns/fn {args}); `?` marks optional, "
+           "`→` is what a call returns (`~` = seen in an earlier result). "
            "MCP tools run only from scripts here (mcp_call is off) — one script can search, "
            "fetch, filter and save in a single step.\n"
            (catalog/render es catalog/default-budget-chars)
+           (or sv "")
+           "\nPure helpers: (nyma/html->text s) (nyma/html->md s) (nyma/strip-quotes body) "
+           "— an email body without quoted history or signature — (nyma/truncate s n)."
            "\nOther registered tools are callable the same way: (nyma/read {:path …}), "
            "(<extension>/<tool> …)."))))
 
@@ -269,16 +320,37 @@
                      (seq logs) (conj (str "logs:\n" (str/join "\n" (take 50 logs))))
                      ledger     (conj ledger)))))
 
+(def last-ok
+  "The last script that finished ok — what `/codemode save` keeps."
+  (atom nil))
+
+(defn prepare
+  "The script with the saved scripts it calls expanded in, analysed.
+   → {:code :ex (saved/expand) :result (analyze of the expanded source)}"
+  [api code]
+  (let [names (remove #(= self-name %) (vec (or (.getAllTools api) [])))
+        ex    (saved/expand code (saved/load-all))]
+    {:code code :ex ex :result (an/analyze (:source ex) names)}))
+
+(defn approval [{:keys [ex result]}]
+  (str (when (seq (:used ex))
+         (str (str/join " · " (map #(str "saved/" %) (:used ex))) " → "))
+       (an/approval-line result mw/categorize-tool)))
+
 (defn ^:async execute-script [api cfg args ext-ctx]
   (let [code   (str (or (aget args "code") ""))
-        names  (remove #(= self-name %) (vec (or (.getAllTools api) [])))
-        result (an/analyze code names)]
+        {:keys [ex result]} (prepare api code)]
     (cond
       (str/blank? code) "[ParseError] empty script"
+      (seq (:missing ex)) (str "[UnknownTool] no saved script "
+                               (str/join ", " (map #(str "saved/" %) (:missing ex)))
+                               " — saved: " (let [ns (sort (keys (saved/load-all)))] (if (seq ns) (str/join ", " ns) "none")))
+      (seq (:nested ex)) (str "[UnknownTool] saved scripts cannot call saved scripts: "
+                              (str/join ", " (:nested ex)))
       (seq (:traps result)) (str "[TrapLint] " (str/join "; " (:traps result)))
       (seq (:unknown result)) (str "[UnknownTool] " (did-you-mean api (:unknown result)))
       :else
-      (let [compiled (try (js-await (compile-script (an/asyncify code)))
+      (let [compiled (try (js-await (compile-script (an/asyncify (:source ex))))
                           (catch :default e {:error (str (or (.-message e) e))}))]
         (if (:error compiled)
           (str "[ParseError] " (:error compiled)
@@ -291,12 +363,18 @@
                 call!    (fn [n f a signal]
                            (let [t (get by-key (str n "/" f))]
                              (-> (.executeTool api t a #js {:preapproved (clj->js (:tools result)) :signal signal})
-                                 (.then #(mcp-error t %)))))
+                                 (.then #(mcp-error t %))
+                                 (.then (fn [r]
+                                          (when (.-ok r) (observe! api t (maybe-json (.-result r))))
+                                          r)))))
                 m        (js-await (run-worker compiled bindings
                                                (assoc cfg
                                                       :signal (some-> ext-ctx .-abortSignal)
                                                       :label  (fn [n f] (an/display-name (get by-key (str n "/" f)))))
                                                call!))]
+            (when (.-ok m)
+              (reset! last-ok {:code code :tools (:tools result) :saved (:used ex)
+                               :returns (schema/signature (schema/infer (.-value m)))}))
             (render-result m (:max-output-chars cfg))))))))
 
 ;;; ─── the tool ──────────────────────────────────────────────────
@@ -313,10 +391,8 @@
        ;; script will call instead of showing an opaque blob.
        :prepareArguments
        (fn [args]
-         (let [code  (str (or (aget args "code") ""))
-               names (remove #(= self-name %) (vec (or (.getAllTools api) [])))]
-           (js/Object.assign #js {} args
-                             #js {:calls (an/approval-line (an/analyze code names) mw/categorize-tool)})))
+         (js/Object.assign #js {} args
+                           #js {:calls (approval (prepare api (str (or (aget args "code") ""))))}))
        :execute (fn [args ext-ctx] (execute-script api cfg args ext-ctx))})
 
 ;;; ─── activation ────────────────────────────────────────────────
@@ -353,6 +429,39 @@
                     (td/deferred? % (:script-only cfg)))
                tools)))
 
+(defn command
+  "`/codemode save <name> [--global] [description…]` | `scripts` | `rm <name>`.
+   Returns the receipt text; `notify` shows it."
+  [api args]
+  (let [[sub nm & more] (map str (or args []))
+        global? (some #(= "--global" %) more)
+        desc    (str/join " " (remove #(= "--global" %) more))
+        scripts (saved/load-all)]
+    (cond
+      (= sub "save")
+      (let [last @last-ok]
+        (cond
+          (not (and nm (re-find saved/name-re nm))) "Usage: /codemode save <name> [--global] [description] — name: lowercase, digits, -"
+          (nil? last) "No script has run ok in this session yet."
+          (seq (:saved last)) "That script calls saved scripts; saved scripts cannot call each other."
+          :else (str "Saved saved/" nm " to "
+                     (saved/save! (if global? :global :project) nm
+                                  {:description desc :tools (:tools last) :returns (:returns last) :body (:code last)})
+                     (when-not global? (when-not (trust/trusted?) " (this folder is untrusted: project scripts load once you trust it)")))))
+      (= sub "rm")
+      (if-let [e (get scripts nm)]
+        (do (fs/unlinkSync (:path e)) (str "Removed saved/" nm " (" (:path e) ")"))
+        (str "No saved script " nm))
+      (or (nil? sub) (= sub "scripts"))
+      (if (seq scripts)
+        (str/join "\n" (map (fn [e] (str "saved/" (:name e) "  [" (name (:scope e)) "]  " (:description e)
+                                          (let [b (saved/broken e (vec (or (.getAllTools api) [])))]
+                                            (when (seq b) (str "  [broken: missing " (str/join ", " b) "]")))))
+                             (sort-by :name (vals scripts))))
+        "No saved scripts. After a script runs ok: /codemode save <name> [description]")
+      :else
+      (str "Unknown subcommand " sub ". Usage: /codemode save <name> | scripts | rm <name>"))))
+
 (defn ^:export activate [api]
   (let [cfg (config (.settings api "codemode"))]
     (if-not (:enabled cfg)
@@ -363,6 +472,13 @@
                         (when-let [b (prompt-block api cfg)]
                           #js {"system-prompt-additions" #js [b]}))]
         (.registerTool api "script" (script-tool api cfg))
+        (doseq [[n t] files/tools] (.registerTool api n t))
+        (.registerCommand api "codemode"
+                          #js {:description "Saved code-mode scripts: /codemode save <name> [--global] [description] | scripts | rm <name>"
+                               :handler (fn [args ctx]
+                                          (let [msg (try (command api args) (catch :default e (str "codemode: " (.-message e))))]
+                                            (when-let [ui (some-> ctx .-ui)] (when (.-notify ui) (.notify ui msg "info")))
+                                            msg))})
         (-> (register-apis! api (:apis cfg)) (.then #(reset! apis %)))
         (.on api "tool_access_check" on-access 50)
         (.on api "before_agent_start" on-start)
@@ -370,6 +486,8 @@
           (.off api "tool_access_check" on-access)
           (.off api "before_agent_start" on-start)
           (doseq [n @apis] (.unregisterTool api n))
+          (doseq [[n _] files/tools] (.unregisterTool api n))
+          (.unregisterCommand api "codemode")
           (.unregisterTool api "script"))))))
 
 (def ^:export default activate)

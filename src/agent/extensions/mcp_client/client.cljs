@@ -99,6 +99,8 @@
          {:name         (.-name t)
           :description  (.-description t)
           :input-schema (.-inputSchema t)
+          ;; MCP 2025-06-18: the shape of structuredContent, for scripts
+          :output-schema (.-outputSchema t)
           ;; MCP hints (readOnlyHint / destructiveHint): the bridge turns
           ;; them into permission categories.
           :annotations  (.-annotations t)})))))
@@ -424,6 +426,7 @@
             f    (save-blob! dir (.-uri res) mime (.-blob res))
             kb   (js/Math.ceil (/ (.-size (fs/statSync f)) 1024))]
         {:type "text" :raw it
+         :file {:path f :mime mime :bytes (.-size (fs/statSync f)) :uri (.-uri res)}
          :text (str "Saved " mime " (" kb " KB) to " f
                     " — read it with the read tool, or move it where the user wants.")})
       (and res (string? (.-text res)))
