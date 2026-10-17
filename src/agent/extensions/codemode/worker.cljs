@@ -14,7 +14,8 @@
      host → {type \"run\" body bindings {ns [fn…]}}
      self → {type \"call\" id ns fn args}     host → {type \"reply\" id ok result error kind}
      self → {type \"done\" ok value logs error}"
-  (:require ["squint-cljs/core.js" :as sc]))
+  (:require ["squint-cljs/core.js" :as sc]
+            ["squint-cljs/string.js" :as sstr]))
 
 (def ^:private AsyncFunction
   (.-constructor (js/Object.getPrototypeOf ^:async (fn [] nil))))
@@ -41,6 +42,18 @@
   (let [orig (.-stringify js/JSON)]
     (set! (.-stringify js/JSON)
           (fn [v r sp] (.call orig js/JSON v (or r seq-replacer) sp)))))
+
+(defn- printable-errors!
+  "`(println \"ERR\" e)` printed `#<Error>` — squint's printer shows a class
+   instance by name only — so a benchmark model that caught a failed call
+   could not see why. Errors print their kind and message instead."
+  []
+  (aset (.-prototype js/Error) (js/Symbol.for "squint.core/-pr-writer")
+        (fn [v w _opts]
+          ((aget w (js/Symbol.for "squint.core/-write"))
+           w (str "#error " (js/JSON.stringify (str (when (.-kind v) (str (.-kind v) ": "))
+                                                    (.-message v)
+                                                    (when (.-tool v) (str " (in " (.-tool v) ")")))))))))
 
 (defn- capture! []
   (doseq [k ["log" "info" "warn" "error" "debug"]]
@@ -102,14 +115,18 @@
 
 (defn ^:async run [m]
   (patch-json!)
+  (printable-errors!)
   (capture!)
   (let [bindings (or (.-bindings m) #js {})
         nss      (namespaces bindings)
         names    (js/Object.keys nss)
+        ;; clojure.string without a require: `str/join`, `string/trim` and
+        ;; `clojure.string/replace` compile to these three names
         f        (js/Reflect.construct AsyncFunction
-                                       (clj->js (concat ["squint_core"] names [(.-body m)])))]
+                                       (clj->js (concat ["squint_core" "str" "string" "clojure_DOT_string"]
+                                                        names [(.-body m)])))]
     (try
-      (let [v (js-await (js/Reflect.apply f nil (clj->js (concat [sc] (map #(aget nss %) names)))))
+      (let [v (js-await (js/Reflect.apply f nil (clj->js (concat [sc sstr sstr sstr] (map #(aget nss %) names)))))
             v (js-await (realize v 0))]
         (js/postMessage #js {:type "done" :ok true :value v :logs logs}))
       (catch :default e

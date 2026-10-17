@@ -1,0 +1,28 @@
+[
+  {
+    "codemode": false,
+    "model": "glm-5.3-flash",
+    "secs": 118.694,
+    "exit": 0,
+    "calls": 0,
+    "toolResultKB": 0,
+    "names": {},
+    "attachments": 3,
+    "mentionedTopics": 2,
+    "outHead": "Mails from Renga (rengavr@indygen.ai) about AFU / FRM / AML — no FRM mail exists (FRM appears only in quoted thread footers):\n\n- **2026-10-08** — *Re: AFU module BRD review* — Please review and sign off by Monday.\n- **2026-10-11** — *Re: AFU module BRD review* — Please review and sign off by Monday.\n- **2026-10-16** — *AML STR generation* — Confirm the STR format for FIU.\n\nAll 3 attachments saved ",
+    "stderrTail": ""
+  },
+  {
+    "codemode": true,
+    "model": "glm-5.3-flash",
+    "secs": 173.138,
+    "exit": 0,
+    "calls": 0,
+    "toolResultKB": 0,
+    "names": {},
+    "attachments": 3,
+    "mentionedTopics": 2,
+    "outHead": "- 2026-10-08 — Re: AFU module BRD review — Please review and sign off by Monday. (attachment: AFU_module_BRD_review_v0.pdf)\n- 2026-10-11 — Re: AFU module BRD review — Please review and sign off by Monday. (attachment: AFU_module_BRD_review_v12.pdf)\n- 2026-10-16 — AML STR generation — Confirm the STR format for FIU. (attachment: AML_STR_generation_v8.pdf)\n\n(No FRM mail from Renga. All three attachm",
+    "stderrTail": ""
+  }
+]

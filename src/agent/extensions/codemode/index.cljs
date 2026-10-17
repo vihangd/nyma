@@ -39,7 +39,7 @@
             [agent.extensions.codemode.openapi :as openapi]))
 
 (def default-config
-  {:enabled false :catalog ["mcp__*"] :apis {}
+  {:enabled false :catalog ["mcp__*"] :script-only [] :apis {}
    :timeout-ms 60000 :max-calls 50 :max-output-chars 20000})
 
 (defn config [section]
@@ -48,6 +48,7 @@
     (cond-> default-config
       (some? (g "enabled"))          (assoc :enabled (true? (g "enabled")))
       (array? (g "catalog"))         (assoc :catalog (vec (g "catalog")))
+      (array? (g "script-only"))     (assoc :script-only (vec (g "script-only")))
       (object? (g "apis"))           (assoc :apis (g "apis"))
       (number? (g "timeout-ms"))     (assoc :timeout-ms (g "timeout-ms"))
       (number? (g "max-calls"))      (assoc :max-calls (g "max-calls"))
@@ -68,7 +69,10 @@
        "- Tool results arrive parsed when they are JSON, otherwise as strings.\n"
        "- The last form is the result; (println …) goes to logs. A failed call throws — wrap in "
        "(try … (catch :default e …)) to continue.\n"
-       "- squint ≠ Clojure: maps are not functions (use get / :key), no js->clj, no array-seq."))
+       "- Unsure of a result's fields? Return (keys (first xs)) first rather than guessing.\n"
+       "- Return the filtered data you need, not whole raw results — big output is truncated.\n"
+       "- squint ≠ Clojure: maps are not functions (use get / :key), no js->clj, no array-seq; "
+       "str/ and clojure.string/ work without a require."))
 
 ;;; ─── catalog ───────────────────────────────────────────────────
 
@@ -239,7 +243,8 @@
       (let [compiled (try (js-await (compile-script code))
                           (catch :default e {:error (str (or (.-message e) e))}))]
         (if (:error compiled)
-          (str "[ParseError] " (:error compiled))
+          (str "[ParseError] " (:error compiled)
+               (when-let [r (an/paren-report code)] (str " — " r)))
           (let [by-key   (into {} (map (fn [t] [(str/join "/" (an/binding-key t)) t]) (:tools result)))
                 bindings (reduce (fn [acc t]
                                    (let [[n f] (an/binding-key t)]
@@ -307,8 +312,12 @@
                         ;; mcp_call goes too: with it on offer, a benchmark
                         ;; model kept calling MCP one tool per step and wrote
                         ;; no script at all. mcp_search stays for discovery.
+                        ;; `script-only` patterns withhold more: with a small
+                        ;; MCP server's tools offered directly, the benchmark
+                        ;; model mostly called them one per step.
                         #js {:allowed (clj->js (remove #(or (re-find #"^codemode__.+__" %)
-                                                            (= "mcp-client__mcp_call" %))
+                                                            (= "mcp-client__mcp_call" %)
+                                                            (td/deferred? % (:script-only cfg)))
                                                        (vec (.-tools ev))))})
             on-start  (fn [_ev]
                         (when-let [b (prompt-block api cfg)]

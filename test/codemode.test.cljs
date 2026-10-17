@@ -208,7 +208,19 @@
     (-> (expect (:out e)) (.toContain "[ToolFailure] An error occurred invoking 'flaky'."))
     (-> (expect (:out n)) (.toMatch #"^nil"))))
 
+(defn ^:async test-scale-traps []
+  ;; the second benchmark round (≈400 KB of mail): an error printed as
+  ;; #<Error>, clojure.string unbound, and a missing paren reported at [1,1]
+  (let [e (js-await (run gh "(try (js-await (github/boom {})) (catch :default e (println \"ERR\" e)))"))
+        s (js-await (run gh "[(str/join \",\" [1 2]) (clojure.string/upper-case \"a\") (string/trim \" x \")]"))
+        p (js-await (run gh "(let [x 1]\n  (println (inc x))"))]
+    (-> (expect (:out e)) (.toContain "ERR #error \"Denied: denied (in github/boom)\""))
+    (-> (expect (:out s)) (.toContain "\"1,2\""))
+    (-> (expect (:out s)) (.toContain "\"A\""))
+    (-> (expect (:out p)) (.toContain "1 unclosed — innermost `(` opened at line 1, col 1"))))
+
 (describe "codemode: running" (fn []
+  (it "errors print their message, clojure.string is bound, parens are located" test-scale-traps)
   (it "def, JSON of a lazy seq, MCP [ERROR] text and a nil result behave" test-benchmark-traps)
                                 (it "chains calls, parses JSON, realizes lazy parallel maps, keeps logs" test-chain)
                                 (it "a denied call throws into the script, which can catch it" test-denied)

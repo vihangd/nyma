@@ -116,3 +116,35 @@
          "no tools")
        (when (seq unrestricted)
          (str " · UNRESTRICTED: " (str/join ", " unrestricted)))))
+
+(defn paren-report
+  "Where the brackets stop balancing, for a reader error that only says
+   `EOF while reading … at [1,1]`. Skips strings, regexes, comments and char
+   literals. nil when balanced. Two of fourteen scripts in one benchmark run
+   were a missing `)`."
+  [src]
+  (let [s (str src) n (count s)
+        pairs {")" "(" "]" "[" "}" "{"}]
+    (loop [i 0 line 1 col 1 stack [] in-str? false]
+      (if (>= i n)
+        (when (seq stack)
+          (let [{:keys [ch line col]} (peek stack)]
+            (str (count stack) " unclosed — innermost `" ch "` opened at line " line ", col " col)))
+        (let [c (nth s i)
+              nl? (= c "\n")
+              [l2 c2] (if nl? [(inc line) 1] [line (inc col)])]
+          (cond
+            in-str? (cond (= c "\\") (recur (+ i 2) line (+ col 2) stack true)
+                          (= c "\"") (recur (inc i) l2 c2 stack false)
+                          :else (recur (inc i) l2 c2 stack true))
+            (= c "\"") (recur (inc i) l2 c2 stack true)
+            (= c ";") (let [j (let [k (.indexOf s "\n" i)] (if (neg? k) n k))]
+                        (recur j line col stack false))
+            (= c "\\") (recur (+ i 2) line (+ col 2) stack false)
+            (contains? #{"(" "[" "{"} c) (recur (inc i) l2 c2 (conj stack {:ch c :line line :col col}) false)
+            (contains? pairs c)
+            (if (= (get pairs c) (:ch (peek stack)))
+              (recur (inc i) l2 c2 (pop stack) false)
+              (str "unexpected `" c "` at line " line ", col " col
+                   (when-let [o (peek stack)] (str " — innermost open is `" (:ch o) "` from line " (:line o) ", col " (:col o)))))
+            :else (recur (inc i) l2 c2 stack false)))))))

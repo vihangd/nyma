@@ -12,6 +12,7 @@
     "codemode": {
       "enabled": false,
       "catalog": ["mcp__*"],
+      "script-only": [],
       "apis": {},
       "timeout-ms": 60000,
       "max-calls": 50,
