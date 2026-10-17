@@ -66,6 +66,16 @@
   {:name n :description (str "does " n)
    :schema #js {:type "object" :properties #js {:per_page #js {:type "integer"}}}})
 
+(describe "codemode: asyncify" (fn []
+  (it "marks awaiting fns, leaves the rest and strings alone"
+      (fn []
+        (-> (expect (an/asyncify "(mapv (fn [x] (js-await (f x))) xs)"))
+            (.toBe "(mapv ^:async (fn [x] (js-await (f x))) xs)"))
+        (-> (expect (an/asyncify "(map #(js-await (f %)) xs)")) (.toBe "(map ^:async #(js-await (f %)) xs)"))
+        (-> (expect (an/asyncify "(map (fn [x] (inc x)) xs)")) (.toBe "(map (fn [x] (inc x)) xs)"))
+        (-> (expect (an/asyncify "(str \"(fn [x] js-await\")")) (.toBe "(str \"(fn [x] js-await\")"))
+        (-> (expect (an/asyncify "(map ^:async (fn [x] (js-await x)) xs)")) (.toBe "(map ^:async (fn [x] (js-await x)) xs)"))))))
+
 (describe "codemode: catalog" (fn []
                                 (it "keeps real argument names and lists every namespace"
                                     (fn []
@@ -219,7 +229,18 @@
     (-> (expect (:out s)) (.toContain "\"A\""))
     (-> (expect (:out p)) (.toContain "1 unclosed — innermost `(` opened at line 1, col 1"))))
 
+(defn ^:async test-await-in-fn []
+  ;; the third benchmark round: js-await inside a mapv fn was a SyntaxError
+  (let [a (js-await (run gh "(mapv (fn [n] (js-await (github/get-issue {:number n}))) [1 2])"))
+        b (js-await (run gh "(map #(str \"x\" (js-await (github/get-issue {:number %}))) [3])"))]
+    (-> (expect (:out a)) (.toContain "\"body of 1\""))
+    (-> (expect (:out a)) (.toContain "\"body of 2\""))
+    (-> (expect (:out b)) (.toContain "\"xbody of 3\""))
+    (-> (expect (:out (js-await (run gh "(let [xs (github/list-issues {})] (vec xs))"))))
+        (.toContain "(js-await (ns/fn …)) before using its value"))))
+
 (describe "codemode: running" (fn []
+  (it "js-await inside a fn works: the fn is made async" test-await-in-fn)
   (it "errors print their message, clojure.string is bound, parens are located" test-scale-traps)
   (it "def, JSON of a lazy seq, MCP [ERROR] text and a nil result behave" test-benchmark-traps)
                                 (it "chains calls, parses JSON, realizes lazy parallel maps, keeps logs" test-chain)

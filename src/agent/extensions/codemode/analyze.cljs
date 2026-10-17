@@ -148,3 +148,56 @@
               (str "unexpected `" c "` at line " line ", col " col
                    (when-let [o (peek stack)] (str " — innermost open is `" (:ch o) "` from line " (:line o) ", col " (:col o)))))
             :else (recur (inc i) l2 c2 stack false)))))))
+
+(defn- code-mask
+  "`s` with string, regex and comment contents blanked to spaces, same length,
+   so bracket and token scans see only code."
+  [s]
+  (let [n (count s) out (js/Array.from s)]
+    (loop [i 0 mode nil]
+      (when (< i n)
+        (let [c (nth s i)]
+          (case mode
+            :str     (cond (= c "\\") (do (aset out i " ") (when (< (inc i) n) (aset out (inc i) " ")) (recur (+ i 2) :str))
+                           (= c "\"") (recur (inc i) nil)
+                           :else (do (when (not= c "\n") (aset out i " ")) (recur (inc i) :str)))
+            :comment (if (= c "\n") (recur (inc i) nil) (do (aset out i " ") (recur (inc i) :comment)))
+            (cond (= c "\"") (recur (inc i) :str)
+                  (= c ";")  (recur i :comment)
+                  (= c "\\") (do (when (< (inc i) n) (aset out (inc i) " ")) (recur (+ i 2) nil))
+                  :else (recur (inc i) nil))))))
+    (.join out "")))
+
+(defn- matching-close [masked open-idx]
+  (loop [i open-idx depth 0]
+    (when (< i (count masked))
+      (let [c (nth masked i)]
+        (cond (contains? #{"(" "[" "{"} c) (recur (inc i) (inc depth))
+              (contains? #{")" "]" "}"} c) (if (= 1 depth) i (recur (inc i) (dec depth)))
+              :else (recur (inc i) depth))))))
+
+(defn asyncify
+  "Mark every `(fn …)` / `#(…)` whose body awaits as `^:async`.
+
+   `js-await` inside a plain fn compiles to `await` in a non-async function — a
+   SyntaxError, reported as \"Unexpected identifier\" (or, from the bundled
+   binary, as a dump of its source). A benchmark model hit it with
+   `(mapv (fn [id] (js-await (mail/get-attachment …))) ids)` and fell back to
+   one script per attachment, eighteen of them. Async fns return promises,
+   which the result's deep await resolves, so the map just works. A fn that
+   only CONTAINS an awaiting fn is marked too; harmless for the same reason,
+   except as a predicate — rare enough to accept."
+  [src]
+  (let [s      (str src)
+        masked (code-mask s)
+        re     (js/RegExp. "\\(fn[\\s\\[]|\\(fn\\s+[\\w\\-]+\\s*\\[|#\\(" "g")
+        hits   (->> (js/Array.from (.matchAll masked re))
+                    (map (fn [m] (let [i (.-index m)
+                                       open (if (= "#" (nth masked i)) (inc i) i)]
+                                   {:at i :close (matching-close masked open)})))
+                    (filter (fn [{:keys [at close]}]
+                              (and close
+                                   (.includes (subs masked at close) "js-await")
+                                   (not (.endsWith (.trimEnd (subs masked (max 0 (- at 12)) at)) "^:async")))))
+                    (sort-by :at >))]
+    (reduce (fn [acc {:keys [at]}] (str (subs acc 0 at) "^:async " (subs acc at))) s hits)))

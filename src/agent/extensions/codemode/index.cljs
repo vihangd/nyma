@@ -221,7 +221,11 @@
                          :else       (js/JSON.stringify v nil 1)))
                  (let [e (.-error m)]
                    (str "[" (.-kind e) "] " (.-message e)
-                        (when (.-tool e) (str " (in " (.-tool e) ")")))))
+                        (when (.-tool e) (str " (in " (.-tool e) ")"))
+                        ;; two benchmark scripts bound a call without js-await
+                        ;; and then iterated the promise
+                        (when (.includes (str (.-message e)) "[object Promise]")
+                          " — a tool call returns a promise: (js-await (ns/fn …)) before using its value"))))
         body   (if (> (count body) max-chars)
                  (let [f (spill! body)]
                    (str (subs body 0 max-chars) "\n…[truncated: " (count body) " chars"
@@ -240,7 +244,7 @@
       (seq (:traps result)) (str "[TrapLint] " (str/join "; " (:traps result)))
       (seq (:unknown result)) (str "[UnknownTool] " (did-you-mean api (:unknown result)))
       :else
-      (let [compiled (try (js-await (compile-script code))
+      (let [compiled (try (js-await (compile-script (an/asyncify code)))
                           (catch :default e {:error (str (or (.-message e) e))}))]
         (if (:error compiled)
           (str "[ParseError] " (:error compiled)
