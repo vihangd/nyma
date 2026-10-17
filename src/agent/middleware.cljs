@@ -438,6 +438,10 @@
         old-s   (arg-get args "old_string")
         new-s   (arg-get args "new_string")
         content (arg-get args "content")
+        ;; codemode__script: what it will call (its prepareArguments ran
+        ;; first), then the opening lines of the source
+        calls   (arg-get args "calls")
+        code    (arg-get args "code")
         diff    (when (or old-s new-s)
                   (let [o (str/split-lines (str (or old-s "")))
                         n (str/split-lines (str (or new-s "")))
@@ -451,6 +455,9 @@
     (str/join "\n"
               (cond-> [(str "Allow '" tool-name "'?  (" category ")")]
                 command (conj (str "$ " (one-line command 110)))
+                calls   (conj (str "calls: " (one-line calls 110)))
+                code    (into (map #(str "  " (one-line % 108))
+                               (take 2 (remove str/blank? (str/split-lines (str code))))))
                 (and path (not command)) (conj (str (one-line path 110)
                                                     (when (and content (not diff))
                                                       (str "  (" (count (str/split-lines (str content))) " lines)"))))
@@ -557,6 +564,9 @@
           (= decision "ask")
           (cond
             (skill-allows-tool? (agent-state (:agent ctx)) tool-name) ctx
+            ;; A code-mode script listed this tool and the user approved the
+            ;; script with that list in front of them. Answers the ask only.
+            (contains? (:preapproved ctx) tool-name) ctx
             ;; bash grants: a remembered pattern, this session's allow, or a
             ;; whole-tool grant from before patterns existed. Answers the ask
             ;; only — a deny (denylist, destructive) above still wins.
@@ -677,11 +687,17 @@
          (swap! chain (fn [c] (vec (remove #(= (:name %) interceptor-name) c))))))
 
      :execute
-     (fn [tool-name tool args]
+     ;; `opts` is for calls made from inside another tool (a code-mode script):
+     ;;   :preapproved  set of tool names the user already approved for this
+     ;;                 call — answers an `ask`, never a deny
+     ;;   :nested?      true — the parent's own result is what gets persisted
+     (fn [tool-name tool args & [opts]]
        (sync-epoch!)
        (let [agent    (when agent-ref @agent-ref)
              ext-ctx  (when agent (create-extension-context agent))
              ctx      {:tool-name         tool-name
+                       :preapproved       (or (:preapproved opts) #{})
+                       :nested?           (boolean (:nested? opts))
                        :session-allows    session-allows
                        :tool              tool
                        :args              args
@@ -769,7 +785,10 @@
    :leave (fn [ctx]
             (let [session   (some-> @agent-ref :session deref)
                   file-path (when session ((:get-file-path session)))]
-              (when (and session file-path (not (:cancelled ctx)))
+              ;; Nested (script) calls are not persisted: their results are
+              ;; inputs the script consumed, and the script's own result is
+              ;; the entry. Persisting them replayed hundreds of KB on resume.
+              (when (and session file-path (not (:cancelled ctx)) (not (:nested? ctx)))
                 ((:append session)
                  {:role     "tool_call"
                   :content  (str (:result ctx))

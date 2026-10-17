@@ -46,6 +46,7 @@
   {   :getActiveTools :tools
    :getAllTools :tools
    :getTool :tools
+   :executeTool :tools
    :setActiveTools :tools
    :getCommands :commands
    :sendMessage :messages

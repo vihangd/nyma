@@ -135,6 +135,36 @@
          :getActiveTools    (fn [] (clj->js (keys ((:get-active (:tool-registry agent))))))
          :getAllTools        (fn [] (clj->js (keys ((:all (:tool-registry agent))))))
          :getTool           (fn [name] (get ((:all (:tool-registry agent))) name))
+         ;; Run a registered tool through the middleware pipeline under its
+         ;; OWN name — hooks, permission gate, tracking all apply, unlike a
+         ;; direct `.execute`. For tools that call tools (code mode). Resolves
+         ;; #js {:ok bool :result any :error str :denied bool}; never rejects.
+         :executeTool       (fn [name args & [opts]]
+                              (let [t        (get ((:all (:tool-registry agent))) name)
+                                    pipeline (:middleware agent)]
+                                (cond
+                                  (nil? t)        (js/Promise.resolve #js {:ok false :error (str "Unknown tool: " name)})
+                                  (nil? pipeline) (js/Promise.resolve #js {:ok false :error "No middleware pipeline"})
+                                  :else
+                                  (-> ((:execute pipeline) name t (or args #js {})
+                                                           {:preapproved (set (or (some-> opts .-preapproved) []))
+                                                            :nested?     true})
+                                      (.then (fn [ctx]
+                                               (cond
+                                                 (:cancelled ctx)
+                                                 #js {:ok false :denied true
+                                                      :error (or (:cancel-reason ctx) "Permission denied")}
+                                                 (and (:error ctx) (nil? (:result ctx)))
+                                                 #js {:ok false :error (or (some-> (:error ctx) .-message) (str (:error ctx)))}
+                                                 :else
+                                                 ;; The raw result when it is text: a script filters
+                                                 ;; it itself, so the model-facing truncation does
+                                                 ;; not apply. Structured results keep :result.
+                                                 (let [raw (:raw-result ctx)]
+                                                   #js {:ok      (not (:result-is-error ctx))
+                                                        :result  (if (string? raw) raw (:result ctx))
+                                                        :error   (when (:result-is-error ctx) (str (:result ctx)))}))))
+                                      (.catch (fn [e] #js {:ok false :error (str (or (.-message e) e))}))))))
          :setActiveTools    (fn [names]
                               ((:set-active (:tool-registry agent)) (set (or names []))))
 
