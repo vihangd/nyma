@@ -86,7 +86,9 @@
   (let [es (entries api (conj (:catalog cfg) "codemode__*__*"))]
     (when (seq es)
       (str "\n\n## Script functions (codemode__script)\n"
-           "Call these from a `codemode__script` script as (ns/fn {args}); `?` marks optional.\n"
+           "Call these from a `codemode__script` script as (ns/fn {args}); `?` marks optional. "
+           "MCP tools run only from scripts here (mcp_call is off) — one script can search, "
+           "fetch, filter and save in a single step.\n"
            (catalog/render es catalog/default-budget-chars)
            "\nOther registered tools are callable the same way: (nyma/read {:path …}), "
            "(<extension>/<tool> …)."))))
@@ -126,7 +128,19 @@
 
 (defn ^:async compile-script [code]
   (let [sq (js-await (js/import "squint-cljs"))]
-    ((.-compileString sq) code #js {:context "return" :elide-imports true})))
+    ;; A top-level `def` compiles to `var x = …` plus `export { x }`; the
+    ;; export is a syntax error inside the function body the worker builds,
+    ;; and the first benchmark script that used `def` died on it.
+    (-> ((.-compileString sq) code #js {:context "return" :elide-imports true})
+        (.replace (js/RegExp. "^export \\{[^}]*\\};?\\s*$" "gm") ""))))
+
+(defn- short-error
+  "A worker error's message, bounded. A SyntaxError from the AsyncFunction
+   constructor came back carrying the whole bundle's source."
+  [msg]
+  (let [m (str msg)
+        m (if (> (count m) 400) (str (subs m 0 400) "…") m)]
+    m))
 
 (defn run-worker
   "Run compiled `body` with `bindings` {ns [fn]} → Promise of the worker's
@@ -144,7 +158,7 @@
                       (aset m "calls" calls)
                       (resolve m)))
            fail   (fn [kind msg]
-                    (finish #js {:ok false :logs #js [] :error #js {:kind kind :message msg}}))
+                    (finish #js {:ok false :logs #js [] :error #js {:kind kind :message (short-error msg)}}))
            timer  (js/setTimeout #(fail "Timeout" (str "script exceeded " timeout-ms " ms")) timeout-ms)]
        (when signal
          (.addEventListener signal "abort" #(fail "Aborted" "interrupted") #js {:once true}))
@@ -154,7 +168,9 @@
                        (let [m (.-data ev)]
                          (case (.-type m)
                            "done" (do (js/clearTimeout timer)
-                                      (when-not (.-ok m) (aset m "logs" (or (.-logs m) #js [])))
+                                      (when-not (.-ok m)
+                                        (aset m "logs" (or (.-logs m) #js []))
+                                        (aset (.-error m) "message" (short-error (.. m -error -message))))
                                       (finish m))
                            "call"
                            (let [entry #js {:tool ((or label str) (.-ns m) (.-fn m)) :status "running"}]
@@ -164,7 +180,13 @@
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok false :kind "CallLimit"
                                                         :ns (.-ns m) :fn (.-fn m) :label (.-tool entry)
                                                         :error (str "more than " max-calls " tool calls")}))
-                               (let [r (js-await (call! (.-ns m) (.-fn m) (.-args m)))]
+                               (let [r (js-await (call! (.-ns m) (.-fn m) (.-args m)))
+                                     ;; the MCP bridge reports a server error as
+                                     ;; text, not as a failed call
+                                     r (if (and (.-ok r) (string? (.-result r))
+                                                (.startsWith (.-result r) "[ERROR] "))
+                                         #js {:ok false :error (subs (.-result r) 8)}
+                                         r)]
                                  (aset entry "status" (if (.-ok r) "ok" (if (.-denied r) "denied" "error")))
                                  (when-not @done?
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok (.-ok r)
@@ -190,7 +212,9 @@
                  (str "calls: " (str/join ", " (map #(str (.-tool %) " " (.-status %)) calls))))
         body   (if (.-ok m)
                  (let [v (.-value m)]
-                   (if (string? v) v (js/JSON.stringify v nil 1)))
+                   (cond (string? v) (if (seq v) v "\"\" (empty string)")
+                         (nil? v)    "nil"
+                         :else       (js/JSON.stringify v nil 1)))
                  (let [e (.-error m)]
                    (str "[" (.-kind e) "] " (.-message e)
                         (when (.-tool e) (str " (in " (.-tool e) ")")))))
@@ -280,7 +304,12 @@
             on-access (fn [ev]
                         ;; API operations are for scripts; listing each as a
                         ;; direct tool is the schema bloat code mode removes.
-                        #js {:allowed (clj->js (remove #(re-find #"^codemode__.+__" %) (vec (.-tools ev))))})
+                        ;; mcp_call goes too: with it on offer, a benchmark
+                        ;; model kept calling MCP one tool per step and wrote
+                        ;; no script at all. mcp_search stays for discovery.
+                        #js {:allowed (clj->js (remove #(or (re-find #"^codemode__.+__" %)
+                                                            (= "mcp-client__mcp_call" %))
+                                                       (vec (.-tools ev))))})
             on-start  (fn [_ev]
                         (when-let [b (prompt-block api cfg)]
                           #js {"system-prompt-additions" #js [b]}))]

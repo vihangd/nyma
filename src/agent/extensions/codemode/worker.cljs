@@ -23,6 +23,25 @@
 (def ^:private next-id (atom 0))
 (def ^:private logs #js [])
 
+(defn- seq-replacer
+  "JSON.stringify replacer that writes a lazy seq / Set as the array it is.
+   Without it `(js/JSON.stringify (map …))` printed `{\"realized\":false,…}` —
+   a benchmark model lost two scripts to that before switching to `vec`."
+  [_k v]
+  ;; not `object?` — squint's is a plain-object test, and a LazyIterable is a
+  ;; class instance
+  (if (and v (not (string? v)) (not (array? v)) (fn? (aget v js/Symbol.iterator))
+           (not (instance? js/Map v)))
+    (js/Array.from v)
+    v))
+
+(defn- patch-json!
+  "This realm runs only scripts, so JSON.stringify can learn about seqs."
+  []
+  (let [orig (.-stringify js/JSON)]
+    (set! (.-stringify js/JSON)
+          (fn [v r sp] (.call orig js/JSON v (or r seq-replacer) sp)))))
+
 (defn- capture! []
   (doseq [k ["log" "info" "warn" "error" "debug"]]
     (aset js/console k
@@ -82,6 +101,7 @@
     :else (str v)))
 
 (defn ^:async run [m]
+  (patch-json!)
   (capture!)
   (let [bindings (or (.-bindings m) #js {})
         nss      (namespaces bindings)

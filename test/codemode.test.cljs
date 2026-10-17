@@ -144,7 +144,8 @@
 (def ^:private gh
   {"mcp__github__list_issues" (fn [_] (js/JSON.stringify #js [#js {:number 1 :title "a"} #js {:number 2 :title "b"}]))
    "mcp__github__get_issue"   (fn [a] (str "body of " (.-number a)))
-   "mcp__github__boom"        (fn [_] (throw (js/Error. "denied")))})
+   "mcp__github__boom"        (fn [_] (throw (js/Error. "denied")))
+   "mcp__github__flaky"       (fn [_] "[ERROR] An error occurred invoking 'flaky'.")})
 
 (defn ^:async test-chain []
   (let [{:keys [out seen]} (js-await (run gh "(let [xs (js-await (github/list-issues {}))]
@@ -195,7 +196,20 @@
                                      (assoc cfg :max-output-chars 100)))]
     (-> (expect out) (.toContain "…[truncated: 5000 chars; full result in "))))
 
+(defn ^:async test-benchmark-traps []
+  ;; each of these lost a benchmark model a script (glm-5.3-flash, mail task)
+  (let [d (js-await (run gh "(def xs (js-await (github/list-issues {}))) (count xs)"))
+        j (js-await (run gh "(println (js/JSON.stringify (map :number (js-await (github/list-issues {}))))) 1"))
+        e (js-await (run gh "(js-await (github/flaky {}))"))
+        n (js-await (run gh "(ns placeholder) nil"))]
+    (-> (expect (:out d)) (.toContain "2"))
+    (-> (expect (:out d)) (.not.toContain "Error"))
+    (-> (expect (:out j)) (.toContain "logs:\n[1,2]"))
+    (-> (expect (:out e)) (.toContain "[ToolFailure] An error occurred invoking 'flaky'."))
+    (-> (expect (:out n)) (.toMatch #"^nil"))))
+
 (describe "codemode: running" (fn []
+  (it "def, JSON of a lazy seq, MCP [ERROR] text and a nil result behave" test-benchmark-traps)
                                 (it "chains calls, parses JSON, realizes lazy parallel maps, keeps logs" test-chain)
                                 (it "a denied call throws into the script, which can catch it" test-denied)
                                 (it "an uncaught failure names the call and keeps the ledger" test-uncaught)

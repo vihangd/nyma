@@ -149,7 +149,7 @@
   [entries query & [full?]]
   (if (empty? entries)
     (str "No MCP tool matches \"" query "\". Try broader words, or a server name.")
-    (str "Call any of these with mcp_call(server, tool, args)."
+    (str "Call any of these with mcp_call(server, tool, args), or from a codemode__script as (server/tool {args})."
          (when-not full? " `?` marks optional; detail:\"full\" returns the raw JSON Schema.")
          "\n\n"
          (str/join "\n\n" (map #(render-match % full?) entries)))))
