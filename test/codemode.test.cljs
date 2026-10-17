@@ -239,7 +239,19 @@
     (-> (expect (:out (js-await (run gh "(let [xs (github/list-issues {})] (vec xs))"))))
         (.toContain "(js-await (ns/fn …)) before using its value"))))
 
+(defn ^:async test-settle []
+  ;; a script that throws while slow parallel calls run reports them done
+  (let [slow {"mcp__github__slow" (fn [_] "late")}
+        api  #js {:getAllTools (fn [] #js ["mcp__github__slow"])
+                  :getTool (fn [_] #js {})
+                  :executeTool (fn [_ _ _] (js/Promise. (fn [r] (js/setTimeout #(r #js {:ok true :result "late"}) 200))))}
+        out  (js-await (cm/execute-script api cfg #js {:code "(github/slow {}) (github/slow {}) (throw (js/Error. \"early\"))"} nil))]
+    (-> (expect out) (.toContain "early"))
+    (-> (expect out) (.toContain "calls: github/slow ok, github/slow ok"))
+    slow))
+
 (describe "codemode: running" (fn []
+  (it "a failing script waits for its in-flight calls, so the ledger is true" test-settle)
   (it "js-await inside a fn works: the fn is made async" test-await-in-fn)
   (it "errors print their message, clojure.string is bound, parens are located" test-scale-traps)
   (it "def, JSON of a lazy seq, MCP [ERROR] text and a nil result behave" test-benchmark-traps)

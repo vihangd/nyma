@@ -33,13 +33,17 @@ function run(codemode) {
   // Calls made INSIDE a script emit tool events too; only top-level results
   // reach the model, so a call is nested while a codemode__script is open.
   let calls = 0, nested = 0, bytes = 0, steps = 0, inTok = 0, outTok = 0, open = 0, out = "";
-  const names = {};
+  const names = {}, inner = new Set();
   for (const l of p.stdout.toString().split("\n")) {
     let e; try { e = JSON.parse(l); } catch { continue; }
-    if (e.type === "tool_execution_start") { if (e.toolName === "codemode__script") open++; else if (open) nested++; }
+    // nested-ness is decided at START: a call still in flight when its script
+    // fails ends after the script does, and must not count as top-level
+    if (e.type === "tool_execution_start") {
+      if (e.toolName === "codemode__script") open++; else if (open) { nested++; inner.add(e.execId); }
+    }
     if (e.type === "tool_execution_end") {
       if (e.toolName === "codemode__script") open--;
-      else if (open) continue;
+      if (inner.has(e.execId)) continue;
       calls++; bytes += String(e.result).length; names[e.toolName] = (names[e.toolName] || 0) + 1;
     }
     if (e.type === "usage") { steps++; inTok += e.inputTokens ?? e.input_tokens ?? 0; outTok += e.outputTokens ?? e.output_tokens ?? 0; }

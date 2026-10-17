@@ -12,8 +12,10 @@ One `codemode__script` tool. The model writes squint (ClojureScript) that calls 
 Off by default:
 
 ```json
-{ "codemode": { "enabled": true } }
+{ "codemode": { "enabled": true, "script-only": ["mcp__*"] } }
 ```
+
+`script-only` takes tool-name patterns and withholds the matching tools from the direct tool list, so they can be reached only from scripts. `mcp_call` is always withheld. When a model is offered a tool directly, it calls it one step at a time and writes no script; the benchmark showed this happening.
 
 ## Names
 
@@ -70,4 +72,11 @@ Argument names are the tool's own, so `per_page` stays `per_page`. The system pr
 
 ## Benchmark
 
-`bun bench/codemode/run.mjs <model> [runs]` runs the eM Client-shaped task against `bench/codemode/mail-mcp.mjs` with code mode off, then on.
+`bun bench/codemode/run.mjs <model> [runs] [scale]` runs an eM Client-shaped task against `bench/codemode/mail-mcp.mjs`, first with code mode off and then on.
+
+On glm-5.3-flash at scale 6 (median of 3, all runs correct), code mode used:
+- 11 steps against 19
+- 137k input tokens against 257k
+- 10 top-level calls against 36
+
+At scale 1 there was nothing to save, and code mode did not win. See `docs/roadmap.md`, "Codemode, measured".

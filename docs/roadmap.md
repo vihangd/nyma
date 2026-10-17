@@ -2027,10 +2027,22 @@ owed here.
 
 | item | why not |
 |---|---|
-| **Codemode** | The measured answer to nyma's own tool-result problem (44.7% of transcript), and still deferred: it needs a QuickJS sandbox, a tools-as-functions bridge, and a `store`/`load` session-entry type. Its own docs list the ceilings — no recursion, 256 MB, scripts fail if they await anything but a pending tool call. Deserves its own pass with a before/after benchmark, like the tool-result reduction it would subsume. |
+| ~~**Codemode**~~ | **Built** — `extensions/codemode` (squint scripts, nested calls through `api.executeTool`, Worker, OpenAPI). Not the QuickJS route this row expected: squint is the language and the script is gated like bash; the before/after is below under "Codemode, measured". `store`/`load` session entries still not built. |
 | **Append-only context edits** (`appendContextEdit(entryId, null)`, pi 0.87) | Omits a message from future provider context without touching raw history, usage or UI. This is the clean substrate for that same deferred work — named here so the next pass starts from it rather than from `priority_assembly`, which only prunes once already over budget and then drops whole messages. |
 | **MCP OAuth** | nyma has none: `mcp_client/client.cljs` has no `authProvider`, and auth is static headers in `normalize-headers`. pi 1.0 hardened per-server credentials, RFC 9207 `iss` checks and `authServerMetadataUrl`. A real gap, the largest of these, and no benefit to the local models actually being benchmarked here. |
 | **Virtual models** (`registerVirtualModel`, pi 0.99) | `model_roles` + `providers/fallback.cljs` already cover named provider+model+policy presets and failover. pi's adds a per-request thinking level, which roles cannot carry. Small, but nothing is asking for it. |
 | **Image generation** (`models.generateImages()`) | nyma has image *input* (`multimodal.cljs`, `view_image`). Output is greenfield with no use behind it. |
 | **Cache warming** (pi 0.86, `cache_warming_decision`) | Considered and dropped in favour of the cheaper rung: `kv_cache` had no `ttl` at all, and setting one is a line. Warming is also Anthropic-only, and this project's sessions and benchmarks run on local models. |
 | **pi-tui colour helpers** for the 16-colour fallback | Checked, cannot help: `TerminalColorMode` is `"256color" \| "truecolor"` only, so `foregroundAnsi` has no 16-colour mode and passing one falls through to 256. The mapping had to be written. |
+
+### Codemode, measured
+
+`bun bench/codemode/run.mjs glm-5.3-flash 3 6` — an eM Client-shaped stub MCP server (`bench/codemode/mail-mcp.mjs`, ×6: 108 mails, ~45 KB HTML per body), the prompt from a real 145-call session: find one sender's mails on three topics, give date/subject/ask, save every attachment. Isolated HOME. Medians of 3, every run correct (18/18 attachments):
+
+| | steps | input tokens | top-level calls | tool-result KB | secs |
+|---|---|---|---|---|---|
+| direct MCP tools | 19 | 257k | 36 | 28 | 109 |
+| codemode (`script-only: ["mcp__*"]`) | 11 | 137k | 10 | 17 | 102 |
+
+At ×1 (24 KB of bodies) there was nothing to save and no win (8 vs 9 steps). What the first rounds measured and fixed: with `mcp_call` or the server's own tools on offer the model wrote no script; `def`, `js-await` inside a `fn`, `(js/JSON.stringify (map …))`, `#<Error>` printing, unbound `clojure.string` and an unlocated missing paren each cost scripts. Remaining script errors per run: 0–2 (an un-awaited call iterated; `js->clj`, caught by the trap lint).
+

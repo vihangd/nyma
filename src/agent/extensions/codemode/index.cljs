@@ -155,14 +155,24 @@
      (let [w      (js/Worker. (worker-url))
            calls  #js []
            done?  (atom false)
-           finish (fn [m]
+           inflight (js/Set.)
+           ;; `settle?`: let calls already in flight finish (≤5 s) so the
+           ;; ledger reports what they did. A script that throws while 18
+           ;; parallel fetches run would otherwise report them "running"
+           ;; though every one completed — and a retry would repeat them.
+           ;; Timeout and Esc do not wait: stopping is the point.
+           finish (fn [m settle?]
                     (when-not @done?
                       (reset! done? true)
                       (.terminate w)
                       (aset m "calls" calls)
-                      (resolve m)))
+                      (if (and settle? (pos? (.-size inflight)))
+                        (-> (js/Promise.race [(js/Promise.allSettled (js/Array.from inflight))
+                                              (js/Promise. (fn [r] (js/setTimeout r 5000)))])
+                            (.then #(resolve m)))
+                        (resolve m))))
            fail   (fn [kind msg]
-                    (finish #js {:ok false :logs #js [] :error #js {:kind kind :message (short-error msg)}}))
+                    (finish #js {:ok false :logs #js [] :error #js {:kind kind :message (short-error msg)}} false))
            timer  (js/setTimeout #(fail "Timeout" (str "script exceeded " timeout-ms " ms")) timeout-ms)]
        (when signal
          (.addEventListener signal "abort" #(fail "Aborted" "interrupted") #js {:once true}))
@@ -175,7 +185,7 @@
                                       (when-not (.-ok m)
                                         (aset m "logs" (or (.-logs m) #js []))
                                         (aset (.-error m) "message" (short-error (.. m -error -message))))
-                                      (finish m))
+                                      (finish m true))
                            "call"
                            (let [entry #js {:tool ((or label str) (.-ns m) (.-fn m)) :status "running"}]
                              (.push calls entry)
@@ -184,7 +194,10 @@
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok false :kind "CallLimit"
                                                         :ns (.-ns m) :fn (.-fn m) :label (.-tool entry)
                                                         :error (str "more than " max-calls " tool calls")}))
-                               (let [r (js-await (call! (.-ns m) (.-fn m) (.-args m)))
+                               (let [p (call! (.-ns m) (.-fn m) (.-args m))
+                                     _ (.add inflight p)
+                                     r (js-await p)
+                                     _ (.delete inflight p)
                                      ;; the MCP bridge reports a server error as
                                      ;; text, not as a failed call
                                      r (if (and (.-ok r) (string? (.-result r))
