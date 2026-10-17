@@ -13,7 +13,8 @@
    Protocol
      host → {type \"run\" body bindings {ns [fn…]}}
      self → {type \"call\" id ns fn args}     host → {type \"reply\" id ok result error kind}
-     self → {type \"done\" ok value logs error}"
+     self → {type \"log\" line}               (each println, as it happens)
+     self → {type \"done\" ok value error}"
   (:require ["squint-cljs/core.js" :as sc]
             ["squint-cljs/string.js" :as sstr]))
 
@@ -22,7 +23,6 @@
 
 (def ^:private pending (js/Map.))
 (def ^:private next-id (atom 0))
-(def ^:private logs #js [])
 
 (defn- seq-replacer
   "JSON.stringify replacer that writes a lazy seq / Set as the array it is.
@@ -59,10 +59,12 @@
   (doseq [k ["log" "info" "warn" "error" "debug"]]
     (aset js/console k
           (fn [& xs]
-            (.push logs (.join (clj->js (map (fn [x] (if (string? x) x
-                                                         (try (js/JSON.stringify x) (catch :default _ (str x)))))
+            (js/postMessage
+             #js {:type "log"
+                  :line (.join (clj->js (map (fn [x] (if (string? x) x
+                                                       (try (js/JSON.stringify x) (catch :default _ (str x)))))
                                              xs))
-                               " "))))))
+                               " ")})))))
 
 (defn- call [ns-name fn-name args]
   (js/Promise.
@@ -128,9 +130,9 @@
     (try
       (let [v (js-await (js/Reflect.apply f nil (clj->js (concat [sc sstr sstr sstr] (map #(aget nss %) names)))))
             v (js-await (realize v 0))]
-        (js/postMessage #js {:type "done" :ok true :value v :logs logs}))
+        (js/postMessage #js {:type "done" :ok true :value v}))
       (catch :default e
-        (js/postMessage #js {:type "done" :ok false :logs logs
+        (js/postMessage #js {:type "done" :ok false
                              :error #js {:kind    (or (.-kind e) "RuntimeError")
                                          :message (str (or (.-message e) e))
                                          :tool    (.-tool e)}})))))

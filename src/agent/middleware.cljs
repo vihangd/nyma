@@ -84,9 +84,12 @@
                        (aset ext-ctx "toolCallId" (:exec-id ctx))
                        ;; :abort-controller is the agent's atom (fresh
                        ;; controller per run) — deref at execution time.
+                       ;; a nested call also stops with its caller (:signal,
+                       ;; a code-mode script's timeout)
                        (aset ext-ctx "abortSignal"
-                             (when-let [ctrl (:abort-controller ctx)]
-                               (.-signal @ctrl)))
+                             (let [sigs (filterv some? [(some-> (:abort-controller ctx) deref .-signal)
+                                                        (:signal ctx)])]
+                               (if (< (count sigs) 2) (first sigs) (js/AbortSignal.any (clj->js sigs)))))
                        (aset ext-ctx "onUpdate"
                              (fn [data]
                                (when events
@@ -268,6 +271,9 @@
         raw-bytes  (count (str (:result ctx)))
         envelope   (policy/apply-policy (:result ctx) (:tool-name ctx))
         ctx        (-> ctx
+                       ;; what hooks left, before the model-facing cut — a
+                       ;; nested caller (code mode) reads this, not raw output
+                       (assoc :hooked-result (:result ctx))
                        (assoc :result (policy/model-string envelope))
                        (assoc :result-envelope envelope))
         model-bytes (count (str (:result ctx)))
@@ -705,6 +711,7 @@
      ;;   :preapproved  set of tool names the user already approved for this
      ;;                 call — answers an `ask`, never a deny
      ;;   :nested?      true — the parent's own result is what gets persisted
+     ;;   :signal       AbortSignal the call also stops on
      (fn [tool-name tool args & [opts]]
        (sync-epoch!)
        (let [agent    (when agent-ref @agent-ref)
@@ -712,6 +719,7 @@
              ctx      {:tool-name         tool-name
                        :preapproved       (or (:preapproved opts) #{})
                        :nested?           (boolean (:nested? opts))
+                       :signal            (:signal opts)
                        :session-allows    session-allows
                        :tool              tool
                        :args              args

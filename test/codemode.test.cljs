@@ -258,6 +258,80 @@
     (-> (expect out) (.toContain "calls: github/slow ok, github/slow ok"))
     slow))
 
+(defn ^:async test-error-text-only-mcp []
+  ;; a log file read by nyma/read may start with [ERROR]; only MCP text means failure
+  (let [{:keys [out]} (js-await (run {"read" (fn [_] "[ERROR] boot failed")} "(nyma/read {:path \"app.log\"})"))]
+    (-> (expect out) (.toContain "boot failed"))
+    (-> (expect out) (.toContain "calls: nyma/read ok"))))
+
+(defn ^:async test-logs-on-timeout []
+  (let [{:keys [out]} (js-await (run gh "(println \"got\" 3 \"items\") (loop [] (recur))" (assoc cfg :timeout-ms 300)))]
+    (-> (expect out) (.toContain "[Timeout]"))
+    (-> (expect out) (.toContain "got 3 items"))))
+
+(defn ^:async test-timeout-aborts-calls []
+  ;; a call still running when the script times out is told to stop
+  (let [seen (atom nil)
+        api  #js {:getAllTools (fn [] #js ["mcp__github__slow"])
+                  :getTool (fn [_] #js {})
+                  :executeTool (fn [_ _ opts]
+                                 (reset! seen (.-signal opts))
+                                 (js/Promise. (fn [r] (js/setTimeout #(r #js {:ok true :result "late"}) 1000))))}
+        out  (js-await (cm/execute-script api (assoc cfg :timeout-ms 200) #js {:code "(github/slow {})"} nil))]
+    (-> (expect out) (.toContain "[Timeout]"))
+    (-> (expect (.-aborted @seen)) (.toBe true))))
+
+(defn ^:async test-pre-aborted []
+  (let [ctrl (js/AbortController.)
+        _    (.abort ctrl)
+        t0   (js/Date.now)
+        out  (js-await (cm/execute-script (fake-api gh (atom [])) cfg #js {:code "(loop [] (recur))"}
+                                          #js {:abortSignal (.-signal ctrl)}))]
+    (-> (expect out) (.toContain "[Aborted]"))
+    (-> (expect (< (- (js/Date.now) t0) 1500)) (.toBe true))))
+
+(defn ^:async test-defn-await []
+  (let [{:keys [out]} (js-await (run gh "(defn one [n] (js-await (github/get-issue {:number n}))) (one 7)"))]
+    (-> (expect out) (.toContain "body of 7"))))
+
+(describe "codemode: review fixes" (fn []
+  (it "global namespaces and bare globals are unrestricted"
+      (fn []
+        (doseq [src ["(Bun/spawn #js [\"sh\"])" "(globalThis/fetch \"u\")" "(globalThis.Bun/write \"f\" \"x\")"
+                     "((get (get globalThis \"Bun\") \"spawn\") 1)"]]
+          (-> (expect #js [src (boolean (seq (:unrestricted (an/analyze src tools))))]) (.toEqual #js [src true])))
+        ;; tool namespaces, clojure.string and js/Promise.all are not
+        (-> (expect (clj->js (:unrestricted (an/analyze "(str/join \",\" (js-await (js/Promise.all (mapv #(github/get-issue {:number %}) [1]))))" tools))))
+            (.toEqual #js []))))
+  (it "strings and comments are not code"
+      (fn []
+        (let [r (an/analyze "(github/list-issues {:folder \"github/archive\" :x \"nyma/bash\"}) ; avoid array-seq" tools)]
+          (-> (expect (clj->js (:tools r))) (.toEqual #js ["mcp__github__list_issues"]))
+          (-> (expect (clj->js (:unknown r))) (.toEqual #js []))
+          (-> (expect (clj->js (:traps r))) (.toEqual #js [])))))
+  (it "an awaiting fn handed to filter/reduce is a trap; to map it is not"
+      (fn []
+        (-> (expect (first (:traps (an/analyze "(filter (fn [m] (js-await (github/get-issue m))) xs)" tools))))
+            (.toContain "passed to filter"))
+        (-> (expect (first (:traps (an/analyze "(reduce #(conj %1 (js-await (github/get-issue %2))) [] xs)" tools))))
+            (.toContain "passed to reduce"))
+        (-> (expect (count (:traps (an/analyze "(map (fn [m] (js-await (github/get-issue m))) xs)" tools)))) (.toBe 0))
+        (-> (expect (first (:traps (an/analyze "(letfn [(f [x] (js-await x))] (f 1))" tools)))) (.toContain "letfn"))))
+  (it "defn bodies that await are made async"
+      (fn []
+        (-> (expect (an/asyncify "(defn f [x] (js-await x))")) (.toBe "(defn ^:async f [x] (js-await x))"))
+        (-> (expect (an/asyncify "(defn- f [x] (inc x))")) (.toBe "(defn- f [x] (inc x))"))))
+  (it "a relative server URL resolves against the spec URL"
+      (fn []
+        (-> (expect (openapi/server-url #js {:servers #js [#js {:url "/api/v3"}]} "https://p.io/api/v3/openapi.json"))
+            (.toBe "https://p.io/api/v3"))
+        (-> (expect (openapi/server-url #js {:servers #js [#js {:url "https://x.io"}]} "spec.yaml")) (.toBe "https://x.io"))))
+  (it "[ERROR] text fails only an MCP tool" test-error-text-only-mcp)
+  (it "logs survive a timeout" test-logs-on-timeout)
+  (it "a timeout aborts calls in flight" test-timeout-aborts-calls)
+  (it "an already-aborted signal stops the script at once" test-pre-aborted)
+  (it "a defn that awaits runs" test-defn-await)))
+
 (describe "codemode: running" (fn []
   (it "a failing script waits for its in-flight calls, so the ledger is true" test-settle)
   (it "js-await inside a fn works: the fn is made async" test-await-in-fn)

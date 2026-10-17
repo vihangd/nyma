@@ -45,6 +45,27 @@
     (-> (expect (.-denied r)) (.toBe true))
     (-> (expect (count @ran)) (.toBe 0))))
 
+(defn ^:async test-hook-rewrite []
+  ;; a tool_complete rewrite (a hook blocking or sanitising) reaches the script
+  (let [api (setup "allow" (atom 0) (atom []))]
+    (.on api "tool_complete" (fn [_] #js {:result "redacted"}))
+    (let [r (js-await (.executeTool api "mcp__mail__send" #js {:to "a"}))]
+      (-> (expect (.-result r)) (.toBe "redacted")))))
+
+(defn ^:async test-signal []
+  ;; the caller's signal reaches the tool, beside the agent's own
+  (let [a    (create-agent {:model #js {:modelId "test"} :system-prompt "s"})
+        api  (create-extension-api a)
+        ctrl (js/AbortController.)
+        seen (atom nil)]
+    ((:register (:tool-registry a)) "slow"
+                                    #js {:execute (fn [_ ctx]
+                                                    (reset! seen (.-abortSignal ctx))
+                                                    (.abort ctrl)
+                                                    "x")})
+    (js-await (.executeTool api "slow" #js {} #js {:signal (.-signal ctrl)}))
+    (-> (expect (.-aborted @seen)) (.toBe true))))
+
 (defn ^:async test-unknown []
   (let [api (setup "allow" (atom 0) (atom []))
         r   (js-await (.executeTool api "nope" #js {}))]
@@ -62,7 +83,9 @@
   (it "a preapproved tool skips the ask; the same call without approval asks" test-preapproved-ask)
   (it "preapproval never lifts a deny" test-deny-wins)
   (it "an unknown tool resolves to an error, never rejects" test-unknown)
-  (it "a throwing tool resolves to an error" test-throw)))
+  (it "a throwing tool resolves to an error" test-throw)
+  (it "returns the result as tool_complete hooks left it" test-hook-rewrite)
+  (it "the caller's abort signal reaches the tool" test-signal)))
 
 ;;; ─── the two holes a review found ──────────────────────────────
 

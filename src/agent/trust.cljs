@@ -65,6 +65,11 @@
            {:source (str rel " lsp." id) :detail (js/JSON.stringify (or (aget e "command") (aget e "env")))}))
        (when-let [cmd (some-> (aget obj "verify") (aget "cmd"))]
          [{:source (str rel " verify.cmd") :detail (str cmd)}])
+       ;; an OpenAPI spec's base URL and headers (`${ENV}`-expanded) decide
+       ;; where the user's secrets are sent
+       (when-let [apis (some-> (aget obj "codemode") (aget "apis"))]
+         (for [k (js/Object.keys apis)]
+           {:source (str rel " codemode.apis." k) :detail (js/JSON.stringify (aget apis k))}))
        (when agents
          (for [k (js/Object.keys agents)]
            {:source (str rel " agent-shell.agents." k)
@@ -223,6 +228,8 @@
           (aset o "lsp" l')))
       (when-let [as (aget o "agent-shell")]
         (let [a' (js/Object.assign #js {} as)] (js-delete a' "agents") (aset o "agent-shell" a')))
+      (when-let [cm (aget o "codemode")]
+        (let [c' (js/Object.assign #js {} cm)] (js-delete c' "apis") (aset o "codemode" c')))
       o)))
 
 (defn plan

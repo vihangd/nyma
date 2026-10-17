@@ -65,7 +65,8 @@
        "- Call tools as (ns/fn {args}) — the catalog in the system prompt lists them with their "
        "argument names; use those names exactly (per_page stays per_page).\n"
        "- Calls return promises: (js-await …) inside let, or just map over them — the result is "
-       "awaited deeply, so (map #(gh/get-issue {:number %}) ids) runs in parallel.\n"
+       "awaited deeply, so (map #(gh/get-issue {:number %}) ids) runs in parallel. To filter or "
+       "reduce fetched data, await the batch first: (js-await (js/Promise.all (mapv #(gh/get-issue {:number %}) ids))).\n"
        "- Tool results arrive parsed when they are JSON, otherwise as strings.\n"
        "- The last form is the result; (println …) goes to logs. A failed call throws — wrap in "
        "(try … (catch :default e …)) to continue.\n"
@@ -148,14 +149,22 @@
 
 (defn run-worker
   "Run compiled `body` with `bindings` {ns [fn]} → Promise of the worker's
-   done message, plus :calls (the ledger). `call!` runs one nested call."
+   done message, plus :calls (the ledger) and :logs. `call!` runs one nested
+   call: (call! ns fn args signal), where `signal` aborts when the script is
+   stopped."
   [body bindings {:keys [timeout-ms max-calls signal label]} call!]
   (js/Promise.
    (fn [resolve _]
      (let [w      (js/Worker. (worker-url))
            calls  #js []
+           ;; kept here, streamed line by line: a timed-out or killed worker
+           ;; never sends `done`, and its printlns are what explain why
+           logs   #js []
            done?  (atom false)
            inflight (js/Set.)
+           stop   (js/AbortController.)
+           timer  (atom nil)
+           on-abort (atom nil)
            ;; `settle?`: let calls already in flight finish (≤5 s) so the
            ;; ledger reports what they did. A script that throws while 18
            ;; parallel fetches run would otherwise report them "running"
@@ -165,25 +174,32 @@
                     (when-not @done?
                       (reset! done? true)
                       (.terminate w)
+                      (js/clearTimeout @timer)
+                      (when signal (.removeEventListener signal "abort" @on-abort))
+                      ;; Timeout/Esc: calls still in flight are told to stop
+                      (when-not settle? (.abort stop))
                       (aset m "calls" calls)
+                      (aset m "logs" logs)
                       (if (and settle? (pos? (.-size inflight)))
                         (-> (js/Promise.race [(js/Promise.allSettled (js/Array.from inflight))
                                               (js/Promise. (fn [r] (js/setTimeout r 5000)))])
                             (.then #(resolve m)))
                         (resolve m))))
            fail   (fn [kind msg]
-                    (finish #js {:ok false :logs #js [] :error #js {:kind kind :message (short-error msg)}} false))
-           timer  (js/setTimeout #(fail "Timeout" (str "script exceeded " timeout-ms " ms")) timeout-ms)]
+                    (finish #js {:ok false :error #js {:kind kind :message (short-error msg)}} false))]
+       (reset! timer (js/setTimeout #(fail "Timeout" (str "script exceeded " timeout-ms " ms")) timeout-ms))
+       (reset! on-abort #(fail "Aborted" "interrupted"))
        (when signal
-         (.addEventListener signal "abort" #(fail "Aborted" "interrupted") #js {:once true}))
+         (if (.-aborted signal)
+           (@on-abort)
+           (.addEventListener signal "abort" @on-abort #js {:once true})))
        (set! (.-onerror w) (fn [e] (fail "RuntimeError" (str (or (.-message e) e)))))
        (set! (.-onmessage w)
              ^:async (fn [ev]
                        (let [m (.-data ev)]
                          (case (.-type m)
-                           "done" (do (js/clearTimeout timer)
-                                      (when-not (.-ok m)
-                                        (aset m "logs" (or (.-logs m) #js []))
+                           "log"  (.push logs (.-line m))
+                           "done" (do (when-not (.-ok m)
                                         (aset (.-error m) "message" (short-error (.. m -error -message))))
                                       (finish m true))
                            "call"
@@ -194,16 +210,10 @@
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok false :kind "CallLimit"
                                                         :ns (.-ns m) :fn (.-fn m) :label (.-tool entry)
                                                         :error (str "more than " max-calls " tool calls")}))
-                               (let [p (call! (.-ns m) (.-fn m) (.-args m))
+                               (let [p (call! (.-ns m) (.-fn m) (.-args m) (.-signal stop))
                                      _ (.add inflight p)
                                      r (js-await p)
-                                     _ (.delete inflight p)
-                                     ;; the MCP bridge reports a server error as
-                                     ;; text, not as a failed call
-                                     r (if (and (.-ok r) (string? (.-result r))
-                                                (.startsWith (.-result r) "[ERROR] "))
-                                         #js {:ok false :error (subs (.-result r) 8)}
-                                         r)]
+                                     _ (.delete inflight p)]
                                  (aset entry "status" (if (.-ok r) "ok" (if (.-denied r) "denied" "error")))
                                  (when-not @done?
                                    (.postMessage w #js {:type "reply" :id (.-id m) :ok (.-ok r)
@@ -212,7 +222,18 @@
                                                         :result (maybe-json (.-result r))
                                                         :error (.-error r)})))))
                            nil))))
-       (.postMessage w #js {:type "run" :body body :bindings (clj->js bindings)})))))
+       (when-not @done?
+         (.postMessage w #js {:type "run" :body body :bindings (clj->js bindings)}))))))
+
+(defn mcp-error
+  "The MCP bridge reports a server error as text, not as a failed call; only
+   an MCP tool's result means that — a log file read by `nyma/read` may well
+   start with `[ERROR] `."
+  [tool r]
+  (if (and (str/starts-with? (str tool) "mcp__") (.-ok r) (string? (.-result r))
+           (.startsWith (.-result r) "[ERROR] "))
+    #js {:ok false :error (subs (.-result r) 8)}
+    r))
 
 (defn- spill! [text]
   (when-let [dir (spill/private-temp-dir! "nyma-codemode")]
@@ -267,8 +288,10 @@
                                    (let [[n f] (an/binding-key t)]
                                      (update acc n (fnil conj []) f)))
                                  {} (:tools result))
-                approved #js {:preapproved (clj->js (:tools result))}
-                call!    (fn [n f a] (.executeTool api (get by-key (str n "/" f)) a approved))
+                call!    (fn [n f a signal]
+                           (let [t (get by-key (str n "/" f))]
+                             (-> (.executeTool api t a #js {:preapproved (clj->js (:tools result)) :signal signal})
+                                 (.then #(mcp-error t %)))))
                 m        (js-await (run-worker compiled bindings
                                                (assoc cfg
                                                       :signal (some-> ext-ctx .-abortSignal)
@@ -307,8 +330,7 @@
       (let [c (aget apis k)]
         (try
           (let [spec (js-await (openapi/load-spec (aget c "spec")))
-                cfg  {:base-url (or (aget c "base-url")
-                                    (some-> spec (aget "servers") (aget 0) (aget "url")))
+                cfg  {:base-url (or (aget c "base-url") (openapi/server-url spec (aget c "spec")))
                       :headers  (aget c "headers")}]
             (doseq [op (openapi/operations spec)]
               (let [n (str k "__" (:name op))]

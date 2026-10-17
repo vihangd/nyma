@@ -227,7 +227,10 @@
                     :executeTool      (gate capabilities :tools
                                             (fn [name args & [opts]]
                                               (.executeTool base-api name args
-                                                            (when (check capabilities :tools-preapprove) opts))))
+                                                            (if (check capabilities :tools-preapprove)
+                                                              opts
+                                                              ;; a signal grants nothing; keep it
+                                                              (when-let [s (some-> opts .-signal)] #js {:signal s})))))
                     :unregisterTool   (gate capabilities :tools
                                             (fn [name] (.unregisterTool base-api (prefix name))))
                     ;; overrideTool: register a tool under its REAL

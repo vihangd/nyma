@@ -148,6 +148,7 @@
                                   :else
                                   (-> ((:execute pipeline) name t (or args #js {})
                                                            {:preapproved (set (or (some-> opts .-preapproved) []))
+                                                            :signal      (some-> opts .-signal)
                                                             :nested?     true})
                                       (.then (fn [ctx]
                                                (cond
@@ -157,12 +158,13 @@
                                                  (and (:error ctx) (nil? (:result ctx)))
                                                  #js {:ok false :error (or (some-> (:error ctx) .-message) (str (:error ctx)))}
                                                  :else
-                                                 ;; The raw result when it is text: a script filters
-                                                 ;; it itself, so the model-facing truncation does
-                                                 ;; not apply. Structured results keep :result.
+                                                 ;; Text as hooks left it but before the model-facing
+                                                 ;; cut: a script filters it itself, and a
+                                                 ;; tool_result/tool_complete rewrite must still
+                                                 ;; apply. Structured results keep :result.
                                                  (let [raw (:raw-result ctx)]
                                                    #js {:ok      (not (:result-is-error ctx))
-                                                        :result  (if (string? raw) raw (:result ctx))
+                                                        :result  (if (string? raw) (or (:hooked-result ctx) raw) (:result ctx))
                                                         :error   (when (:result-is-error ctx) (str (:result ctx)))}))))
                                       (.catch (fn [e] #js {:ok false :error (str (or (.-message e) e))}))))))
          :setActiveTools    (fn [names]

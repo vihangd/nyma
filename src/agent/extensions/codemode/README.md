@@ -37,22 +37,23 @@ Argument names are the tool's own, so `per_page` stays `per_page`. The system pr
   calls: mail/search-emails (read) · mail/get-email-data (read)
     (let [ms (js-await (mail/search-emails {:from_contains "renga"}))]
   ```
-  `UNRESTRICTED: js/ interop` is appended when the source reaches past its functions (`js/`, `.method`, `aget`, `"constructor"`, …).
+  `UNRESTRICTED: …` is appended when the source reaches past its functions: `js/` (except `js/Promise.all`), `.method`, `aget`, `"constructor"`, a JS global such as `Bun/spawn` or a bare `globalThis`. Strings and comments are not scanned as code. A computed key such as `(str "constr" "uctor")` still gets past these checks, which is why every script asks.
 - **Only the tools the source names get bound.** They're preapproved for that run, so an approved script doesn't re-ask per call.
 - **Each nested call still goes through the middleware pipeline under its own name** (`api.executeTool`). So `before_tool_call` hooks, `.nymaignore` and a per-tool deny all apply. Approval answers an ask; it never lifts a deny.
-- **The script runs in a Worker.** The timeout (`timeout-ms`, 60 s) and Esc terminate it, even inside `(loop [] (recur))`. That is for interruption, not isolation.
+- **The script runs in a Worker.** The timeout (`timeout-ms`, 60 s) and Esc terminate it, even inside `(loop [] (recur))`, and abort the tool calls still in flight. That is for interruption, not isolation.
+- **`codemode.apis` in a project's `.nyma/settings.json` is ignored until the folder is trusted.** It decides where `${ENV}` headers are sent.
 
 ## Results
 
 - The last form, deeply awaited, with lazy seqs realized. An un-awaited `(map #(gh/get-issue {:number %}) ids)` runs in parallel and still comes back as data.
-- `println` output goes into `logs:`.
+- `println` output goes into `logs:`, and survives a timeout.
 - A tool result that is JSON text arrives parsed.
 - A failed run says which call failed and lists every call with its status, so a retry knows what already ran:
   ```
   [Denied] Permission denied (in mail/delete-email)
   calls: mail/search-emails ok, mail/delete-email denied
   ```
-  Error kinds: `ParseError`, `TrapLint` (squint traps such as `js->clj`), `UnknownTool` (with did-you-mean), `ToolFailure`, `Denied`, `CallLimit` (`max-calls`, 50), `Timeout`, `Aborted`.
+  Error kinds: `ParseError`, `TrapLint` (squint traps such as `js->clj`, or `js-await` inside a fn given to `filter`/`reduce`, where the promise would be used as the value), `UnknownTool` (with did-you-mean), `ToolFailure`, `Denied`, `CallLimit` (`max-calls`, 50), `Timeout`, `Aborted`.
 - Output over `max-output-chars` (20000) is cut, and the full text is written to a private temp file whose path is returned.
 
 ## APIs
@@ -67,6 +68,7 @@ Argument names are the tool's own, so `per_page` stays `per_page`. The system pr
 - Each operation becomes a registered tool, so it gets the same pipeline and gate. GET/HEAD are read; the rest ask as writes.
 - These tools are withheld from the direct tool list; only scripts call them.
 - Path and query params go by name; the JSON body goes in `body`.
+- Without `base-url`, the spec's first server URL is used, resolved against the spec's URL.
 - Headers are expanded from the environment at call time and appear in no schema, description or result.
 - The spec can be JSON or YAML, from a URL or a file.
 

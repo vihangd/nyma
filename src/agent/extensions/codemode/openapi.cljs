@@ -107,6 +107,13 @@
                (and (:body? op) (some? (aget args "body")))
                (assoc :body (js/JSON.stringify (aget args "body"))))})))
 
+(defn server-url
+  "The spec's first server URL, resolved against the spec's own URL: the
+   Petstore v3 spec says `/api/v3`, which fetch cannot use as written."
+  [spec src]
+  (when-let [u (some-> spec (aget "servers") (aget 0) (aget "url"))]
+    (if (re-find #"^https?://" (str src)) (str (js/URL. u src)) u)))
+
 (defn ^:async load-spec
   "Read a spec from a URL or a file path; JSON or YAML."
   [src]
@@ -130,10 +137,12 @@
                         #js {:destructive? true :network? true :requires-confirmation? true
                              :capabilities #js ["network"] :category "network"})
          :execute
-         (^:async fn [args]
+         (^:async fn [args ctx]
            (let [{:keys [url init]} (request cfg op (or args #js {}) (.-env js/process))
+                 sigs (cond-> [(js/AbortSignal.timeout 30000)]
+                        (some-> ctx .-abortSignal) (conj (.-abortSignal ctx)))
                  r    (js-await (js/fetch url (js/Object.assign (clj->js init)
-                                                                #js {:signal (js/AbortSignal.timeout 30000)})))
+                                                                #js {:signal (js/AbortSignal.any (clj->js sigs))})))
                  text (js-await (.text r))]
              (when-not (.-ok r)
                (throw (js/Error. (str "HTTP " (.-status r) ": " (subs text 0 (min 500 (count text)))))))
