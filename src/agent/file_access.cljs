@@ -47,11 +47,14 @@
         (fn [data]
           (let [tool-name (or (.-name data) (.-toolName data))
                 args      (.-args data)
-                path-arg  (when args (or (.-path args) (aget args "path")))]
-            (when (and path-arg (tm/matches-any-tool-name?
-                                 tool-name
-                                 #{"read" "write" "edit" "multi_edit" "glob" "grep"}))
-              (let [result (check-access path-arg patterns)]
-                (when-not (:allowed result)
-                  #js {:block true :reason (:reason result)})))))
+                ;; `from` too: a copy (codemode's save-file) reads its source
+                paths     (when args (filter string? (map #(aget args %) ["path" "file_path" "filePath" "from"])))]
+            (when (and (seq paths)
+                       (or (tm/matches-any-tool-name?
+                            tool-name
+                            #{"read" "write" "edit" "multi_edit" "glob" "grep"})
+                           ;; any tool that says it touches files
+                           (contains? (tm/capabilities (str tool-name)) :filesystem)))
+              (when-let [denied (some #(let [r (check-access % patterns)] (when-not (:allowed r) r)) paths)]
+                #js {:block true :reason (:reason denied)}))))
         100)))) ;; priority 100 = runs before extension handlers
