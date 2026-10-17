@@ -3,6 +3,7 @@
   "description": "Code mode — one `script` tool that runs squint code calling tools, MCP servers and OpenAPI endpoints as functions, in one round trip (off unless `codemode.enabled`)",
   "capabilities": [
     "tools",
+    "tools-preapprove",
     "events"
   ],
   "dependsOn": [

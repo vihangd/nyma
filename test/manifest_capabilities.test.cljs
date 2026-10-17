@@ -13,7 +13,7 @@
 (def ^:private method->cap
   {"on" "events" "off" "events" "emitGlobal" "events"
    "registerTool" "tools" "unregisterTool" "tools"
-   "getActiveTools" "tools" "getAllTools" "tools" "getTool" "tools" "setActiveTools" "tools"
+   "getActiveTools" "tools" "getAllTools" "tools" "getTool" "tools" "setActiveTools" "tools" "executeTool" "tools"
    "overrideTool" "tools-override" "unoverrideTool" "tools-override"
    "registerCommand" "commands" "unregisterCommand" "commands" "getCommands" "commands"
    "registerShortcut" "shortcuts" "unregisterShortcut" "shortcuts"

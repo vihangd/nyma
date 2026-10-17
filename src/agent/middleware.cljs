@@ -464,6 +464,14 @@
                 diff    (into diff)
                 (seq (str reason)) (conj (str "Reason: " (one-line reason 110)))))))
 
+(def no-whole-tool-grant
+  "Tools whose \"Allow always\" / \"for this session\" must never cover the
+   whole tool: bash (a grant is a command pattern instead) and a code-mode
+   script, which is arbitrary code that preapproves every tool it names — one
+   session grant on a read-only script would have run every later script,
+   writes and bash included, unasked."
+  #{"bash" "codemode__script"})
+
 (defn ^:async resolve-ask
   "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
    this session / Allow always (this tool, this project) / Deny. With no
@@ -487,16 +495,22 @@
           ;; always-option at all.
           bash?  (= tool-name "bash")
           base   (when bash? (shell-grant/grant-base (get (or (:original-args ctx) (:args ctx)) :command)))
+          once?  (and (contains? no-whole-tool-grant tool-name) (not bash?))
           always (cond
+                   once?       nil
                    (not bash?) "Allow always (this tool, this project)"
                    base        (str "Allow always: " base " * (this project)")
                    :else       nil)
           choice (js-await
                   (.select ui prompt
-                           (clj->js (cond-> ["Allow once" "Allow for this session"]
-                                      always (conj always)
-                                      true   (conj "Deny")))))]
+                           (clj->js (cond-> ["Allow once"]
+                                      (not once?) (conj "Allow for this session")
+                                      always      (conj always)
+                                      true        (conj "Deny")))))]
       (cond
+        ;; only "Allow once" is offered; any other Allow is still this once
+        (and choice once? (.startsWith choice "Allow")) ctx
+
         (and choice (.startsWith choice "Allow always") bash?)
         (do (when (and settings (:append-bash-allow! settings)) ((:append-bash-allow! settings) base)) ctx)
 
@@ -542,7 +556,7 @@
     (if (or (:cancelled ctx) (:skip? ctx)
             ;; Never for bash: skipping permission_request skipped bash_suite's
             ;; denylist with it. A bash grant answers an `ask` below instead.
-            (and (not= tool-name "bash")
+            (and (not (contains? no-whole-tool-grant tool-name))
                  (or (contains? @(allows-of ctx) tool-name)
                      (and settings ((:tool-allowed? settings) tool-name)))))
       ctx

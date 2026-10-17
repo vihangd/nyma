@@ -4,14 +4,16 @@
 
 (def all-capabilities
   "All available extension capabilities (must match extension_scope gating)."
-  #{:tools :tools-override :commands :shortcuts :events :messages :state :ui
+  #{:tools :tools-override :tools-preapprove :commands :shortcuts :events :messages :state :ui
     :middleware :exec :providers :model :session :flags :spawn
     :context})
 
 (def default-capabilities
-  "What a manifest-less extension gets. Deliberately excludes the four that
-   run code or rewire the pipeline; declare them in extension.json."
-  (disj all-capabilities :exec :spawn :tools-override :middleware))
+  "What a manifest-less extension gets. Deliberately excludes the ones that
+   run code, rewire the pipeline or answer the permission gate
+   (`tools-preapprove`: executeTool's `preapproved`); declare them in
+   extension.json."
+  (disj all-capabilities :exec :spawn :tools-override :tools-preapprove :middleware))
 
 (defn check
   "Check if a capability is granted. :all grants everything."

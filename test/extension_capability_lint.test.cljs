@@ -31,7 +31,7 @@
    text without false positives, and every extension declares `events` anyway."
   {"registerTool" "tools" "unregisterTool" "tools" "overrideTool" "tools-override"
    "unoverrideTool" "tools-override" "getActiveTools" "tools" "getAllTools" "tools"
-   "getTool" "tools" "setActiveTools" "tools"
+   "getTool" "tools" "setActiveTools" "tools" "executeTool" "tools"
    "registerCommand" "commands" "unregisterCommand" "commands" "getCommands" "commands"
    "registerShortcut" "shortcuts" "unregisterShortcut" "shortcuts"
    "sendMessage" "messages" "sendUserMessage" "messages"
@@ -102,8 +102,9 @@
    plus the surfaces that are not plain method calls: `api.ui` is a property,
    `api.events`/`api.state` are sub-objects, `on`/`off` are the whole point of
    `events`, `__state_atom` is reached by aget."
-  {"tools"          ["registerTool" "unregisterTool" "getActiveTools" "getAllTools" "getTool" "setActiveTools"]
+  {"tools"          ["registerTool" "unregisterTool" "getActiveTools" "getAllTools" "getTool" "setActiveTools" "executeTool"]
    "tools-override" ["overrideTool" "unoverrideTool"]
+   "tools-preapprove" ["executeTool"]
    "commands"       ["registerCommand" "unregisterCommand" "getCommands"]
    "shortcuts"      ["registerShortcut" "unregisterShortcut"]
    "events"         ["on" "off" "emitGlobal" "events"]

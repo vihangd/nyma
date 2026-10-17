@@ -46,7 +46,6 @@
   {   :getActiveTools :tools
    :getAllTools :tools
    :getTool :tools
-   :executeTool :tools
    :setActiveTools :tools
    :getCommands :commands
    :sendMessage :messages
@@ -222,6 +221,13 @@
                                                 (track! (fn [] (when (identical? (.getTool base-api full) td)
                                                                  (.unregisterTool base-api full))))
                                                 nil)))
+                    ;; `preapproved` answers the gate's ask for the listed
+                    ;; tools, so it is its own capability: with only :tools,
+                    ;; an extension could run bash unasked by preapproving it.
+                    :executeTool      (gate capabilities :tools
+                                            (fn [name args & [opts]]
+                                              (.executeTool base-api name args
+                                                            (when (check capabilities :tools-preapprove) opts))))
                     :unregisterTool   (gate capabilities :tools
                                             (fn [name] (.unregisterTool base-api (prefix name))))
                     ;; overrideTool: register a tool under its REAL

@@ -318,24 +318,25 @@
             (d/warn (str "[codemode] API " k ": " (.-message e)))))))
     @registered))
 
+(defn direct-allowed
+  "The tools still offered directly, as `tool_access_check` wants them.
+   API operations are for scripts — listing each is the schema bloat code mode
+   removes. `mcp_call` goes too: with it on offer a benchmark model called MCP
+   one tool per step and wrote no script; `mcp_search` stays for discovery.
+   `script-only` patterns withhold more, for the same reason: a small
+   server's tools are offered directly and got called one per step. Pure."
+  [tools cfg]
+  (vec (remove #(or (re-find #"^codemode__.+__" %)
+                    (= "mcp-client__mcp_call" %)
+                    (td/deferred? % (:script-only cfg)))
+               tools)))
+
 (defn ^:export activate [api]
   (let [cfg (config (.settings api "codemode"))]
     (if-not (:enabled cfg)
       (fn [] nil)
       (let [apis (atom [])
-            on-access (fn [ev]
-                        ;; API operations are for scripts; listing each as a
-                        ;; direct tool is the schema bloat code mode removes.
-                        ;; mcp_call goes too: with it on offer, a benchmark
-                        ;; model kept calling MCP one tool per step and wrote
-                        ;; no script at all. mcp_search stays for discovery.
-                        ;; `script-only` patterns withhold more: with a small
-                        ;; MCP server's tools offered directly, the benchmark
-                        ;; model mostly called them one per step.
-                        #js {:allowed (clj->js (remove #(or (re-find #"^codemode__.+__" %)
-                                                            (= "mcp-client__mcp_call" %)
-                                                            (td/deferred? % (:script-only cfg)))
-                                                       (vec (.-tools ev))))})
+            on-access (fn [ev] #js {:allowed (clj->js (direct-allowed (vec (.-tools ev)) cfg))})
             on-start  (fn [_ev]
                         (when-let [b (prompt-block api cfg)]
                           #js {"system-prompt-additions" #js [b]}))]

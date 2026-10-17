@@ -5,7 +5,8 @@
    but never lift a deny."
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
-            [agent.extensions :refer [create-extension-api]]))
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extension-scope :refer [create-scoped-api]]))
 
 (defn- setup
   "Agent with one tool `mcp__mail__send`, a gate answering `decision`, and a
@@ -62,3 +63,36 @@
   (it "preapproval never lifts a deny" test-deny-wins)
   (it "an unknown tool resolves to an error, never rejects" test-unknown)
   (it "a throwing tool resolves to an error" test-throw)))
+
+;;; ─── the two holes a review found ──────────────────────────────
+
+(defn ^:async test-scoped-preapprove []
+  ;; an extension with only :tools must not answer the gate for itself
+  (let [prompts (atom 0) ran (atom [])
+        base    (setup "ask" prompts ran)
+        plain   (create-scoped-api base "plain" #{:tools})
+        trusted (create-scoped-api base "trusted" #{:tools :tools-preapprove})]
+    (js-await (.executeTool plain "mcp__mail__send" #js {:to "a"} #js {:preapproved #js ["mcp__mail__send"]}))
+    (-> (expect @prompts) (.toBe 1))
+    (js-await (.executeTool trusted "mcp__mail__send" #js {:to "b"} #js {:preapproved #js ["mcp__mail__send"]}))
+    (-> (expect @prompts) (.toBe 1))))
+
+(defn ^:async test-script-no-session-grant []
+  ;; a session grant on one script must not approve the next one
+  (let [a       (create-agent {:model #js {:modelId "test"} :system-prompt "s"})
+        offered (atom nil)
+        prompts (atom 0)]
+    (set! (.-extension-api a)
+          #js {:ui #js {:available true
+                        :select (fn [_q opts] (swap! prompts inc) (reset! offered (vec opts))
+                                  (js/Promise.resolve "Allow for this session"))}})
+    ((:on (:events a)) "permission_request" (fn [_] #js {:decision "ask"}))
+    (let [run! (fn [] ((:execute (:middleware a)) "codemode__script" #js {:execute (fn [_] "ok")} {:code "1"}))]
+      (js-await (run!))
+      (js-await (run!))
+      (-> (expect @prompts) (.toBe 2))
+      (-> (expect (clj->js @offered)) (.toEqual #js ["Allow once" "Deny"])))))
+
+(describe "codemode: no self-granted or whole-tool approval" (fn []
+  (it "preapproved is dropped for an extension without tools-preapprove" test-scoped-preapprove)
+  (it "a script gets Allow once / Deny only, and every script asks" test-script-no-session-grant)))

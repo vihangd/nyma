@@ -76,6 +76,14 @@
         (-> (expect (an/asyncify "(str \"(fn [x] js-await\")")) (.toBe "(str \"(fn [x] js-await\")"))
         (-> (expect (an/asyncify "(map ^:async (fn [x] (js-await x)) xs)")) (.toBe "(map ^:async (fn [x] (js-await x)) xs)"))))))
 
+(describe "codemode: direct tool list" (fn []
+  (it "withholds API ops, mcp_call and script-only matches; keeps the rest"
+      (fn []
+        (-> (expect (clj->js (cm/direct-allowed ["read" "codemode__script" "codemode__petstore__getPetById"
+                                                 "mcp-client__mcp_call" "mcp-client__mcp_search" "mcp__mail__search"]
+                                                (assoc cm/default-config :script-only ["mcp__*"]))))
+            (.toEqual #js ["read" "codemode__script" "mcp-client__mcp_search"]))))))
+
 (describe "codemode: catalog" (fn []
                                 (it "keeps real argument names and lists every namespace"
                                     (fn []
