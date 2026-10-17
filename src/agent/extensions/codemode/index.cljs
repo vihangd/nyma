@@ -203,19 +203,27 @@
       u
       (path/join (.-dir js/import.meta) "extensions" "codemode" "worker.mjs"))))
 
-(defn ^:async compile-script [code]
+(defn ^:async compile-script
+  "The script compiled inside `(^:async (fn [] …))`. squint wraps a `try`,
+   `let`, `loop` or `case` in expression position — `(println (try …))` — in
+   an arrow IIFE, and only inside an async fn is that IIFE async; at the top
+   level its `await` was a SyntaxError that surfaced as a dump of bundle
+   source, and cost one benchmark run three scripts. The wrapper also makes
+   `def` a local, so there is no `export` to strip. Same first line, so
+   reader errors keep their line numbers."
+  [code]
   (let [sq (js-await (js/import "squint-cljs"))]
-    ;; A top-level `def` compiles to `var x = …` plus `export { x }`; the
-    ;; export is a syntax error inside the function body the worker builds,
-    ;; and the first benchmark script that used `def` died on it.
-    (-> ((.-compileString sq) code #js {:context "return" :elide-imports true})
+    (-> ((.-compileString sq) (str "(^:async (fn [] " code "\n))") #js {:context "return" :elide-imports true})
         (.replace (js/RegExp. "^export \\{[^}]*\\};?\\s*$" "gm") ""))))
 
-(defn- short-error
+(defn short-error
   "A worker error's message, bounded. A SyntaxError from the AsyncFunction
    constructor came back carrying the whole bundle's source."
   [msg]
   (let [m (str msg)
+        ;; Bun prefixes a worker's SyntaxError with the source around it —
+        ;; the bundle's, in the binary. The `…Error: …` line is the message.
+        m (or (re-find #"(?m)^\w*Error: .*$" m) m)
         m (if (> (count m) 400) (str (subs m 0 400) "…") m)]
     m))
 
@@ -370,7 +378,8 @@
   "The script with the saved scripts it calls expanded in, analysed.
    → {:code :ex (saved/expand) :result (analyze of the expanded source)}"
   [api code]
-  (let [names (remove #(= self-name %) (vec (or (.getAllTools api) [])))
+  (let [code  (an/strip-ns code)
+        names (remove #(= self-name %) (vec (or (.getAllTools api) [])))
         ex    (saved/expand code (saved/load-all))]
     {:code code :ex ex :result (an/analyze (:source ex) names)}))
 
@@ -382,6 +391,7 @@
 (defn ^:async execute-script [api cfg args ext-ctx]
   (let [code   (str (or (aget args "code") ""))
         {:keys [ex result] :as p} (prepare api code)
+        code     (:code p)
         approved (aget args "calls")]
     (cond
       (str/blank? code) "[ParseError] empty script"
@@ -423,7 +433,9 @@
                                                       sig (schema/signature s)]
                                                   ;; a string result has no fields to learn
                                                   (when (and (informative? sig) (not= "str" sig))
-                                                    (aset r "shape" sig)
+                                                    ;; a model read `(:html b)` off a one-item list
+                                                    ;; for five scripts; say it is a list, and how long
+                                                    (aset r "shape" (if (array? v) (str sig " (list of " (.-length v) ")") sig))
                                                     (aset r "hint" (catalog/html-hint s)))))))
                                           r)))))
                 m        (js-await (run-worker compiled bindings

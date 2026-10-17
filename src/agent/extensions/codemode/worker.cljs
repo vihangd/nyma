@@ -65,6 +65,14 @@
                                                     (.-message v)
                                                     (when (.-tool v) (str " (in " (.-tool v) ")")))))))))
 
+(defn- printable-promises!
+  "`(println x)` of an un-awaited call printed `#<Promise>` and the model
+   kept going; say what to do."
+  []
+  (aset (.-prototype js/Promise) (js/Symbol.for "squint.core/-pr-writer")
+        (fn [_v w _opts]
+          ((aget w (js/Symbol.for "squint.core/-write")) w "#<Promise: not awaited — (js-await …) it>"))))
+
 (defn- capture! []
   (doseq [k ["log" "info" "warn" "error" "debug"]]
     (aset js/console k
@@ -133,6 +141,7 @@
     (try (js-await (html/load-html-mods!)) (catch :default _ nil)))
   (patch-json!)
   (printable-errors!)
+  (printable-promises!)
   (capture!)
   (let [bindings (or (.-bindings m) #js {})
         nss      (namespaces bindings)

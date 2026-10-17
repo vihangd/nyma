@@ -235,7 +235,7 @@
 (defn ^:async test-shapes-line []
   (let [api (fake-api {"mcp__mail__get" (fn [_] (js/JSON.stringify #js [#js {:id 1 :html "<p>x</p>"}]))})
         out (js-await (cm/execute-script api cfg #js {:code "(count (js-await (mail/get {})))"} nil))]
-    (-> (expect out) (.toContain "shapes (observed):\n  mail/get → [{id: int, html: str}]"))
+    (-> (expect out) (.toContain "shapes (observed):\n  mail/get → [{id: int, html: str}] (list of 1)"))
     (-> (expect out) (.toContain "(nyma/strip-quotes (nyma/html->text (:html m)))"))))
 
 (defn ^:async test-no-shape-when-declared []
@@ -267,7 +267,25 @@
     (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
     (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int, cc?: any, subject: str}]"))))
 
+(defn ^:async test-expression-await []
+  ;; (println (try (js-await …))) — squint's IIFE must be async
+  (let [api (fake-api {"mcp__mail__get" (fn [_] "{\"a\":1}")})
+        out (js-await (cm/execute-script api cfg
+                                         #js {:code "(ns r (:require [clojure.string :as str]))
+(def n 2)
+(println (try (:a (js-await (mail/get {}))) (catch :default e (str \"E \" e))))
+(println (let [x (js-await (mail/get {}))] (str/join \",\" (keys x))))
+(println (mail/get {}))
+(+ n (case (:a (js-await (mail/get {}))) 1 10 0))"} nil))]
+    (-> (expect out) (.toContain "12"))
+    (-> (expect out) (.toContain "logs:\n1\na\n#<Promise: not awaited"))
+    (-> (expect out) (.not.toContain "UNRESTRICTED"))))
+
 (describe "codemode: fewer exploratory scripts" (fn []
+  (it "await inside try/let/case in expression position works; a leading ns form is dropped; promises print a hint" test-expression-await)
+  (it "a worker SyntaxError is reduced to its Error: line"
+      (fn [] (-> (expect (cm/short-error "212 | const f = 1;\n   ^\nSyntaxError: Unexpected identifier 'nyma'\n at x"))
+                 (.toBe "SyntaxError: Unexpected identifier 'nyma'"))))
   (it "the result lists each call's observed shape, with the helper hint for an html field" test-shapes-line)
   (it "no shapes line for a tool that declares its return" test-no-shape-when-declared)
   (it "a big array result is count, shape and first item, not a cut prefix" test-big-array)

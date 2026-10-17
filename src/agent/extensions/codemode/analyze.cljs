@@ -208,6 +208,22 @@
        (when (seq unrestricted)
          (str " · UNRESTRICTED: " (str/join ", " unrestricted)))))
 
+(defn strip-ns
+  "`src` with a leading `(ns …)` form blanked (newlines kept, so error lines
+   still match). Models write `(ns r (:require [clojure.string :as str]))` out
+   of habit; everything it could name is already bound, and inside the async
+   wrapper an ns form does not compile."
+  [src]
+  (let [s (str src) masked (code-mask s)
+        m (re-find #"^\s*\(\s*ns\b" masked)]
+    (if-not m
+      s
+      (let [open  (.indexOf masked "(")
+            close (matching-close masked open)]
+        (if-not close
+          s
+          (str (.replace (subs s 0 (inc close)) (js/RegExp. "[^\n]" "g") " ") (subs s (inc close))))))))
+
 (defn paren-report
   "Where the brackets stop balancing, for a reader error that only says
    `EOF while reading … at [1,1]`. Skips strings, regexes, comments and char
