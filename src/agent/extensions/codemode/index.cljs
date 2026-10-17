@@ -98,10 +98,14 @@
 
 (defn- observe! [api tool value]
   (when-let [st (store api)]
-    (when (and (some? value) (not (some-> (.getTool api tool) .-outputSchema))
-               (nil? (observed-shape api tool)))
-      (try (.set st (str "shape:" tool) #js {:hash (schema-hash api tool) :schema (schema/infer value)})
-           (catch :default _ nil)))))
+    (let [inferred (schema/infer value)
+          sig      (schema/signature inferred)]
+      ;; an empty first result (`[]`, `{}`) says nothing: wait for one that does
+      (when (and (some? value) (not (some-> (.getTool api tool) .-nymaOutputSchema))
+                 (not (re-find #"any|\{\}" sig))
+                 (nil? (observed-shape api tool)))
+        (try (.set st (str "shape:" tool) #js {:hash (schema-hash api tool) :schema inferred})
+             (catch :default _ nil))))))
 
 ;;; ─── catalog ───────────────────────────────────────────────────
 
@@ -111,7 +115,7 @@
        (filter #(td/deferred? % patterns))
        (map (fn [n]
               (let [t    (.getTool api n)
-                    decl (some-> t .-outputSchema)
+                    decl (some-> t .-nymaOutputSchema)
                     seen (when-not decl (observed-shape api n))]
                 {:name n
                  :description (some-> t .-description)
@@ -339,9 +343,15 @@
 
 (defn ^:async execute-script [api cfg args ext-ctx]
   (let [code   (str (or (aget args "code") ""))
-        {:keys [ex result]} (prepare api code)]
+        {:keys [ex result] :as p} (prepare api code)
+        approved (aget args "calls")]
     (cond
       (str/blank? code) "[ParseError] empty script"
+      ;; prepareArguments wrote `calls` for the prompt; a saved script or the
+      ;; tool registry that changed since must not bind what was not shown
+      (and (string? approved) (not= approved (approval p)))
+      (str "[Denied] what this script calls changed after it was approved (now: " (approval p)
+           ") — run it again to approve that")
       (seq (:missing ex)) (str "[UnknownTool] no saved script "
                                (str/join ", " (map #(str "saved/" %) (:missing ex)))
                                " — saved: " (let [ns (sort (keys (saved/load-all)))] (if (seq ns) (str/join ", " ns) "none")))

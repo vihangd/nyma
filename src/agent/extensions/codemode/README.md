@@ -36,7 +36,7 @@ Pure functions, bound under `nyma/` in every script, not tools, never approved:
 |---|---|
 | `(nyma/html->text s)` | HTML to plain text (tables, entities) |
 | `(nyma/html->md s)` | HTML to Markdown (turndown) |
-| `(nyma/strip-quotes body)` | an email body without quoted history (Gmail, Outlook, Thunderbird, Yahoo markup; `On … wrote:`, `-----Original Message-----`, `>` lines) or signature; HTML or text in, text out. Heuristic: keep the raw body if the answer depends on what was quoted |
+| `(nyma/strip-quotes body)` | an email body without quoted history (Gmail, Outlook, Thunderbird, Yahoo markup; `On … wrote:`, `-----Original Message-----`, `>` lines) or signature; a forwarded message is kept whole, since the ask is often in it; HTML or text in, text out. Heuristic: keep the raw body if the answer depends on what was quoted |
 | `(nyma/truncate s n)` | cut with an `…[+N chars]` marker |
 
 File helpers are registered tools, so the gate, checkpoints and `.nymaignore` apply (and they are script-only):
@@ -46,7 +46,7 @@ File helpers are registered tools, so the gate, checkpoints and `.nymaignore` ap
 | `(nyma/save-file {:path p :from f})` / `{:path p :base64 b}` / `{:path p :text t}` | write | `{path, bytes}` |
 | `(nyma/pdf-text {:path p :from 1 :to 3})` | read | `{text, pages}` |
 
-`.nymaignore` covers any tool that declares the `filesystem` capability, on its `path` and `from` args, so a script cannot copy an ignored file out.
+`.nymaignore` covers any tool that declares the `filesystem` capability, on its `path` and `from` args, so a script cannot copy an ignored file out — for file patterns (`secret.txt`, `*.pem`). A directory pattern such as `secret/` does not match the files inside it; that gap is `.nymaignore`'s own, older than code mode.
 
 ## Typed returns
 
@@ -66,7 +66,7 @@ A script that ran ok can be kept and called again:
 /codemode scripts        /codemode rm find-renga-mail
 ```
 
-`(saved/find-renga-mail {:topic "AML"})` runs it; inside, `args` is that map (`{}` at the top level, so a script reads the same either way). The approval lists the saved script and every tool it calls. Saving is a command, not a model tool: self-generated skills gave no average gain in SkillsBench (2026), while verifying before keeping is what CRAFT and ToolMaker gained from. A saved script cannot call another. Project scripts load only in a trusted folder, and `.nyma/scripts` is a trust source.
+`(saved/find-renga-mail {:topic "AML"})` runs it; inside, `args` is that map (`{}` at the top level, so a script reads the same either way). The approval lists the saved script and every tool it calls; if a saved script or the tool registry changes between the prompt and the run, the run is refused rather than binding tools the prompt did not show. Saving is a command, not a model tool: self-generated skills gave no average gain in SkillsBench (2026), while verifying before keeping is what CRAFT and ToolMaker gained from. A saved script cannot call another. Project scripts load only in a trusted folder, and `.nyma/scripts` is a trust source.
 
 ## Safety
 

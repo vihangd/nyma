@@ -50,7 +50,7 @@
                                            :base64 #js {:type "string"}
                                            :text   #js {:type "string"}}
                           :required #js ["path"]}
-        :outputSchema #js {:type "object" :properties #js {:path #js {:type "string"} :bytes #js {:type "integer"}}}
+        :nymaOutputSchema #js {:type "object" :properties #js {:path #js {:type "string"} :bytes #js {:type "integer"}}}
         :safety #js {:destructive? true :requires-confirmation? true
                      :capabilities #js ["filesystem" "write"] :category "file"}
         :execute (fn [args] (save-file args))}
@@ -61,6 +61,6 @@
                                            :from #js {:type "integer"}
                                            :to   #js {:type "integer"}}
                           :required #js ["path"]}
-        :outputSchema #js {:type "object" :properties #js {:text #js {:type "string"} :pages #js {:type "integer"}}}
+        :nymaOutputSchema #js {:type "object" :properties #js {:text #js {:type "string"} :pages #js {:type "integer"}}}
         :safety #js {:read-only? true :capabilities #js ["filesystem"] :category "file"}
         :execute (fn [args] (pdf-text args))}})

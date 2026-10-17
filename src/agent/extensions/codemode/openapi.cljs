@@ -140,7 +140,7 @@
   (let [read? (contains? #{"GET" "HEAD"} (:method op))]
     #js {:description (str (:description op) " [" (:method op) " " (:path op) "]")
          :inputSchema (:schema op)
-         :outputSchema (:output op)
+         :nymaOutputSchema (:output op)
          :safety      (if read?
                         #js {:read-only? true :network? true :capabilities #js ["network"] :category "network"}
                         #js {:destructive? true :network? true :requires-confirmation? true

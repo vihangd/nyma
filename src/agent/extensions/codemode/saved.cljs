@@ -92,11 +92,14 @@
         used    (keep #(get by-key %) refs)
         missing (vec (remove #(contains? by-key %) refs))
         nested  (vec (keep (fn [e] (when (some #(= "saved" (first %)) (an/references (:body e))) (:name e))) used))]
-    {:source  (str "(def saved {"
-                   (str/join " " (map (fn [e] (str (js/JSON.stringify (an/munge-part (:name e)))
-                                                   " (fn [args]\n" (:body e) "\n)"))
-                                      used))
-                   "})\n" code)
+    ;; only when used: the prefix shifts squint's error line numbers
+    {:source  (if (seq used)
+                (str "(def saved {"
+                     (str/join " " (map (fn [e] (str (js/JSON.stringify (an/munge-part (:name e)))
+                                                     " (fn [args]\n" (:body e) "\n)"))
+                                        used))
+                     "})\n" code)
+                code)
      :used    (mapv :name used)
      :missing (mapv #(.replaceAll % "_" "-") missing)
      :nested  nested}))

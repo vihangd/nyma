@@ -75,7 +75,7 @@
 (def ^:private text-quote-starts
   "Lines that start quoted history or a signature in plain text."
   [#"^On .{4,200}wrote:\s*$"
-   #"^-{2,}\s*(Original Message|Forwarded message)\s*-{2,}"
+   #"^-{2,}\s*Original Message\s*-{2,}"
    #"^_{10,}\s*$"                                   ; Outlook's rule before From:
    #"^From: .+\n(Sent|Date): "
    #"^-- $"])
@@ -86,13 +86,17 @@
 
 (defn strip-quotes
   "The new part of an email body: quoted history, `>` lines and the
-   signature removed. HTML in, text out; text in, text out. Heuristic — keep
-   the raw body if the answer depends on what was quoted."
+   signature removed; a forwarded message is kept. HTML in, text out; text
+   in, text out. Heuristic — keep the raw body if the answer depends on what
+   was quoted."
   [body]
   (let [s    (str body)
         html? (re-find #"<(html|body|div|p|br|table|span)\b" s)
-        t    (if html? (html->text (cut-at s html-quote-starts)) s)]
-    (->> (str/split-lines (cut-at t text-quote-starts))
+        ;; a forward is kept whole: in corporate mail the ask is often in it,
+        ;; and Gmail wraps it in the same gmail_quote div as a reply
+        fwd? (re-find #"Forwarded message|Begin forwarded message" s)
+        t    (if html? (html->text (if fwd? s (cut-at s html-quote-starts))) s)]
+    (->> (str/split-lines (if fwd? t (cut-at t text-quote-starts)))
          (remove #(re-find #"^\s*>" %))
          (str/join "\n")
          (str/trim))))

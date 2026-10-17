@@ -59,7 +59,10 @@
                                            (-> (expect (html/strip-quotes "Yes, approved.\n\nOn Tue, Bob wrote:\n> can you approve?")) (.toBe "Yes, approved."))
                                            (-> (expect (html/strip-quotes "Fine\n> quoted\nstill mine")) (.toBe "Fine\nstill mine"))
                                            (-> (expect (html/strip-quotes "Hi\n-----Original Message-----\nFrom: x")) (.toBe "Hi"))
-                                           (-> (expect (html/strip-quotes "Body\n-- \nRenga | Bank")) (.toBe "Body"))))
+                                           (-> (expect (html/strip-quotes "Body\n-- \nRenga | Bank")) (.toBe "Body"))
+        ;; a forward keeps its content: the ask is often in it
+        (-> (expect (html/strip-quotes "<div>FYI</div><div class=\"gmail_quote\">---------- Forwarded message ---------<br>From: Bob<br>Date: Mon<br>Please file the STR</div>"))
+            (.toContain "Please file the STR"))))
                                      (it "html->text: tables, entities, numeric entities"
                                          (fn []
                                            (-> (expect (html/html->text "<table><tr><td>a</td><td>b&amp;c</td></tr></table><p>&#8364;5 &lt;ok&gt;</p>"))
@@ -164,7 +167,7 @@
         ((:register (:tool-registry a)) (str "mcp__echo__" (:name t)) (bridge/build-tool-def "echo" c t)))
       ;; declared outputSchema reaches the catalog
       (let [t (.getTool api "mcp__echo__get_structured")]
-        (-> (expect (catalog/line {:name "mcp__echo__get_structured" :schema #js {} :output (.-outputSchema t)}))
+        (-> (expect (catalog/line {:name "mcp__echo__get_structured" :schema #js {} :output (.-nymaOutputSchema t)}))
             (.toContain "→ {count: num, names: [str]}")))
       ;; a script gets structuredContent as data; the model-facing text is unchanged
       (let [r (js-await (.executeTool api "mcp__echo__get_structured" #js {}))]
@@ -191,6 +194,15 @@
          :state       #js {:get (fn [k] (get @m k)) :set (fn [k v] (swap! m assoc k v))}
          :executeTool (fn [_ _ _] (js/Promise.resolve #js {:ok true :result (impl)}))}))
 
+(defn ^:async test-observed-empty-first []
+  (let [n   (atom 0)
+        api (state-api (atom #js {:type "object"})
+                       (fn [] (js/JSON.stringify (if (= 1 (swap! n inc)) #js [] #js [#js {:id 1}]))))]
+    (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
+    (-> (expect (cm/observed-shape api "mcp__mail__search")) (.toBeFalsy))
+    (js-await (cm/execute-script api cfg #js {:code "(mail/search {})"} nil))
+    (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int}]"))))
+
 (defn ^:async test-observed []
   (let [sch (atom #js {:type "object" :properties #js {:q #js {:type "string"}}})
         api (state-api sch (fn [] (js/JSON.stringify #js [#js {:id 1 :subject "s"}])))]
@@ -198,6 +210,9 @@
     (js-await (cm/execute-script api cfg #js {:code "(mail/search {:q \"x\"})"} nil))
     (-> (expect (schema/signature (cm/observed-shape api "mcp__mail__search"))) (.toBe "[{id: int, subject: str}]"))
     (-> (expect (cm/prompt-block api cfg)) (.toContain "→ ~[{id: int, subject: str}]"))
+    ;; the approval line the user saw must still be what runs
+    (-> (expect (js-await (cm/execute-script api cfg #js {:code "(mail/search {:q \"x\"})" :calls "no tools"} nil)))
+        (.toContain "[Denied] what this script calls changed"))
     ;; the server changed its input schema: the old shape is not trusted
     (reset! sch #js {:type "object" :properties #js {:query #js {:type "string"}}})
     (-> (expect (cm/observed-shape api "mcp__mail__search")) (.toBeFalsy))))
@@ -205,6 +220,7 @@
 (describe "codemode: typed returns" (fn []
                                       (it "MCP outputSchema, structuredContent and saved files reach a script as data" test-structured-mcp 30000)
                                       (it "an observed result shape is listed, and dropped when the tool's schema changes" test-observed)
+  (it "an empty first result is not kept as the shape" test-observed-empty-first)
                                       (it "OpenAPI responses become the operation's return type"
                                           (fn []
                                             (let [[op] (openapi/operations
@@ -232,6 +248,13 @@
                            (-> (expect (cm/command api ["save" "find-mail" "mails" "by" "topic"])) (.toContain "Saved saved/find-mail"))
                            (-> (expect (fs/readFileSync ".nyma/scripts/find-mail.cljs" "utf8")) (.toContain ";; tools: mcp__mail__search"))
                            (-> (expect (cm/command api ["scripts"])) (.toContain "saved/find-mail  [project]  mails by topic"))
+                           ;; edited after approval: the run refuses instead of binding unseen tools
+                           (let [shown (cm/approval (cm/prepare api "(saved/find-mail {})"))
+                                 orig  (fs/readFileSync ".nyma/scripts/find-mail.cljs" "utf8")]
+                             (fs/writeFileSync ".nyma/scripts/find-mail.cljs" (str orig "\n(nyma/read {:path \"x\"})"))
+                             (-> (expect (js-await (cm/execute-script api cfg #js {:code "(saved/find-mail {})" :calls shown} nil)))
+                                 (.toContain "[Denied]"))
+                             (fs/writeFileSync ".nyma/scripts/find-mail.cljs" orig))
                            ;; called from a new script, with args; its tools are in the approval
                            (let [p (cm/prepare api "(saved/find-mail {:q \"frm\"})")]
                              (-> (expect (cm/approval p)) (.toContain "saved/find-mail → mail/search (")))

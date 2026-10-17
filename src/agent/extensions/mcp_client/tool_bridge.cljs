@@ -127,7 +127,8 @@
                 ;; image to the model; text results take the text branch unchanged.
                 :toModelOutput mm/tool-model-output})
       (aset "safety" (hint-safety (:annotations mcp-tool)))
-      (aset "outputSchema" (:output-schema mcp-tool)))))
+      ;; not `outputSchema`: the AI SDK validates UI messages against that key
+      (aset "nymaOutputSchema" (:output-schema mcp-tool)))))
 
 (defn register-all!
   "Walk the manager's running clients, register each of their tools
