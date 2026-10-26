@@ -388,7 +388,11 @@
             ;; stream filter giving up.
             (when @(:msg st)
               (end-turn! agent st nil {:stopReason (if (aborted? agent) "aborted" "stop")}))
-            (end-run! st))]
+            ;; nyma ends a run per loop pass and then drains a queued follow-up
+            ;; into the next; pi runs follow-ups inside one agent_start/agent_end
+            ;; (pi-agent-core agent-loop), so the run is not over yet.
+            (when (empty? @(:follow-queue agent))
+              (end-run! st)))]
 
          ;; The session-level run has settled: no retry, no compaction retry
          ;; and no queued follow-up will continue it. Distinct from agent_end,
@@ -400,7 +404,10 @@
             ;; runs. So the run is ended here, with an assistant message that
             ;; carries the error: without one a consumer reads a failed run as
             ;; a clean end.
-            (when @(:streaming? st)
+            ;; Not while a follow-up is queued on a clean turn: the loop drains
+            ;; it into the same run. An error stops the loop with it queued.
+            (when (and @(:streaming? st)
+                       (or (.-error data) (empty? @(:follow-queue agent))))
               (let [ab? (aborted? agent)]
                 (when (or @(:msg st) (.-error data))
                   (end-turn! agent st nil
@@ -411,7 +418,7 @@
             ;; drain, so the loop can recur into another turn afterwards.
             ;; agent_settled means the run will not continue on its own, so it
             ;; waits until nothing is queued.
-            (when (empty? @(:follow-queue agent))
+            (when (or (.-error data) (empty? @(:follow-queue agent)))
               (write-event! {:type "agent_settled" :aborted (aborted? agent)})))]]
 
         ;; User messages: the prompt, and steering or follow-ups the loop
@@ -883,8 +890,11 @@
 
 (defn ^:async start
   "Enter pi-rpc mode: wire the event translator + permission handler, then read
-   JSONL commands from stdin until EOF. Returns a cleanup thunk."
-  [agent]
+   JSONL commands from stdin until EOF. Returns a cleanup thunk.
+   `on-eof` runs after stdin closes; cli exits there, as pi's rpc mode does,
+   so a frontend that dies does not leave the agent (and its MCP servers)
+   running."
+  [agent & [{:keys [on-eof]}]]
   (let [st         (new-st)
         unsub      (subscribe-events! agent st)
         perm-h     (make-permission-handler st)
@@ -903,7 +913,9 @@
                        ;; On stdin EOF (the frontend exited) release any pending
                        ;; dialog so a wedged permission gate can't keep the
                        ;; process alive.
-                       (fn [] (drain-pending-ui! st #js {:confirmed false :cancelled true})))]
+                       (fn []
+                         (drain-pending-ui! st #js {:confirmed false :cancelled true})
+                         (when on-eof (on-eof))))]
       (fn []
         (unsub)
         ((:off events) "permission_request" perm-h)

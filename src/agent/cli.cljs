@@ -1174,7 +1174,7 @@ Examples:
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
           "rpc"         (js-await (rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
-          "pi-rpc"      (js-await (pi-rpc/start agent))
+          "pi-rpc"      (js-await (pi-rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
           ;; Agent Client Protocol: run inside Zed, JetBrains and other ACP
           ;; editors. Stdin EOF means the editor closed the agent.
           "acp"         (js-await (acp/start agent {:on-eof (fn [] (js/process.exit 0))})))

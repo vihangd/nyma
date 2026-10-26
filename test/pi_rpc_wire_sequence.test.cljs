@@ -158,4 +158,35 @@
                                  (fire! agent "turn_finalize" #js {})
                                  (unsub))))]
                     (-> (expect (types-of evs))
-                        (.toEqual #js ["agent_start" "agent_end" "agent_settled"])))))))
+                        (.toEqual #js ["agent_start" "agent_end" "agent_settled"])))))
+
+            (it "a queued follow-up stays inside one agent_start/agent_end, as pi's loop does"
+                (fn []
+                  (let [agent (fake-agent [{:role "user" :content "then this"}])
+                        st (st-of)
+                        evs (capture
+                             (fn []
+                               (let [unsub (subscribe-events! agent st)]
+                                 (fire! agent "agent_start" #js {})
+                                 (fire! agent "agent_end" #js {})
+                                 (fire! agent "turn_finalize" #js {})
+                                 ;; the loop drains the follow-up and runs it
+                                 (reset! (:follow-queue agent) [])
+                                 (fire! agent "agent_end" #js {})
+                                 (fire! agent "turn_finalize" #js {})
+                                 (unsub))))]
+                    ;; the drain itself shows as a queue_update
+                    (-> (expect (types-of evs))
+                        (.toEqual #js ["agent_start" "queue_update" "agent_end" "agent_settled"])))))
+
+            (it "an error settles the run even with a follow-up queued"
+                (fn []
+                  (let [agent (fake-agent [{:role "user" :content "then this"}])
+                        st (st-of)
+                        evs (capture
+                             (fn []
+                               (let [unsub (subscribe-events! agent st)]
+                                 (fire! agent "agent_start" #js {})
+                                 (fire! agent "turn_finalize" #js {:error true})
+                                 (unsub))))]
+                    (-> (expect (last (types-of evs))) (.toBe "agent_settled")))))))
