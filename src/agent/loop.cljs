@@ -898,6 +898,7 @@
 
             (js-await ((:emit-async events) "turn_finalize"
                                             #js {:error        (or (boolean @turn-error) blocked?)
+                                                 :errorMessage (some-> @turn-error .-message)
                                                  :toolCalls    @tools-this-turn
                                                  :noOpTurns    (:no-op-turns @(:state agent))
                                                  ;; So a consumer can tell a stall from a

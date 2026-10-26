@@ -276,6 +276,9 @@
              :get-session-name (fn [] @session-name)
              :get-entries      (fn [] @entries)
              :get-branch       (fn [] (build-context-fn))
+             ;; The current branch's entries whole, metadata included — what
+             ;; pi-rpc's get_messages rebuilds tool calls from.
+             :get-branch-entries (fn [] (mapv #(nth @entries %) (walk-branch @index @leaf-id)))
              ;; The file this session persists to — the key usage rows and
              ;; prompt history are grouped by.
              :session-file     (fn [] (session-file))

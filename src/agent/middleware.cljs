@@ -334,6 +334,8 @@
                 ;; treat event payloads as read-only.
                 ((:emit events) "tool_execution_start"
                                 (merge {:toolName (:tool-name ctx) :execId exec-id :args (:args ctx)
+                                        ;; a call made from inside a script, not by the model
+                                        :nested (boolean (:nested? ctx))
                                         :label (when-let [t (:tool ctx)] (.-label t))}
                                        display-fields)))
               (when store
@@ -823,6 +825,7 @@
                 ((:append session)
                  {:role     "tool_call"
                   :content  (str (:result ctx))
-                  :metadata {:tool-name (:tool-name ctx)
-                             :args      (:args ctx)}})))
+                  :metadata {:tool-name    (:tool-name ctx)
+                             :tool-call-id (:exec-id ctx)
+                             :args         (:args ctx)}})))
             ctx)})

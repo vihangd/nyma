@@ -20,7 +20,7 @@
 
    So these tests assert the ORDER of what reaches stdout."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.modes.pi-rpc :refer [subscribe-events!]]))
+            [agent.modes.pi-rpc :refer [subscribe-events! new-st]]))
 
 (defn- capture
   "Run `f` with stdout captured; returns the event objects written."
@@ -43,14 +43,17 @@
 (defn- fire! [agent e data]
   (mapv (fn [h] (h data)) (get @(:__handlers agent) e)))
 
-(defn- st-of [] {:acc (atom "") :content-index (atom 0) :streaming? (atom false)
-                 :running? (atom false) :compacting? (atom false)
-                 :turn-open? (atom false) :pending-ui (atom {})})
+(defn- st-of [] (new-st))
 
 (defn- step [& {:keys [text finish]}]
   #js {:text (or text "") :finishReason (or finish "stop") :toolResults #js []})
 
 (defn- types-of [events] (vec (map #(.-type %) events)))
+
+(defn- turn-types-of
+  "Only the turn pair: each step also brings its assistant message."
+  [events]
+  (vec (filter #(contains? #{"turn_start" "turn_end"} %) (types-of events))))
 
 ;;; ─── 1. the turn pair ───────────────────────────────────────
 
@@ -69,7 +72,7 @@
                                  (fire! agent "turn_end" (step :finish "tool-calls"))
                                  (fire! agent "turn_end" (step :finish "stop"))
                                  (unsub))))
-                        ts  (types-of evs)]
+                        ts  (turn-types-of evs)]
                     (-> (expect ts)
                         (.toEqual #js ["turn_start" "turn_end"
                                        "turn_start" "turn_end"
@@ -87,7 +90,7 @@
                                  (fire! agent "turn_start" #js {})
                                  (fire! agent "turn_end" (step))
                                  (unsub))))]
-                    (-> (expect (types-of evs)) (.toEqual #js ["turn_start" "turn_end"])))))))
+                    (-> (expect (turn-types-of evs)) (.toEqual #js ["turn_start" "turn_end"])))))))
 
 ;;; ─── 2. agent_settled ───────────────────────────────────────
 
@@ -132,8 +135,13 @@
                                  (fire! agent "agent_start" #js {})
                                  (fire! agent "turn_finalize" #js {:error true})
                                  (unsub))))]
+                    ;; With an assistant message carrying the error: a
+                    ;; consumer reads the run's outcome off agent_end.messages.
                     (-> (expect (types-of evs))
-                        (.toEqual #js ["agent_start" "agent_end" "agent_settled"]))
+                        (.toEqual #js ["agent_start" "turn_start" "message_start" "message_end" "turn_end"
+                                       "agent_end" "agent_settled"]))
+                    (let [end (first (filter #(= "agent_end" (.-type %)) evs))]
+                      (-> (expect (.-stopReason (last (.-messages end)))) (.toBe "error")))
                     ;; And the flag get_state reports is honest again.
                     (-> (expect @(:streaming? st)) (.toBe false)))))
 

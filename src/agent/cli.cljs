@@ -537,10 +537,13 @@ Examples:
    - --fork <path>        → copy the source JSONL into a fresh file, use the copy
    - --continue / -c      → most recent session in sessions-dir (interactive only)
    - --resume  / -r       → numbered pre-TUI picker over sessions-dir (interactive)
-   - interactive default  → a fresh ~/.nyma/sessions/<ts>.jsonl per launch"
+   - interactive default  → a fresh ~/.nyma/sessions/<ts>.jsonl per launch
+   - pi-rpc               → the same, and -c, as pi's rpc mode persists: a
+                            frontend lists and reopens its chats from these"
   [values mode sessions-dir]
   (let [one-shot?    (contains? #{"print" "json"} mode)
         interactive? (= mode "interactive")
+        pi-rpc?      (= mode "pi-rpc")
         ;; -c/-r/--fork were accepted and then dropped on the floor in one-shot
         ;; mode: the cond's `one-shot?` clause wins before any of them is read.
         ;; A flag that parses, prints nothing and does nothing is the worst of
@@ -585,10 +588,10 @@ Examples:
               (if (seq (:shown (resume-listing sessions-dir (:all values))))
                 (new-session-path sessions-dir)
                 (no-sessions!)))
-          (and (:continue values) interactive?)
+          (and (:continue values) (or interactive? pi-rpc?))
           (or (:path (first (list-sessions sessions-dir)))
               (no-sessions!))
-          interactive?         (new-session-path sessions-dir)
+          (or interactive? pi-rpc?) (new-session-path sessions-dir)
           :else                nil)]
     (when path
       (fs/mkdirSync (npath/dirname path) #js {:recursive true})

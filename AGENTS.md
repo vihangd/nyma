@@ -131,6 +131,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/markdown.cljs` | `agent.utils.markdown` | Markdown → ANSI, via Bun.markdown.ansi; `marked` only for its lexer. |
 | `src/agent/utils/markdown_blocks.cljs` | `agent.utils.markdown-blocks` | Incremental markdown rendering via block-level tokenization. |
 | `src/agent/utils/pdf.cljs` | `agent.utils.pdf` | PDFs: who can read one natively, and text out of one for whoever can't. |
+| `src/agent/utils/pi_shape.cljs` | `agent.utils.pi-shape` | nyma messages in the shapes pi's `AgentMessage` uses (pi-agent-core 1.2): user, assistant with `[text \| thinking \| toolCall]` blocks, and… |
 | `src/agent/utils/reasoning_request.cljs` | `agent.utils.reasoning-request` | Translate nyma's thinking level into each provider's REQUEST dialect. |
 | `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |
 | `src/agent/utils/shell_grant.cljs` | `agent.utils.shell-grant` | What one shell command is, and what an "Allow always" for it covers. |

@@ -40,13 +40,15 @@
                   ;; Where the adapter looks for them. At the top level they
                   ;; would arrive and be ignored.
                   (let [e (turn-end-event (step :text "x" :finish "tool-calls" :in 7 :out 3))]
-                    (-> (expect (:stopReason (:message e))) (.toBe "tool-calls"))
+                    ;; pi's name: ThinkRail runs a message's tool calls only on "toolUse"
+                    (-> (expect (:stopReason (:message e))) (.toBe "toolUse"))
                     (-> (expect (:inputTokens (:usage (:message e)))) (.toBe 7))
                     (-> (expect (:outputTokens (:usage (:message e)))) (.toBe 3)))))
 
-            (it "omits usage entirely when the step reported none"
+            (it "reports zero usage when the step reported none"
                 (fn []
-                  (-> (expect (contains? (:message (turn-end-event (step))) :usage)) (.toBe false))))
+                  ;; pi's AssistantMessage always has usage
+                  (-> (expect (:totalTokens (:usage (:message (turn-end-event (step)))))) (.toBe 0))))
 
             (it "survives a step with nothing on it"
                 (fn []
