@@ -2,7 +2,7 @@
   "The fields a pi RPC consumer builds its transcript from, pinned as ThinkRail
    reads them (apps/web appStore reduceSessionEvent, server agentSessionManager):
 
-   - every message_update carries the message so far as `partial`;
+   - message_update carries deltas only, as pi's RPC mode strips `partial`;
    - one assistant message per step, its toolCall block ids equal to the
      tool_execution_* toolCallIds, stopReason \"toolUse\" when tools ran;
    - toolResult messages after it; user messages as message_start/end;
@@ -73,14 +73,21 @@
 
 (describe "pi-rpc messages"
           (fn []
-            (it "every message_update carries the message so far"
+            (it "message_update carries deltas, not the message so far, as pi's RPC mode does"
                 (fn []
-                  (let [ups (of-type (a-run (fake-agent)) "message_update")]
+                  ;; pi 1.2 modes/json-event.js strips `partial` and `message`;
+                  ;; resending the message on every token is O(n²) on the wire.
+                  (let [ups (of-type (a-run (fake-agent)) "message_update")
+                        ames (mapv #(.-assistantMessageEvent %) ups)]
                     (-> (expect (count ups)) (.toBeGreaterThan 0))
                     (doseq [u ups]
-                      (-> (expect (.. u -assistantMessageEvent -partial -role)) (.toBe "assistant")))
-                    (let [d (second (filter #(= "text_delta" (.. % -assistantMessageEvent -type)) ups))]
-                      (-> (expect (.. d -assistantMessageEvent -partial -content (at 0) -text)) (.toBe "Looking"))))))
+                      (-> (expect (.-message u)) (.toBeUndefined))
+                      (-> (expect (.. u -assistantMessageEvent -partial)) (.toBeUndefined)))
+                    (-> (expect (mapv #(.-delta %) (filterv #(= "text_delta" (.-type %)) ames)))
+                        (.toEqual #js ["Look" "ing" "Done"]))
+                    ;; toolcall_start names the call, since there is no partial to look in
+                    (-> (expect (mapv #(.-id %) (filterv #(= "toolcall_start" (.-type %)) ames)))
+                        (.toEqual #js ["c1" "c2"])))))
 
             (it "one assistant message per step, joined to its tool executions"
                 (fn []
@@ -124,6 +131,17 @@
                   (let [evs (a-run (fake-agent))]
                     (-> (expect (.. (first evs) -message -role)) (.toBe "user"))
                     (-> (expect (.-type (second evs))) (.toBe "message_end")))))
+
+            (it "a session switch reseeding history sends nothing"
+                (fn []
+                  (let [agent (fake-agent)
+                        evs   (capture
+                               (fn []
+                                 (let [unsub (subscribe-events! agent (new-st))]
+                                   (@(:__sub agent) :message-added {:replaying-session? true}
+                                                    {:message {:role "user" :content "old turn"}})
+                                   (unsub))))]
+                    (-> (expect (count evs)) (.toBe 0)))))
 
             (it "queue_update follows the queues"
                 (fn []

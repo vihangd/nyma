@@ -10,7 +10,7 @@
         overrides (atom {})
         switched  (atom [])
         agent     {:config         cfg
-                   :model-registry {:context-window (fn [_] 200000)}
+                   :model-registry {:context-window (fn [_] 200000) :get (fn [_] nil)}
                    :provider-registry {:list (fn [] {"p" {:models [{:id "m1"} {:id "m2" :name "Model 2"}]}})}
                    :thinking-level (atom "off")
                    :state          (atom {:messages [{:role "user" :content "hi"}
@@ -80,6 +80,13 @@
                           (let [a (make-agent)]
                             (js-await (call a (pi/new-st) {:type "set_model" :provider "p" :modelId "m2"}))
                             (-> (expect (vec @(:__switched a))) (.toEqual #js ["p/m2"])))))
+
+            (it "set_model without a provider leaves the choice to the registry path"
+                ^:async (fn []
+                          (let [a (make-agent)]
+                            (js-await (call a (pi/new-st) {:type "set_model" :modelId "m2"}))
+                            (-> (expect (count @(:__switched a))) (.toBe 0))
+                            (-> (expect (.-model (:config a))) (.toBe "m2")))))
 
             (it "queue modes accept only what the loop does"
                 ^:async (fn []

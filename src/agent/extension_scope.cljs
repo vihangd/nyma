@@ -229,6 +229,11 @@
                                               (let [pi?  (and (object? name) (string? (.-name name)))
                                                     td   (if pi? (pi-tool name) td)
                                                     full (if pi? (.-name name) (prefix name))]
+                                                ;; Unprefixed, it could land on bash or read:
+                                                ;; replacing a tool is what :tools-override gates.
+                                                (when (and pi? (.getTool base-api full))
+                                                  (throw (js/Error. (str "pi tool \"" full "\" would replace an existing tool;"
+                                                                         " overriding one needs the tools-override capability"))))
                                                 (.registerTool base-api full td)
                                                 ;; Identity guard: only remove what
                                                 ;; this call put there, so a tool the

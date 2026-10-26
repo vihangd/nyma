@@ -153,10 +153,14 @@
   (try (let [m (model-obj agent)] {:api (:api m) :provider (:provider m) :model (:id m)})
        (catch :default _ {})))
 
-(defn- update! [st ame]
-  (let [m @(:msg st)]
-    (write-event! {:type "message_update" :message m
-                   :assistantMessageEvent (assoc ame :partial m)})))
+(defn- update!
+  "A message_update as pi's RPC mode writes it (modes/json-event.js): the
+   message so far is NOT sent — pi strips `partial` and `message` from the
+   wire, so a client builds the message from the deltas and gets it whole at
+   message_end."
+  [st ame]
+  (write-event! {:type "message_update" :usage (:usage @(:msg st))
+                 :assistantMessageEvent ame}))
 
 (defn- ensure-msg!
   "The open assistant message, starting one (and its message_start) if none."
@@ -184,7 +188,7 @@
              (nil? (some-> @(:msg st) (shape/tool-call-index id))))
     (let [block {:type "toolCall" :id (str id) :name (str tool-name) :arguments (or args {})}
           i     (add-block! agent st block)]
-      (update! st {:type "toolcall_start" :contentIndex i})
+      (update! st {:type "toolcall_start" :contentIndex i :id (str id) :toolName (str tool-name)})
       (update! st {:type "toolcall_end" :contentIndex i :toolCall block}))))
 
 (defn- record! [st m] (swap! (:run-msgs st) conj m))
@@ -239,10 +243,7 @@
 
    One assistant message per step: nyma's text-start/text-end mark a text
    PART, so they become text_start/text_end inside the message, which closes
-   at the step's turn_end. Every message_update carries the whole message so
-   far as `partial` — pi does, and ThinkRail renders only that. It is O(n²)
-   on the wire for a long reply, as it is in pi; the Emacs frontend reads
-   `delta` and ignores it."
+   at the step's turn_end with every block in it."
   [agent st]
   (let [events (:events agent)
         on     (:on events)
@@ -412,8 +413,10 @@
         unsub-store
         (when-let [store (:store agent)]
           ((:subscribe store)
-           (fn [ev _state data]
-             (when (= ev :message-added)
+           (fn [ev state data]
+             ;; Not a session switch reseeding history: those turns were sent
+             ;; once already, and would start the next agent_end's messages.
+             (when (and (= ev :message-added) (not (:replaying-session? state)))
                (let [m (:message data)]
                  (when (= "user" (:role m))
                    (let [pm (shape/->pi-message m)]
@@ -710,7 +713,8 @@
         (write-response! cmd (session-stats agent))
 
         "set_model"
-        (if (and (.-modelId cmd) (set-model! agent (.-provider cmd) (.-modelId cmd)))
+        ;; Without a provider, the path below decides which one the id belongs to.
+        (if (and (.-modelId cmd) (.-provider cmd) (set-model! agent (.-provider cmd) (.-modelId cmd)))
           (write-response! cmd (model-obj agent))
         (do (when-let [m (.-modelId cmd)]
               (set! (.-model (:config agent)) m)

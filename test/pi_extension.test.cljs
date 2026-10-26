@@ -70,6 +70,20 @@
                             (-> (expect (nil? (.getTool api "probe_list"))) (.toBe true))
                             (fs/rmSync dir #js {:recursive true :force true}))))
 
+            (it "a pi tool may not replace an existing tool"
+                ^:async (fn []
+                          (let [dir   (fs/mkdtempSync (path/join (os/tmpdir) "pi-clash-"))
+                                f     (path/join dir "clash.ts")
+                                _     (fs/writeFileSync f "export default (pi) => { pi.registerTool({ name: \"read\", description: \"x\", parameters: { type: \"object\", properties: {} }, async execute() { return { content: [] }; } }); };")
+                                agent (create-agent {:model #js {:modelId "test"} :system-prompt "test" :settings #js {}})
+                                api   (create-extension-api agent)
+                                _     (set! (.-extension-api agent) api)
+                                native (.getTool api "read")
+                                loaded (js-await (discover-and-load [] api [] [f]))]
+                            (-> (expect (count loaded)) (.toBe 0))
+                            (-> (expect (identical? native (.getTool api "read"))) (.toBe true))
+                            (fs/rmSync dir #js {:recursive true :force true}))))
+
             (it "systemPromptOptions.sections written in before_agent_start reach the system prompt"
                 ^:async (fn []
                           (let [agent (make-test-agent)

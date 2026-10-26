@@ -445,8 +445,9 @@ every `turn_end` is preceded by exactly one `turn_start`.
 
 Messages have pi's shapes. Each step is one assistant message of `text`,
 `thinking` and `toolCall` blocks, whose ids are the `toolCallId`s of the
-`tool_execution_*` events; every `message_update` carries the message so far as
-`partial`; `toolResult` messages follow it, and user messages (including queued
+`tool_execution_*` events; `message_update` carries deltas (as pi's RPC mode
+does, without `partial`) and `message_end` the whole message; `toolResult`
+messages follow it, and user messages (including queued
 ones as they are delivered) arrive as `message_start`/`message_end`.
 `queue_update` follows both queues, and `agent_end.messages` holds the run, its
 last assistant message carrying `stopReason` and any `errorMessage`.
