@@ -3,7 +3,8 @@
             [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact settings->opts resolve-settings]]
             [agent.sessions.manager :as sessions]
-            [agent.token-estimation :as te]))
+            [agent.token-estimation :as te]
+            [agent.utils.pi-shape :as pi-shape]))
 
 (defn create-extension-context
   "Build the context object passed to event handlers and tool execute.
@@ -21,9 +22,12 @@
 
          ;; Session manager
          :sessionManager (when-let [s @(:session agent)]
-                           #js {:getEntries (fn [] ((:get-entries s)))
-                                :getBranch  (fn [] ((:get-branch s)))
-                                :getLeafId  (fn [] ((:get-leaf-id s)))})
+                           (let [file (fn [] (try ((:get-file-path s)) (catch :default _ nil)))]
+                             #js {:getEntries     (fn [] ((:get-entries s)))
+                                  :getBranch      (fn [] ((:get-branch s)))
+                                  :getLeafId      (fn [] ((:get-leaf-id s)))
+                                  :getSessionFile file
+                                  :getSessionId   (fn [] (or (pi-shape/session-id (file)) "session"))}))
 
          ;; Model access
          :modelRegistry  (when-let [pr (:provider-registry agent)]

@@ -236,10 +236,14 @@
                         (wrap-tools-with-before-hook raw-tools events))
 
             ;; Allow extensions to modify system prompt via before_agent_start
+            ;; pi extensions write `event.systemPromptOptions.sections[name]`
+            ;; instead of returning; read back after the handlers ran.
+            pi-sections   #js {}
             before-result (js-await
                            (emit-collect "before_agent_start"
                                          #js {:userMessage  (last messages)
-                                              :systemPrompt (:system-prompt config)}))
+                                              :systemPrompt (:system-prompt config)
+                                              :systemPromptOptions #js {:sections pi-sections}}))
 
             ;; Build effective prompt from additions and base. Layout is
             ;; cache-aware: everything that is the same from turn to turn
@@ -255,7 +259,9 @@
             (let [base      (:system-prompt config)
                   additions (get before-result "system-prompt-additions")
                   addition  (get before-result "systemPromptAddition")
-                  sections  (get before-result "prompt-sections")
+                  sections  (concat (get before-result "prompt-sections")
+                                    (map (fn [k] {"content" (aget pi-sections k)})
+                                         (js/Object.keys pi-sections)))
                   volatile  (get before-result "volatile-additions")
                   sections-text
                   (when (seq sections)

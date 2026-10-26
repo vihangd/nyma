@@ -94,7 +94,7 @@
              :followUpMode "one-at-a-time"
              ;; The file's name, not its path: a consumer keys files by it
              ;; (ThinkRail's todo store does).
-             :sessionId (or (some-> file (str/split #"/") last (str/replace #"\.jsonl$" "")) name "session")
+             :sessionId (or (shape/session-id file) name "session")
              :sessionFile (or file "")
              :autoCompactionEnabled (auto-compaction? agent)
              :messageCount (count (:messages s))
@@ -326,8 +326,11 @@
                            :toolName (:toolName data)
                            ;; update payload carries the streaming chunk under
                            ;; :data (middleware onUpdate), not :result
-                           :partialResult {:content [{:type "text" :text (str (or (:data data) ""))}]
-                                           :details {}}}))]
+                           :partialResult (let [d (:data data)]
+                                            (if (and (object? d) (.-content d))
+                                              d          ; a pi tool's onUpdate({content, details})
+                                              {:content [{:type "text" :text (str (or d ""))}]
+                                               :details {}}))}))]
 
          ["tool_execution_end"
           (fn [data]

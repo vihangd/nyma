@@ -140,6 +140,13 @@
 
             :else (recur more acc calls)))))))
 
+(defn session-id
+  "A session's id as pi reports it: the file's name without `.jsonl`.
+   Filename-safe, since a consumer keys files by it (ThinkRail's todo
+   store), and the same in get_state and an extension's ctx."
+  [file]
+  (some-> file str (str/split #"/") last (str/replace #"\.jsonl$" "")))
+
 (defn queue-texts
   "A message queue as the plain strings pi's `queue_update` carries."
   [q]

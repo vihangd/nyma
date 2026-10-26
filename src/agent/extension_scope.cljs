@@ -4,6 +4,17 @@
             [agent.permissions :refer [check]]
             [agent.extension-state :refer [create-state-api]]))
 
+(defn pi-tool
+  "A pi ToolDefinition (`{name, parameters, execute(toolCallId, params,
+   signal, onUpdate, ctx)}`) as a nyma tool def. pi's `{content, details}`
+   result is a shape the middleware already takes."
+  [td]
+  (doto (js/Object.assign #js {} td)
+    (aset "inputSchema" (.-parameters td))
+    (aset "execute" (fn [args ctx]
+                      ((.-execute td) (or (some-> ctx .-toolCallId) "") args
+                                      (some-> ctx .-abortSignal) (some-> ctx .-onUpdate) ctx)))))
+
 (defn- gate
   "Gate a function behind a capability check. Throws if not authorized."
   [capabilities capability f]
@@ -212,7 +223,12 @@
                     ;; Tool management
                     :registerTool     (gate capabilities :tools
                                             (fn [name td]
-                                              (let [full (prefix name)]
+                                              ;; pi's one-argument form keeps its own name:
+                                              ;; a pi extension's skills and prompts call
+                                              ;; the tool by it.
+                                              (let [pi?  (and (object? name) (string? (.-name name)))
+                                                    td   (if pi? (pi-tool name) td)
+                                                    full (if pi? (.-name name) (prefix name))]
                                                 (.registerTool base-api full td)
                                                 ;; Identity guard: only remove what
                                                 ;; this call put there, so a tool the

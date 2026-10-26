@@ -216,12 +216,44 @@
     (set (keep (fn [k] (when (false? (get m k)) k))
                (when (object? m) (js/Object.keys m))))))
 
+(defn extension-targets
+  "`--extension` paths → {:files [entry files] :skill-dirs [dirs]}. A file is
+   loaded as is; a directory whose package.json has a `pi` key (a pi package)
+   contributes its `pi.extensions` and `pi.skills`; any other directory, its
+   index file. A path that does not exist is reported and skipped."
+  [paths]
+  (reduce
+   (fn [acc p]
+     (let [p   (path/resolve (str p))
+           pkg (path/join p "package.json")
+           pi  (when (fs/existsSync pkg)
+                 (try (aget (js/JSON.parse (fs/readFileSync pkg "utf8")) "pi") (catch :default _ nil)))
+           rel (fn [xs] (mapv #(path/resolve p %) (or xs [])))]
+       (cond
+         (not (fs/existsSync p))
+         (do (d/warn "extensions" (str "--extension: no such path " p)) acc)
+
+         (.isFile (fs/statSync p)) (update acc :files conj p)
+
+         pi (-> acc
+                (update :files into (rel (aget pi "extensions")))
+                (update :skill-dirs into (rel (aget pi "skills"))))
+
+         :else (let [idx (some #(let [f (path/join p %)] (when (fs/existsSync f) f))
+                               ["index.ts" "index.js" "index.mjs" "index.cljs"])]
+                 (if idx
+                   (update acc :files conj idx)
+                   (do (d/warn "extensions" (str "--extension: nothing to load in " p)) acc))))))
+   {:files [] :skill-dirs []}
+   (or paths [])))
+
 (defn ^:async discover-and-load
   "Scan directories for extension files, load them, and wire them up.
    Extensions may return a deactivate function for cleanup.
    If an extension.json manifest exists, it provides namespace, capabilities, and dependsOn.
-   Extensions are loaded in dependency order (topological sort)."
-  [dirs api & [builtins]]
+   Extensions are loaded in dependency order (topological sort).
+   `files` are single extension entry files to load as well (`--extension`)."
+  [dirs api & [builtins files]]
   (reset! last-load-failures {})
   (reset! last-disabled #{})
   ;; Pass 1: collect metadata — the statically compiled builtins first, then
@@ -241,6 +273,9 @@
                                    :module    module
                                    :deps      (when (and manifest (.-dependsOn manifest))
                                                 (vec (js/Array.from (.-dependsOn manifest))))})))]
+    (doseq [f (or files [])]
+      (swap! scan-results conj {:path f :entry (path/basename f)
+                                :namespace (derive-namespace f) :manifest nil :deps nil}))
     (doseq [dir dirs]
       (when (js-await (-> (.stat fsp dir) (.then (constantly true)) (.catch (constantly false))))
         (let [entries (js-await (.readdir fsp dir #js {:recursive true}))]

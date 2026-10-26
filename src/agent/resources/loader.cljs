@@ -315,7 +315,7 @@ When multiple independent tool calls are needed, make them in parallel.
    Optionally accepts an events bus to emit resources_discover for extensions,
    and `:context-files` (the setting) naming the files to read as AGENTS.md;
    the loader has no settings manager of its own, so the caller passes it."
-  [& [{:keys [events reason context-files max-skill-description]}]]
+  [& [{:keys [events reason context-files max-skill-description skill-paths]}]]
   (let [;; Skill discovery walks both nyma's own paths AND the cross-vendor
         ;; paths used by Claude Code, Cursor 2.4, Codex, and the proposed
         ;; agentskills.io standard. Project paths win over global; nyma's
@@ -359,7 +359,8 @@ When multiple independent tool calls are needed, make them in parallel.
                                                       :reason (or reason "startup")})))
 
         ;; Merge extension-contributed resources
-        ext-skill-paths  (get ext-resources "skillPaths")
+        ;; `--extension` pi packages' skills, then what extensions contribute
+        ext-skill-paths  (concat skill-paths (get ext-resources "skillPaths"))
         ext-prompt-paths (get ext-resources "promptPaths")
         ext-theme-paths  (get ext-resources "themePaths")
 

@@ -22,7 +22,7 @@
             [agent.version :refer [version]]
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
-            [agent.extension-loader :refer [discover-and-load deactivate-all]]
+            [agent.extension-loader :as ext-loader :refer [discover-and-load deactivate-all]]
             [agent.commands.builtins :refer [register-builtins]]
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
             [agent.providers.registry :as registry-utils]
@@ -275,6 +275,8 @@ Session:
                          (settings max-steps). A capped run says so and stops.
       --append-system-prompt <text>
                          Append text to the system prompt for this run.
+  -e, --extension <path> Load an extension file, or a pi package directory's
+                         extensions and skills, for this run. Repeatable.
   -w, --worktree <name>  Work in git worktree <name> (.nyma/worktrees/<name>, branch
                          nyma/<name>), created off HEAD the first time and reused
                          after. Your checkout is never touched. /worktrees lists them.
@@ -684,6 +686,9 @@ Examples:
        ;; Headless controls: a step cap for this run, and extra system text.
        :max-steps    #js {:type "string"}
        :append-system-prompt #js {:type "string"}
+       ;; pi's flag: load an extension file, or a pi package's extensions and
+       ;; skills, for this run. Repeatable.
+       :extension    #js {:type "string" :short "e" :multiple true}
        ;; Run the whole session in a git worktree of this repo.
        :worktree     #js {:type "string" :short "w"}})
 
@@ -769,7 +774,9 @@ Examples:
         _         (when-let [w (inert-warning ((:user-settings settings)))]
                     (d/warn "settings" w))
         sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
+        cli-ext   (ext-loader/extension-targets (:extension values))
         resources (-> (js-await (discover {:context-files (:context-files merged)
+                                           :skill-paths (:skill-dirs cli-ext)
                                            :max-skill-description (:max-description-length (:skills merged))}))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
@@ -957,7 +964,8 @@ Examples:
     (when (and (not (contains? #{"print" "json"} mode)) (.-isTTY js/process.stderr))
       (.write js/process.stderr (str "nyma " version ": loading extensions…\r")))
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
-                                                         (:builtin-extensions resources)))
+                                                         (:builtin-extensions resources)
+                                                         (:files cli-ext)))
           extensions-atom   (atom loaded-extensions)
           ;; Dev: save-to-live for extensions on disk (opt-in). Builtins are
           ;; compiled in and need the restart `bun run dev` already does.
