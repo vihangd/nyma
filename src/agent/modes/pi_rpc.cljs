@@ -1,7 +1,7 @@
 (ns agent.modes.pi-rpc
-  "Adapter mode that speaks the pi-coding-agent Emacs frontend's JSONL-over-stdio
-   RPC protocol, so the existing `pi-coding-agent.el` package can drive nyma with
-   no .el edits (point `pi-coding-agent-extra-args` at `--mode pi-rpc`).
+  "pi's JSONL-over-stdio RPC protocol (pi 1.2 `rpc-types`), so pi RPC clients
+   drive nyma unchanged, the Emacs frontends (`pi-coding-agent.el`, pilish)
+   among them.
 
    Two halves:
    1. Command loop — reads JSONL commands from stdin, each carrying {type,id,…};

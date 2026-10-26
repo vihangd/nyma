@@ -59,7 +59,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/model_info.cljs` | `agent.model-info` | — |
 | `src/agent/modes/acp.cljs` | `agent.modes.acp` | Agent Client Protocol server: `nyma --mode acp` runs inside Zed, JetBrains and any other ACP editor. |
 | `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | Pi-tui based interactive mode. |
-| `src/agent/modes/pi_rpc.cljs` | `agent.modes.pi-rpc` | Adapter mode that speaks the pi-coding-agent Emacs frontend's JSONL-over-stdio RPC protocol, so the existing `pi-coding-agent.el` package… |
+| `src/agent/modes/pi_rpc.cljs` | `agent.modes.pi-rpc` | pi's JSONL-over-stdio RPC protocol (pi 1.2 `rpc-types`), so pi RPC clients drive nyma unchanged, the Emacs frontends (`pi-coding-agent.el… |
 | `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode. |
 | `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode. |
 | `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode. |
@@ -709,7 +709,7 @@ Settings are resolved in priority order:
 | print | `-p` / `--print` | Run once, print result to stdout |
 | json | `--mode json` | Run once, output JSON messages |
 | rpc | `--mode rpc` | JSONL protocol over stdio |
-| pi-rpc | `--mode pi-rpc` | JSONL protocol for the pi Emacs frontend |
+| pi-rpc | `--mode pi-rpc` | pi's RPC protocol (pi Emacs frontends, other pi RPC clients) |
 | acp | `--mode acp` | Agent Client Protocol server (Zed, JetBrains, other ACP editors) |
 | sdk | (import) | Programmatic embedding |
 

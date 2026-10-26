@@ -424,10 +424,16 @@ bun run start -- --mode pi-rpc     # pi-compatible JSONL protocol
 
 Both are JSONL over stdio, one command per line, `\n` as the only delimiter.
 
-`--mode pi-rpc` speaks the protocol pi's frontends use, so tools written against
-pi can drive nyma. It implements `prompt`, `steer`, `abort`, `fork`,
-`clear_queue`, `switch_session`, `set_model`, `set_thinking_level`, the `get_*`
-queries, and the event flow pi documents:
+`--mode pi-rpc` speaks the protocol pi's frontends use (pi 1.2's `rpc-types`), so
+tools written against pi's RPC mode can drive nyma, the Emacs frontends among
+them. It implements
+pi's commands: `prompt`/`steer`/`follow_up` (with their dispositions), `abort`,
+`clear_queue`, model and thinking-level setting and cycling, `compact`, `bash`,
+the session commands, `get_session_stats`, `export_html` and the `get_*` queries.
+A few settings nyma has no equivalent for fail with a reason rather than claim
+success: queue modes other than nyma's (steering all at once, follow-ups one at a
+time), turning provider retry off, and `abort_bash`. The session persists like
+pi's (`-c` continues it), and the event flow is the one pi documents:
 
 ```
 response/prompt → agent_start → (turn_start → message_* → turn_end)+ → agent_end → agent_settled
@@ -437,8 +443,20 @@ A turn is one assistant response plus the tool calls it causes, so a run that
 uses tools sends several `turn_start`/`turn_end` pairs. They always alternate:
 every `turn_end` is preceded by exactly one `turn_start`.
 
+Messages have pi's shapes. Each step is one assistant message of `text`,
+`thinking` and `toolCall` blocks, whose ids are the `toolCallId`s of the
+`tool_execution_*` events; every `message_update` carries the message so far as
+`partial`; `toolResult` messages follow it, and user messages (including queued
+ones as they are delivered) arrive as `message_start`/`message_end`.
+`queue_update` follows both queues, and `agent_end.messages` holds the run, its
+last assistant message carrying `stopReason` and any `errorMessage`.
+
 `turn_end` carries the assistant message with its `usage` and `stopReason`, plus
 `toolResults` — consumers derive per-turn token accounting from those fields.
+
+An extension that asks the user (`ui.select`, `confirm`, `input`, `editor`) asks
+through `extension_ui_request`; `notify`, widgets and editor text go out the same
+way.
 
 `agent_settled` means the run will not continue on its own: it is withheld while
 a follow-up is queued, because the loop will recur into another turn. A frontend
@@ -568,6 +586,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--trust` | Run this folder's project-defined commands without asking, this run only (see Workspace Trust) | — |
 | `--max-steps <n>` | Cap model steps (tool-call rounds) per run; a capped run says so and stops | `100` (setting `max-steps`) |
 | `--append-system-prompt <text>` | Append text to the system prompt for this run (kept across `/reload`) | — |
+| `-e, --extension <path>` | Load an extension file, or a pi package directory's `pi.extensions` and `pi.skills`, for this run; repeatable. pi extensions load unchanged | — |
 | `--discover` | With `-p`: fetch provider catalogues at startup | off in one-shot runs |
 | `--ext-<name>[=v]` | Set a flag registered by an extension | — |
 | `--debug` | Debug logging to `~/.nyma/debug.log` | — |
