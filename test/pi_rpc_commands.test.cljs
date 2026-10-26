@@ -117,3 +117,30 @@
                 ^:async (fn []
                           (let [r (js-await (call (make-agent) (pi/new-st) {:type "get_available_thinking_levels"}))]
                             (-> (expect (.. r -data -levels)) (.toContain "high")))))))
+
+(describe "extension ui over RPC"
+          (fn []
+            (it "select, input and confirm round-trip through extension_ui_request"
+                ^:async (fn []
+                          (let [st   (pi/new-st)
+                                ui   (pi/rpc-ui st)
+                                lines (atom [])
+                                orig js/console.log]
+                            (set! js/console.log (fn [s] (swap! lines conj (js/JSON.parse s))))
+                            (let [sel (.select ui "Pick" #js ["a" "b"] nil)
+                                  inp (.input ui "Name" "x" nil)
+                                  cf  (.confirm ui "Sure?" nil)
+                                  [r1 r2 r3] @lines]
+                              (.notify ui "careful" "warn")
+                              (set! js/console.log orig)
+                              (-> (expect (.-method r1)) (.toBe "select"))
+                              (-> (expect (.-options r1)) (.toEqual #js ["a" "b"]))
+                              (-> (expect (.-placeholder r2)) (.toBe "x"))
+                              (-> (expect (.-notifyType (nth @lines 3))) (.toBe "warning"))
+                              (js-await (pi/handle-line {} st (js/JSON.stringify #js {:type "extension_ui_response" :id (.-id r1) :value "b"})))
+                              (js-await (pi/handle-line {} st (js/JSON.stringify #js {:type "extension_ui_response" :id (.-id r2) :cancelled true})))
+                              (js-await (pi/handle-line {} st (js/JSON.stringify #js {:type "extension_ui_response" :id (.-id r3) :confirmed true})))
+                              (-> (expect (js-await sel)) (.toBe "b"))
+                              (-> (expect (nil? (js-await inp))) (.toBe true))
+                              (-> (expect (js-await cf)) (.toBe true))
+                              (-> (expect (count @(:pending-ui st))) (.toBe 0))))))))

@@ -453,6 +453,51 @@
                         :title "Permission request"
                         :message (str "Allow tool: " tool "?")}))))))
 
+;; ── extension ui over RPC ──────────────────────────────────────
+
+(defn- ui-request!
+  "Send an extension_ui_request; resolves with the client's response object
+   (or the cancellation drain-pending-ui! hands out on abort and EOF)."
+  [st m]
+  (js/Promise.
+   (fn [resolve _]
+     (let [id (str "ui-" (js/Date.now) "-" (.toString (js/Math.random) 36))]
+       (swap! (:pending-ui st) assoc id resolve)
+       (write-event! (assoc m :type "extension_ui_request" :id id))))))
+
+(defn- ui-value [r] (when-not (.-cancelled r) (.-value r)))
+
+(defn rpc-ui
+  "An extension `api.ui` whose dialogs are pi's extension_ui_request methods,
+   so an extension asking the user works in any pi RPC frontend."
+  [st]
+  (let [tell! (fn [m] (write-event! (assoc m :type "extension_ui_request"
+                                           :id (str "ui-" (js/Date.now) "-" (.toString (js/Math.random) 36)))))]
+    #js {:available true
+         :select  (fn [prompt items _opts]
+                    (let [items (vec (or items []))
+                          by    (into {} (map (fn [i] [(str i) i]) items))]
+                      (-> (ui-request! st {:method "select" :title (str prompt) :options (mapv str items)})
+                          (.then (fn [r] (some->> (ui-value r) (get by)))))))
+         :confirm (fn [message _opts]
+                    (-> (ui-request! st {:method "confirm" :title (str message) :message (str message)})
+                        (.then (fn [r] (true? (.-confirmed r))))))
+         :input   (fn [prompt placeholder _opts]
+                    (-> (ui-request! st (cond-> {:method "input" :title (str prompt)}
+                                          placeholder (assoc :placeholder (str placeholder))))
+                        (.then ui-value)))
+         :editor  (fn [title prefill]
+                    (-> (ui-request! st (cond-> {:method "editor" :title (str title)}
+                                          prefill (assoc :prefill (str prefill))))
+                        (.then ui-value)))
+         :notify  (fn [msg level]
+                    (tell! {:method "notify" :message (str msg)
+                            :notifyType (case (str level) ("warn" "warning") "warning" "error" "error" "info")}))
+         :setWidget (fn [k lines _pos]
+                      (tell! {:method "setWidget" :widgetKey (str k) :widgetLines (vec (or lines []))}))
+         :clearWidget (fn [k] (tell! {:method "setWidget" :widgetKey (str k) :widgetLines nil}))
+         :setEditorValue (fn [v] (tell! {:method "set_editor_text" :text (str v)}))}))
+
 ;; ── command handlers ───────────────────────────────────────────
 
 (defn pi-messages
@@ -832,6 +877,10 @@
         perm-h     (make-permission-handler st)
         events     (:events agent)]
     ((:on events) "permission_request" perm-h)
+    ;; Layered over the headless ui, like ACP's, so methods with no RPC form
+    ;; (overlays, custom components) stay the no-ops they were.
+    (when-let [api (.-extension_api agent)]
+      (aset api "ui" (js/Object.assign #js {} (.-ui api) (rpc-ui st))))
     ;; Not node:readline: it also splits on U+2028/U+2029, which are legal
     ;; inside a JSON string and routine in model output, so one record arrived
     ;; as two unparseable fragments. See agent.utils.jsonl-stdin.
