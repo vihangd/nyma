@@ -319,7 +319,12 @@
   [events store]
   {:name  :tool-tracking
    :enter (fn [ctx]
-            (let [exec-id    (str (js/Date.now) "-" (.toString (js/Math.random) 36))
+            (let [;; The model's own id when the AI SDK gave one, so a
+                  ;; consumer can join tool_execution_* to the toolCall block
+                  ;; in the assistant message (pi-rpc, ACP). Nested script
+                  ;; calls have none and keep a generated id.
+                  exec-id    (or (:tool-call-id ctx)
+                                 (str (js/Date.now) "-" (.toString (js/Math.random) 36)))
                   start-time (js/Date.now)
                   display-fields (extract-display-fields (:tool ctx) (:tool-name ctx) (:args ctx))]
               (when events
@@ -712,6 +717,7 @@
      ;;                 call — answers an `ask`, never a deny
      ;;   :nested?      true — the parent's own result is what gets persisted
      ;;   :signal       AbortSignal the call also stops on
+     ;;   :tool-call-id the AI SDK's toolCallId, used as the execution id
      (fn [tool-name tool args & [opts]]
        (sync-epoch!)
        (let [agent    (when agent-ref @agent-ref)
@@ -720,6 +726,7 @@
                        :preapproved       (or (:preapproved opts) #{})
                        :nested?           (boolean (:nested? opts))
                        :signal            (:signal opts)
+                       :tool-call-id      (:tool-call-id opts)
                        :session-allows    session-allows
                        :tool              tool
                        :args              args
@@ -770,8 +777,10 @@
      (assoc acc tool-name
             (js/Object.assign #js {} t
                               #js {:execute
-                                   (fn [args]
-                                     (let [result-promise ((:execute pipeline) tool-name t args)]
+                                   (fn [args call-opts]
+                                     (let [result-promise ((:execute pipeline) tool-name t args
+                                                           (when-let [id (some-> call-opts .-toolCallId)]
+                                                             {:tool-call-id id}))]
                                        (.then result-promise
                                               (fn [ctx]
                                                 (cond
