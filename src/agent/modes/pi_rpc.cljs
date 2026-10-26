@@ -21,6 +21,12 @@
             [agent.model-info :as model-info]
             [agent.utils.event-json :refer [tool-results]]
             [agent.utils.pi-shape :as shape]
+            [agent.providers.catalog :as catalog]
+            [agent.sessions.compaction :as compaction]
+            [agent.commands.share :as share]
+            [agent.ui.editor-bash :as editor-bash]
+            [agent.thinking :as thinking]
+            ["node:fs" :as fs]
             [clojure.string :as str]))
 
 ;; ── stdout: the one and only protocol writer ───────────────────
@@ -70,19 +76,31 @@
 (defn- session-of [agent]
   (some-> (:session agent) deref))
 
+(defn- auto-compaction? [agent]
+  (try (:enabled? (compaction/settings->opts (compaction/resolve-settings (:settings agent))))
+       (catch :default _ true)))
+
 (defn- get-state-data [agent st]
   (let [s    @(:state agent)
         sess (session-of agent)
         file (when sess (try ((:get-file-path sess)) (catch :default _ nil)))
         name (when sess (try ((:get-session-name sess)) (catch :default _ nil)))]
-    {:model (model-obj agent)
-     :thinkingLevel (or @(:thinking-level agent) "off")
-     :isStreaming @(:streaming? st)
-     :isCompacting @(:compacting? st)
-     :sessionId (or name file "session")
-     :sessionFile (or file "")
-     :messageCount (count (:messages s))
-     :pendingMessageCount (count @(:follow-queue agent))}))
+    (cond-> {:model (model-obj agent)
+             :thinkingLevel (or @(:thinking-level agent) "off")
+             :isStreaming @(:streaming? st)
+             :isCompacting @(:compacting? st)
+             ;; How nyma's loop delivers them; set_*_mode accepts only these.
+             :steeringMode "all"
+             :followUpMode "one-at-a-time"
+             ;; The file's name, not its path: a consumer keys files by it
+             ;; (ThinkRail's todo store does).
+             :sessionId (or (some-> file (str/split #"/") last (str/replace #"\.jsonl$" "")) name "session")
+             :sessionFile (or file "")
+             :autoCompactionEnabled (auto-compaction? agent)
+             :messageCount (count (:messages s))
+             :pendingMessageCount (+ (count (some-> (:steer-queue agent) deref))
+                                     (count @(:follow-queue agent)))}
+      name (assoc :sessionName name))))
 
 ;; ── event translator ───────────────────────────────────────────
 
@@ -210,6 +228,9 @@
   (write-event! {:type "agent_end" :messages @(:run-msgs st) :willRetry false})
   (reset! (:run-msgs st) []))
 
+(defn- compaction-reason [data]
+  (if (= "manual" (some-> data (aget "trigger"))) "manual" "threshold"))
+
 (defn- aborted? [agent]
   (boolean (some-> agent :abort-controller deref .-signal .-aborted)))
 
@@ -325,14 +346,18 @@
                                                    :error? (:isError data)})))))]
 
          ["before_compact"
-          (fn [_]
+          (fn [data]
             (reset! (:compacting? st) true)
-            (write-event! {:type "compaction_start" :reason "overflow"}))]
+            (write-event! {:type "compaction_start" :reason (compaction-reason data)}))]
 
          ["compact"
-          (fn [_]
+          (fn [data]
             (reset! (:compacting? st) false)
-            (write-event! {:type "compaction_end"}))]
+            (write-event! {:type "compaction_end" :reason (compaction-reason data)
+                           :result {:summary (str (or (:summary data) "")) :firstKeptEntryId ""
+                                    :tokensBefore (or (:before data) 0)
+                                    :estimatedTokensAfter (or (:after data) 0)}
+                           :aborted false :willRetry false}))]
 
          ;; A turn is one assistant response plus the tool calls it caused.
          ;; nyma emits turn_start once per run-loop iteration and turn_end once
@@ -452,11 +477,56 @@
                             c)
       :else [])))
 
-(defn- available-models [agent]
-  ;; nyma has no central model catalogue (provider-registry :list yields provider
-  ;; names, not models), so v1 returns the current model. The elisp mapcars this,
-  ;; so it must be a non-empty vector — never nil.
-  [(let [mo (model-obj agent)] {:id (:id mo) :name (:name mo) :provider (:provider mo)})])
+(defn- ->pi-model
+  "A catalogue entry → pi's Model."
+  [agent m]
+  (let [[in out] (:cost m)]
+    {:id (:id m) :name (:name m) :provider (:provider m) :api (:provider m)
+     :reasoning (boolean (:reasoning m)) :input ["text"]
+     :cost {:input (or in 0) :output (or out 0) :cacheRead 0 :cacheWrite 0}
+     :contextWindow (or (:context-window m) 100000)
+     :maxTokens (:maxTokens (model-obj agent))}))
+
+(defn available-models
+  "Every model the provider registry knows, in pi's Model shape. Never empty:
+   the current model stands in when the catalogue has nothing, since the Emacs
+   frontend mapcars the list."
+  [agent]
+  (let [ms (try (catalog/list-all-models ((:list (:provider-registry agent)))
+                                         (:context-window (:model-registry agent)))
+                (catch :default _ []))]
+    (if (seq ms)
+      (mapv #(->pi-model agent %) ms)
+      [(let [mo (model-obj agent)] {:id (:id mo) :name (:name mo) :provider (:provider mo)})])))
+
+(defn- set-model!
+  "Switch through the extension api's setModel, which resolves the provider's
+   model object; false when there is no api to do it."
+  [agent provider model-id]
+  ;; cli.cljs sets it with `.-extension-api`, which squint writes as extension_api
+  (if-let [api (.-extension_api agent)]
+    (do (.setModel api (if (seq (str provider)) (str provider "/" model-id) (str model-id))) true)
+    false))
+
+(defn- session-stats
+  "pi's SessionStats from the store's running totals."
+  [agent]
+  (let [s    @(:state agent)
+        ms   (pi-messages agent)
+        n    (fn [role] (count (filter #(= role (:role %)) ms)))
+        in   (or (:total-input-tokens s) 0)
+        out  (or (:total-output-tokens s) 0)
+        sess (session-of agent)]
+    {:sessionFile (when sess (try ((:get-file-path sess)) (catch :default _ nil)))
+     :sessionId (or (when sess (try ((:get-session-name sess)) (catch :default _ nil))) "session")
+     :userMessages (n "user") :assistantMessages (n "assistant")
+     :toolCalls (n "toolResult") :toolResults (n "toolResult")
+     :totalMessages (count ms)
+     :tokens {:input in :output out
+              :cacheRead (or (:total-cache-read-tokens s) 0)
+              :cacheWrite (or (:total-cache-write-tokens s) 0)
+              :total (+ in out)}
+     :cost (or (:total-cost s) 0)}))
 
 (defn- new-session-path []
   (sessions/new-session-path (str (.. js/process -env -HOME) "/.nyma/sessions")))
@@ -499,6 +569,36 @@
   (let [i (.indexOf thinking-cycle (str cur))]
     (nth thinking-cycle (mod (inc (max 0 i)) (count thinking-cycle)))))
 
+(defn- start-run! [agent st content]
+  (reset! (:running? st) true)
+  (-> (run agent content)
+      (.catch (fn [e] (js/console.error "[pi-rpc] run error:" e)))
+      (.finally (fn [] (reset! (:running? st) false)))))
+
+(defn- cycle-model!
+  "The next catalogue model after the current one, switched to; nil when there
+   is nothing to cycle to."
+  [agent]
+  (let [ms  (available-models agent)
+        cur (model-obj agent)
+        i   (first (keep-indexed (fn [i m] (when (and (= (:id m) (:id cur)) (= (:provider m) (:provider cur))) i)) ms))
+        nxt (when (> (count ms) 1) (nth ms (mod (inc (or i -1)) (count ms))))]
+    (when (and nxt (set-model! agent (:provider nxt) (:id nxt)))
+      {:model (model-obj agent) :thinkingLevel (or @(:thinking-level agent) "off") :isScoped false})))
+
+(defn- ^:async run-bash
+  "pi's BashResult for `command`, run the way `!cmd` runs in the TUI. Unless
+   the client excludes it, the output joins the context as the user's own
+   message, as pi's bash execution does."
+  [agent command exclude?]
+  (let [r   (js-await (editor-bash/run-bash! agent command))
+        out (editor-bash/format-bash-output r)]
+    (when-not exclude?
+      ((:dispatch! (:store agent)) :message-added
+                                   {:message {:role "user" :content (str "$ " command "\n" out)}}))
+    {:output (str (or (:stdout r) "") (when (seq (:stderr r)) (str (when (seq (:stdout r)) "\n") (:stderr r))))
+     :exitCode (:exit-code r) :cancelled (boolean (:blocked? r)) :truncated false}))
+
 (defn ^:async handle-line
   "Dispatch one JSONL command line. Every branch must emit a response (or resolve a
    pending dialog) — the elisp blocks on the id otherwise."
@@ -509,20 +609,27 @@
       (case type
         "prompt"
         ;; Guard against overlapping runs: a prompt arriving mid-turn would start
-        ;; a second `run` sharing the same accumulator/state atoms and interleave
-        ;; deltas. Deliver it as a follow-up (after the current turn) instead.
-        (if @(:running? st)
-          (do (follow-up agent {:role "user" :content (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))})
-              (write-response! cmd))
-          (do (reset! (:running? st) true)
-              (write-response! cmd)
-              (-> (run agent (content/prompt-content (.-message cmd) (content/cmd-attachments cmd)))
-                  (.catch (fn [e] (js/console.error "[pi-rpc] run error:" e)))
-                  (.finally (fn [] (reset! (:running? st) false))))))
+        ;; a second `run` sharing the same state atoms and interleave deltas.
+        ;; Queue it the way the client asked (pi's streamingBehavior), as a
+        ;; follow-up by default.
+        (let [msg {:role "user" :content (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))}]
+          (if @(:running? st)
+            (do (if (= "steer" (.-streamingBehavior cmd)) (steer agent msg) (follow-up agent msg))
+                (write-response! cmd {:disposition "queued"}))
+            (do (start-run! agent st (:content msg))
+                (write-response! cmd {:disposition "started"}))))
 
         "steer"
         (do (steer agent {:role "user" :content (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))})
-            (write-response! cmd))
+            (write-response! cmd {:disposition "queued"}))
+
+        "follow_up"
+        (let [c (content/prompt-content (.-message cmd) (content/cmd-attachments cmd))]
+          (if @(:running? st)
+            (do (follow-up agent {:role "user" :content c})
+                (write-response! cmd {:disposition "queued"}))
+            (do (start-run! agent st c)
+                (write-response! cmd {:disposition "handled"}))))
 
         "clear_queue"
         ;; Remove queued steering and follow-up messages and hand their text
@@ -552,13 +659,11 @@
         (write-response! cmd {:text (last-assistant-text agent)})
 
         "get_session_stats"
-        (let [msgs (:messages @(:state agent))]
-          (write-response! cmd {:tokens {:input 0 :output 0 :total 0 :cacheRead 0 :cacheWrite 0}
-                                :cost 0
-                                :userMessages (count (filter #(= (:role %) "user") msgs))
-                                :toolCalls 0}))
+        (write-response! cmd (session-stats agent))
 
         "set_model"
+        (if (and (.-modelId cmd) (set-model! agent (.-provider cmd) (.-modelId cmd)))
+          (write-response! cmd (model-obj agent))
         (do (when-let [m (.-modelId cmd)]
               (set! (.-model (:config agent)) m)
               ;; A client may send a model without a provider. Leaving the
@@ -578,7 +683,46 @@
                     (aset (:config agent) "active-provider-name" nil)))))
             (when-let [p (.-provider cmd)]
               (aset (:config agent) "active-provider-name" p))
-            (write-response! cmd (model-obj agent)))
+            (write-response! cmd (model-obj agent))))
+
+        "cycle_model"
+        (write-response! cmd (cycle-model! agent))
+
+        "get_available_thinking_levels"
+        (write-response! cmd {:levels thinking/levels})
+
+        ;; nyma's loop injects every queued steering message at the next step
+        ;; and drains follow-ups one per turn; there is no other mode to set.
+        "set_steering_mode"
+        (if (= "all" (.-mode cmd))
+          (write-response! cmd)
+          (write-error! cmd "nyma delivers steering messages all at once"))
+
+        "set_follow_up_mode"
+        (if (= "one-at-a-time" (.-mode cmd))
+          (write-response! cmd)
+          (write-error! cmd "nyma delivers follow-ups one at a time"))
+
+        "set_auto_compaction"
+        (if-let [s (:settings agent)]
+          (let [cur (or (:compaction (compaction/resolve-settings s)) {})]
+            ((:set-override s) :compaction (assoc cur :enabled (boolean (.-enabled cmd))))
+            (write-response! cmd))
+          (write-error! cmd "no settings"))
+
+        ;; nyma retries a failed request inside the turn; there is no toggle,
+        ;; and nothing waits between attempts for abort_retry to cut short.
+        "set_auto_retry"
+        (write-error! cmd "nyma's provider retry cannot be switched off")
+
+        "abort_retry"
+        (write-response! cmd)
+
+        "bash"
+        (write-response! cmd (js-await (run-bash agent (str (.-command cmd)) (.-excludeFromContext cmd))))
+
+        "abort_bash"
+        (write-error! cmd "abort_bash is not supported")
 
         "set_thinking_level"
         (do (reset! (:thinking-level agent) (or (.-level cmd) "off"))
@@ -623,10 +767,30 @@
                                                 (or entries []))}))
 
         "compact"
-        (write-response! cmd)
+        (if-let [sess (session-of agent)]
+          (let [r (js-await
+                   (compaction/compact sess (:model (:config agent)) (:events agent)
+                                       (merge (compaction/settings->opts (compaction/resolve-settings (:settings agent)))
+                                              {:model-registry (:model-registry agent)
+                                               :state-atom     (:state agent)
+                                               :force?         true
+                                               :custom-instructions (.-customInstructions cmd)
+                                               :model-key      (model-info/config-model-key (:config agent))})))]
+            (if r
+              (write-response! cmd {:summary "" :firstKeptEntryId ""
+                                    :tokensBefore (:before r) :estimatedTokensAfter (:after r)})
+              (write-error! cmd "Nothing to compact")))
+          (write-error! cmd "no session"))
 
         "export_html"
-        (write-response! cmd {:path ""})
+        (let [sess (session-of agent)
+              file (when sess (try ((:get-file-path sess)) (catch :default _ nil)))
+              out  (or (.-outputPath cmd)
+                       (when file (str/replace file #"\.jsonl$" ".html"))
+                       (str (js/process.cwd) "/session.html"))]
+          (fs/writeFileSync out (share/messages->html (:messages @(:state agent))
+                                                      (or (when sess ((:get-session-name sess))) "session")))
+          (write-response! cmd {:path out}))
 
         "extension_ui_response"
         (let [id (.-id cmd)
