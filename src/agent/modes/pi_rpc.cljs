@@ -22,6 +22,7 @@
             [agent.utils.event-json :refer [tool-results]]
             [agent.utils.pi-shape :as shape]
             [agent.providers.catalog :as catalog]
+            [agent.pricing :as pricing]
             [agent.sessions.compaction :as compaction]
             [agent.commands.share :as share]
             [agent.ui.editor-bash :as editor-bash]
@@ -69,9 +70,14 @@
         cw   (try ((:context-window (:model-registry agent))
                    (model-info/model-key prov m))
                   (catch :default _ nil))]
-    {:id mid :name mid :provider prov :api prov
-     :contextWindow (or cw 100000)
-     :maxTokens (or (aget cfg "max-tokens") (.-maxTokens cfg) 8192)}))
+    ;; pi's Model shape: a client reads cost, reasoning and input off it
+    ;; (ThinkRail's model picker reads model.cost.input).
+    (let [[in out] (try (pricing/lookup-cost (model-info/model-key prov m)) (catch :default _ nil))]
+      {:id mid :name mid :provider prov :api prov :baseUrl ""
+       :reasoning false :input ["text"]
+       :cost {:input (or in 0) :output (or out 0) :cacheRead 0 :cacheWrite 0}
+       :contextWindow (or cw 100000)
+       :maxTokens (or (aget cfg "max-tokens") (.-maxTokens cfg) 8192)})))
 
 (defn- session-of [agent]
   (some-> (:session agent) deref))
@@ -548,7 +554,7 @@
                 (catch :default _ []))]
     (if (seq ms)
       (mapv #(->pi-model agent %) ms)
-      [(let [mo (model-obj agent)] {:id (:id mo) :name (:name mo) :provider (:provider mo)})])))
+      [(model-obj agent)])))
 
 (defn- set-model!
   "Switch through the extension api's setModel, which resolves the provider's
