@@ -673,11 +673,15 @@
                       ;; The project file's own `permissions.allow` is pinned
                       ;; out (`strip-project-widening`): a checked-out repo must
                       ;; not be able to pre-approve its own shell.
+                       ;; Plus this run's overrides (`--settings`): the CLI is a
+                       ;; trusted source too — see settings-source pinning.
                        (let [gs            @global-settings
                              global-allow  (or (some-> gs .-permissions .-allow) #js [])
                              project-allow (or (some-> gs .-permissions .-projects (aget (js/process.cwd)) .-allow) #js [])
+                             run-allow     (or (get-in @overrides [:permissions :allow]) [])
                              all-allowed   (into #{} (concat (js/Array.from global-allow)
-                                                             (js/Array.from project-allow)))]
+                                                             (js/Array.from project-allow)
+                                                             run-allow))]
                          (contains? all-allowed tool-name)))
 
       ;; bash command PATTERNS granted with "Allow always" — in the USER's

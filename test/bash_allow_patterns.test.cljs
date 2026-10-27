@@ -136,3 +136,13 @@
 
 (describe "/permissions and old grants"
           (fn [] (it "flags a whole-tool bash grant" test-legacy-bash-grant-flagged)))
+
+(describe "run overrides"
+          (fn []
+            (it "a tool allowed in --settings is allowed for the run; the files are untouched"
+                (fn []
+                  (let [settings (temp-settings)]
+                    (-> (expect ((:tool-allowed? settings) "todo_write")) (.toBe false))
+                    ((:apply-overrides settings) {:permissions {:allow ["todo_write"]}})
+                    (-> (expect ((:tool-allowed? settings) "todo_write")) (.toBe true))
+                    (-> (expect ((:tool-allowed? settings) "write")) (.toBe false)))))))
