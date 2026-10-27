@@ -204,7 +204,7 @@
    messages of its tool calls. Returns [message results], or nil if none open."
   [st fields]
   (when-let [m @(:msg st)]
-    (let [final   (merge m fields)
+    (let [final   (update (merge m fields) :content shape/split-think)
           results @(:results st)]
       (reset! (:msg st) nil)
       (reset! (:text-i st) nil)

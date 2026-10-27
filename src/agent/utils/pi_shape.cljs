@@ -9,6 +9,7 @@
    what ThinkRail renders from."
   (:require [agent.utils.content :as content]
             [agent.utils.event-json :refer [step-usage]]
+            [agent.ui.think-tag-parser :as think]
             [clojure.string :as str]))
 
 (defn part->pi
@@ -73,6 +74,21 @@
   [{:keys [api provider model]}]
   {:role "assistant" :content [] :api (or api "") :provider (or provider "")
    :model (or model "") :usage (usage nil) :stopReason "stop" :timestamp (js/Date.now)})
+
+(defn split-think
+  "Text blocks carrying a model's inline `<think>…</think>` become a thinking
+   block and a text block, as pi's message has them. The conservative split
+   (no orphan-closer guess): a consumer stores this message, and a false
+   positive there would cut real answer text."
+  [content]
+  (vec (mapcat (fn [b]
+                 (if (and (= "text" (:type b)) (re-find #"(?i)<think" (str (:text b))))
+                   (let [{:keys [reasoning text]} (think/split-blocks* (str (:text b)) false)]
+                     (cond-> []
+                       (seq reasoning)       (conj {:type "thinking" :thinking reasoning})
+                       (seq (str/trim text)) (conj {:type "text" :text text})))
+                   [b]))
+               content)))
 
 (defn add-block
   "`msg` with `block` appended → [msg index]."

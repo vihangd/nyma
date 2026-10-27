@@ -168,4 +168,15 @@
                     (-> (expect (mapv :role ms)) (.toEqual #js ["user" "assistant" "toolResult" "toolResult" "assistant"]))
                     (-> (expect (mapv :id (:content (second ms)))) (.toEqual #js ["c1" "c2"]))
                     (-> (expect (:stopReason (second ms))) (.toBe "toolUse"))
-                    (-> (expect (:text (first (:content (nth ms 2))))) (.toBe "A")))))))
+                    (-> (expect (:text (first (:content (nth ms 2))))) (.toBe "A")))))
+
+            (it "splits a model's inline think tags into a thinking block"
+                (fn []
+                  (-> (expect (clj->js (shape/split-think [{:type "text" :text "<think>plan it</think>\n\nnoted"}
+                                                           {:type "toolCall" :id "c1"}])))
+                      (.toEqual (clj->js [{:type "thinking" :thinking "plan it"}
+                                          {:type "text" :text "noted"}
+                                          {:type "toolCall" :id "c1"}])))
+                  ;; prose that only mentions a closer is left alone
+                  (-> (expect (clj->js (shape/split-think [{:type "text" :text "use </think> to close"}])))
+                      (.toEqual (clj->js [{:type "text" :text "use </think> to close"}])))))))
