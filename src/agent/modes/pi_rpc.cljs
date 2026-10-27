@@ -710,8 +710,8 @@
         ;; Without a provider, the path below decides which one the id belongs to.
         (if (and (.-modelId cmd) (.-provider cmd) (set-model! agent (.-provider cmd) (.-modelId cmd)))
           (write-response! cmd (model-obj agent))
-        (do (when-let [m (.-modelId cmd)]
-              (set! (.-model (:config agent)) m)
+          (do (when-let [m (.-modelId cmd)]
+                (set! (.-model (:config agent)) m)
               ;; A client may send a model without a provider. Leaving the
               ;; PREVIOUS provider name attached to the NEW id produced a
               ;; provider-qualified key for a pair that never existed, and
@@ -720,16 +720,16 @@
               ;; registry actually knows that pair; otherwise drop it and let
               ;; the key degrade to a bare id, which is merely ambiguous
               ;; rather than wrong.
-              (when-not (.-provider cmd)
-                (let [prov (aget (:config agent) "active-provider-name")
-                      mr   (:model-registry agent)
-                      known? (and mr (seq (str (or prov "")))
-                                  (some? ((:get mr) (str prov "/" m))))]
-                  (when-not known?
-                    (aset (:config agent) "active-provider-name" nil)))))
-            (when-let [p (.-provider cmd)]
-              (aset (:config agent) "active-provider-name" p))
-            (write-response! cmd (model-obj agent))))
+                (when-not (.-provider cmd)
+                  (let [prov (aget (:config agent) "active-provider-name")
+                        mr   (:model-registry agent)
+                        known? (and mr (seq (str (or prov "")))
+                                    (some? ((:get mr) (str prov "/" m))))]
+                    (when-not known?
+                      (aset (:config agent) "active-provider-name" nil)))))
+              (when-let [p (.-provider cmd)]
+                (aset (:config agent) "active-provider-name" p))
+              (write-response! cmd (model-obj agent))))
 
         "cycle_model"
         (write-response! cmd (cycle-model! agent))
@@ -848,7 +848,12 @@
         ;; Unknown command — still answer so the elisp doesn't hang on the id.
         (write-error! cmd (str "Unknown command: " type))))
     (catch :default e
-      (js/console.error "[pi-rpc] handle-line error:" e))))
+      ;; A command that throws still answers, with the error: a client
+      ;; waiting on the id would otherwise hang (set_model to a provider with
+      ;; no key throws, and ThinkRail timed out session.create on it).
+      (if-let [cmd (try (js/JSON.parse line) (catch :default _ nil))]
+        (write-error! cmd (or (.-message e) (str e)))
+        (js/console.error "[pi-rpc] handle-line error:" e)))))
 
 ;; ── start ──────────────────────────────────────────────────────
 

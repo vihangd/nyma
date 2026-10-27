@@ -46,6 +46,18 @@
 
 (describe "pi-rpc commands"
           (fn []
+            (it "a command that throws still answers, with the error"
+                ^:async (fn []
+                          ;; set_model to a provider with no key throws inside
+                          ;; setModel; ThinkRail waited 60s on session.create for it
+                          (let [a  (make-agent)
+                                st (pi/new-st)]
+                            (aset a "extension_api" #js {:setModel (fn [_] (throw (js/Error. "No anthropic API key.")))})
+                            (let [r (js-await (call a st {:type "set_model" :provider "anthropic" :modelId "x" :id "7"}))]
+                              (-> (expect (.-success r)) (.toBe false))
+                              (-> (expect (.-id r)) (.toBe "7"))
+                              (-> (expect (.-error r)) (.toBe "No anthropic API key."))))))
+
             (it "steer and follow_up while running answer queued and fill their queues"
                 ^:async (fn []
                           (let [a  (make-agent)
