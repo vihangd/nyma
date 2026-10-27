@@ -277,6 +277,8 @@ Session:
                          Append text to the system prompt for this run.
   -e, --extension <path> Load an extension file, or a pi package directory's
                          extensions and skills, for this run. Repeatable.
+      --settings <json>  Settings for this run, over both settings files
+                         (e.g. '{\"extensions\":{\"todos\":false}}').
   -w, --worktree <name>  Work in git worktree <name> (.nyma/worktrees/<name>, branch
                          nyma/<name>), created off HEAD the first time and reused
                          after. Your checkout is never touched. /worktrees lists them.
@@ -614,6 +616,12 @@ Examples:
         ((:append session) {:role "session-meta" :metadata {:cwd (js/process.cwd)}}))
       session)))
 
+(defn settings-arg
+  "`--settings` text → the settings map, or nil unless it is a JSON object."
+  [raw]
+  (let [m (try (js/JSON.parse (str raw)) (catch :default _ nil))]
+    (when (and (object? m) (not (array? m))) m)))
+
 (defn parse-args-error
   "One line for a `parseArgs` throw, or nil when it is not one we can phrase.
 
@@ -689,6 +697,7 @@ Examples:
        ;; pi's flag: load an extension file, or a pi package's extensions and
        ;; skills, for this run. Repeatable.
        :extension    #js {:type "string" :short "e" :multiple true}
+       :settings     #js {:type "string"}
        ;; Run the whole session in a git worktree of this repo.
        :worktree     #js {:type "string" :short "w"}})
 
@@ -765,6 +774,14 @@ Examples:
             (aset js/process.env "NYMA_ONE_SHOT" "1"))
         _         (js-await (resolve-trust! values mode))
         settings  (create-settings-manager)
+        ;; --settings: this run's overrides, above both files. A frontend that
+        ;; launches nyma (ThinkRail turning off nyma's todos for its own) sets
+        ;; what it needs without touching the user's files.
+        _         (when-let [raw (:settings values)]
+                    (if-let [m (settings-arg raw)]
+                      ((:apply-overrides settings) m)
+                      (do (.write (.-stderr js/process) "nyma: --settings takes a JSON object\n")
+                          (js/process.exit 2))))
         merged    ((:get settings))
         ;; Say so if the settings file contains keys that do nothing. Emitted
         ;; here, before the TUI starts, which is the one point where writing to

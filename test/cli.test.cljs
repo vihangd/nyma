@@ -9,7 +9,7 @@
             ["node:os" :as os]
             ["node:util" :refer [parseArgs]]
             [agent.cli :refer [resolve-ext-flags resolve-model-via-registry help-text
-                               parse-args-error error-line resolve-session cli-options
+                               parse-args-error error-line resolve-session cli-options settings-arg
                                interactive-resources output-format-error]]))
 
 ;; ── output-format-error ────────────────────────────────────
@@ -379,3 +379,11 @@
             (it "stays quiet when --session says what to use" test-print-mode-with-session-is-quiet)
             (it "stays quiet when there IS a session to continue"
                 test-interactive-is-quiet-with-sessions)))
+
+(describe "settings-arg" (fn []
+  (it "takes a JSON object and nothing else"
+      (fn []
+        (-> (expect (get-in (settings-arg "{\"extensions\":{\"todos\":false}}") [:extensions :todos])) (.toBe false))
+        (-> (expect (settings-arg "[1]")) (.toBeUndefined))
+        (-> (expect (settings-arg "nope")) (.toBeUndefined))
+        (-> (expect (settings-arg "null")) (.toBeUndefined))))))
