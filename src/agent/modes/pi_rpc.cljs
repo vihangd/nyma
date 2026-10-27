@@ -21,7 +21,6 @@
             [agent.model-info :as model-info]
             [agent.utils.event-json :refer [tool-results]]
             [agent.utils.pi-shape :as shape]
-            [agent.providers.catalog :as catalog]
             [agent.pricing :as pricing]
             [agent.sessions.compaction :as compaction]
             [agent.commands.share :as share]
@@ -527,7 +526,9 @@
   [agent m]
   (let [[in out] (:cost m)]
     {:id (:id m) :name (:name m) :provider (:provider m) :api (:provider m)
-     :reasoning (boolean (:reasoning m)) :input ["text"]
+     ;; Unknown counts as yes: a client offers thinking levels off this, and
+     ;; nyma clamps per provider anyway; GLM refuses "off" outright.
+     :reasoning (not (false? (:reasoning m))) :input ["text"]
      :cost {:input (or in 0) :output (or out 0) :cacheRead 0 :cacheWrite 0}
      :contextWindow (or (:context-window m) 100000)
      :maxTokens (:maxTokens (model-obj agent))}))
@@ -537,9 +538,8 @@
    the current model stands in when the catalogue has nothing, since the Emacs
    frontend mapcars the list."
   [agent]
-  (let [ms (try (catalog/list-all-models ((:list (:provider-registry agent)))
-                                         (:context-window (:model-registry agent)))
-                (catch :default _ []))]
+  ;; Most recently used first, as /model orders its picker.
+  (let [ms (try (builtins/current-models agent) (catch :default _ []))]
     (if (seq ms)
       (mapv #(->pi-model agent %) ms)
       [(model-obj agent)])))
