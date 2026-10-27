@@ -3,7 +3,8 @@
 //
 // A compiled nyma cannot read package.json: there are no files inside the
 // binary, and `--compile-autoload-package-json` defaults to false anyway. So
-// the version has to be baked in at build time.
+// the version has to be baked in at build time. (The bundle scripts do turn
+// that autoload on, for on-disk extensions; it reads their package.json, not ours.)
 //
 // This runs as part of `bun run build`, which every `bundle:*` script calls
 // first — so the constant cannot go stale and needs no drift test. Do not edit

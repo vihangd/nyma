@@ -48,6 +48,18 @@
             ;; parse, so startup did not move (40ms both ways) while the binary
             ;; went 94.6MB -> 89.3MB. Pinned so a target cannot quietly ship
             ;; 5MB heavier than its siblings.
+            ;; Measured on Bun 1.4.4: without it a compiled nyma ignores the
+            ;; package.json of every on-disk package an extension imports, so
+            ;; only a package with a root index.js resolves. ThinkRail's rails
+            ;; failed on `typebox` and `@earendil-works/pi-ai` (exports-only)
+            ;; while the same files loaded from dist/.
+            (it "every compile target reads on-disk package.json"
+                (fn []
+                  (doseq [[name cmd] (bundle-scripts)]
+                    (when (str/includes? cmd "--compile")
+                      (-> (expect (str name ": " (str/includes? cmd "--compile-autoload-package-json")))
+                          (.toBe (str name ": true")))))))
+
             (it "every compile target is minified"
                 (fn []
                   (doseq [[name cmd] (bundle-scripts)]
