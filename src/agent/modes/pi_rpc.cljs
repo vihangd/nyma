@@ -449,29 +449,6 @@
       (doseq [q queues] (remove-watch q :pi-rpc-queue))
       (when unsub-store (unsub-store)))))
 
-;; ── permission reverse-RPC ─────────────────────────────────────
-
-(defn- make-permission-handler
-  "emit-collect handler on permission_request. Pops a `confirm` dialog in Emacs and
-   blocks (returns a Promise) until extension_ui_response arrives, then returns a
-   concrete {decision} that composes with the mode/role policy via precedence."
-  [st]
-  (fn [data]
-    (js/Promise.
-     (fn [resolve _reject]
-       (let [id   (str "perm-" (js/Date.now) "-" (.toString (js/Math.random) 36))
-             tool (str (.-tool data))]
-         (swap! (:pending-ui st) assoc id
-                (fn [resp]
-                  (resolve (if (.-confirmed resp)
-                             #js {:decision "allow"}
-                             #js {:decision "deny"}))))
-         (write-event! {:type "extension_ui_request"
-                        :id id
-                        :method "confirm"
-                        :title "Permission request"
-                        :message (str "Allow tool: " tool "?")}))))))
-
 ;; ── extension ui over RPC ──────────────────────────────────────
 
 (defn- ui-request!
@@ -488,7 +465,11 @@
 
 (defn rpc-ui
   "An extension `api.ui` whose dialogs are pi's extension_ui_request methods,
-   so an extension asking the user works in any pi RPC frontend."
+   so an extension asking the user works in any pi RPC frontend. The
+   permission gate asks through it too: the user's permission mode decides,
+   as in the TUI, and an ask arrives as a select of Allow once / for this
+   session / always / Deny. (Before dialogs went over RPC, pi-rpc confirmed
+   every tool call, read-only ones included.)"
   [st]
   (let [tell! (fn [m] (write-event! (assoc m :type "extension_ui_request"
                                            :id (str "ui-" (js/Date.now) "-" (.toString (js/Math.random) 36)))))]
@@ -889,17 +870,14 @@
    :pending-ui    (atom {})})
 
 (defn ^:async start
-  "Enter pi-rpc mode: wire the event translator + permission handler, then read
+  "Enter pi-rpc mode: wire the event translator and the RPC-backed ui, then read
    JSONL commands from stdin until EOF. Returns a cleanup thunk.
    `on-eof` runs after stdin closes; cli exits there, as pi's rpc mode does,
    so a frontend that dies does not leave the agent (and its MCP servers)
    running."
   [agent & [{:keys [on-eof]}]]
   (let [st         (new-st)
-        unsub      (subscribe-events! agent st)
-        perm-h     (make-permission-handler st)
-        events     (:events agent)]
-    ((:on events) "permission_request" perm-h)
+        unsub      (subscribe-events! agent st)]
     ;; Layered over the headless ui, like ACP's, so methods with no RPC form
     ;; (overlays, custom components) stay the no-ops they were.
     (when-let [api (.-extension_api agent)]
@@ -918,6 +896,5 @@
                          (when on-eof (on-eof))))]
       (fn []
         (unsub)
-        ((:off events) "permission_request" perm-h)
         (drain-pending-ui! st #js {:confirmed false :cancelled true})
         (stop-reading)))))
