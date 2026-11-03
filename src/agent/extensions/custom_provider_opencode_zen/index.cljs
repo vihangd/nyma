@@ -1,5 +1,7 @@
 (ns agent.extensions.custom-provider-opencode-zen.index
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+            [agent.debug :as d]
+            [agent.providers.model-fetch :as model-fetch]
             [agent.utils.credentials :as credentials]
             [agent.utils.reasoning-stream :as rs]
             [agent.utils.toolcall-rescue :as rescue]))
@@ -21,8 +23,16 @@
 ;; endpoint is public but returns only {id, object, created, owned_by}, with no
 ;; window and no pricing, so it cannot answer this question. Checked directly.
 ;;
-;; `ling-2.6-flash` is the one model models.dev doesn't list; it has no :ctx and
-;; falls back to the registry default. That omission is known, not an oversight.
+;; This list is the SEED and the metadata, not the catalogue: Zen adds and
+;; retires models without notice (by 2026-11 most of these ids were gone and
+;; ~50 new ones missing), so the live ids come from GET /zen/v1/models via
+;; model-fetch, cached for a day. That endpoint carries ids only, so a listed
+;; id keeps its name, window and price from here; an id not listed here gets
+;; the registry's window and the :chat protocol, which Zen serves for every
+;; family (claude, gemini and gpt included — checked directly).
+;;
+;; Free models answer FreeUsageLimitError outside OpenCode's own client unless
+;; the account has an OpenCode Go subscription; that is Zen's policy.
 (def ^:private models
   [;; ── Free ────────────────────────────────────────────────────────────────
    {:id "gpt-5-nano"           :name "GPT-5 Nano (free)"           :protocol :responses :ctx 400000 :cost {:input 0   :output 0 :cache-read 0.005}}
@@ -57,8 +67,15 @@
    {:id "qwen3.5-plus"        :name "Qwen 3.5 Plus"               :protocol :chat              :ctx 262144 :cost {:input 0.20 :output 1.20 :cache-read 0.02}}
    {:id "qwen3.6-plus"        :name "Qwen 3.6 Plus"               :protocol :chat              :ctx 262144 :cost {:input 0.50 :output 3.00 :cache-read 0.05}}])
 
-(def ^:private protocol-by-id
-  (into {} (map (juxt :id :protocol) models)))
+(def ^:private known-by-id
+  (into {} (map (juxt :id identity) models)))
+
+(defn with-known
+  "Discovered ids, with what this file knows about each. Zen's list carries no
+   names, windows or prices, so the known entry fills them; an unknown id stays
+   as discovered (its name is its id)."
+  [discovered]
+  (mapv (fn [m] (merge m (get known-by-id (:id m)))) discovered))
 
 (defn- ->js-model [{:keys [id name ctx cost]}]
   (let [base #js {:id id :name name}]
@@ -92,7 +109,7 @@
               (str "No OpenCode Zen credentials found. Set the OPENCODE_ZEN_API_KEY "
                    "env var or run /login opencode-zen to save a key. "
                    "Sign up at https://opencode.ai/auth"))))
-    (let [protocol (get protocol-by-id id :chat)
+    (let [protocol (get-in known-by-id [id :protocol] :chat)
           opts     #js {:apiKey  key
                         :baseURL (resolve-base-url)}]
       ;; Zen proxies some chat-protocol models (e.g. big-pickle → DeepSeek)
@@ -132,12 +149,25 @@
     (reset! rescue-enabled?
             (rescue/enabled-for? settings provider-name "*" override))
     (reset! active-tools-atom (rescue/active-tools-fn api)))
-  (.registerProvider api provider-name
-                     #js {:createModel create-oc-zen-model
-                          :baseUrl     default-base-url
-                          :apiKeyEnv   "OPENCODE_ZEN_API_KEY"
-                          :api         "openai-compatible"
-                          :models      (clj->js (mapv ->js-model models))})
-
-  (fn []
-    (.unregisterProvider api provider-name)))
+  (let [disposed? (atom false)
+        register! (fn [ms]
+                    (when-not @disposed?
+                      (.registerProvider api provider-name
+                                         #js {:createModel create-oc-zen-model
+                                              :baseUrl     default-base-url
+                                              :apiKeyEnv   "OPENCODE_ZEN_API_KEY"
+                                              :api         "openai-compatible"
+                                              :models      (clj->js (mapv ->js-model ms))})))
+        all       (constantly true)
+        cached    (model-fetch/cached-models provider-name all)]
+    ;; The cached list (or the seed) now; a stale cache refreshes in the
+    ;; background and re-registers, never blocking startup.
+    (register! (if cached (with-known (:models cached)) models))
+    (when (and (not (:fresh? cached)) (not (model-fetch/discovery-disabled?)))
+      (when-let [key (resolve-api-key)]
+        (-> (model-fetch/refresh! provider-name (resolve-base-url) key all nil)
+            (.then (fn [fresh] (when (seq fresh) (register! (with-known fresh)))))
+            (.catch (fn [e] (d/warn "opencode-zen" (str "model discovery failed: " (.-message e))))))))
+    (fn []
+      (reset! disposed? true)
+      (.unregisterProvider api provider-name))))

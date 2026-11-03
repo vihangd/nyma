@@ -198,15 +198,7 @@
         srv-ids  (set (map :id from-srv))]
     (vec (concat from-srv (remove #(contains? srv-ids (str (:id %))) settings-models)))))
 
-(defn discovery-disabled?
-  "Local discovery is skipped for the same reasons the relay path skips it: an
-   explicit opt-out, or a one-shot run that resolves a single named model from
-   the seed list and has no picker to populate."
-  []
-  (let [off (str (or (aget js/process.env "NYMA_NO_MODEL_DISCOVERY") ""))
-        one (str (or (aget js/process.env "NYMA_ONE_SHOT") ""))]
-    (or (and (seq off) (not= "0" off) (not= "false" off))
-        (= "1" one))))
+(def discovery-disabled? model-fetch/discovery-disabled?)
 
 (defn ^:async fetch-server-models
   "GET <base>/models. Returns the raw data array, or nil — a local endpoint that

@@ -454,6 +454,17 @@
 
 ;; ── Orchestration ────────────────────────────────────────────
 
+(defn discovery-disabled?
+  "NYMA_NO_MODEL_DISCOVERY=1 suppresses every catalogue fetch, so `bun test` on a
+   machine that exports a provider key makes no live calls; a one-shot run
+   (NYMA_ONE_SHOT=1, set by cli.cljs for print/json mode) resolves the single
+   model it was given from the seed list and has no picker to populate."
+  []
+  (let [off (str (or (aget js/process.env "NYMA_NO_MODEL_DISCOVERY") ""))
+        one (str (or (aget js/process.env "NYMA_ONE_SHOT") ""))]
+    (or (and (seq off) (not= "0" off) (not= "false" off))
+        (= "1" one))))
+
 (defn ^:async refresh!
   "Fetch, filter, decorate, cache. Returns the new model list, or nil when
    unavailable. Callers use nil to mean \"keep whatever you already registered\".
