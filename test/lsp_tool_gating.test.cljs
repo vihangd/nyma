@@ -108,6 +108,24 @@
           (-> (expect (contains? (cfg/workspace-extensions d) ".npmrc")) (.toBe false))
           (fs/rmSync d #js {:recursive true :force true}))))
 
+  (it "does not walk HOME, which reaches ~/Library's protected folders"
+      (fn []
+        (let [d    (fs/mkdtempSync (path/join (os/tmpdir) "nyma-lsp-"))
+              orig (.. js/process -env -HOME)]
+          (fs/writeFileSync (path/join d "a.js") "x")
+          (aset (.-env js/process) "HOME" d)
+          (try
+            (-> (expect (cfg/workspace-extensions d)) (.toEqual #{}))
+            (finally (aset (.-env js/process) "HOME" orig)))
+          (fs/rmSync d #js {:recursive true :force true}))))
+
+  (it "stops after max-entries"
+      (fn []
+        (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-lsp-"))]
+          (doseq [i (range 5)] (fs/writeFileSync (path/join d (str "f" i ".ext" i)) "x"))
+          (-> (expect (count (cfg/workspace-extensions d {:max-entries 2}))) (.toBe 1))
+          (fs/rmSync d #js {:recursive true :force true}))))
+
   (it "an unreadable directory is not fatal"
       (fn []
         (-> (expect (cfg/workspace-extensions "/definitely/not/here")) (.toEqual #{}))))))

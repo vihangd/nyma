@@ -1,6 +1,7 @@
 (ns agent.extensions.lsp-suite.lsp-config
   "Load and merge LSP server configuration from .nyma/settings.json."
   (:require [agent.tool-metadata :as tm]
+            [agent.utils.home :as home]
             [agent.trust :as trust]
             ["node:fs" :as fs]
             ["node:path" :as path]
@@ -63,16 +64,24 @@
   "File extensions actually present under `cwd`, dotted to match the catalog —
    `.rb`, not `rb`. Depth-limited and skips the usual dead weight, because this
    runs once at activation and the answer only has to be good enough to tell
-   `there is Ruby here` from `there is not`."
-  [cwd & [{:keys [max-depth]}]]
-  (let [limit (or max-depth 4)
-        found (atom #{})]
+   `there is Ruby here` from `there is not`.
+
+   HOME is not a workspace and is not walked: the walk is synchronous, and from
+   HOME it reaches ~/Library, whose privacy-protected folders can hold an open()
+   for a minute or more — measured, a pi-rpc nyma started in HOME (ThinkRail's
+   model-list child) answered its first command after 30-85 s. `max-entries`
+   bounds a large tree the same way."
+  [cwd & [{:keys [max-depth max-entries]}]]
+  (let [limit  (or max-depth 4)
+        budget (atom (or max-entries 20000))
+        found  (atom #{})]
     (letfn [(walk [dir depth]
-              (when (< depth limit)
+              (when (and (< depth limit) (pos? @budget))
                 (try
                   (doseq [entry (fs/readdirSync dir #js {:withFileTypes true})]
                     (let [nm (.-name entry)]
                       (cond
+                        (not (pos? (swap! budget dec))) nil
                         (and (.isDirectory entry)
                              (not (.startsWith nm "."))
                              (not (contains? #{"node_modules" "dist" "target"
@@ -84,7 +93,8 @@
                           (when (pos? i)
                             (swap! found conj (.slice nm i)))))))
                   (catch :default _e nil))))]
-      (walk cwd 0))
+      (when-not (= (path/resolve cwd) (path/resolve (home/dir)))
+        (walk cwd 0)))
     @found))
 
 (defn any-server-available?
