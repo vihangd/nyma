@@ -409,6 +409,26 @@
           (-> (expect (printable-char (wrap-paste "sk-ant-api03-XYZ")))
               (.toBe "sk-ant-api03-XYZ"))))
 
+    (it "a pasted key reaches the input picker's result, not just printable-char"
+        (fn []
+          (let [got  (atom :unset)
+                comp (adapt-component
+                      (make-input-picker "Key" "" (fn [v] (reset! got v)) nil true)
+                      {})]
+            ((.-handleInput comp) "a")
+            ((.-handleInput comp) (wrap-paste "sk-ant-api03-XYZ"))
+            ((.-handleInput comp) "b")
+            ((.-handleInput comp) ENTER)
+            (-> (expect @got) (.toBe "ask-ant-api03-XYZb")))))
+
+    (it "a secret input never renders its text"
+        (fn []
+          (let [p (make-input-picker "Key" "" (fn [_] nil) nil true)]
+            ((.-onInput p) "sk-secret" (data->key "x"))
+            (let [out ((.-render p) 100 30)]
+              (-> (expect out) (.toContain "•••••••••"))
+              (-> (expect out) (.not.toContain "sk-secret"))))))
+
     (it "strips control characters so a multi-line paste can't corrupt the field"
         (fn []
           (-> (expect (printable-char (wrap-paste "line1\nline2")))

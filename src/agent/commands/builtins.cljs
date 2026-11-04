@@ -608,8 +608,10 @@
   (let [cred-path (creds-util/credentials-path)]
     (if-not (and ctx (.-ui ctx) (.-input (.-ui ctx)))
       (notify ctx "Login requires interactive mode" "error")
-      (let [key (js-await (.input (.-ui ctx) (str "API key for " provider ":") "sk-..."))]
-        (when (and key (seq (.trim key)))
+      (let [key (js-await (.input (.-ui ctx) (str "API key for " provider ":") "sk-..."
+                                       #js {:secret true}))]
+        (if-not (and key (seq (.trim key)))
+          (notify ctx "No API key entered, nothing saved" "warning")
           (let [{:keys [ok error]} (creds-util/read-for-write)]
             (if error
               ;; Never rewrite a file we could not read: "unparseable" and

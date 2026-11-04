@@ -401,8 +401,10 @@
    Deliberately not built on `render-frame` — that renders a windowed list
    and this is one line. Width is still capped so a long value can't overflow
    the overlay box; pi-tui wraps over-wide rows, and a wrapped row throws off
-   the differential renderer's line accounting."
-  [prompt placeholder on-resolve width-fn]
+   the differential renderer's line accounting.
+
+   `secret?` shows bullets instead of the text, for an API key."
+  [prompt placeholder on-resolve width-fn secret?]
   (let [text   (atom "")
         ;; Cursor index into `text`. It was append/backspace only — the API
         ;; key field with no way to fix a typo mid-string.
@@ -411,7 +413,10 @@
          (fn [w _h]
            (let [cap   (if width-fn (width-fn) (overlay-max-width w))
                  body-cap (max 1 (- cap 2))
-                 shown (if (empty? @text) (str (or placeholder "")) @text)
+                 shown (cond
+                         (empty? @text) (str (or placeholder ""))
+                         secret?        (.repeat "•" (count @text))
+                         :else          @text)
                  ;; Show the TAIL once the value outgrows the line, so typing
                  ;; past the cap keeps showing what's being typed instead of
                  ;; freezing on the first `cap` characters.
@@ -447,9 +452,10 @@
              ;; would type a literal letter into a text field.
              (.-ctrl key) nil
 
-             (and input (= (count input) 1))
+             ;; Not capped at 1: a paste arrives as one chunk.
+             (and input (pos? (count input)))
              (do (swap! text (fn [s] (str (subs s 0 @cursor) input (subs s @cursor))))
-                 (swap! cursor inc))))
+                 (swap! cursor + (count input)))))
 
          :dispose (fn [] nil)}))
 
@@ -648,6 +654,7 @@
           (fn [prompt placeholder opts]
             (promised (fn [done]
                         (make-input-picker prompt placeholder done
-                                           (width-fn-for (overlay-of opts))))
+                                           (width-fn-for (overlay-of opts))
+                                           (and opts (.-secret opts))))
                       (overlay-of opts) (signal-of opts))))
     nil))
