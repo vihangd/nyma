@@ -29,7 +29,7 @@
      slot 1: system stable section
      slot 2: last stable assistant turn (anchor)
      slot 3: N-back checkpoint
-     slot 4: reserved for future (tool-block caching)"
+     slot 4: newest message of the current step (see `step-breakpoint`)"
   (:require [agent.debug :as d]
             [clojure.string :as str]
             [agent.pricing :as pricing]
@@ -168,6 +168,24 @@
           (annotate-message! (aget messages i) provider ttl))
         (count indices)))))
 
+(defn step-breakpoint
+  "A `prepareStep` that puts a breakpoint on each step's newest message.
+
+   before_provider_request fires once per run, but a run is many requests: one
+   per tool step. Without this nothing added during a run was ever cached, and
+   every step paid full price for all of it again. A copy, so the breakpoint
+   moves on with the next step instead of piling up against the limit of four."
+  [provider ttl]
+  (fn [opts]
+    (when (pos? (.-stepNumber opts))
+      (let [out  (.slice (.-messages opts))
+            i    (dec (.-length out))
+            msg  (js/Object.assign #js {} (aget out i))]
+        (aset msg "providerOptions" (js/Object.assign #js {} (.-providerOptions msg)))
+        (annotate-message! msg provider ttl)
+        (aset out i msg)
+        #js {:messages out}))))
+
 (defn activate [api]
   (let [config            (shared/load-config)
         kv-config         (:kv-cache config)
@@ -256,6 +274,8 @@
               ;; without this, Layer-2-only configs pay cache-write premiums
               ;; forever with zero reads and no miss ever surfaces.
               (when cache-messages?
+                (when (= provider :anthropic)
+                  (aset config-obj "prepareStep" (step-breakpoint provider ttl)))
                 (when (pos? (annotate-messages! config-obj provider every-turns max-msg-breaks ttl))
                   (when @prev-annotated? (reset! expected-hit? true))
                   (reset! annotated true))))

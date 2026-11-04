@@ -197,3 +197,31 @@
                 (^:async fn [] (js-await (test-compaction-clears-the-miss-expectation))))
             (it "still records a genuine unserved breakpoint"
                 (^:async fn [] (js-await (test-real-miss-is-still-recorded))))))
+
+;;; ─── A breakpoint per step ──────────────────────────────────
+;;; before_provider_request fires once per run, and a run is one request per
+;;; tool step, so what a run added was never cached.
+
+(defn ^:async test-each-step-caches-its-newest-message []
+  (let [config (js-await (fire-bpr "claude-opus-5-5" (make-config "claude-opus-5-5" #js [])))
+        step   (.-prepareStep config)
+        tool   #js {:role "tool" :content #js []}
+        msgs   #js [#js {:role "user" :content "hi"} tool]
+        out    (.-messages (step #js {:stepNumber 1 :messages msgs}))]
+    (-> (expect (.. (aget out 1) -providerOptions -anthropic -cacheControl -type)) (.toBe "ephemeral"))
+    ;; a mark left on the original would stay in the history and use up all four
+    (-> (expect (.-providerOptions tool)) (.toBeUndefined))
+    (-> (expect (step #js {:stepNumber 0 :messages msgs})) (.toBeUndefined))))
+
+(defn ^:async test-no-step-breakpoint-off-anthropic []
+  (let [g (js-await (fire-bpr "gemini-3-pro" (make-config "gemini-3-pro" #js [])))
+        o (js-await (fire-bpr "gpt-5" (make-config "gpt-5" #js [])))]
+    (-> (expect (.-prepareStep g)) (.toBeUndefined))
+    (-> (expect (.-prepareStep o)) (.toBeUndefined))))
+
+(describe "kv-cache: per-step breakpoint"
+  (fn []
+    (it "caches each step's newest message without marking the history"
+        (^:async fn [] (js-await (test-each-step-caches-its-newest-message))))
+    (it "stays off providers without message breakpoints"
+        (^:async fn [] (js-await (test-no-step-breakpoint-off-anthropic))))))
