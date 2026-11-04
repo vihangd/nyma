@@ -205,13 +205,21 @@
 (defn ^:async test-each-step-caches-its-newest-message []
   (let [config (js-await (fire-bpr "claude-opus-5-5" (make-config "claude-opus-5-5" #js [])))
         step   (.-prepareStep config)
-        tool   #js {:role "tool" :content #js []}
-        msgs   #js [#js {:role "user" :content "hi"} tool]
-        out    (.-messages (step #js {:stepNumber 1 :messages msgs}))]
-    (-> (expect (.. (aget out 1) -providerOptions -anthropic -cacheControl -type)) (.toBe "ephemeral"))
-    ;; a mark left on the original would stay in the history and use up all four
-    (-> (expect (.-providerOptions tool)) (.toBeUndefined))
-    (-> (expect (step #js {:stepNumber 0 :messages msgs})) (.toBeUndefined))))
+        user   #js [#js {:role "user" :content "hi"}]
+        tool   (fn [] #js {:role "tool" :content #js []})
+        marked (fn [ms] (count (filter #(some-> % .-providerOptions .-anthropic .-cacheControl) ms)))
+        ;; As the SDK runs it: what a step returned is the next step's `messages`.
+        step-1 (.-messages (step #js {:stepNumber 1 :messages user
+                                      :initialMessages user :responseMessages #js [(tool)]}))
+        resp   #js [(tool) (tool)]
+        step-2 (.-messages (step #js {:stepNumber 2 :messages (.concat step-1 #js [(aget resp 1)])
+                                      :initialMessages user :responseMessages resp}))]
+    (-> (expect (marked step-1)) (.toBe 1))
+    (-> (expect (marked step-2)) (.toBe 1))
+    (-> (expect (.-length step-2)) (.toBe 3))
+    (-> (expect (.. (aget step-2 2) -providerOptions -anthropic -cacheControl -type)) (.toBe "ephemeral"))
+    (-> (expect (.-providerOptions (aget resp 1))) (.toBeUndefined))
+    (-> (expect (step #js {:stepNumber 0 :messages user})) (.toBeUndefined))))
 
 (defn ^:async test-no-step-breakpoint-off-anthropic []
   (let [g (js-await (fire-bpr "gemini-3-pro" (make-config "gemini-3-pro" #js [])))

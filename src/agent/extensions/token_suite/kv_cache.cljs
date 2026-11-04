@@ -173,12 +173,15 @@
 
    before_provider_request fires once per run, but a run is many requests: one
    per tool step. Without this nothing added during a run was ever cached, and
-   every step paid full price for all of it again. A copy, so the breakpoint
-   moves on with the next step instead of piling up against the limit of four."
+   every step paid full price for all of it again.
+
+   Built from `initialMessages` + `responseMessages`, not `messages`: the SDK
+   carries what this returns into the next step's `messages`, so marks piled up
+   past the limit of four, and the SDK drops the newest ones first."
   [provider ttl]
   (fn [opts]
     (when (pos? (.-stepNumber opts))
-      (let [out  (.slice (.-messages opts))
+      (let [out  (.concat (.-initialMessages opts) (.-responseMessages opts))
             i    (dec (.-length out))
             msg  (js/Object.assign #js {} (aget out i))]
         (aset msg "providerOptions" (js/Object.assign #js {} (.-providerOptions msg)))
