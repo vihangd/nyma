@@ -111,3 +111,17 @@
                         tools (get-active-tools agent)]
                     (-> (expect (get tools "read")) (.toBeTruthy))
                     (-> (expect (get tools "bash")) (.toBeTruthy)))))))
+
+(describe "build-context: blank assistant entries"
+          (fn []
+            (it "drops one, which Anthropic would refuse, and keeps the rest"
+                (fn []
+                  (let [agent (create-agent {:model "m"})]
+                    (swap! (:state agent) assoc :messages
+                           [{:role "user" :content "go"}
+                            {:role "assistant" :content ""}
+                            {:role "assistant" :content "  \n"}
+                            {:role "assistant" :content "done"}
+                            {:role "user" :content "next"}])
+                    (-> (expect (mapv :content (build-context agent)))
+                        (.toEqual #js ["go" "done" "next"])))))))

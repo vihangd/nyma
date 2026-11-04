@@ -1,5 +1,6 @@
 (ns agent.context
-  "Message filtering, context building.")
+  "Message filtering, context building."
+  (:require [clojure.string :as str]))
 
 (defn- message-entry? [entry]
   (or (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry))
@@ -36,6 +37,15 @@
   [entry]
   (not (:local-only entry)))
 
+(defn- blank-assistant?
+  "An assistant entry with no text: a run that ended on a tool call, as one
+   stopped by the step limit does. Anthropic refuses a blank text block with a
+   400, so one in the history failed every request after it."
+  [entry]
+  (and (= "assistant" (:role entry))
+       (string? (:content entry))
+       (str/blank? (:content entry))))
+
 (defn build-context
   "Build the message list for the current conversation turn.
    Walks the active state and filters to LLM-relevant messages.
@@ -46,6 +56,7 @@
     (->> messages
          (filter message-entry?)
          (filter llm-visible?)
+         (remove blank-assistant?)
          (map provider-role)
          vec)))
 
