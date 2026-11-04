@@ -55,6 +55,12 @@
      :step-capped? (boolean (and (pos? (or max-steps 0))
                                  (>= (or steps 0) max-steps)))}))
 
+(defn output-cap
+  "`max_tokens` for a request: the user's setting, the model's own limit, or
+   8000 when neither is known."
+  [setting model-key]
+  (or setting (model-info/max-output model-key) 8000))
+
 (def cut-off-nudge
   "Borrowed from mini-swe-agent's format_error_template, which answers a
    length-truncated response with an instruction instead of silence."
@@ -478,7 +484,11 @@
                              ;; Without this the provider decides, and a model
                              ;; that plans in prose can spend an entire turn
                              ;; without ever calling a tool.
-                             :maxOutputTokens (:max-output-tokens config)
+                             :maxOutputTokens (output-cap
+                                               (:max-output-tokens config)
+                                               (model-info/model-key
+                                                (aget (:config agent) "active-provider-name")
+                                                active-model))
                              :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        (stepCountIs (if final-report? 1 (:max-steps config)))
                              ;; Extended thinking is opt-in per request: with no

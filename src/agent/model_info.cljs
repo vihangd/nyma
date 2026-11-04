@@ -59,6 +59,14 @@
   (let [i (.indexOf id "/")]
     (when-not (neg? i) (.slice id (inc i)))))
 
+(defn max-output
+  "The most tokens `model-id` can return, or nil when unknown: exact, then the
+   bare id, which is what a relayed model is known by."
+  [model-id]
+  (let [id (str model-id)]
+    (or (get pricing-data/output-limit id)
+        (when-let [bare (bare-id id)] (get pricing-data/output-limit bare)))))
+
 (defn- usable
   "An entry with no context window is not an answer — it's a placeholder a
    gateway registered for a model whose /v1/models response said nothing about

@@ -123,7 +123,7 @@
                                      ;; Same carry as :max-retries — the loop
                                      ;; must not hardcode what settings owns.
                                      :max-output-tokens    (let [n (get merged-settings :max-output-tokens)]
-                                                             (if (number? n) n 8000))
+                                                             (when (number? n) n))
                                      :temperature          (let [t (get merged-settings :temperature)]
                                                              (if (number? t) t 0.2))
                                      ;; After a step cap, one tool-less call so

@@ -16,7 +16,9 @@
    (maxRetries was 5 regardless of what the user set)."
   (:require ["bun:test" :refer [describe it expect]]
             ["node:fs" :as fs]
-            [agent.core :refer [create-agent]]))
+            [agent.core :refer [create-agent]]
+            [agent.loop :as loop]
+            [agent.model-info :as model-info]))
 
 (defn- temp-for [settings]
   (:temperature (:config (create-agent {:model #js {} :system-prompt "" :tools {}
@@ -68,8 +70,20 @@
 
 (describe "max-output-tokens reaches the agent config"
   (fn []
-    (it "defaults to a cap rather than leaving it to the provider"
-        (fn [] (-> (expect (cap-for {})) (.toBe 8000))))
+    (it "unset, the loop picks the model's own limit"
+        (fn [] (-> (expect (cap-for {})) (.toBeNil))))
+
+    (it "reads a model's limit, relayed or not, and nil when unknown"
+        (fn []
+          (-> (expect (model-info/max-output "anthropic/claude-opus-5-5")) (.toBe 128000))
+          (-> (expect (model-info/max-output "some-relay/claude-opus-5-5")) (.toBe 128000))
+          (-> (expect (model-info/max-output "omlx/not-a-listed-model")) (.toBeNil))))
+
+    (it "the setting wins, then the model, then 8000"
+        (fn []
+          (-> (expect (loop/output-cap 4000 "anthropic/claude-opus-5-5")) (.toBe 4000))
+          (-> (expect (loop/output-cap nil "anthropic/claude-opus-5-5")) (.toBe 128000))
+          (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))))
 
     (it "honours what the user set"
         (fn [] (-> (expect (cap-for {:max-output-tokens 4000})) (.toBe 4000))))

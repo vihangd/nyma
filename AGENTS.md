@@ -66,7 +66,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/multimodal.cljs` | `agent.multimodal` | Multimodal (image) tool results — let a tool return an image a vision-capable model can SEE. |
 | `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system. |
 | `src/agent/pricing.cljs` | `agent.pricing` | Token cost table + `calculate-turn-cost` for all supported models. |
-| `src/agent/pricing_data.cljs` | `agent.pricing-data` | Model prices, context windows and PDF input, from models.dev. |
+| `src/agent/pricing_data.cljs` | `agent.pricing-data` | Model prices, context windows, output limits and PDF input, from models.dev. |
 | `src/agent/providers/builtins.cljs` | `agent.providers.builtins` | Default Anthropic/OpenAI/Google provider factories. |
 | `src/agent/providers/catalog.cljs` | `agent.providers.catalog` | Enumerate every model nyma knows about, across all registered providers. |
 | `src/agent/providers/fallback.cljs` | `agent.providers.fallback` | Which failures are worth trying a different model for, and which one to try. |

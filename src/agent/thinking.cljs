@@ -152,7 +152,7 @@
 
    Callers that set an explicit output cap need this: Anthropic counts thinking
    against `max_tokens`, so a request with a 24k budget and a 2k cap is
-   rejected. The main loop doesn't hit this because it sets no cap."
+   rejected. The main loop doesn't hit this: its cap is the model's own limit."
   [level]
   (or (get anthropic-budgets (str level)) 0))
 
