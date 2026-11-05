@@ -382,6 +382,15 @@
                                  (-> (expect (count @sent)) (.toBe 0))
                                  (-> (expect (some #(.includes % "failed") @notes)) (.toBeTruthy))))))))
 
+            (it "a step-capped turn's mid-work text is not taken for the plan"
+                (fn []
+                  (let [st    (atom {:plan-mode true :active-role :plan :plan-prev-role :default
+                                     :messages [{:role "assistant" :content "still reading"}]})
+                        notes (atom [])
+                        api   (notify-api st (atom []) notes)]
+                    (-> (pm/on-turn-finalize api #js {:error false :stepCapped true})
+                        (.then (fn [_] (-> (expect (count @notes)) (.toBe 0))))))))
+
             (it "no UI + not auto-approve notifies instead of a silent no-op"
                 (fn []
                   (let [st    (atom {:plan-mode true :active-role :plan :plan-prev-role :default

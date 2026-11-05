@@ -244,7 +244,8 @@ the user will approve the plan before execution begins.")
    in the same run — without blocking on unrelated agent_end handlers."
   [api data]
   (let [s (cur-state api)]
-    (when (:plan-mode s)
+    ;; A capped turn's text is mid-work. Its report turn comes next, and is the plan.
+    (when (and (:plan-mode s) (not (and data (.-stepCapped data))))
       (if (and data (or (.-error data) (get data "error")))
         ;; The planning turn errored (e.g. flaky provider). Don't auto-execute a
         ;; non-existent plan — stay in plan mode and surface it so the gate is

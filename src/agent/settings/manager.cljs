@@ -30,10 +30,16 @@
    ;; as mcp.max-description-length.
    :skills         {:max-description-length 500}
    :max-steps      100
+   ;; Blocks of `max-steps` a run can earn past the first, each only on outside
+   ;; evidence of progress (model_roles/features/progress). Needs :step-cap-report,
+   ;; which is the handoff between blocks. 0 stops at the cap. Top-level runs
+   ;; only; subagents never extend.
+   :max-extensions 3
    ;; When the step cap fires, spend ONE more tool-less call asking the model
-   ;; to report what it found or changed, instead of ending in silence. Not an
-   ;; auto-continue: the work stops, the user gets a summary. Subagent children
-   ;; inherit it, so a capped child returns a report rather than mid-work text.
+   ;; to report what it found or changed, instead of ending in silence. The
+   ;; work stops there unless :max-extensions grants another block. Subagent
+   ;; children inherit it, so a capped child returns a report rather than
+   ;; mid-work text.
    :step-cap-report true
    ;; Session logs compress to about 13% of their size (0.82MB -> 0.11MB in 2ms,
    ;; measured), so an old sessions directory is mostly air. Off by default:

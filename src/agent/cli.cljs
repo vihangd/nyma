@@ -272,7 +272,9 @@ Session:
                          (Default: a fresh session file per launch.)
       --no-session       Don't read or write any session file.
       --max-steps <n>    Cap model steps (tool-call rounds) per run. Default: 100
-                         (settings max-steps). A capped run says so and stops.
+                         (settings max-steps). A capped run reports, then gets
+                         another block if it made progress (settings
+                         max-extensions), and otherwise stops.
       --append-system-prompt <text>
                          Append text to the system prompt for this run.
   -e, --extension <path> Load an extension file, or a pi package directory's
@@ -831,6 +833,7 @@ Examples:
                {:model         nil
                 :system-prompt ((:build-system-prompt resources))
                 :max-steps     max-steps
+                :max-extensions (or (:max-extensions merged) 0)
                 ;; --thinking beats settings :thinking. Both were parsed and
                 ;; then dropped before this.
                 :thinking      (or (:thinking values) (:thinking merged))

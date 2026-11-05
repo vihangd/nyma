@@ -6,7 +6,7 @@
    taken away and a nudge to report. One call, not an auto-continue."
   (:require ["bun:test" :refer [describe it expect]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.loop :refer [run step-cap-nudge cut-off-nudge]]
+            [agent.loop :refer [run step-cap-nudge cut-off-nudge step-extension-nudge]]
             [test-util.agent-harness :refer [make-test-agent]]))
 
 (defn- tool-call-parts
@@ -53,6 +53,63 @@
                       (apply str (map (fn [p] (or (.-text p) (get p "text") "")) c))))))
         (reverse (:messages @(:state agent)))))
 
+(defn- user-texts [agent]
+  (keep (fn [m] (when (= (:role m) "user") (str (:content m)))) (:messages @(:state agent))))
+
+(defn- capped-agent
+  "Two-step blocks and `limit` extensions, with `answer` as the step_cap verdict."
+  [model limit answer]
+  (let [agent (make-test-agent {:model model :max-steps 2})]
+    (aset (:config agent) "max-extensions" limit)
+    ((:on (:events agent)) "step_cap" (fn [_] answer))
+    agent))
+
+(describe "loop:step-extension" (fn []
+  (it "progress earns a fresh block, then the limit stops it"
+      (fn []
+        (let [{:keys [model calls]} (busy-model)
+              agent (capped-agent model 1 #js {:continue true :reason "files changed"})]
+          (-> (run agent "do the thing")
+              (.then (fn []
+                       (-> (expect (mapv pos? @calls))
+                           (.toEqual (clj->js [true true false true true false])))
+                       (-> (expect (count (filter #(= % step-extension-nudge) (user-texts agent))))
+                           (.toBe 1))))))))
+  (it "no progress stops at the report"
+      (fn []
+        (let [{:keys [model calls]} (busy-model)
+              agent (capped-agent model 3 nil)]
+          (-> (run agent "do the thing")
+              (.then (fn [] (-> (expect (count @calls)) (.toBe 3))))))))
+  (it "no extensions never asks"
+      (fn []
+        (let [{:keys [model calls]} (busy-model)
+              asked (atom 0)
+              agent (make-test-agent {:model model :max-steps 2})]
+          ((:on (:events agent)) "step_cap" (fn [_] (swap! asked inc) #js {:continue true}))
+          (-> (run agent "do the thing")
+              (.then (fn []
+                       (-> (expect @asked) (.toBe 0))
+                       (-> (expect (count @calls)) (.toBe 3))))))))
+  (it "a new message gets its own extensions"
+      (fn []
+        (let [{:keys [model calls]} (busy-model)
+              agent (capped-agent model 1 #js {:continue true :reason "x"})]
+          (-> (run agent "first")
+              (.then (fn [] (run agent "second")))
+              (.then (fn [] (-> (expect (count @calls)) (.toBe 12))))))))))
+
+(describe "loop:report-digest" (fn []
+  (it "the report call is told what the pass did"
+      (fn []
+        (let [{:keys [model]} (busy-model)
+              agent (make-test-agent {:model model :max-steps 2})]
+          (-> (run agent "do the thing")
+              (.then (fn []
+                       (-> (expect (some #(when (.includes % "cannot call any more tools") %) (user-texts agent)))
+                           (.toContain "What this turn did")))))))
+      )))
+
 (describe "loop:stop-run" (fn []
                             (it "an extension's stop flag ends the run before the step limit"
                                 (fn []
@@ -62,7 +119,10 @@
                                                            (fn [_] (swap! (:state agent) assoc :stop-run true)))
                                     (-> (run agent "do the thing")
                                         (.then (fn []
-                                                 (-> (expect (< (count @calls) 5)) (.toBe true))))))))))
+                                                 ;; steps, then the tool-less report
+                                                 (-> (expect (< (count @calls) 6)) (.toBe true))
+                                                 (-> (expect (last @calls)) (.toBe 0))
+                                                 (-> (expect (last-assistant-text agent)) (.toContain "REPORT"))))))))))
 
 (describe "loop:step-cap-report" (fn []
                                    (it "nudge names the budget and forbids tools"
@@ -81,7 +141,7 @@
                                                         (-> (expect (last-assistant-text agent)) (.toContain "REPORT"))
                        ;; the nudge went in as the user turn the report answers
                                                         (-> (expect (some #(and (= (:role %) "user")
-                                                                                (= (:content %) (step-cap-nudge 2)))
+                                                                                (.startsWith (str (:content %)) (step-cap-nudge 2)))
                                                                           (:messages @(:state agent))))
                                                             (.toBeTruthy))
                        ;; one-shot: nothing left armed for the next user turn
@@ -122,6 +182,6 @@
                                            (-> (run agent "hi")
                                                (.then (fn []
                                                         (-> (expect @calls) (.toBe 1))
-                                                        (-> (expect (some #(= (:content %) (step-cap-nudge 5))
+                                                        (-> (expect (some #(.startsWith (str (:content %)) (step-cap-nudge 5))
                                                                           (:messages @(:state agent))))
                                                             (.toBeFalsy))))))))))

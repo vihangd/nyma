@@ -585,7 +585,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--fork` | Branch a copy of an existing session | — |
 | `--no-session` | Disable session persistence | — |
 | `--trust` | Run this folder's project-defined commands without asking, this run only (see Workspace Trust) | — |
-| `--max-steps <n>` | Cap model steps (tool-call rounds) per run; a capped run says so and stops | `100` (setting `max-steps`) |
+| `--max-steps <n>` | Cap model steps (tool-call rounds) per run; a capped run reports, then gets another block if it made progress | `100` (setting `max-steps`) |
 | `--append-system-prompt <text>` | Append text to the system prompt for this run (kept across `/reload`) | — |
 | `--settings <json>` | Settings for this run, applied over both settings files (e.g. `'{"extensions":{"todos":false}}'`) | — |
 | `-e, --extension <path>` | Load an extension file, or a pi package directory's `pi.extensions` and `pi.skills`, for this run; repeatable. pi extensions load unchanged | — |
@@ -738,8 +738,19 @@ so a `sed -i`, a formatter or an `npm install` is no longer invisible.
 
 `step-cap-report` (default `true`): when a run hits `max-steps`, spend one more
 tool-less call asking the model to report what it found or changed, instead of
-ending in silence. It is not an auto-continue — the work stops there — and it
-is what turns a step-capped subagent's mid-work text into a usable report.
+ending in silence. It is what turns a step-capped subagent's mid-work text into
+a usable report.
+
+`max-extensions` (default `3`): how many more blocks of `max-steps` a top-level
+run can earn. After the report, nyma continues only on outside evidence of
+progress since the last cap: files changed, a verify pass, or a todo or spec task
+closed. A worktree that returns to an earlier state earns nothing. The report is
+the handoff, so this needs `step-cap-report`. `0` always stops at the cap, and
+subagents never extend.
+
+A run that repeats itself is caught separately: `escalate.on.repeat-tool-calls`
+(default `3`) repeats of the same call with the same result get a note naming
+it, and twice that ends the run. `0` turns it off.
 
 One exception to "source of truth is `manager.cljs`": `escalate` keeps its
 defaults in the extension that owns it
@@ -1001,7 +1012,8 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 | `agent_end` | emit | A turn's provider call finished: `{text, usage, finishReason}` |
 | `turn_start` | emit | A provider call is about to start |
 | `turn_end` | emit | One model step finished (AI SDK StepResult) |
-| `turn_finalize` | emit-async | Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason}` |
+| `turn_finalize` | emit-async | Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason, stepCapped}` |
+| `step_cap` | emit-collect | A capped run has reported: `{steps, extensions, maxExtensions}`; return `{continue: true, reason}` to grant another block of steps |
 | `message_start` | emit | A streamed text block begins |
 | `message_update` | emit | A streamed text delta |
 | `message_end` | emit | A streamed text block ends |

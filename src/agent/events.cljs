@@ -48,7 +48,8 @@
    ;; (e.g. plan-mode's approval gate) can enqueue a follow-up that the drain
    ;; then picks up. Distinct from agent_end (sync, fire-and-forget) so slow
    ;; external handlers like Stop hooks never block the loop.
-   ["turn_finalize"         {:kind :async :doc "Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason}`"}]
+   ["turn_finalize"         {:kind :async :doc "Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason, stepCapped}`"}]
+   ["step_cap"              {:kind :collect :doc "A capped run has reported: `{steps, extensions, maxExtensions}`; return `{continue: true, reason}` to grant another block of steps"}]
    ["message_start"         {:kind :emit :doc "A streamed text block begins"}]
    ["message_update"        {:kind :emit :doc "A streamed text delta"}]
    ["message_end"           {:kind :emit :doc "A streamed text block ends"}]

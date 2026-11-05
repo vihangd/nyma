@@ -48,9 +48,9 @@
    :require-capabilities — #{kw} tool must declare ALL of these capabilities
    :exclude-capabilities — #{kw} tool must NOT declare ANY of these capabilities
    :modes                — #{kw} tool must be allowed in at least one of these modes"
-  [{:keys [model system-prompt tools max-steps extensions settings
+  [{:keys [model system-prompt tools max-steps max-extensions extensions settings
            require-capabilities exclude-capabilities modes thinking]
-    :or   {max-steps 20}}]
+    :or   {max-steps 20 max-extensions 0}}]
   (let [tool-filter-opts  {:require-capabilities require-capabilities
                            :exclude-capabilities exclude-capabilities
                            :modes                modes}
@@ -116,6 +116,9 @@
                  :config            {:model                model
                                      :system-prompt        system-prompt
                                      :max-steps            max-steps
+                                     ;; 0 unless the CLI says otherwise: a subagent's
+                                     ;; step budget is sized by its parent.
+                                     :max-extensions       max-extensions
                                      ;; The loop hardcoded maxRetries 5 while
                                      ;; claiming to match this setting, so a
                                      ;; user asking for 3 silently got 6

@@ -2,6 +2,7 @@
   "`run`, `steer`, `follow-up`."
   (:require ["ai" :refer [streamText stepCountIs]]
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
+            [agent.utils.stall :as stall]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :as compaction]
@@ -79,12 +80,65 @@
   "Borrowed from apprentice's force-final-answer: the step cap used to end a
    run in silence, so a capped subagent handed its parent whatever text it
    had mid-work. One more call with the tools taken away turns that into a
-   report. It is one tool-less call, not an auto-continue — the work itself
-   still stops here."
-  [max-steps]
+   report. The report is also the handoff when the run earns another block of
+   steps: tool results do not outlive a pass, so it is all that survives.
+
+   `digest` is what the pass did. The report call runs without those results,
+   and a report written blind said \"I can't see this turn's tool results\"."
+  [max-steps & [digest]]
   (str "You have used all " max-steps " steps of this turn and cannot call "
        "any more tools. Answer now with what you already have: report what "
-       "you found or changed so far, and what remains undone."))
+       "you found or changed so far, which files you touched, what remains "
+       "undone, the next step, and the exact command or error for anything "
+       "still failing."
+       (when (seq digest)
+         (str "\n\nWhat this turn did, latest last:\n" digest))))
+
+(defn repeat-stop-nudge
+  "The report call for a run stopped for repeating itself."
+  [digest]
+  (str "This turn was stopped because the same tool calls kept returning the "
+       "same result. You cannot call any more tools. Report what you were "
+       "trying to do, why it kept failing, and what you would need to get "
+       "past it."
+       (when (seq digest)
+         (str "\n\nWhat this turn did, latest last:\n" digest))))
+
+(def step-extension-nudge
+  (str "Continue the task from your report above, with a fresh step budget. "
+       "Tool output from earlier steps is gone, so read again whatever you need "
+       "and do not redo finished work."))
+
+(defn ^:async maybe-extend!
+  "After a step-cap report: give the run another block of steps if a `step_cap`
+   handler can show progress. Another pass rather than a bigger limit, so the
+   context a block built up is dropped instead of re-sent on every further step.
+
+   The bound lives here because the follow-queue drain has none. Anything
+   already queued goes first, and it runs with tools anyway."
+  [agent notify!]
+  (let [state  (:state agent)
+        config (:config agent)
+        used   (or (:step-extensions @state) 0)
+        limit  (or (:max-extensions config) 0)
+        signal (some-> (:abort-controller agent) deref .-signal)]
+    (when (and (< used limit)
+               (empty? @(:follow-queue agent))
+               (not (some-> signal .-aborted)))
+      (let [answer (js-await ((:emit-collect (:events agent)) "step_cap"
+                                                              #js {:steps         (:max-steps config)
+                                                                   :extensions    used
+                                                                   :maxExtensions limit}))]
+        (dbg/warn (str "[loop] step cap: " (if (get answer "continue")
+                                                 (str "extending, " (get answer "reason"))
+                                                 "no progress shown, stopping")
+                       " (" used " of " limit " used)"))
+        (when (get answer "continue")
+          (swap! state assoc :step-extensions (inc used))
+          (notify! (str "Step limit reached (" (:max-steps config) "): progress made ("
+                        (get answer "reason") "), continuing, extension "
+                        (inc used) " of " limit "."))
+          (follow-up agent {:role "user" :content step-extension-nudge}))))))
 
 (defn- event-type [chunk]
   (get stream-event-types (.-type chunk)))
@@ -206,6 +260,8 @@
     (dbg/debug "loop/run"
                (str "user-message: " (.slice (str user-message) 0 200)
                     " | msg-count: " (count (:messages @state))))
+
+    (swap! state dissoc :step-extensions :stop-run)
 
     ;; Append user message via event store (or direct swap for backwards compat)
     (if-let [store (:store agent)]
@@ -441,6 +497,8 @@
               tools-this-turn (atom 0)
               ;; Model steps this run (tool call + response cycles).
               steps-this-run  (atom 0)
+              ;; What this pass did, for the report call that cannot see it.
+              pass-digest     (atom {})
 
               ;; What we are about to send, by our own reckoning. Recorded after
               ;; every replacement hook has had its say, so it describes the
@@ -512,6 +570,7 @@
                                                 ;; budget. This is the number a
                                                 ;; budget is measured in.
                                                 (swap! steps-this-run inc)
+                                                (swap! pass-digest stall/add-step step)
                                                 (when-let [u (.-usage step)]
                                                   ;; How full the context is: what
                                                   ;; THIS request sent, and the
@@ -901,7 +960,16 @@
                 ;; returns, so a capped run was indistinguishable from a finished
                 ;; one. Counted, not inferred from finishReason, which an abort
                 ;; path can produce too.
-                (when step-capped?
+                (when (and (:stop-run @st) (not final-report?))
+                  ;; Ended for repeating itself. It gets the report, not more
+                  ;; steps: use up its extensions.
+                  (dbg/warn "[loop] run stopped: it was repeating itself")
+                  (swap! st assoc :step-extensions (:max-extensions config))
+                  (follow-up agent {:role "user"
+                                    :content (repeat-stop-nudge (stall/digest-text @pass-digest))
+                                    :turn {:final-report true}}))
+
+                (when (and step-capped? (not (:stop-run @st)))
                   (dbg/warn (str "[loop] step limit reached (" (:max-steps config) ") — the model was still working"))
                   (if (and (:step-cap-report config) (not final-report?))
                     ;; Queue the tool-less report turn; the follow-up drain
@@ -910,11 +978,15 @@
                     (do (notify! (str "Step limit reached (" (:max-steps config)
                                       ") with work still in progress. Asking the model to report "
                                       "what it has; send a message to continue, or raise `max-steps`."))
-                        (follow-up agent {:role "user" :content (step-cap-nudge (:max-steps config))
+                        (follow-up agent {:role "user" :content (step-cap-nudge (:max-steps config)
+                                                                                (stall/digest-text @pass-digest))
                                           :turn {:final-report true}}))
                     (notify! (str "Step limit reached (" (:max-steps config)
                                   ") with work still in progress. Send a message to continue, "
                                   "or raise `max-steps` in settings."))))
+
+                (when final-report?
+                  (js-await (maybe-extend! agent notify!)))
 
                 ;; Only once the session has asked for work: two one-word
                 ;; conversational turns tripped this. Three in a row after a
@@ -931,6 +1003,10 @@
                                                  ;; So a consumer can tell a stall from a
                                                  ;; response that was merely cut off.
                                                  :finishReason @turn-finish
+                                                 ;; The step limit stopped this turn: its text is
+                                                 ;; mid-work, not a finished answer.
+                                                 :stepCapped   (and (not @turn-error) (not final-report?)
+                                                                    (>= @steps-this-run (:max-steps config)))
                                                  ;; A continue-nudge WAS queued for this
                                                  ;; turn: a handler that wants to shape
                                                  ;; that retry (thinking off) can rely

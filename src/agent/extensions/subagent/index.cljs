@@ -132,7 +132,7 @@ intermediate tool calls, so put everything that matters in the summary.")
   "Flags for the child run, from the role config."
   [{:keys [model sys allowed steps]}]
   (cond-> ["-p" "--output-format" "json" "--no-session" "--permission-mode" "full-auto"
-           "--max-steps" (str (or steps 20)) "--model" model
+           "--max-steps" (str (or steps 20)) "--settings" "{\"max-extensions\":0}" "--model" model
            "--append-system-prompt" sys]
     (seq allowed) (into ["--tools" (str/join "," allowed)])))
 

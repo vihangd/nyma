@@ -9,6 +9,7 @@
             [agent.extensions.model-roles.status-segment :as status-seg]
             [agent.extensions.model-roles.features.plan-mode :as plan-mode]
             [agent.extensions.model-roles.features.escalate :as escalate]
+            [agent.extensions.model-roles.features.progress :as progress]
             [agent.extensions.model-roles.features.commit :as commit]
             [agent.extensions.model-roles.features.review :as review]))
 
@@ -277,6 +278,7 @@
 (defn ^:export default [api]
   (let [plan-deactivate (atom nil)
         esc-deactivate  (atom nil)
+        progress-deactivate (atom nil)
         seg-deactivate  (atom nil)
 
         ;; THE role switch. /role, the cycle shortcut and the `role_change`
@@ -586,6 +588,9 @@
     ;; Escalation: stall → stronger model, provider error → next in the chain.
     (reset! esc-deactivate (escalate/activate api))
 
+    ;; What a capped run has to show for another block of steps.
+    (reset! progress-deactivate (progress/activate api))
+
     ;; Status-line segments: the model role (plain) + the permission mode
     ;; (color-coded), shown together — replaces the core inline [role].
     (reset! seg-deactivate
@@ -608,4 +613,5 @@
           (.unregisterShortcut api k)))
       (when @plan-deactivate (@plan-deactivate))
       (when @esc-deactivate (@esc-deactivate))
+      (when @progress-deactivate (@progress-deactivate))
       (when @seg-deactivate (@seg-deactivate)))))
