@@ -94,6 +94,35 @@
 
 ;;; ─── 2. agent_settled ───────────────────────────────────────
 
+(describe "a capped run"
+          (fn []
+            (it "stays open across the nudge the loop queues after agent_end"
+                (fn []
+                  ;; agent_end fires with the queue empty; the step-cap nudge
+                  ;; lands after it. A client told the run ended there would
+                  ;; miss the report and every extension after it.
+                  (let [agent (fake-agent) st (st-of)
+                        evs (capture
+                             (fn []
+                               (let [unsub (subscribe-events! agent st)]
+                                 (fire! agent "agent_start" #js {})
+                                 (fire! agent "agent_end" #js {})
+                                 (swap! (:follow-queue agent) conj {:role "user" :content "report"})
+                                 (fire! agent "turn_finalize" #js {})
+                                 (unsub))))]
+                    (-> (expect (types-of evs)) (.not.toContain "agent_end")))))
+            (it "ends when nothing is queued at turn_finalize"
+                (fn []
+                  (let [agent (fake-agent) st (st-of)
+                        evs (capture
+                             (fn []
+                               (let [unsub (subscribe-events! agent st)]
+                                 (fire! agent "agent_start" #js {})
+                                 (fire! agent "agent_end" #js {})
+                                 (fire! agent "turn_finalize" #js {})
+                                 (unsub))))]
+                    (-> (expect (types-of evs)) (.toContain "agent_end")))))))
+
 (describe "agent_settled"
           (fn []
             (it "is withheld while a follow-up is queued"

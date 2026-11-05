@@ -387,11 +387,10 @@
             ;; stream filter giving up.
             (when @(:msg st)
               (end-turn! agent st nil {:stopReason (if (aborted? agent) "aborted" "stop")}))
-            ;; nyma ends a run per loop pass and then drains a queued follow-up
-            ;; into the next; pi runs follow-ups inside one agent_start/agent_end
-            ;; (pi-agent-core agent-loop), so the run is not over yet.
-            (when (empty? @(:follow-queue agent))
-              (end-run! st)))]
+            ;; Not end-run!: nyma ends a run per loop pass and pi runs follow-ups
+            ;; inside one agent_start/agent_end, and the loop's own nudges are
+            ;; queued after this event. turn_finalize knows; see below.
+            nil)]
 
          ;; The session-level run has settled: no retry, no compaction retry
          ;; and no queued follow-up will continue it. Distinct from agent_end,
