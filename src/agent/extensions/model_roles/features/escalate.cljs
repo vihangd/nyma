@@ -197,8 +197,13 @@
 (defn- current-spec
   "The 'provider/model' the session is actually running right now."
   [api]
-  ;; `:runtime-model` led this `or` and has no writer anywhere.
-  (:model (cur-state api)))
+  ;; `:runtime-model` led this `or` and has no writer anywhere. State's :model
+  ;; is the resolved SDK object in a live session, which stringifies to
+  ;; "[object Object]": in the fallback notice, and in the `tried` set, where
+  ;; it never matched the failed model's spec.
+  (if (.-getActiveModelSpec api)
+    (.getActiveModelSpec api)
+    (:model (cur-state api))))
 
 (defn- split-spec [spec]
   (let [s (str spec)

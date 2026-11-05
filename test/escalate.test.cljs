@@ -80,6 +80,18 @@
                     (-> (expect (vec @(:set-calls c))) (.toEqual ["mm/m2.5"]))
             ;; stale thinking options from the old provider would 400 the retry
                     (-> (expect (.-thinking (.-providerOptions cfg))) (.toBeUndefined)))))
+            (it "reports a live session's model object by its spec"
+                (fn []
+                  ;; A real session holds the SDK model object in state, not a
+                  ;; string: the notice read "quota on [object Object]".
+                  (let [notes (atom [])
+                        c     (assoc (collector) :ui (ui-with-select "no" notes))
+                        st    (atom {:model #js {:modelId "cheap-1"}})
+                        api   (fake-api st c)]
+                    (aset api "getActiveModelSpec" (fn [] "zen/cheap-1"))
+                    (esc/on-provider-error api #js {:message "429 rate limit" :config #js {}})
+                    (-> (expect (first @notes)) (.toContain "quota on zen/cheap-1"))
+                    (-> (expect (vec (:escalate-tried @st))) (.toContain "zen/cheap-1")))))
             (it "names the model that FAILED, not the one it fell back to"
                 (fn []
                   (let [c   (collector)
