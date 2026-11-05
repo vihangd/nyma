@@ -685,13 +685,16 @@
 
 (defn ^:async test-live-context-shrinks []
   (let [sm    (tool-heavy-session)
-        state (atom {:messages (vec ((:build-context sm)))})
+        state (atom {:messages (vec ((:build-context sm)))
+                     :last-input-tokens 900000})
         before (count (:messages @state))]
     (js-await (compact sm "mock-model" (events-offering nil)
                        {:gen-fn (gen-stub six-section) :state-atom state}))
     (let [after (:messages @state)]
       ;; It actually got smaller …
       (-> (expect (< (count after) before)) (.toBe true))
+      ;; … and the meter stops showing the conversation that is gone.
+      (-> (expect (< 0 (:last-input-tokens @state) 900000)) (.toBe true))
       ;; … and opens on the summary, the same marker resume produces.
       (-> (expect (.includes (str (:content (first after))) "[Earlier conversation summary]"))
           (.toBe true)))))

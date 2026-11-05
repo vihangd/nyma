@@ -511,6 +511,23 @@
                                                 ;; budget is measured in.
                                                 (swap! steps-this-run inc)
                                                 (when-let [u (.-usage step)]
+                                                  ;; How full the context is: what
+                                                  ;; THIS request sent, and the
+                                                  ;; ground truth for the compaction
+                                                  ;; trigger — the provider's count,
+                                                  ;; not our estimate, which walks
+                                                  ;; the whole session tree while
+                                                  ;; what is sent is pruned at
+                                                  ;; context_assembly and capped by
+                                                  ;; priority_assembly. Not
+                                                  ;; `totalUsage`: every step re-sends
+                                                  ;; the conversation, so its sum read
+                                                  ;; ctx:385% on a 7% full window.
+                                                  ;; Skipped when a provider drops
+                                                  ;; usage, so one bad step cannot
+                                                  ;; zero the meter.
+                                                  (when (pos? (or (.-inputTokens u) 0))
+                                                    (swap! state assoc :last-input-tokens (.-inputTokens u)))
                                                   (swap! step-usage
                                                          (fn [t] (-> t
                                                                      (update :input + (or (.-inputTokens u) 0))
@@ -782,15 +799,7 @@
                                                  :cache-read-tokens cache-read :cache-write-tokens cache-write
                                                  :steps @steps-this-run
                                                  :cost cost})
-                          ;; Ground truth for the compaction trigger: what the
-                          ;; PROVIDER counted, not what we estimated. The estimate
-                          ;; walks the whole session tree, while what is actually
-                          ;; sent is pruned at context_assembly and capped by
-                          ;; priority_assembly — two different quantities.
-                          ;; Triggering off the tree meant firing on a 956k
-                          ;; estimate while the requests themselves fit fine.
                             (when (and input-tokens (pos? input-tokens))
-                              (swap! state assoc :last-input-tokens input-tokens)
                               ;; Learn what a GATEWAY injects. `unpriced-providers`
                               ;; is the existing marker for "this is a relay, its
                               ;; rates and ids are its own"; first-party providers

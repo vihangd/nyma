@@ -329,7 +329,11 @@ with every section below present.
                 (assoc st
                        :messages msgs
                        ;; Where the next "30 new messages" is measured from.
-                       :compacted-at-count (count msgs))))))
+                       :compacted-at-count (count msgs)
+                       ;; The figure from before the summary describes a
+                       ;; conversation that is gone; the meter would show it
+                       ;; until the next step reports.
+                       :last-input-tokens (te/estimate-messages-tokens msgs))))))
     true))
 
 (def ^:private min-new-summary-chars
