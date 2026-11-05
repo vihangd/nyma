@@ -21,12 +21,16 @@
    msg-usg = message_start.message.usage  (has cache breakdown)
    delta-usg = message_delta.usage         (has final output_tokens)"
   [msg-usg delta-usg]
-  (let [in-total  (or (when msg-usg   (.-input_tokens msg-usg)) 0)
+  (let [fresh     (or (when msg-usg   (.-input_tokens msg-usg)) 0)
         cache-rd  (or (when msg-usg   (.-cache_read_input_tokens msg-usg)) 0)
         cache-wr  (or (when msg-usg   (.-cache_creation_input_tokens msg-usg)) 0)
+        ;; Anthropic's input_tokens leaves cached tokens out; V3's total has
+        ;; them in, as @ai-sdk/anthropic reports it. Context size and cost both
+        ;; read this as the whole prompt.
+        in-total  (+ fresh cache-rd cache-wr)
         out-total (or (when delta-usg (.-output_tokens delta-usg)) 0)]
     #js {:inputTokens  #js {:total    in-total
-                            :noCache  (- in-total cache-rd)
+                            :noCache  fresh
                             :cacheRead  cache-rd
                             :cacheWrite cache-wr}
          :outputTokens #js {:total     out-total

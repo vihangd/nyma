@@ -104,6 +104,21 @@
     (-> (expect (.. finish -usage -inputTokens -total))  (.toBeGreaterThanOrEqual 0))
     (-> (expect (.. finish -usage -outputTokens -total)) (.toBeGreaterThan 0))))
 
+(defn ^:async test-usage-total-counts-cached []
+  (let [start  (js/JSON.stringify
+                #js {:type    "message_start"
+                     :message #js {:id "msg_01" :type "message" :role "assistant"
+                                   :model "claude-sonnet-4-6"
+                                   :usage #js {:input_tokens 10 :output_tokens 1
+                                               :cache_read_input_tokens 900
+                                               :cache_creation_input_tokens 90}}})
+        parts  (js-await (collect-parts [start (block-start 0 "text") (text-delta 0 "Hi")
+                                         (block-stop 0) (msg-delta-line "end_turn") msg-stop]))
+        finish (first (filter #(= (.-type %) "finish") parts))
+        input  (.. finish -usage -inputTokens)]
+    (-> (expect (.-total input))   (.toBe 1000))
+    (-> (expect (.-noCache input)) (.toBe 10))))
+
 (defn ^:async test-ping-ignored []
   (let [lines (concat [msg-start ping-line (block-start 0 "text")]
                       [(text-delta 0 "Hi") ping-line (block-stop 0)
@@ -254,6 +269,7 @@
                                                         (it "assembles correct text from deltas"                             test-assembles-text)
                                                         (it "finish part has correct unified stop reason"                    test-finish-stop-reason)
                                                         (it "finish part carries usage tokens"                               test-finish-usage)
+                                                        (it "usage total counts cached tokens, as @ai-sdk/anthropic does"    test-usage-total-counts-cached)
                                                         (it "ping events are silently ignored"                               test-ping-ignored)
                                                         (it "multiple text blocks get distinct ids"                          test-multi-block-distinct-ids)
                                                         (it "stream-start is emitted exactly once"                           test-stream-start-once)))
