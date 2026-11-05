@@ -19,6 +19,7 @@
      after_provider_request — advance turn counter, emit quality-signal
   "
   (:require [agent.extensions.small-model.shared :as shared]
+            [agent.utils.stall :as stall]
             [clojure.string :as str]))
 
 ;; ── Escalating nudge helpers ─────────────────────────────────────
@@ -162,7 +163,7 @@
              :leave (fn [ctx]
                       (let [tool-name (str (aget ctx "tool-name"))
                             args      (.-args ctx)
-                            sig       (shared/tool-call-sig tool-name args)
+                            sig       (stall/tool-call-sig tool-name args)
                             prev-sigs (:all-tool-sigs @state)
                             active    (get-active-tool-names api)]
                         (cond
@@ -192,7 +193,7 @@
                           ;; changed" without ever looking at it.
                           (and (contains? prev-sigs sig)
                                (= (get (:tool-result-fps @state) sig)
-                                  (shared/result-fingerprint (.-result ctx))))
+                                  (stall/result-fingerprint (.-result ctx))))
                           (let [n (swap! counters update :repeat inc)]
                             ;; APPEND — never destroy a real result. The model
                             ;; needs to see what the tool said AND that it has
@@ -214,7 +215,7 @@
                                 (swap! state assoc :all-tool-sigs #{} :tool-result-fps {}))
                               (swap! state update :all-tool-sigs conj sig)
                               (swap! state assoc-in [:tool-result-fps sig]
-                                     (shared/result-fingerprint (.-result ctx)))))
+                                     (stall/result-fingerprint (.-result ctx)))))
                         ctx))}
 
         ;; ── after_provider_request: advance turn counter ──────────

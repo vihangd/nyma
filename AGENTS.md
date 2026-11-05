@@ -136,6 +136,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |
 | `src/agent/utils/shell_grant.cljs` | `agent.utils.shell-grant` | What one shell command is, and what an "Allow always" for it covers. |
 | `src/agent/utils/spill_file.cljs` | `agent.utils.spill-file` | Writing model-visible content to disk, safely. |
+| `src/agent/utils/stall.cljs` | `agent.utils.stall` | Is a run repeating itself? |
 | `src/agent/utils/stream_drain.cljs` | `agent.utils.stream-drain` | Draining a subprocess pipe without waiting on processes we do not own. |
 | `src/agent/utils/template_args.cljs` | `agent.utils.template-args` | Positional argument substitution for skill bodies and prompt templates. |
 | `src/agent/utils/time.cljs` | `agent.utils.time` | Shared time formatting helpers. |

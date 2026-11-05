@@ -490,7 +490,9 @@
                                                 (aget (:config agent) "active-provider-name")
                                                 active-model))
                              :maxRetries      (or (:max-retries config) 5)
-                             :stopWhen        (stepCountIs (if final-report? 1 (:max-steps config)))
+                             :stopWhen        #js [(stepCountIs (if final-report? 1 (:max-steps config)))
+                                                  ;; An extension saw a loop.
+                                                  (fn [_] (boolean (:stop-run @state)))]
                              ;; Extended thinking is opt-in per request: with no
                              ;; `thinking` field a Claude model returns no
                              ;; reasoning at all, measured against Opus 5.

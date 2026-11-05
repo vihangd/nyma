@@ -675,3 +675,45 @@
                 (fn []
                   (doseq [ok ["next-request" "never"]]
                     (-> (expect (:revert (esc/config {:escalate {:revert ok}}))) (.toBe ok)))))))
+
+(defn- tool-done [tool result]
+  #js {:toolName tool :args #js {:command "bun test"} :result result})
+
+(describe "escalate:repeat-detection" (fn []
+  (it "fix-then-verify re-running one command is not a repeat"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (doseq [i (range 12)]
+            (-> (expect (esc/on-tool-complete api (tool-done "bash" (str "failures: " i)))) (.toBeFalsy)))
+          (-> (expect (:stop-run @st)) (.toBeUndefined)))))
+  (it "names the call on the third identical result, keeping the result"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (esc/on-tool-complete api (tool-done "bash" "same"))
+          (esc/on-tool-complete api (tool-done "bash" "same"))
+          (let [r (esc/on-tool-complete api (tool-done "bash" "same"))]
+            (-> (expect (.-result r)) (.toContain "bash has now returned"))
+            (-> (expect (.-result r)) (.toContain "same"))))))
+  (it "ends the run at twice the threshold"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (doseq [_ (range 6)] (esc/on-tool-complete api (tool-done "bash" "same")))
+          (-> (expect (:stop-run @st)) (.toBe true))
+          (-> (expect (:repeat-stopped @st)) (.toBe "bash")))))
+  (it "waiting on a background subagent is not a repeat"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (doseq [_ (range 8)] (esc/on-tool-complete api (tool-done "subagent__subagent" "running")))
+          (-> (expect (:stop-run @st)) (.toBeUndefined)))))
+  (it "a repeat stall skips the retry and clears the stop flag"
+      (fn []
+        (let [c (collector)
+              st (atom {:model "zen/cheap-1" :stop-run true :repeat-stopped "bash"
+                        :messages [{:role "user" :content "fix X"}]})
+              s  (assoc settings :escalate {:mode "auto"})
+              api (fake-api st (assoc c :settings s))]
+          (-> (esc/on-turn-finalize api #js {:toolCalls 6 :noOpTurns 0})
+              (.then (fn []
+                       (-> (expect (:stop-run @st)) (.toBeUndefined))
+                       (-> (expect (vec @(:set-calls c))) (.toEqual ["yun/opus-5"]))))))))))
+

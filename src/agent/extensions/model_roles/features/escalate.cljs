@@ -20,6 +20,8 @@
    (named, so testable; `^:async (fn …)` with the meta on the FORM works too). Keywords ARE strings, so (:mode cfg) reads
    both CLJS defaults and user JSON."
   (:require [agent.utils.content :as content]
+            [agent.utils.stall :as stall]
+            [agent.tool-metadata :as tool-metadata]
             [clojure.string :as str]
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.debug :as d]
@@ -141,6 +143,9 @@
         n       (or (:no-op-turns signals) 0)
         thresh  (or (:no-op-turns on) 3)]
     (cond
+      (:repeat-stopped signals)
+      (str "the same tool calls kept returning the same result: " (:repeat-stopped signals))
+
       (and (:verify-exhausted signals) (:verify-exhausted on))
       "the verify command is still failing after the fix attempts ran out"
 
@@ -352,7 +357,7 @@
 (defn ^:async escalate!
   "One capability escalation, consent included. Every refusal path is silent
    except the one the user needs to know about."
-  [api reason forced?]
+  [api reason forced? & [skip-retry?]]
   (let [st   (state-atom api)
         s    @st
         cfg  (config (settings api))
@@ -378,7 +383,10 @@
 
       ;; Retry the same model from a clean context before paying for a bigger
       ;; one. A forced /escalate skips straight to the model swap.
+      ;; Not for a loop: a retry repairs drift, but a model that repeats itself
+      ;; repeats itself again from a clean context.
       (and (not forced?)
+           (not skip-retry?)
            (< (or (:escalate-retries s) 0) (or (:retries-before-escalate cfg) 0)))
       (apply-retry! api reason)
 
@@ -490,6 +498,8 @@
     (d/info "escalate" "turn was cut off at the output-token cap — not a stall"))
   (let [s   (cur-state api)
         cfg (config (settings api))]
+    ;; One-shot: the flag ends this pass of the run, not the ones queued after.
+    (swap! (state-atom api) dissoc :stop-run :repeat-stopped)
     (when (and (not= (mode cfg) "off")
                (not (:escalate-disarmed s))
                (not (:plan-mode s))        ; opusplan already owns the model there
@@ -502,9 +512,55 @@
                           (stall-reason {:no-op-turns (or (and data (.-noOpTurns data))
                                                           (:no-op-turns s))
                                          :task-in-flight (:escalate-task-in-flight s)
-                                         :verify-exhausted (:escalate-verify-exhausted s)}
+                                         :verify-exhausted (:escalate-verify-exhausted s)
+                                         :repeat-stopped (:repeat-stopped s)}
                                         cfg))]
-        (escalate! api reason false)))))
+        (escalate! api reason false (boolean (:repeat-stopped s)))))))
+
+;; ---------------------------------------------------------------------------
+;; repeat detection
+;; ---------------------------------------------------------------------------
+
+(defn repeat-note
+  "What the model reads on the call that repeats. Names the call: telling a
+   model which check failed recovers far more runs than retrying it blind."
+  [tool-name reps]
+  (str "[nyma] " tool-name " has now returned this same result " reps
+       " times with the same input. Running it again will not change that. "
+       "Change the input, or take a different approach."))
+
+(defn on-tool-complete
+  "tool_complete: note a repeat, then end the run if the model keeps going.
+
+   The first answer is a note, not a stop: the model is told what it is doing
+   and can get out by itself. Twice the threshold ends the run, and the stall
+   check at turn_finalize takes it from there.
+
+   Subagent status is exempt: waiting on a background job looks exactly like a
+   repeat, and is not one."
+  [api data]
+  (let [st   (state-atom api)
+        cfg  (config (settings api))
+        n    (or (:repeat-tool-calls (:on cfg)) 0)
+        tool (str (.-toolName data))]
+    (when (and (pos? n)
+               (not= (mode cfg) "off")
+               (not (.-cancelled data))
+               (not (tool-metadata/matches-any-tool-name? tool #{"subagent"})))
+      (let [sig  (str (stall/tool-call-sig tool (.-args data))
+                      "=" (stall/result-fingerprint (.-result data)))
+            sigs (:repeat-sigs (swap! st update :repeat-sigs
+                                      (fn [v] (vec (take-last (* 2 n stall/max-cycle)
+                                                              (conj (or v []) sig))))))]
+        (cond
+          (stall/repeat-cycle sigs (* 2 n))
+          (do (swap! st assoc :stop-run true :repeat-stopped tool)
+              (notify api (str "⚠ Stopped this run: " tool
+                               " kept returning the same result.") "warning")
+              nil)
+
+          (and (stall/repeat-cycle sigs n) (string? (.-result data)))
+          #js {:result (str (repeat-note tool n) "\n\n" (.-result data))})))))
 
 (defn on-user-message
   "Episode boundary. The routing unit for an agent is the task, not the turn:
@@ -587,6 +643,8 @@
     ;; so an active escalation is the last writer of config.model.
     (.on api "model_resolve" on-mres -20)
     (.on api "provider_error" on-perr)
+    (.on api "agent_start" (fn [_] (swap! (state-atom api) dissoc :repeat-sigs :stop-run :repeat-stopped) nil))
+    (.on api "tool_complete" (fn [data] (on-tool-complete api data)))
     (.on api "turn_finalize" on-final)
     (.on api "input_submit" on-user)
     (.on api "small-model/verify-exhausted" on-vexh)

@@ -53,6 +53,17 @@
                       (apply str (map (fn [p] (or (.-text p) (get p "text") "")) c))))))
         (reverse (:messages @(:state agent)))))
 
+(describe "loop:stop-run" (fn []
+                            (it "an extension's stop flag ends the run before the step limit"
+                                (fn []
+                                  (let [{:keys [model calls]} (busy-model)
+                                        agent (make-test-agent {:model model :max-steps 50})]
+                                    ((:on (:events agent)) "turn_end"
+                                                           (fn [_] (swap! (:state agent) assoc :stop-run true)))
+                                    (-> (run agent "do the thing")
+                                        (.then (fn []
+                                                 (-> (expect (< (count @calls) 5)) (.toBe true))))))))))
+
 (describe "loop:step-cap-report" (fn []
                                    (it "nudge names the budget and forbids tools"
                                        (fn []
