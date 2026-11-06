@@ -57,12 +57,13 @@
 
 (defn- code-mask
   "`s` with string, regex and comment contents blanked to spaces, same length,
-   so bracket and token scans see only code."
+   so bracket and token scans see only code. Indexed in UTF-16 units throughout,
+   as `count` is: `nth` walks code points and runs off the end past an emoji."
   [s]
-  (let [n (count s) out (js/Array.from s)]
+  (let [n (count s) out (.split s "")]
     (loop [i 0 mode nil]
       (when (< i n)
-        (let [c (nth s i)]
+        (let [c (.charAt s i)]
           (case mode
             :str     (cond (= c "\\") (do (aset out i " ") (when (< (inc i) n) (aset out (inc i) " ")) (recur (+ i 2) :str))
                            (= c "\"") (recur (inc i) nil)
@@ -77,7 +78,7 @@
 (defn- matching-close [masked open-idx]
   (loop [i open-idx depth 0]
     (when (< i (count masked))
-      (let [c (nth masked i)]
+      (let [c (.charAt masked i)]
         (cond (contains? #{"(" "[" "{"} c) (recur (inc i) (inc depth))
               (contains? #{")" "]" "}"} c) (if (= 1 depth) i (recur (inc i) (dec depth)))
               :else (recur (inc i) depth))))))
@@ -175,7 +176,7 @@
   (->> (js/Array.from (.matchAll masked (js/RegExp. (str "\\((" sync-hofs ")\\s+(\\(fn[\\s\\[]|#\\()") "g")))
        (keep (fn [m]
                (let [at   (+ (.-index m) (- (count (aget m 0)) (count (aget m 2))))
-                     open (if (= "#" (nth masked at)) (inc at) at)
+                     open (if (= "#" (.charAt masked at)) (inc at) at)
                      end  (matching-close masked open)]
                  (when (and end (.includes (subs masked at end) "js-await")) (aget m 1)))))
        distinct))
@@ -237,7 +238,7 @@
         (when (seq stack)
           (let [{:keys [ch line col]} (peek stack)]
             (str (count stack) " unclosed — innermost `" ch "` opened at line " line ", col " col)))
-        (let [c (nth s i)
+        (let [c (.charAt s i)
               nl? (= c "\n")
               [l2 c2] (if nl? [(inc line) 1] [line (inc col)])]
           (cond
@@ -274,7 +275,7 @@
         hits   (->> (js/Array.from (.matchAll masked re))
                     (map (fn [m] (let [i     (.-index m)
                                        defn? (.startsWith (aget m 0) "(defn")
-                                       open  (if (= "#" (nth masked i)) (inc i) i)]
+                                       open  (if (= "#" (.charAt masked i)) (inc i) i)]
                                    {:at    (if defn? (+ i (count (aget m 0))) i)
                                     :close (matching-close masked open)})))
                     (filter (fn [{:keys [at close]}]

@@ -15,6 +15,17 @@
 
 ;;; ─── analyze ───────────────────────────────────────────────────
 
+(describe "codemode:analyze past the BMP" (fn []
+  (it "reads a script holding an emoji, in a string or a comment"
+      (fn []
+        (-> (expect (clj->js (an/references "(github/list-issues {:q \"🔥\"}) ; 🔥 done")))
+            (.toEqual (clj->js [["github" "list_issues"]])))))
+  (it "still finds where brackets stop balancing after one"
+      (fn []
+        (-> (expect (an/paren-report "(str \"🔥\")")) (.toBeFalsy))
+        (-> (expect (an/paren-report "(str \"🔥\"")) (.toContain "1 unclosed"))))))
+
+
 (describe "codemode: names" (fn []
                               (it "maps registered names to script names generically"
                                   (fn []
