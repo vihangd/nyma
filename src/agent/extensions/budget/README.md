@@ -28,3 +28,7 @@ Off unless a cap is set. Usage accumulates per step (`turn_end` fires on every s
 so exceeding a cap aborts the run **between tool steps** — partial work is kept, the agent just
 stops. The turn counter resets on each run; the session counter never resets (after the session
 cap trips, each new submit is aborted at its first step boundary).
+
+Subagents and extensions' own model calls count toward both caps. They report when they finish, so
+the check lands at the step that called them: a single child can overshoot a cap, since nothing
+stops it mid-run.

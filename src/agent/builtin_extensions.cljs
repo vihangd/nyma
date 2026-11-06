@@ -85,7 +85,7 @@
     :manifest  #js {"namespace" "bash-suite" "description" "Shell execution helpers, security analysis, output handling, and a per-command edit diff (files a bash command changed)" "capabilities" #js ["events" "tools" "middleware" "commands"] "dependsOn" #js [] "dependencies" #js {"shell-quote" "^1.12.0"} "settings" #js {"bash-suite" #js {"security-analysis" nil "permissions" nil "output-handling" nil "edit-diff" nil "env-filter" nil "cwd-manager" nil "background-jobs" nil "timeout-classifier" nil}}}}
    {:namespace "budget"
     :module    ext-budget
-    :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
+    :manifest  #js {"namespace" "budget" "description" "Per-turn and per-session token caps that abort a runaway run (off unless `budget` is set)" "capabilities" #js ["events" "state"] "dependsOn" #js [] "settings" #js {"budget" #js {"turn-tokens" nil "session-tokens" nil "wall-seconds" nil}}}}
    {:namespace "checkpoints"
     :module    ext-checkpoints
     :manifest  #js {"namespace" "checkpoints" "description" "Persistent per-turn file checkpoints (edits and bash changes); /undo restores, /diff reviews the session" "capabilities" #js ["events" "commands" "session" "ui"] "dependsOn" #js []}}

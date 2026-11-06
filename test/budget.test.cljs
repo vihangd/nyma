@@ -35,6 +35,51 @@
                    #js {:usage #js {:inputTokens 80 :outputTokens 10}} ctx)
                   (-> (expect @aborted) (.toBe true)))))
 
+          (it "counts subagent and extension spend once, at the next step"
+              (fn []
+                (let [handlers (atom {})
+                      aborted  (atom 0)
+                      state    (atom {:extension-tokens 0})
+                      all      #js {:budget #js {:turn-tokens 100}}
+                      api      #js {:settings (fn [sec] (if sec (or (get all sec) {}) all))
+                                    :getState (fn [] @state)
+                                    :on  (fn [evt h] (swap! handlers assoc evt h))
+                                    :off (fn [evt _] (swap! handlers dissoc evt))}
+                      _        (b/activate api)
+                      ctx      #js {:abort (fn [] (swap! aborted inc))}
+                      step!    (fn [] ((get @handlers "turn_end")
+                                       #js {:usage #js {:inputTokens 10 :outputTokens 0}} ctx))]
+                  ((get @handlers "before_agent_start") #js {} ctx)
+                  (swap! state assoc :extension-tokens 80)
+                  (step!)
+                  (-> (expect @aborted) (.toBe 0))
+                  ;; 90 + 10: the 80 must not be counted a second time.
+                  (step!)
+                  (-> (expect @aborted) (.toBe 0))
+                  (swap! state assoc :extension-tokens 90)
+                  (step!)
+                  (-> (expect @aborted) (.toBe 1)))))
+
+          (it "spend between runs counts for the session, not the next run"
+              (fn []
+                (let [handlers (atom {})
+                      aborted  (atom 0)
+                      state    (atom {:extension-tokens 0})
+                      all      #js {:budget #js {:turn-tokens 100 :session-tokens 1000}}
+                      api      #js {:settings (fn [sec] (if sec (or (get all sec) {}) all))
+                                    :getState (fn [] @state)
+                                    :on  (fn [evt h] (swap! handlers assoc evt h))
+                                    :off (fn [evt _] (swap! handlers dissoc evt))}
+                      _        (b/activate api)
+                      ctx      #js {:abort (fn [] (swap! aborted inc))}]
+                  (swap! state assoc :extension-tokens 500)
+                  ((get @handlers "before_agent_start") #js {} ctx)
+                  ((get @handlers "turn_end") #js {:usage #js {:inputTokens 10 :outputTokens 0}} ctx)
+                  (-> (expect @aborted) (.toBe 0))
+                  (swap! state assoc :extension-tokens 1500)
+                  ((get @handlers "turn_end") #js {:usage #js {:inputTokens 10 :outputTokens 0}} ctx)
+                  (-> (expect @aborted) (.toBe 1)))))
+
           (it "turn counter resets per run; session counter persists"
               (fn []
                 (let [handlers (atom {})

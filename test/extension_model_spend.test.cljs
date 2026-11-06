@@ -73,6 +73,13 @@
           ((:dispatch! s) :extension-usage {:input-tokens 10 :output-tokens 1 :cost 0.1 :cost-unknown? false})
           (-> (expect (:cost-unknown? ((:get-state s)))) (.toBe true)))))
 
+  (it "keeps its tokens apart for budget, without the agent's own"
+      (fn []
+        (let [s (store)]
+          ((:dispatch! s) :usage-updated {:input-tokens 500 :output-tokens 100 :cost 0 :steps 1})
+          ((:dispatch! s) :extension-usage {:input-tokens 20 :output-tokens 5 :cost 0})
+          (-> (expect (:extension-tokens ((:get-state s)))) (.toBe 25)))))
+
   (it "it accumulates alongside the agent's own usage"
       (fn []
         (let [s (store)]

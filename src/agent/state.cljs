@@ -147,6 +147,10 @@
                            (update :total-cache-read-tokens (fnil + 0) (or (:cache-read-tokens data) 0))
                            (update :total-cache-write-tokens (fnil + 0) (or (:cache-write-tokens data) 0))
                            (update :total-cost (fnil + 0.0) (or (:cost data) 0))
+                           ;; Apart from the totals, for budget: it counts steps
+                           ;; itself and adds only what no step reported.
+                           (update :extension-tokens (fnil + 0)
+                                   (+ (or (:input-tokens data) 0) (or (:output-tokens data) 0)))
                            (cond-> (:cost-unknown? data) (assoc :cost-unknown? true))))
    :tool-execution-started (fn [state data]
                              (update state :active-executions (fnil conj #{}) (:exec-id data)))
