@@ -13,7 +13,7 @@
 
    Isolation guarantees (verified against agent.core/create-agent):
      - child gets its own event bus  → parent extensions never fire on it
-     - child :session stays nil       → no writes to parent JSONL/SQLite
+     - child :session is its own file → no writes to parent JSONL/SQLite
      - only the final summary returns → child tool calls stay in the child"
   (:require [agent.utils.data :as data]
             [agent.schema :as schema]
@@ -24,10 +24,12 @@
             [agent.providers.registry :as registry]
             [agent.tool-metadata :as tool-metadata]
             [agent.settings.manager :refer [create-settings-manager]]
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
             [agent.extensions.subagent.concurrency :as conc]
             [agent.extensions.subagent.agents-md :as agents-md]
             [agent.utils.worktree :as wt]
             ["node:fs" :as fs]
+            ["node:path" :as path]
             ["node:url" :as url]
             [clojure.string :as str]))
 
@@ -261,7 +263,9 @@ intermediate tool calls, so put everything that matters in the summary.")
                    (nil? res)                "failed"
                    (.-is_error res)          "failed"
                    :else                     "done")
-         :text  (str (if res (.-result res) (str "child produced no result: " (str/trim (str err out))))
+         :text  (str (if res
+                       (clip-reply (.-result res) nil)
+                       (clip-reply (str "child produced no result: " (str/trim (str err out))) nil))
                      "\n\n"
                      (cond
                        (:error done)
@@ -298,6 +302,36 @@ intermediate tool calls, so put everything that matters in the summary.")
    :cache-write (or (:total-cache-write-tokens st) 0)
    :cost   (+ (or (:total-cost st) 0.0) (or (:run-cost st) 0))
    :cost-unknown? (boolean (:cost-unknown? st))})
+
+;; Under the tool-result policy's 12,000, so its own cut does not take the footer.
+(def ^:private reply-limit 11000)
+
+(defn clip-reply
+  "A child's reply, bounded. The whole of it stays in the transcript, when there
+   is one; the parent's context only pays for what it can use."
+  [text transcript]
+  (let [s (str text)]
+    (if (<= (count s) reply-limit)
+      s
+      (str (subs s 0 reply-limit) "\n\n[cut " (- (count s) reply-limit) " chars"
+           (when transcript "; the rest is in the transcript") "]"))))
+
+(defn- open-transcript!
+  "Save `child` as a real session beside the parent's, under subagents/ so the
+   session list stays the user's own. `nyma --session <path>` opens it. Written as
+   it goes: a child that dies is the one worth reading. Returns the path, nil
+   with no parent file (--no-session, ACP)."
+  [child api agent-name]
+  (when-let [parent (when (aget api "getSessionFile") (.getSessionFile api))]
+    (let [dir  (path/join (path/dirname parent) "subagents")
+          file (path/join dir (str (path/basename parent ".jsonl") "-" (wt/safe-name agent-name)
+                                   "-" (js/Date.now) ".jsonl"))
+          sm   (create-session-manager file)]
+      (fs/mkdirSync dir #js {:recursive true})
+      ((:append sm) {:role "session-meta" :metadata {:cwd (js/process.cwd)}})
+      (reset! (:session child) sm)
+      (attach-session-persistence! child sm)
+      file)))
 
 (defn- step-bill
   "What one finished step of a child on `model` spent, as `bill-parent!` takes it.
@@ -396,7 +430,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                 {:agent agent-name :ok false
                  :text (str "Subagent " agent-name " cannot have: " (str/join ", " missing)
                             ". A subagent has builtin tools only, not MCP or extension tools.")}
-              (let [stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
+              (let [transcript (open-transcript! child api agent-name)
+                    stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
                     _    (some-> signal (.addEventListener "abort" stop #js {:once true}))
                     _    ((:on (:events child)) "turn_end"
                                                 (fn [step _]
@@ -430,7 +465,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                           "cancelled" "cancelled"
                           "failed"    (str "Subagent " agent-name " failed: " (.-message err))
                           "empty"     (str "Subagent " agent-name " ended without a reply.")
-                          said)
+                          (clip-reply said transcript))
+                 :transcript transcript
                  :usage (child-usage st (str provider "/" model-id))
                  :billed? true})))
             (catch :default e
@@ -456,7 +492,8 @@ intermediate tool calls, so put everything that matters in the summary.")
          "cancelled"   " (CANCELLED)"
          "empty"       " (EMPTY)"
          (when-not (:ok r) " (FAILED)"))
-       "\n" (:text r)))
+       "\n" (:text r)
+       (when-let [t (:transcript r)] (str "\n\nTranscript: " t))))
 
 (defn- format-results [results]
   (str/join "\n\n" (map format-result results)))

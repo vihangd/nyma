@@ -7,7 +7,7 @@
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-scope :refer [create-scoped-api]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute child-tools start-async-job]]
+            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute child-tools start-async-job clip-reply]]
             [agent.pricing :as pricing]))
 
 ;; ── B2 regression: final-text returns the last ASSISTANT message ──
@@ -244,7 +244,7 @@
         prev   (js/process.cwd)
         asked  (atom [])
         parent (create-agent {:model "m" :system-prompt "x"})
-        api    (create-scoped-api (create-extension-api parent) "subagent" #{:tools :model :state})]
+        api    (create-scoped-api (create-extension-api parent) "subagent" #{:tools :model :state :session})]
     ((:on (:events parent)) "permission_request"
                             (fn [d] (swap! asked conj (.-tool d)) #js {:decision decision}))
     (aset api "resolveModel" (fn [_ _] (scripted bash-step text-chunks)))
@@ -348,6 +348,33 @@
                               (it "a child past its deadline is stopped" test-timeout-status)
                               (it "the parent reads the cap in the header" test-header-says-capped)
                               (it "a failed background job tells the parent" test-failed-job-reports)))
+
+(defn ^:async test-transcript-saved []
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "nyma-tr-"))
+        api #js {:resolveModel (fn [_ _] (scripted tool-chunks text-chunks))
+                 :dispatchState (fn [_ _] nil)
+                 :checkPermission (fn [& _] (js/Promise.resolve #js {:allowed true}))
+                 :getSessionFile (fn [] (path/join dir "parent.jsonl"))}
+        r   (js-await (run-on nil {:api api}))
+        t   (:transcript r)]
+    (-> (expect (.includes t "/subagents/parent-mine-")) (.toBe true))
+    (let [text (str (fs/readFileSync t "utf8"))]
+      (-> (expect text) (.toContain "\"go\""))
+      (-> (expect text) (.toContain "done"))
+      (-> (expect text) (.toContain "think")))
+    ;; The parent's own file is untouched.
+    (-> (expect (fs/existsSync (path/join dir "parent.jsonl"))) (.toBe false))
+    (fs/rmSync dir #js {:recursive true :force true})))
+
+(describe "subagent:transcript" (fn []
+                                  (it "a child is a session of its own" test-transcript-saved)
+                                  (it "a huge reply is cut, and says where the rest is"
+                                      (fn []
+                                        (let [big (.repeat "x" 20000)
+                                              out (clip-reply big "/t.jsonl")]
+                                          (-> (expect (< (count out) 12000)) (.toBe true))
+                                          (-> (expect out) (.toContain "in the transcript"))
+                                          (-> (expect (clip-reply "short" nil)) (.toBe "short")))))))
 
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)
