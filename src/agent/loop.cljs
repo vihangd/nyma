@@ -281,7 +281,8 @@
           (assoc :cost-unknown? true)))))
 
 (defn- inject-steer-messages!
-  "Move steer queue messages into agent state between tool steps."
+  "Move steer queue messages into agent state between tool steps. Returns them:
+   state only reaches the model on the next run, so this run has to be told."
   [agent]
   (let [queued @(:steer-queue agent)]
     (when (seq queued)
@@ -289,7 +290,8 @@
         (doseq [msg queued]
           ((:dispatch! store) :message-added {:message msg}))
         (swap! (:state agent) update :messages into queued))
-      (reset! (:steer-queue agent) []))))
+      (reset! (:steer-queue agent) [])
+      queued)))
 
 (defn ^:async run
   "Execute the agent loop. Yields events via the event bus.
@@ -545,6 +547,10 @@
               ;; st-config, for :onStepFinish: it cannot name itself in its own
               ;; initializer, for the same reason as above.
               request-config  (atom nil)
+              ;; Messages steered in during this pass. The SDK rebuilds each
+              ;; step's prompt from the request and its own responses, so they
+              ;; go back in at every step (:prepareStep).
+              steered         (atom [])
               ;; Did this pass's usage reach the store? Every step before a
               ;; failure was paid for, and the run-end dispatch never comes.
               usage-billed?   (atom false)
@@ -613,6 +619,12 @@
                                                    active-model)
                                                   #js {})
                              :onError         (fn [e] (throw (.-error e)))
+                             :prepareStep     (fn [o]
+                                                (when (seq @steered)
+                                                  ;; Not `messages`: the SDK carries what
+                                                  ;; this returns into the next step's.
+                                                  #js {:messages (.concat (.-initialMessages o) (.-responseMessages o)
+                                                                          (clj->js @steered))}))
                              :onStepFinish    (fn [step]
                                                 ;; Steps, not runs. `:turn-count`
                                                 ;; in the store counts agent
@@ -665,7 +677,7 @@
                                                   (catch :default e
                                                     (dbg/error "loop" (str "step cost: " (.-message e)))))
                                                 (emit "turn_end" step)
-                                                (inject-steer-messages! agent))}
+                                                (swap! steered into (inject-steer-messages! agent)))}
 
               _ (reset! request-config st-config)
               ;; before_provider_request — extensions can MUTATE st-config in place

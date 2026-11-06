@@ -5,7 +5,7 @@
    about 7% full."
   (:require ["bun:test" :refer [describe it expect]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.loop :refer [run]]
+            [agent.loop :refer [run steer]]
             [agent.pricing :as pricing]
             [agent.providers.fallback :as fallback]
             [test-util.agent-harness :refer [make-test-agent]]))
@@ -150,6 +150,27 @@
       (-> (expect (:total-input-tokens st)) (.toBe 2000000))
       ;; $1 at A's rates, $3 at B's, and each output token at its own.
       (-> (expect (:total-cost st)) (.toBeCloseTo 4 3)))))
+
+(defn ^:async test-steer-reaches-next-steps []
+  (let [prompts (atom [])
+        left    (atom [(tool-step 10) (tool-step 10) (text-step 10)])
+        model   (new MockLanguageModelV4
+                     #js {:doStream (fn [o]
+                                      (swap! prompts conj (js/JSON.stringify (.-prompt o)))
+                                      (let [s (first @left)]
+                                        (swap! left rest)
+                                        (js/Promise.resolve #js {:stream (convertArrayToReadableStream s)})))})
+        agent   (make-test-agent {:model model})]
+    (steer agent {:role "user" :content "also check b"})
+    (js-await (run agent "go"))
+    (-> (expect (first @prompts)) (.not.toContain "also check b"))
+    (-> (expect (nth @prompts 1)) (.toContain "also check b"))
+    ;; Once: the SDK keeps what prepareStep returns.
+    (-> (expect (dec (count (.split (nth @prompts 2) "also check b")))) (.toBe 1))))
+
+(describe "loop:steer" (fn []
+                         (it "a steered message reaches the model from the next step on"
+                             test-steer-reaches-next-steps)))
 
 (describe "loop:retry-usage" (fn []
                                (it "a discarded attempt is billed, each model at its rates"

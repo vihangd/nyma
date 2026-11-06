@@ -177,11 +177,13 @@
 
    Built from `initialMessages` + `responseMessages`, not `messages`: the SDK
    carries what this returns into the next step's `messages`, so marks piled up
-   past the limit of four, and the SDK drops the newest ones first."
-  [provider ttl]
+   past the limit of four, and the SDK drops the newest ones first. `prior` is
+   the request's own prepareStep (steered messages), whose list this marks."
+  [provider ttl & [prior]]
   (fn [opts]
     (when (pos? (.-stepNumber opts))
-      (let [out  (.concat (.-initialMessages opts) (.-responseMessages opts))
+      (let [out  (or (some-> (when prior (prior opts)) .-messages)
+                     (.concat (.-initialMessages opts) (.-responseMessages opts)))
             i    (dec (.-length out))
             msg  (js/Object.assign #js {} (aget out i))]
         (aset msg "providerOptions" (js/Object.assign #js {} (.-providerOptions msg)))
@@ -278,7 +280,7 @@
               ;; forever with zero reads and no miss ever surfaces.
               (when cache-messages?
                 (when (= provider :anthropic)
-                  (aset config-obj "prepareStep" (step-breakpoint provider ttl)))
+                  (aset config-obj "prepareStep" (step-breakpoint provider ttl (aget config-obj "prepareStep"))))
                 (when (pos? (annotate-messages! config-obj provider every-turns max-msg-breaks ttl))
                   (when @prev-annotated? (reset! expected-hit? true))
                   (reset! annotated true))))

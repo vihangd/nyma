@@ -233,3 +233,18 @@
         (^:async fn [] (js-await (test-each-step-caches-its-newest-message))))
     (it "stays off providers without message breakpoints"
         (^:async fn [] (js-await (test-no-step-breakpoint-off-anthropic))))))
+
+(describe "kv-cache: a request's own prepareStep"
+          (fn []
+            (it "keeps what it added, and marks that"
+                (fn []
+                  (let [steered #js {:role "user" :content "also b"}
+                        prior   (fn [o] #js {:messages (.concat (.-initialMessages o) (.-responseMessages o) #js [steered])})
+                        step    (kv-cache/step-breakpoint :anthropic "5m" prior)
+                        out     (.-messages (step #js {:stepNumber 1 :initialMessages #js [#js {:role "user" :content "go"}]
+                                                       :responseMessages #js []}))]
+                    (-> (expect (.-length out)) (.toBe 2))
+                    (-> (expect (.-content (aget out 1))) (.toBe "also b"))
+                    (-> (expect (.. (aget out 1) -providerOptions -anthropic -cacheControl)) (.toBeDefined))
+                    ;; the steered message itself stays clean for the next step
+                    (-> (expect (.-providerOptions steered)) (.toBeUndefined)))))))
