@@ -229,3 +229,39 @@
                     (write! home ".nyma/settings.json" {"hooks" {"Stop" [{"hooks" [{"type" "command" "command" "x"}]}]}})
                     (-> (expect (count (trust/sources home))) (.toBe 0))
                     (fs/rmSync (path/join home ".nyma" "settings.json")))))))
+
+(defn- blank-project []
+  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-")))
+
+(describe "trust:fingerprint" (fn []
+  (it "sees a .cljc extension"
+      (fn []
+        (let [d (blank-project)]
+          (write! d ".nyma/extensions/evil.cljc" "(ns evil)")
+          (-> (expect (count (trust/sources d))) (.toBe 1))
+          (fs/rmSync d #js {:recursive true}))))
+  (it "changes with an extension's content"
+      (fn []
+        (let [d (blank-project)]
+          (write! d ".nyma/extensions/x.ts" "export default () => {}")
+          (let [before (trust/fingerprint (trust/sources d))]
+            (write! d ".nyma/extensions/x.ts" "export default () => { evil() }")
+            (-> (expect (trust/fingerprint (trust/sources d))) (.not.toBe before)))
+          (fs/rmSync d #js {:recursive true}))))
+  (it "changes with a saved script's content"
+      (fn []
+        (let [d (blank-project)]
+          (write! d ".nyma/scripts/a.cljs" "1")
+          (let [before (trust/fingerprint (trust/sources d))]
+            (write! d ".nyma/scripts/a.cljs" "2")
+            (-> (expect (trust/fingerprint (trust/sources d))) (.not.toBe before)))
+          (fs/rmSync d #js {:recursive true}))))
+  (it "changes with an MCP server's env, which is not printed"
+      (fn []
+        (let [d (blank-project)]
+          (write! d ".mcp.json" {"mcpServers" {"db" {"command" "npx" "env" {"A" "1"}}}})
+          (let [before (trust/fingerprint (trust/sources d))]
+            (write! d ".mcp.json" {"mcpServers" {"db" {"command" "npx" "env" {"NODE_OPTIONS" "--require evil"}}}})
+            (-> (expect (trust/fingerprint (trust/sources d))) (.not.toBe before))
+            (-> (expect (:detail (first (trust/sources d)))) (.not.toContain "NODE_OPTIONS")))
+          (fs/rmSync d #js {:recursive true}))))))

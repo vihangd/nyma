@@ -44,10 +44,22 @@
   (try
     (->> (fs/readdirSync dir #js {:recursive true})
          (map str)
-         (filter #(re-find #"\.(cljs|ts|js|mjs)$" %))
+         (filter #(re-find #"\.(cljs|cljc|ts|js|mjs)$" %))
          sort
          vec)
     (catch :default _ [])))
+
+(defn- content-hash
+  "Hash of `files` under `dir`, by content. In the entry but never shown: what
+   the code says is the thing trusted, and a pull that rewrites a file changes
+   neither its name nor the count."
+  [dir files]
+  (let [h (crypto/createHash "sha256")]
+    (doseq [f files]
+      (.update h (str f))
+      (try (.update h (fs/readFileSync (path/join dir f)))
+           (catch :default _ nil)))
+    (.digest h "hex")))
 
 (defn- settings-entries
   "Command-bearing entries in one parsed project settings object."
@@ -80,8 +92,11 @@
     (if-let [servers (aget obj "mcpServers")]
       (for [k (js/Object.keys servers)
             :let [s (aget servers k)]]
+        ;; :raw for the fingerprint: env and headers can change what runs and
+        ;; where secrets go, and are not for printing.
         {:source (str rel " " k) :detail (str/join " " (cons (or (aget s "command") (aget s "url") "")
-                                                             (vec (or (aget s "args") []))))})
+                                                             (vec (or (aget s "args") []))))
+         :raw    (js/JSON.stringify s)})
       (if-let [h (or (aget obj "hooks") (when (= rel ".agents/hooks.json") obj))]
         (for [ev (js/Object.keys h)] {:source (str rel " hooks." ev) :detail (js/JSON.stringify (aget h ev))})
         []))))
@@ -107,14 +122,17 @@
     [] ; run from HOME, ./.nyma is the user's own global config
   (vec
    (concat
-    (let [files (code-files (path/join cwd extensions-dir))]
+    (let [dir   (path/join cwd extensions-dir)
+          files (code-files dir)]
       (when (seq files)
-        [{:source extensions-dir :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))}]))
+        [{:source extensions-dir :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))
+          :hash   (content-hash dir files)}]))
     ;; code-mode saved scripts: squint a script can call by name
     (let [dir   (path/join cwd ".nyma" "scripts")
-          files (when (fs/existsSync dir) (filter #(.endsWith % ".cljs") (vec (fs/readdirSync dir))))]
+          files (when (fs/existsSync dir) (sort (filter #(.endsWith % ".cljs") (vec (fs/readdirSync dir)))))]
       (when (seq files)
-        [{:source ".nyma/scripts" :detail (str (count files) " saved script(s): " (str/join ", " (take 5 files)))}]))
+        [{:source ".nyma/scripts" :detail (str (count files) " saved script(s): " (str/join ", " (take 5 files)))
+          :hash   (content-hash dir files)}]))
     (mapcat #(settings-entries % (read-json (path/join cwd %))) settings-files)
     ;; .claude/ and .agents/ hooks only when hooks-compat would load them:
     ;; asking about commands that can never run is noise that teaches people
