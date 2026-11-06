@@ -969,7 +969,8 @@ Examples:
                    ;; totalled from two different rate tables, and nothing in
                    ;; the usage report could say where the money went.
                    :model        (let [m (:model (:config agent))]
-                                   (or (model-info/config-model-key (:config agent))
+                                   (or (:request-spec data)
+                                       (model-info/config-model-key (:config agent))
                                        (if (string? m) m (or (and m (.-modelId m)) ""))))
                    :input-tokens (:input-tokens data)
                    :output-tokens (:output-tokens data)

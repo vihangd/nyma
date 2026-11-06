@@ -7,6 +7,7 @@
             [agent.model-info :as model-info]
             [agent.sessions.compaction :as compaction]
             [agent.pricing :refer [calculate-turn-cost model-cost-key] :as pricing]
+            [agent.providers.fallback :as fallback]
             [agent.thinking :as thinking]
             [agent.token-estimation :as te]
             [agent.debug :as dbg]
@@ -251,6 +252,11 @@
   [u]
   [(or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
    (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)])
+
+(defn- request-cost-key
+  "Price what answered: a fallback moves the request, not the session's model."
+  [agent st-config]
+  (or (fallback/request-spec st-config) (model-cost-key (:config agent))))
 
 (defn- add-live-step
   "One finished step into the figures the status line shows while a run is going.
@@ -529,6 +535,9 @@
               tools-this-turn (atom 0)
               ;; Model steps this run (tool call + response cycles).
               steps-this-run  (atom 0)
+              ;; st-config, for :onStepFinish: it cannot name itself in its own
+              ;; initializer, for the same reason as above.
+              request-config  (atom nil)
               ;; What this pass did, for the report call that cannot see it.
               pass-digest     (atom {})
 
@@ -640,9 +649,10 @@
                                                 ;; Last: the SDK swallows a throw
                                                 ;; here, which would skip the rest.
                                                 (swap! state add-live-step
-                                                       (model-cost-key (:config agent))
+                                                       (request-cost-key agent @request-config)
                                                        (.-usage step)))}
 
+              _ (reset! request-config st-config)
               ;; before_provider_request — extensions can MUTATE st-config in place
               provider-result (js-await
                                (emit-collect "before_provider_request" st-config))]
@@ -899,7 +909,7 @@
                                 ;; already reads — the cost line just ignored it,
                                 ;; overstating a cache-heavy turn ~3x.
                                 [cache-read cache-write] (cache-split usage)
-                                cost-model-id (model-cost-key (:config agent))
+                                cost-model-id (request-cost-key agent st-config)
                                 cost          (calculate-turn-cost
                                                cost-model-id
                                                {:input-tokens  input-tokens
@@ -910,6 +920,7 @@
                                                 {:input-tokens input-tokens :output-tokens output-tokens
                                                  :cache-read-tokens cache-read :cache-write-tokens cache-write
                                                  :steps @steps-this-run
+                                                 :request-spec (fallback/request-spec st-config)
                                                  :cost cost})
                             (when (and input-tokens (pos? input-tokens))
                               ;; Learn what a GATEWAY injects. `unpriced-providers`

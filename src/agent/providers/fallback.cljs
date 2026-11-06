@@ -19,11 +19,21 @@
 
 ;; ── how ──────────────────────────────────────────────────────────
 
+;; Beside the request, not on it: streamText passes unknown keys on to telemetry.
+(def ^:private retargeted (js/WeakMap.))
+
+(defn request-spec
+  "The `provider/model` a request was moved to, nil if it never was. A fallback
+   leaves the session's model alone, so config cannot say who answered."
+  [cfg]
+  (.get retargeted cfg))
+
 (defn retarget!
   "Point the request `cfg` at `model`. Its other fields were built for the model
    that failed: providerOptions carry that provider's thinking dialect, and a
    max_tokens above the new model's limit is a 400 on the retry."
   [cfg model spec]
+  (.set retargeted cfg spec)
   (aset cfg "model" model)
   (aset cfg "providerOptions" #js {})
   (when-let [cap (aget cfg "maxOutputTokens")]

@@ -12,7 +12,11 @@
    or the real fix is compaction, and falling back would bury a setup error behind
    a model nobody chose."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.providers.fallback :as fb]))
+            ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
+            [agent.loop :refer [run]]
+            [agent.pricing :as pricing]
+            [agent.providers.fallback :as fb]
+            [test-util.agent-harness :refer [make-test-agent]]))
 
 ;;; ─── when to fall back ─────────────────────────────────────────
 
@@ -141,6 +145,49 @@
       (fn []
         (doseq [m ["HTTP 503: try later" "status 502" "500 Internal"]]
           (-> (expect #js [m (fb/should-fall-back? m)]) (.toEqual #js [m true])))))))
+
+(defn- answer [input]
+  (new MockLanguageModelV4
+       #js {:doStream (fn [_]
+                        (js/Promise.resolve
+                         #js {:stream (convertArrayToReadableStream
+                                       #js [#js {:type "text-start" :id "t1"}
+                                            #js {:type "text-delta" :id "t1" :delta "done"}
+                                            #js {:type "text-end" :id "t1"}
+                                            #js {:type "finish"
+                                                 :finishReason #js {:unified "stop" :raw "stop"}
+                                                 :usage #js {:inputTokens  #js {:total input}
+                                                             :outputTokens #js {:total 0}}}])}))}))
+
+(defn- failing []
+  (new MockLanguageModelV4
+       #js {:doStream (fn [_]
+                        (js/Promise.resolve
+                         #js {:stream (convertArrayToReadableStream
+                                       #js [#js {:type "error" :error "overloaded"}])}))}))
+
+(defn ^:async test-fallback-priced-as-what-answered []
+  (let [agent  (make-test-agent {:model (failing)})
+        rows   (atom [])
+        fb-key "fb-provider/fb-model"
+        own    (pricing/model-cost-key (:config agent))]
+    (swap! pricing/token-costs assoc fb-key [2 2] own [100 100])
+    ((:subscribe (:store agent))
+     (fn [t _ data] (when (= t :usage-updated) (swap! rows conj (:request-spec data)))))
+    ((:on (:events agent)) "provider_error"
+                           (fn [ctx _]
+                             (fb/retarget! (.-config ctx) (answer 1000000) fb-key)
+                             #js {:retry true}))
+    (js-await (run agent "go"))
+    (swap! pricing/token-costs dissoc fb-key own)
+    (-> (expect (:total-cost @(:state agent))) (.toBeCloseTo 2 6))
+    ;; The session's model is untouched, so the row must name who answered.
+    (-> (expect (first @rows)) (.toBe fb-key))))
+
+(describe "a run that fell back"
+  (fn []
+    (it "is priced and recorded as the model that answered"
+        test-fallback-priced-as-what-answered)))
 
 (describe "retarget!" (fn []
   (it "drops what was built for the failed model"
