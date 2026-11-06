@@ -24,6 +24,16 @@
 
 (def protocol-version 1)
 
+(defn editor-ui
+  "`ui` over the headless `base`. `available` is true here, which is what a
+   caller's guard checks, and the base's methods are all nil, so the widget calls
+   behind that guard need real ones. Only those: extensions test `showOverlay`
+   and the like for presence and fall back to text, which a stub would swallow."
+  [base ui]
+  (js/Object.assign #js {} base
+                    #js {:setWidget (fn [& _] nil) :clearWidget (fn [& _] nil)}
+                    ui))
+
 (defn- write! [obj]
   (.write js/process.stdout (str (js/JSON.stringify (clj->js obj)) "\n")))
 
@@ -131,10 +141,8 @@
                             (= "yes" (some-> r (aget "outcome") (aget "optionId")))))
                         :notify  (fn [_ _] nil)
                         :input   (fn [& _] (js/Promise.resolve nil))}
-        ;; Layered over the headless ui, so the no-op widget/status methods
-        ;; extensions call still exist.
         _          (when-let [api (.-extension-api agent)]
-                     (aset api "ui" (js/Object.assign #js {} (.-ui api) ui)))
+                     (aset api "ui" (editor-ui (.-ui api) ui)))
         on         (:on (:events agent))
         off        (:off (:events agent))
         handlers

@@ -22,7 +22,8 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
             [agent.extensions :refer [create-extension-api]]
-            [agent.extension-scope :refer [create-scoped-api]]))
+            [agent.extension-scope :refer [create-scoped-api]]
+            [agent.modes.acp :refer [editor-ui]]))
 
 (defn- ui-of [api] (.-ui api))
 
@@ -46,6 +47,14 @@
 
 (describe "ui surface parity"
   (fn []
+    (it "ACP says the ui is available, so what extensions then call must exist"
+      (fn []
+        (let [ui (editor-ui contract-ui #js {:available true})]
+          ((.-setWidget ui) "id" #js [])
+          ((.-clearWidget ui) "id")
+          ;; Tested for presence: a stub would swallow their text fallback.
+          (-> (expect (.-showOverlay ui)) (.toBeFalsy)))))
+
     (it "both surfaces were actually built"
       (fn []
         ;; Guard the guard: two empty objects would satisfy every comparison
