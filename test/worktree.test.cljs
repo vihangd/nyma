@@ -133,8 +133,22 @@
         (js/process.chdir prev)
         (fs/rmSync d #js {:recursive true :force true})))))
 
+(defn ^:async test-child-cannot-delegate []
+  (let [d (temp-repo) prev (js/process.cwd)]
+    (js/process.chdir d)
+    (try
+      (let [r (js-await (sub/run-in-worktree
+                         {:agent-name "w" :task "t"
+                          :command ["sh" "-c" "printf '{\"result\":\"depth=%s\"}' \"$NYMA_SUBAGENT_DEPTH\""]}
+                         {:provider "p" :model "m"}))]
+        (-> (expect (:text r)) (.toContain "depth=1")))
+      (finally
+        (js/process.chdir prev)
+        (fs/rmSync d #js {:recursive true :force true})))))
+
 (describe "worktree child process"
-          (fn [] (it "drains stderr and stdout together" test-noisy-child 20000)))
+          (fn [] (it "drains stderr and stdout together" test-noisy-child 20000)
+            (it "is told it is a child, so it registers no subagent tool" test-child-cannot-delegate 20000)))
 
 ((.skipIf describe (not (fs/existsSync cli))) "subagent isolation: worktree"
                                               (fn [] (it "edits land on a branch, not in the user's tree" test-subagent-in-worktree 60000)))

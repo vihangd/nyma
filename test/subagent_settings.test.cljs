@@ -1,7 +1,7 @@
 (ns subagent-settings.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.settings.manager :refer [defaults]]
-            [agent.extensions.subagent.index :refer [run-isolated-agent live-settings all-agents child-tools worktree-args]]))
+            [agent.extensions.subagent.index :as sub :refer [run-isolated-agent live-settings all-agents child-tools worktree-args]]))
 
 (def ^:private read-only-roles [:scout :planner :reviewer :researcher])
 
@@ -117,3 +117,17 @@
                   (let [args (fn [t] (vec (worktree-args {:model "m" :sys "s" :allowed t})))]
                     (-> (expect (.includes (args ["*"]) "--tools")) (.toBe false))
                     (-> (expect (.includes (args ["read"]) "--tools")) (.toBe true)))))))
+
+(describe "subagent:depth"
+          (fn []
+            (it "a worktree child gets no subagent tool, and still has /agents"
+                (fn []
+                  (let [tools (atom []) cmds (atom [])
+                        api   #js {:registerTool (fn [n _] (swap! tools conj n))
+                                   :registerCommand (fn [n _] (swap! cmds conj n))}]
+                    (aset js/process.env "NYMA_SUBAGENT_DEPTH" "1")
+                    (try
+                      ((aget sub "default") api)
+                      (finally (js-delete js/process.env "NYMA_SUBAGENT_DEPTH")))
+                    (-> (expect (count @tools)) (.toBe 0))
+                    (-> (expect (.includes (vec @cmds) "agents")) (.toBe true)))))))

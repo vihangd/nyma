@@ -280,6 +280,23 @@
                                              (-> (expect (child-tools ["read" "bash" "edit"] "plan")) (.toEqual #js ["read"]))
                                              (-> (expect (.includes (child-tools ["*"] "plan") "bash")) (.toBe false))))))
 
+(defn ^:async test-missing-tool-refused []
+  (let [calls (atom 0)
+        model (new MockLanguageModelV4
+                   #js {:doStream (fn [_] (swap! calls inc)
+                                    (js/Promise.resolve #js {:stream (convertArrayToReadableStream text-chunks)}))})
+        r     (js-await (run-isolated-agent
+                         {:api #js {:resolveModel (fn [_ _] model)} :settings-mgr nil
+                          :agents {"mine" {:provider "p" :model "m" :allowed-tools ["read" "mcp__db__query"]}}
+                          :agent-name "mine" :task "go"}))]
+    (-> (expect (:ok r)) (.toBe false))
+    (-> (expect (:text r)) (.toContain "mcp__db__query"))
+    (-> (expect @calls) (.toBe 0))))
+
+(describe "subagent:tools" (fn []
+                             (it "a tool the child cannot have is refused before spending"
+                                 test-missing-tool-refused)))
+
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)
                              (it "an aborted fan-out starts nothing" test-aborted-never-starts)

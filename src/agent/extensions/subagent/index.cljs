@@ -199,6 +199,8 @@ intermediate tool calls, so put everything that matters in the summary.")
 
 (def ^:private worktree-timeout-ms (* 30 60 1000))
 
+(def ^:private child-env "NYMA_SUBAGENT_DEPTH")
+
 (defn ^:async run-in-worktree [opts cfg]
   (let [{:keys [api agent-name task model-override max-steps signal command]} opts
         provider (cfg-get cfg :provider "provider")
@@ -216,7 +218,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                              "--" task))
             proc (js/Bun.spawn (clj->js argv)
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
-                                    :env js/process.env
+                                    :env (js/Object.assign #js {} js/process.env
+                                                           (doto #js {} (aset child-env "1")))
                                     ;; ponytail: fixed 30 min ceiling; a setting when a task needs longer
                                     :timeout worktree-timeout-ms :killSignal "SIGTERM"})
             ;; Cancelling the parent's turn ends the child too.
@@ -363,6 +366,12 @@ intermediate tool calls, so put everything that matters in the summary.")
                 ((:set-active (:tool-registry child)) (set allowed)))
               ;; Caught here, not below: a failed child spent money too. The
               ;; controller is read at abort time: `run` replaces it on entry.
+              (if-let [missing (seq (remove (set (keys ((:all (:tool-registry child))))) allowed))]
+                ;; A child has builtins only. It would run without these and
+                ;; never say so, spending money on the wrong answer.
+                {:agent agent-name :ok false
+                 :text (str "Subagent " agent-name " cannot have: " (str/join ", " missing)
+                            ". A subagent has builtin tools only, not MCP or extension tools.")}
               (let [stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
                     _    (some-> signal (.addEventListener "abort" stop #js {:once true}))
                     _    ((:on (:events child)) "turn_end"
@@ -380,7 +389,7 @@ intermediate tool calls, so put everything that matters in the summary.")
                           err  (str "Subagent " agent-name " failed: " (.-message err))
                           :else (final-text (:messages st)))
                  :usage (child-usage st (str provider "/" model-id))
-                 :billed? true}))
+                 :billed? true})))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))
@@ -621,10 +630,12 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; ---------------------------------------------------------------------------
 
 (defn ^:export default [api]
+  ;; A worktree child is a whole nyma: without this it could delegate too.
+  (when-not (aget js/process.env child-env)
   (.registerTool
    api "subagent"
    #js {;; Delegation, not a file or shell action of its own: every tool a
-        ;; subagent runs is gated in its own loop.
+        ;; subagent runs goes through this session's gate.
         :safety #js {:long-running? true :capabilities #js ["execution"] :category "meta"}
         :description
         (str "Delegate to context-isolated subagents (built on roles). "
@@ -644,7 +655,7 @@ intermediate tool calls, so put everything that matters in the summary.")
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
-        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal)))})
+        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal)))}))
 
   (.registerCommand
    api "agents"
