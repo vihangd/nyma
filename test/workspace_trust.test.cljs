@@ -52,6 +52,15 @@
 
 (describe "sources"
           (fn []
+            (it "an mcpServers key does not hide hooks in the same file"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-both-"))]
+                    (write! d ".nyma/settings.json" {"hooks-compat" {"claude" true}})
+                    (write! d ".claude/settings.json" {"mcpServers" {}
+                                                       "hooks" {"Stop" [{"hooks" [{"type" "command" "command" "./x.sh"}]}]}})
+                    (-> (expect (boolean (some #(= ".claude/settings.json hooks.Stop" (:source %)) (trust/sources d))))
+                        (.toBe true)))))
+
             (it "finds every kind of project command, and nothing in an ordinary repo"
                 (fn []
                   (let [d    (hostile-project)

@@ -101,17 +101,19 @@
 
 (defn- command-file-entries [rel obj]
   (when obj
-    (if-let [servers (aget obj "mcpServers")]
-      (for [k (js/Object.keys servers)
-            :let [s (aget servers k)]]
-        ;; :raw for the fingerprint: env and headers can change what runs and
-        ;; where secrets go, and are not for printing.
-        {:source (str rel " " k) :detail (str/join " " (cons (or (aget s "command") (aget s "url") "")
-                                                             (vec (or (aget s "args") []))))
-         :raw    (js/JSON.stringify s)})
-      (if-let [h (or (aget obj "hooks") (when (= rel ".agents/hooks.json") obj))]
-        (for [ev (js/Object.keys h)] {:source (str rel " hooks." ev) :detail (js/JSON.stringify (aget h ev))})
-        []))))
+    ;; Both, not either: one file can carry servers and hooks, and an empty
+    ;; `mcpServers` must not hide the hooks beside it.
+    (concat
+     (when-let [servers (aget obj "mcpServers")]
+       (for [k (js/Object.keys servers)
+             :let [s (aget servers k)]]
+         ;; :raw for the fingerprint: env and headers can change what runs and
+         ;; where secrets go, and are not for printing.
+         {:source (str rel " " k) :detail (str/join " " (cons (or (aget s "command") (aget s "url") "")
+                                                              (vec (or (aget s "args") []))))
+          :raw    (js/JSON.stringify s)}))
+     (when-let [h (or (aget obj "hooks") (when (= rel ".agents/hooks.json") obj))]
+       (for [ev (js/Object.keys h)] {:source (str rel " hooks." ev) :detail (js/JSON.stringify (aget h ev))})))))
 
 (defn- hooks-compat
   "Which foreign hook files the hook bridge would load: `hooks-compat` from
