@@ -23,7 +23,7 @@
             [agent.extensions.model-roles.policy :as policy]
             [agent.providers.registry :as registry]
             [agent.tool-metadata :as tool-metadata]
-            [agent.settings.manager :refer [create-settings-manager]]
+            [agent.settings.manager :refer [create-settings-manager defaults]]
             [agent.sessions.manager :refer [create-session-manager attach-session-persistence!]]
             [agent.extensions.subagent.concurrency :as conc]
             [agent.extensions.subagent.agents-md :as agents-md]
@@ -132,11 +132,14 @@ intermediate tool calls, so put everything that matters in the summary.")
         roles    (into {} (filter (fn [[_ cfg]] (or (:model cfg) (get cfg "model")))
                                   (or (:roles settings) {})))
         md       (agents-md/load-agents)
-        named?   (fn [k] (or (cfg-get (get roles k) :model "model")
-                             (cfg-get (get md k) :model "model")))
-        shipped  (into {} (map (fn [[k cfg]] [k (assoc cfg :shipped? (not (named? k)))])
-                               default-subagent-roles))]
-    (merge-with merge shipped roles md)))
+        ;; Settings carry the shipped roles too, so being there says nothing:
+        ;; a role is the user's once its model differs from the one we ship.
+        stock    (merge-with merge default-subagent-roles (:roles defaults))]
+    (into {} (map (fn [[k cfg]]
+                    [k (assoc cfg :shipped? (and (some? (get stock k))
+                                                 (= (cfg-get cfg :model "model")
+                                                    (cfg-get (get stock k) :model "model"))))])
+                  (merge-with merge default-subagent-roles roles md)))))
 
 (defn inherit-model
   "A role takes the parent's model when it says `inherit` or names none, and when

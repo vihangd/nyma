@@ -157,6 +157,11 @@
                       (-> (expect (:shipped? (get agents "scout"))) (.toBe false))
                       (-> (expect (:shipped? (get agents "planner"))) (.toBe true)))))
 
+              (it "the settings defaults' own copy of a role is still shipped"
+                  (fn []
+                    (let [agents (all-agents (live-settings #js {:settings (fn [] {:roles (:roles defaults)})}))]
+                      (-> (expect (:shipped? (get agents "scout"))) (.toBe true)))))
+
               (it "an unknown role stays unknown"
                   (fn []
                     (-> (expect (on nil)) (.toBeFalsy)))))))
