@@ -184,8 +184,44 @@
     ;; The session's model is untouched, so the row must name who answered.
     (-> (expect (first @rows)) (.toBe fb-key))))
 
+(defn ^:async fall-back-to
+  "A run on a model priced or not that falls back to one priced or not; the
+   resulting :cost-unknown?."
+  [own-priced? fb-priced?]
+  (let [agent  (make-test-agent {:model (failing)})
+        fb-key "fb-provider/fb-model"
+        own    (pricing/model-cost-key (:config agent))]
+    (swap! pricing/token-costs dissoc fb-key own)
+    (when own-priced? (swap! pricing/token-costs assoc own [1 1]))
+    (when fb-priced? (swap! pricing/token-costs assoc fb-key [1 1]))
+    ((:on (:events agent)) "provider_error"
+                           (fn [ctx _]
+                             (fb/retarget! (.-config ctx) (answer 1000) fb-key)
+                             #js {:retry true}))
+    (js-await (run agent "go"))
+    (swap! pricing/token-costs dissoc fb-key own)
+    (boolean (:cost-unknown? @(:state agent)))))
+
+(defn ^:async test-unknown-follows-what-answered []
+  (-> (expect (js-await (fall-back-to true false))) (.toBe true))
+  (-> (expect (js-await (fall-back-to false true))) (.toBe false)))
+
+(defn ^:async test-unknown-is-sticky []
+  (let [agent (make-test-agent {:model (answer 1000)})
+        own   (pricing/model-cost-key (:config agent))]
+    (swap! pricing/token-costs dissoc own)
+    (js-await (run agent "one"))
+    (swap! pricing/token-costs assoc own [1 1])
+    (js-await (run agent "two"))
+    (swap! pricing/token-costs dissoc own)
+    (-> (expect (:cost-unknown? @(:state agent))) (.toBe true))))
+
 (describe "a run that fell back"
   (fn []
+    (it "flags unknown cost by the model that answered, not the session's"
+        test-unknown-follows-what-answered)
+    (it "keeps the flag once unpriced spend happened"
+        test-unknown-is-sticky)
     (it "is priced and recorded as the model that answered"
         test-fallback-priced-as-what-answered)))
 

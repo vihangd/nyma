@@ -3,7 +3,6 @@
   (:require ["node:path" :as path]
             [agent.utils.home :as home]
             [agent.model-info :as model-info]
-            [agent.pricing :as pricing]
             [agent.debug :as d]
             ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
@@ -734,8 +733,7 @@
                                          :cost-usd   (+ (or (:total-cost st) 0) (or (:run-cost st) 0))
                                          :run-steps  (:run-steps st)
                                          :last-cache-read (:last-cache-read st)
-                                         :cost-unknown? (and (pos? (+ (or (:total-steps st) 0) (or (:run-steps st) 0)))
-                                                             (not (pricing/priced? (pricing/model-cost-key (:config agent)))))
+                                         :cost-unknown? (:cost-unknown? st)
                                          ;; In the store since the cache-token
                                          ;; work and never passed on, so
                                          ;; cache-read/cache-write could not

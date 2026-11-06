@@ -272,7 +272,12 @@
                                      {:input-tokens       (some-> u .-inputTokens)
                                       :output-tokens      (some-> u .-outputTokens)
                                       :cache-read-tokens  cr
-                                      :cache-write-tokens cw})))))
+                                      :cache-write-tokens cw}))
+        ;; Sticky, like the total it qualifies: the spend stays uncounted after
+        ;; the session moves to a priced model.
+        (cond-> (and (pos? (or (some-> u .-inputTokens) 0))
+                     (not (pricing/priced? cost-key)))
+          (assoc :cost-unknown? true)))))
 
 (defn- inject-steer-messages!
   "Move steer queue messages into agent state between tool steps."
