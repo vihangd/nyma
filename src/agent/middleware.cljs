@@ -496,8 +496,9 @@
     (assoc ctx :cancelled true
            :cancel-reason (or reason (str "Permission required for '" tool-name
                                           "' but no interactive approval is available")))
-    (let [prompt (permission-prompt-text tool-name (categorize-tool tool-name)
-                                         (or (:original-args ctx) (:args ctx)) reason)
+    (let [prompt (str (when-let [s (:source ctx)] (str "Subagent " s " asks:\n"))
+                      (permission-prompt-text tool-name (categorize-tool tool-name)
+                                              (or (:original-args ctx) (:args ctx)) reason))
           ;; The run is now blocked on the user. Announced so desktop_notify
           ;; can say so: a turn stuck on an unseen prompt was the classic
           ;; "came back to nothing".
@@ -749,6 +750,21 @@
                                     (approval-check-interceptor approval-checks)
                                     tool-execution-interceptor]))]
          (ic/execute full ctx)))
+
+     ;; The gate alone, for a tool that runs in a subagent. Its bus has no
+     ;; subscribers, so without this "no decision" meant allow. `source` names
+     ;; the child in the prompt. Resolves the ctx; :cancelled means refused.
+     :check-permission
+     (fn [tool-name args source]
+       (sync-epoch!)
+       (let [ctx {:tool-name tool-name :args args :source source
+                  :preapproved #{} :session-allows session-allows
+                  :cancelled false :events events
+                  :agent (when agent-ref @agent-ref)}]
+         (-> (permission-check-enter events settings ctx)
+             (.then (fn [c] (if (:cancelled c)
+                              c
+                              ((:enter (approval-check-interceptor approval-checks)) c)))))))
 
      :chain (fn [] @chain)
 

@@ -85,7 +85,8 @@
    :emitGlobal :events
    :getState :state
    :dispatch :state
-   :dispatchState :state})
+   :dispatchState :state
+   :checkPermission :tools})
 
 (def ungated-passthroughs
   "Read-only utilities every extension gets."

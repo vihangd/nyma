@@ -139,6 +139,15 @@
          ;; OWN name — hooks, permission gate, tracking all apply, unlike a
          ;; direct `.execute`. For tools that call tools (code mode). Resolves
          ;; #js {:ok bool :result any :error str :denied bool}; never rejects.
+         ;; The parent's whole gate for a call that runs elsewhere (a subagent).
+         ;; `source` labels the prompt. Resolves #js {:allowed bool :reason str}.
+         :checkPermission   (fn [tool args source]
+                              (if-let [pipeline (:middleware agent)]
+                                (-> ((:check-permission pipeline) tool args source)
+                                    (.then (fn [ctx]
+                                             #js {:allowed (not (:cancelled ctx))
+                                                  :reason  (:cancel-reason ctx)})))
+                                (js/Promise.resolve #js {:allowed false :reason "No middleware pipeline"})))
          :executeTool       (fn [name args & [opts]]
                               (let [t        (get ((:all (:tool-registry agent))) name)
                                     pipeline (:middleware agent)]

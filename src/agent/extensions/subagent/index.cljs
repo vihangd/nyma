@@ -20,6 +20,7 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.pricing :as pricing]
+            [agent.tool-metadata :as tool-metadata]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions.subagent.concurrency :as conc]
             [agent.extensions.subagent.agents-md :as agents-md]
@@ -77,14 +78,31 @@ intermediate tool calls, so put everything that matters in the summary.")
   (boolean (some #(= "*" %) allowed)))
 
 (defn child-tools
-  "The tools an in-process child may use, nil for all of them. A child has no
-   permission gate, so this list is its only limit, and leaving it out must not
-   mean everything: a role written just to pick a model got bash and write."
-  [allowed]
-  (cond
-    (all-tools? allowed) nil
-    (seq allowed)        allowed
-    :else                read-only-tools))
+  "The tools an in-process child may use, nil for all of them. Leaving the list
+   out must not mean everything: a role written just to pick a model got bash
+   and write. Under a plan-mode parent nothing that changes the tree is offered."
+  [allowed & [parent-mode]]
+  (let [tools (cond
+                (all-tools? allowed) nil
+                (seq allowed)        allowed
+                :else                read-only-tools)]
+    (if (= "plan" parent-mode)
+      (filterv tool-metadata/read-only? (or tools read-only-tools))
+      tools)))
+
+(defn- gate-child!
+  "Answer `child`'s permission_request with the parent's gate, so mode, policy,
+   denylist and grants all apply and a prompt names the child. A child's bus has
+   no subscribers, and no decision means allow: an api without the gate refuses."
+  [child api agent-name]
+  ((:on (:events child)) "permission_request"
+                         (fn [data]
+                           (if-let [check (aget api "checkPermission")]
+                             (-> (check (.-tool data) (.-args data) agent-name)
+                                 (.then (fn [r] (if (.-allowed r)
+                                                  #js {:decision "allow"}
+                                                  #js {:decision "deny" :reason (.-reason r)}))))
+                             #js {:decision "deny" :reason "No permission gate"}))))
 
 (defn live-settings
   "A settings manager whose `:get` is the session's own view, so `--settings`
@@ -318,7 +336,8 @@ intermediate tool calls, so put everything that matters in the summary.")
       (let [provider   (cfg-get cfg :provider "provider")
             model-id   (or model-override (cfg-get cfg :model "model"))
             sys        (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
-            allowed    (child-tools (cfg-get cfg :allowed-tools "allowed-tools"))
+            allowed    (child-tools (cfg-get cfg :allowed-tools "allowed-tools")
+                                    (when (aget api "getState") (:permission-mode (.getState api))))
             resolve-fn (aget api "resolveModel")
             model-obj  (when (and resolve-fn provider model-id)
                          (try (resolve-fn provider model-id) (catch :default _e nil)))]
@@ -338,6 +357,7 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; Rates are keyed provider/model: without this a child's lookup
               ;; missed, and a paid model cost 0.
               (aset (:config child) "active-provider-name" provider)
+              (gate-child! child api agent-name)
               ;; Children never receive the `subagent` tool → depth capped at 1.
               (when allowed
                 ((:set-active (:tool-registry child)) (set allowed)))

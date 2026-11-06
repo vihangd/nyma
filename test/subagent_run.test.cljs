@@ -1,8 +1,13 @@
 (ns subagent-run.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
             [agent.core :refer [create-agent]]
+            [agent.extensions :refer [create-extension-api]]
+            [agent.extension-scope :refer [create-scoped-api]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute]]
+            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute child-tools]]
             [agent.pricing :as pricing]))
 
 ;; ── B2 regression: final-text returns the last ASSISTANT message ──
@@ -224,6 +229,56 @@
 
 (describe "subagent:custom-role" (fn []
                                    (it "reaches the model read-only unless it asks for *" test-custom-role-tools)))
+
+(def ^:private bash-step
+  #js [#js {:type "tool-call" :toolCallId "c1" :toolName "bash"
+            :input "{\"command\":\"touch gate-ran.txt\"}"}
+       #js {:type "finish" :finishReason #js {:unified "tool-calls" :raw "tool-calls"}
+            :usage #js {:inputTokens #js {:total 10} :outputTokens #js {:total 1}}}])
+
+(defn ^:async gated-run
+  "A child that calls bash in a temp dir, under a parent whose gate answers
+   `decision`. Returns [ran? requests]."
+  [decision]
+  (let [dir    (fs/mkdtempSync (path/join (os/tmpdir) "nyma-gate-"))
+        prev   (js/process.cwd)
+        asked  (atom [])
+        parent (create-agent {:model "m" :system-prompt "x"})
+        api    (create-scoped-api (create-extension-api parent) "subagent" #{:tools :model :state})]
+    ((:on (:events parent)) "permission_request"
+                            (fn [d] (swap! asked conj (.-tool d)) #js {:decision decision}))
+    (aset api "resolveModel" (fn [_ _] (scripted bash-step text-chunks)))
+    (js/process.chdir dir)
+    (try
+      (js-await (run-isolated-agent {:api api :settings-mgr nil
+                                     :agents {"mine" {:provider "p" :model "m" :allowed-tools ["bash"]}}
+                                     :agent-name "mine" :task "go"}))
+      [(fs/existsSync (path/join dir "gate-ran.txt")) @asked]
+      (finally
+        (js/process.chdir prev)
+        (fs/rmSync dir #js {:recursive true :force true})))))
+
+(defn ^:async test-parent-gate-denies []
+  (let [[ran? asked] (js-await (gated-run "deny"))]
+    (-> (expect ran?) (.toBe false))
+    (-> (expect (vec asked)) (.toEqual #js ["bash"]))))
+
+(defn ^:async test-parent-gate-allows []
+  (let [[ran? _] (js-await (gated-run "allow"))]
+    (-> (expect ran?) (.toBe true))))
+
+(defn ^:async test-ask-without-ui-denies []
+  (let [[ran? _] (js-await (gated-run "ask"))]
+    (-> (expect ran?) (.toBe false))))
+
+(describe "subagent:permission-gate" (fn []
+                                       (it "the parent's deny stops a child's tool" test-parent-gate-denies)
+                                       (it "the parent's allow lets it run" test-parent-gate-allows)
+                                       (it "an ask with no one to answer is a deny" test-ask-without-ui-denies)
+                                       (it "a plan-mode parent offers nothing that writes"
+                                           (fn []
+                                             (-> (expect (child-tools ["read" "bash" "edit"] "plan")) (.toEqual #js ["read"]))
+                                             (-> (expect (.includes (child-tools ["*"] "plan") "bash")) (.toBe false))))))
 
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)
