@@ -44,6 +44,17 @@
     (fn []
       (-> (expect (format-cost 1.456)) (.toBe "$1.46"))))))
 
+(describe "cost-label" (fn []
+  (it "is the plain cost when every model was priced"
+      (fn []
+        (-> (expect (pricing/cost-label 1.2 false)) (.toBe "$1.20"))
+        (-> (expect (pricing/cost-label nil false)) (.toBe "$0.00"))))
+  (it "never reads as free or complete when some spend is unknown"
+      (fn []
+        (-> (expect (pricing/cost-label 0 true)) (.toBe "$?"))
+        (-> (expect (pricing/cost-label nil true)) (.toBe "$?"))
+        (-> (expect (pricing/cost-label 1.2 true)) (.toBe "$1.20+?"))))))
+
 (describe "format-tokens" (fn []
   (it "formats small numbers as-is"
     (fn []

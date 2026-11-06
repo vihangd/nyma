@@ -146,7 +146,8 @@
                            (update :total-output-tokens (fnil + 0) (or (:output-tokens data) 0))
                            (update :total-cache-read-tokens (fnil + 0) (or (:cache-read-tokens data) 0))
                            (update :total-cache-write-tokens (fnil + 0) (or (:cache-write-tokens data) 0))
-                           (update :total-cost (fnil + 0.0) (or (:cost data) 0))))
+                           (update :total-cost (fnil + 0.0) (or (:cost data) 0))
+                           (cond-> (:cost-unknown? data) (assoc :cost-unknown? true))))
    :tool-execution-started (fn [state data]
                              (update state :active-executions (fnil conj #{}) (:exec-id data)))
    :tool-execution-ended   (fn [state data]

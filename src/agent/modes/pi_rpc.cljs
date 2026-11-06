@@ -576,7 +576,8 @@
               :cacheRead (or (:total-cache-read-tokens s) 0)
               :cacheWrite (or (:total-cache-write-tokens s) 0)
               :total (+ in out)}
-     :cost (or (:total-cost s) 0)}))
+     :cost (or (:total-cost s) 0)
+     :costUnknown (boolean (:cost-unknown? s))}))
 
 (defn- new-session-path []
   (sessions/new-session-path (str (.. js/process -env -HOME) "/.nyma/sessions")))

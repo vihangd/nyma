@@ -1,6 +1,7 @@
 (ns agent.commands.builtins
   "Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.)."
-  (:require [agent.utils.content :as content]
+  (:require [agent.pricing :as pricing]
+            [agent.utils.content :as content]
             ["node:path" :as path]
             [agent.utils.data :as data]
             [agent.model-info :as model-info]
@@ -1115,7 +1116,7 @@
                                         "Messages: " (count (:messages s)) "\n"
                                         "Input tokens: " (or (:total-input-tokens s) 0) "\n"
                                         "Output tokens: " (or (:total-output-tokens s) 0) "\n"
-                                        "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
+                                        "Cost: " (pricing/cost-label (:total-cost s) (:cost-unknown? s)) "\n"
                                         "Turns: " (or (:turn-count s) 0) "\n"
                                         "Active tools: " (count (:active-tools s)) "\n"
                                         "Active executions: " (count (:active-executions s)) "\n"
@@ -1225,7 +1226,7 @@
                                         "Messages: " (count (:messages s)) "\n"
                                         "Input tokens: " (or (:total-input-tokens s) 0) "\n"
                                         "Output tokens: " (or (:total-output-tokens s) 0) "\n"
-                                        "Cost: $" (.toFixed (or (:total-cost s) 0) 4) "\n"
+                                        "Cost: " (pricing/cost-label (:total-cost s) (:cost-unknown? s)) "\n"
                                         "Turns: " (or (:turn-count s) 0) "\n"
                                         "--------------------"))))}
 

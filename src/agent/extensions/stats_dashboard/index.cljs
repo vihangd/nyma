@@ -1,6 +1,6 @@
 (ns agent.extensions.stats-dashboard
   "Usage stats dashboard: /stats shows cost, tokens, model breakdown, daily trends."
-  (:require [agent.pricing :refer [format-cost format-tokens]]
+  (:require [agent.pricing :refer [cost-label format-cost format-tokens]]
             [agent.commands.resolver :refer [resolve-command]]
             [clojure.string :as str]))
 
@@ -202,7 +202,7 @@
                                (.notify (.-ui ctx)
                                         (str "Session: " turns " turns | "
                                              (format-tokens input) " in / " (format-tokens output) " out | "
-                                             (format-cost cost)
+                                             (cost-label cost (:cost-unknown? state))
                                              (when (pos? input)
                                                (str " | cache: " (js/Math.round (* 100 (/ cread input)))
                                                     "% of input read from cache"

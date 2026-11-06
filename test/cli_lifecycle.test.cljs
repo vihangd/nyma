@@ -49,6 +49,7 @@
                                                 {:role "assistant" :content "b"}])
                     (let [s (agent-stats agent)]
                       (-> (expect (.-totalCost s)) (.toBe 0.42))
+                      (-> (expect (.-costUnknown s)) (.toBe false))
                       (-> (expect (.-turnCount s)) (.toBe 3))
                       (-> (expect (.-inputTokens s)) (.toBe 1500))
                       (-> (expect (.-outputTokens s)) (.toBe 700))

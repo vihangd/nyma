@@ -10,6 +10,7 @@
             ["node:path" :as npath]
             ["node:readline" :as readline]
             [agent.core :refer [create-agent]]
+            [agent.pricing :as pricing]
             [agent.model-info :as model-info]
             [agent.loop :refer [run]]
             [agent.resources.loader :as loader :refer [discover]]
@@ -40,6 +41,7 @@
   [agent]
   (let [s @(:state agent)]
     #js {:totalCost    (or (:total-cost s) 0)
+         :costUnknown  (boolean (:cost-unknown? s))
          :turnCount    (or (:turn-count s) 0)
          :inputTokens  (or (:total-input-tokens s) 0)
          :outputTokens (or (:total-output-tokens s) 0)
@@ -1155,8 +1157,8 @@ Examples:
                        sess @(:session agent)
                        file (when (and sess (fn? (:session-file sess))) ((:session-file sess)))]
                    (.write js/process.stderr
-                           (str "nyma: " (or (:turn-count st) 0) " turns · $"
-                                (.toFixed (or (:total-cost st) 0) 4)
+                           (str "nyma: " (or (:turn-count st) 0) " turns · "
+                                (pricing/cost-label (:total-cost st) (:cost-unknown? st))
                                 (when (seq (str file)) (str " · " file " — resume with nyma -c"))
                                 "\n")))
                  (catch :default _ nil)))))

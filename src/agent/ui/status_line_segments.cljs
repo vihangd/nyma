@@ -259,12 +259,10 @@
   ;; Hidden at zero: auto-appended, a permanent `$0.00` on a fresh session
   ;; is noise. A model with no known rates costs 0 here whatever it really
   ;; costs, so that says so instead of hiding.
-  (let [cost  (or cost-usd 0)
-        color (get-in theme [:colors :secondary] "#9ece6a")]
-    (cond
-      cost-unknown? (visible (if (pos? cost) (str (pricing/format-cost cost) "+?") "$?") color)
-      (pos? cost)   (visible (pricing/format-cost cost) color)
-      :else         (hidden))))
+  (if (or cost-unknown? (pos? (or cost-usd 0)))
+    (visible (pricing/cost-label cost-usd cost-unknown?)
+             (get-in theme [:colors :secondary] "#9ece6a"))
+    (hidden)))
 
 (defn- cache-hit-seg [{:keys [last-cache-read ctx-used theme]}]
   ;; The last request, not session totals: those include other models'

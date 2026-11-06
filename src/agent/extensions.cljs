@@ -541,6 +541,7 @@
                                     :output-tokens      output
                                     :cache-read-tokens  cr
                                     :cache-write-tokens cw
+                                    :cost-unknown? (not (pricing/priced? (str model-spec)))
                                     :cost (pricing/calculate-turn-cost
                                            (str model-spec)
                                            {:input-tokens       input

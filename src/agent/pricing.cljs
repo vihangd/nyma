@@ -144,6 +144,16 @@
     (< usd 1)     (str "$" (.toFixed usd 3))
     :else          (str "$" (.toFixed usd 2))))
 
+(defn cost-label
+  "Cost for a person to read. `unknown?` says some spend went to a model with no
+   known rates, so 0 is not free and a total is a floor."
+  [usd unknown?]
+  (let [usd (or usd 0)]
+    (cond
+      (not unknown?) (format-cost usd)
+      (pos? usd)     (str (format-cost usd) "+?")
+      :else          "$?")))
+
 (defn format-tokens
   "Format token count as human-readable (e.g., '1.2k', '45.6k', '1.2M')."
   [n]

@@ -52,6 +52,7 @@
                                  #js {:inputTokens  (or (:total-input-tokens s) 0)
                                       :outputTokens (or (:total-output-tokens s) 0)
                                       :cost         (or (:total-cost s) 0)
+                                      :costUnknown  (boolean (:cost-unknown? s))
                                       :turns        (or (:turn-count s) 0)}))
 
          ;; Compaction

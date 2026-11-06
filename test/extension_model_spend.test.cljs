@@ -66,6 +66,13 @@
             (-> (expect (:total-cache-read-tokens st)) (.toBe 800))
             (-> (expect (:total-cache-write-tokens st)) (.toBe 50))))))
 
+  (it "an unpriced consult marks the session's cost as unknown, for good"
+      (fn []
+        (let [s (store)]
+          ((:dispatch! s) :extension-usage {:input-tokens 10 :output-tokens 1 :cost 0 :cost-unknown? true})
+          ((:dispatch! s) :extension-usage {:input-tokens 10 :output-tokens 1 :cost 0.1 :cost-unknown? false})
+          (-> (expect (:cost-unknown? ((:get-state s)))) (.toBe true)))))
+
   (it "it accumulates alongside the agent's own usage"
       (fn []
         (let [s (store)]

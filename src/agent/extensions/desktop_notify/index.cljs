@@ -7,7 +7,8 @@
    Config in .nyma/settings.json:
    {\"desktop-notify\": {\"enabled\": true, \"threshold-ms\": 3000}}
 
-   Also controllable via /flag desktop-notify__enabled true")
+   Also controllable via /flag desktop-notify__enabled true"
+  (:require [agent.pricing :as pricing]))
 
 ;;; ─── Config ────────────────────────────────────────────────
 ;;; Read through the settings manager, not by opening settings.json here: the
@@ -127,8 +128,8 @@
         (fn [data _ctx]
           (when (check-enabled)
             (send-notification! "nyma"
-                                (str "Session: " (or (.-turnCount data) 0) " turns, $"
-                                     (.toFixed (or (.-totalCost data) 0) 2)))))]
+                                (str "Session: " (or (.-turnCount data) 0) " turns, "
+                                     (pricing/cost-label (.-totalCost data) (.-costUnknown data))))))]
 
     ;; Register enable/disable flag
     (when (.-registerFlag api)

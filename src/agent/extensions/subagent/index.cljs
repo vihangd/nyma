@@ -198,7 +198,9 @@ intermediate tool calls, so put everything that matters in the summary.")
                        :else "No file changes; the worktree was removed."))
          :usage {:input  (or (some-> res .-usage .-input_tokens) 0)
                  :output (or (some-> res .-usage .-output_tokens) 0)
-                 :cost   (or (some-> res .-total_cost_usd) 0.0)}})
+                 :cost   (or (some-> res .-total_cost_usd) 0.0)
+                 :cost-unknown? (or (nil? (some-> res .-total_cost_usd))
+                                    (boolean (some-> res .-total_cost_partial)))}})
       (catch :default e
         {:agent agent-name :ok false :text (str "Subagent " agent-name " (worktree) failed: " (.-message e))}))))
 
@@ -263,7 +265,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                  :text  (final-text msgs)
                  :usage {:input  (or (:total-input-tokens st) 0)
                          :output (or (:total-output-tokens st) 0)
-                         :cost   (or (:total-cost st) 0.0)}}))
+                         :cost   (or (:total-cost st) 0.0)
+                         :cost-unknown? (boolean (:cost-unknown? st))}}))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))

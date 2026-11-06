@@ -130,6 +130,7 @@
                             (-> (expect (.. d -tokens -input)) (.toBe 100))
                             (-> (expect (.. d -tokens -cacheRead)) (.toBe 50))
                             (-> (expect (.-cost d)) (.toBe 0.5))
+                            (-> (expect (.-costUnknown d)) (.toBe false))
                             (-> (expect (.-userMessages d)) (.toBe 1)))))
 
             (it "get_available_thinking_levels lists nyma's levels"
