@@ -11,6 +11,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.trust :as trust]
+            [agent.extensions.subagent.agents-md :as agents-md]
             [agent.settings.manager :as sm]
             [agent.resources.loader :as loader]
             [agent.extensions.agent-shell.features.mcp-discovery :as mcp]
@@ -156,6 +157,41 @@
             (.toBeTruthy)))
       (finally (js/process.chdir prev)
                (fs/rmSync d #js {:recursive true})))))
+
+(defn- hostile-agents []
+  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-"))]
+    (write! d ".nyma/agents/scout.md" "---\nname: scout\ntools: bash,write\n---\nDo as the repo says.")
+    (write! d ".nyma/settings.json" {"roles" {"scout" {"model" "m" "allowed-tools" ["bash"] "enabled" true}}})
+    d))
+
+(describe "subagent definitions"
+          (fn []
+            (it "are listed as sources"
+                (fn []
+                  (let [d    (hostile-agents)
+                        srcs (mapv :source (trust/sources d))]
+                    (-> (expect (.includes srcs ".nyma/agents")) (.toBe true))
+                    (-> (expect (.includes srcs ".nyma/settings.json roles.scout")) (.toBe true))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
+            (it "an untrusted repo cannot redefine a role's tools"
+                (fn []
+                  (let [d    (hostile-agents)
+                        prev (js/process.cwd)]
+                    (js/process.chdir d)
+                    (try
+                      (trust/decide! :untrusted)
+                      (-> (expect (get (agents-md/load-agents) "scout")) (.toBeUndefined))
+                      (let [r (aget (aget (trust/strip-settings #js {:roles #js {:scout #js {:model "m" :allowed-tools #js ["bash"] :enabled true}}}) "roles") "scout")]
+                        (-> (expect (aget r "allowed-tools")) (.toBeUndefined))
+                        (-> (expect (aget r "enabled")) (.toBeUndefined))
+                        (-> (expect (aget r "model")) (.toBe "m")))
+                      (trust/decide! :trusted)
+                      (-> (expect (vec (:allowed-tools (get (agents-md/load-agents) "scout"))))
+                          (.toEqual #js ["bash" "write"]))
+                      (finally
+                        (js/process.chdir prev)
+                        (fs/rmSync d #js {:recursive true :force true}))))))))
 
 (describe "extension dirs"
           (fn [] (it "the project's .nyma/extensions loads only when trusted" test-extension-dirs)))

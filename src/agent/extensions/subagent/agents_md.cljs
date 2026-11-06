@@ -11,7 +11,8 @@
    multi-line) instead of a hand-rolled key:value subset.
 
    Project agents (.nyma/agents) override user agents (~/.nyma/agents)."
-  (:require [agent.utils.home :as home]
+  (:require [agent.trust :as trust]
+            [agent.utils.home :as home]
              ["node:fs" :as fs]
             ["node:path" :as path]
             [clojure.string :as str]
@@ -72,9 +73,10 @@
 
 (defn load-agents
   "Load markdown agents. Project (.nyma/agents) overrides user
-   (~/.nyma/agents). Returns {role-name role-config}."
+   (~/.nyma/agents), once the folder is trusted: a definition names what a child
+   may run. Returns {role-name role-config}."
   []
   (let [home (home/dir)
         user (read-dir (path/join home ".nyma" "agents"))
-        proj (read-dir (path/join (js/process.cwd) ".nyma" "agents"))]
+        proj (when (trust/trusted?) (read-dir (path/join (js/process.cwd) ".nyma" "agents")))]
     (merge user proj)))

@@ -6,8 +6,9 @@
    name commands nyma would otherwise run with no prompt at all: code in
    `.nyma/extensions/` (imported at startup), MCP servers in `.mcp.json` and
    friends (spawned at session start, in every mode), hooks, LSP server
-   commands, `verify.cmd`, ACP agent commands. Cloning a repo and starting
-   nyma in it was enough.
+   commands, `verify.cmd`, ACP agent commands. Subagent definitions count too:
+   their tool list is what a child may run. Cloning a repo and starting nyma in
+   it was enough.
 
    So: `sources` lists every such entry; `decide!` records the user's answer
    (once per folder, in ~/.nyma/trust.json, keyed by path and a fingerprint of
@@ -85,7 +86,13 @@
        (when agents
          (for [k (js/Object.keys agents)]
            {:source (str rel " agent-shell.agents." k)
-            :detail (js/JSON.stringify (or (some-> (aget agents k) (aget "command")) (aget agents k)))}))))))
+            :detail (js/JSON.stringify (or (some-> (aget agents k) (aget "command")) (aget agents k)))}))
+       (when-let [roles (aget obj "roles")]
+         (for [k (js/Object.keys roles)
+               :let [r (aget roles k)]
+               :when (and r (or (aget r "allowed-tools") (some? (aget r "enabled"))))]
+           {:source (str rel " roles." k)
+            :detail (js/JSON.stringify (or (aget r "allowed-tools") (aget r "enabled")))}))))))
 
 (defn- command-file-entries [rel obj]
   (when obj
@@ -132,6 +139,12 @@
           files (when (fs/existsSync dir) (sort (filter #(.endsWith % ".cljs") (vec (fs/readdirSync dir)))))]
       (when (seq files)
         [{:source ".nyma/scripts" :detail (str (count files) " saved script(s): " (str/join ", " (take 5 files)))
+          :hash   (content-hash dir files)}]))
+    ;; subagent definitions: a repo's `scout.md` replaces the read-only scout
+    (let [dir   (path/join cwd ".nyma" "agents")
+          files (when (fs/existsSync dir) (sort (filter #(.endsWith % ".md") (vec (fs/readdirSync dir)))))]
+      (when (seq files)
+        [{:source ".nyma/agents" :detail (str (count files) " subagent definition(s): " (str/join ", " (take 5 files)))
           :hash   (content-hash dir files)}]))
     (mapcat #(settings-entries % (read-json (path/join cwd %))) settings-files)
     ;; .claude/ and .agents/ hooks only when hooks-compat would load them:
@@ -270,6 +283,14 @@
         (let [a' (js/Object.assign #js {} as)] (js-delete a' "agents") (aset o "agent-shell" a')))
       (when-let [cm (aget o "codemode")]
         (let [c' (js/Object.assign #js {} cm)] (js-delete c' "apis") (aset o "codemode" c')))
+      (when-let [roles (aget o "roles")]
+        (let [r' #js {}]
+          (doseq [k (js/Object.keys roles)]
+            (let [e (js/Object.assign #js {} (aget roles k))]
+              (js-delete e "allowed-tools")
+              (js-delete e "enabled")
+              (aset r' k e)))
+          (aset o "roles" r')))
       o)))
 
 (defn plan
