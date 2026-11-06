@@ -119,7 +119,21 @@
     (-> (expect (:total-cache-read-tokens @(:state agent))) (.toBe 900000))
     (-> (expect (:total-cost @(:state agent))) (.toBeCloseTo 0.19 6))))
 
+(defn ^:async test-failed-run-keeps-its-spend []
+  (let [agent (make-test-agent {:model (scripted-model [(cached-step 900000)
+                                                        #js [#js {:type "error" :error "boom"}]])})
+        undo  (with-rates! agent)]
+    (-> (run agent "go") (.catch (fn [_] nil)) js-await)
+    (undo)
+    (let [st @(:state agent)]
+      (-> (expect (:total-input-tokens st)) (.toBe 1000000))
+      (-> (expect (:total-cache-read-tokens st)) (.toBe 900000))
+      (-> (expect (:total-cost st)) (.toBeCloseTo 0.19 6))
+      (-> (expect (:run-cost st)) (.toBeUndefined)))))
+
 (describe "loop:live-usage" (fn []
+                              (it "a run that fails after paid steps keeps their spend"
+                                  test-failed-run-keeps-its-spend)
                               (it "adds each step while the run is going, and counts it once"
                                   test-live-figures)
                               (it "keeps cache reads with the request they came from"

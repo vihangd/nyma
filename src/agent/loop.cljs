@@ -544,6 +544,9 @@
               ;; st-config, for :onStepFinish: it cannot name itself in its own
               ;; initializer, for the same reason as above.
               request-config  (atom nil)
+              ;; Did this pass's usage reach the store? Every step before a
+              ;; failure was paid for, and the run-end dispatch never comes.
+              usage-billed?   (atom false)
               ;; What this pass did, for the report call that cannot see it.
               pass-digest     (atom {})
 
@@ -922,6 +925,7 @@
                                                 :output-tokens output-tokens
                                                 :cache-read-tokens  cache-read
                                                 :cache-write-tokens cache-write})]
+                            (reset! usage-billed? true)
                             ((:dispatch! store) :usage-updated
                                                 {:input-tokens input-tokens :output-tokens output-tokens
                                                  :cache-read-tokens cache-read :cache-write-tokens cache-write
@@ -977,6 +981,15 @@
                                            :finishReason finish-reason})))))
               ;; Capture a provider error so turn_finalize still runs below.
                 (catch :default e (reset! turn-error e))))
+
+           (let [{:keys [input output cache-read cache-write]} @step-usage]
+             (when (and (:store agent) (not @usage-billed?) (pos? (+ input output)))
+               ((:dispatch! (:store agent)) :usage-updated
+                                            {:input-tokens input :output-tokens output
+                                             :cache-read-tokens cache-read :cache-write-tokens cache-write
+                                             :steps @steps-this-run
+                                             :request-spec (fallback/request-spec st-config)
+                                             :cost (or (:run-cost @state) 0)})))
 
            ;; turn_finalize — awaited post-turn boundary. ALWAYS fires: block,
            ;; normal, AND error paths all reach here (the try/catch above captures
