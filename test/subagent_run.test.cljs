@@ -128,7 +128,32 @@
     (-> (expect (:ok r)) (.toBe false))
     (-> (expect (:cost d)) (.toBeCloseTo 1 6))))
 
+(defn ^:async test-billed-per-step []
+  (let [[r bills] (js-await (bill-of (scripted tool-chunks tool-chunks text-chunks)))]
+    (-> (expect (:ok r)) (.toBe true))
+    (-> (expect (count bills)) (.toBe 3))
+    (-> (expect (reduce + (map (fn [[_ d]] (:input-tokens d)) bills))) (.toBe 3000000))
+    (-> (expect (reduce + (map (fn [[_ d]] (:cost d)) bills))) (.toBeCloseTo 3 4))))
+
+(defn ^:async test-budget-abort-stops-child []
+  ;; What a budget does: abort the parent from inside a billing dispatch.
+  (let [ctrl  (js/AbortController.)
+        calls (atom 0)
+        model (new MockLanguageModelV4
+                   #js {:doStream (fn [o]
+                                    (when-not (.. o -abortSignal -aborted) (swap! calls inc))
+                                    (js/Promise.resolve
+                                     #js {:stream (convertArrayToReadableStream tool-chunks)}))})
+        api   #js {:resolveModel (fn [_ _] model)
+                   :dispatchState (fn [_ _] (.abort ctrl))}
+        r     (js-await (run-isolated-agent (assoc (base) :api api :agent-name "scout" :task "go"
+                                                   :signal (.-signal ctrl))))]
+    (-> (expect (:text r)) (.toBe "cancelled"))
+    (-> (expect @calls) (.toBe 1))))
+
 (describe "subagent:billing" (fn []
+                               (it "bills as it goes, so a budget sees a running child" test-billed-per-step)
+                               (it "stops at the step that crossed the cap" test-budget-abort-stops-child)
                                (it "adds a child's spend to the parent, once" test-child-billed)
                                (it "bills steps a failed child already paid for" test-failed-child-billed)))
 

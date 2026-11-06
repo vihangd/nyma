@@ -17,6 +17,32 @@
                   (-> (expect (shared/over-budget cfg {:turn 50 :session 1500})) (.toBe :session))))))
 
 (describe "budget extension" (fn [])
+          (it "stops on a child's spend, without waiting for the parent's step"
+              (fn []
+                (let [handlers (atom {})
+                      watcher  (atom nil)
+                      aborted  (atom 0)
+                      state    (atom {:extension-tokens 0})
+                      all      #js {:budget #js {:turn-tokens 100}}
+                      api      #js {:settings (fn [sec] (if sec (or (get all sec) {}) all))
+                                    :getState (fn [] @state)
+                                    :onStateChange (fn [f] (reset! watcher f) (fn [] nil))
+                                    :on  (fn [evt h] (swap! handlers assoc evt h))
+                                    :off (fn [evt _] (swap! handlers dissoc evt))}
+                      _        (b/activate api)
+                      ctx      #js {:abort (fn [_] (swap! aborted inc))}
+                      spend!   (fn [n] (swap! state update :extension-tokens + n) (@watcher @state))]
+                  ;; Between runs it is left for on-start.
+                  (spend! 500)
+                  (-> (expect @aborted) (.toBe 0))
+                  ((get @handlers "before_agent_start") #js {} ctx)
+                  (spend! 60)
+                  (-> (expect @aborted) (.toBe 0))
+                  (@watcher @state)
+                  (-> (expect @aborted) (.toBe 0))
+                  (spend! 60)
+                  (-> (expect @aborted) (.toBe 1)))))
+
           (it "says which cap stopped the run"
               (fn []
                 (let [handlers (atom {})

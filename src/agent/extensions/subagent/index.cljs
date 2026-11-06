@@ -19,6 +19,7 @@
             [agent.schema :as schema]
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
+            [agent.pricing :as pricing]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions.subagent.concurrency :as conc]
             [agent.extensions.subagent.agents-md :as agents-md]
@@ -237,6 +238,20 @@ intermediate tool calls, so put everything that matters in the summary.")
    :cost   (+ (or (:total-cost st) 0.0) (or (:run-cost st) 0))
    :cost-unknown? (boolean (:cost-unknown? st))})
 
+(defn- step-bill
+  "What one finished step of a child on `model` spent, as `bill-parent!` takes it.
+   `rates` is the child's own cost key, which is not always the role's spelling."
+  [step model rates]
+  (let [u  (.-usage step)
+        in (or (some-> u .-inputTokens) 0)
+        ot (or (some-> u .-outputTokens) 0)
+        cr (or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
+        cw (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)]
+    {:model model :input in :output ot :cache-read cr :cache-write cw
+     :cost (pricing/calculate-turn-cost rates {:input-tokens in :output-tokens ot
+                                               :cache-read-tokens cr :cache-write-tokens cw})
+     :cost-unknown? (and (pos? in) (not (pricing/priced? rates)))}))
+
 (defn- bill-parent!
   "A child keeps its own totals, so the parent's cost left out all its work."
   [api usage]
@@ -253,7 +268,9 @@ intermediate tool calls, so put everything that matters in the summary.")
 (defn ^:async run-child
   "Spawn one isolated child agent for `task` under role `agent-name`.
    opts: {:api :settings-mgr :agents :agent-name :task :model-override :max-steps :signal}
-   Returns {:agent :ok :text :usage} (or {:ok false :text <error>})."
+   Returns {:agent :ok :text :usage} (or {:ok false :text <error>}). An in-process
+   child bills the parent step by step, so a budget can stop it; `:billed?` says
+   its `:usage` is already counted."
   [opts]
   (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal]} opts
         cfg (lookup-agent agents agent-name)]
@@ -311,6 +328,10 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; controller is read at abort time: `run` replaces it on entry.
               (let [stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
                     _    (some-> signal (.addEventListener "abort" stop #js {:once true}))
+                    _    ((:on (:events child)) "turn_end"
+                                                (fn [step _]
+                                                  (bill-parent! api (step-bill step (str provider "/" model-id)
+                                                                               (pricing/model-cost-key (:config child))))))
                     err  (try (js-await (run child task)) nil
                               (catch :default e e))
                     _    (some-> signal (.removeEventListener "abort" stop))
@@ -321,7 +342,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                           gone "cancelled"
                           err  (str "Subagent " agent-name " failed: " (.-message err))
                           :else (final-text (:messages st)))
-                 :usage (child-usage st (str provider "/" model-id))}))
+                 :usage (child-usage st (str provider "/" model-id))
+                 :billed? true}))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))
@@ -330,7 +352,7 @@ intermediate tool calls, so put everything that matters in the summary.")
   "`run-child`, with what it spent added to the parent's totals."
   [opts]
   (let [r (js-await (run-child opts))]
-    (bill-parent! (:api opts) (:usage r))
+    (when-not (:billed? r) (bill-parent! (:api opts) (:usage r)))
     r))
 
 ;; ---------------------------------------------------------------------------
