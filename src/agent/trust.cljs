@@ -212,24 +212,41 @@
   (let [rel (rel-to-cwd abs)]
     (and (not (str/starts-with? rel "..")) (not (path/isAbsolute rel)))))
 
+(defn- named-rel
+  "`abs` relative to cwd as it is NAMED, not where its links lead; nil outside
+   cwd. A repo decides where its symlinks point, so `.mcp.json -> conf/mcp.json`
+   is still `.mcp.json`. Ancestors go through `real` to find cwd, because the two
+   may spell it differently (see `real`)."
+  [abs]
+  (let [root (real (js/process.cwd))
+        p    (path/resolve abs)]
+    (loop [dir (path/dirname p) tail [(path/basename p)]]
+      (cond
+        (= (real dir) root)        (str/join "/" tail)
+        (= dir (path/dirname dir)) nil
+        :else (recur (path/dirname dir) (into [(path/basename dir)] tail))))))
+
+(defn- gated-rel? [rel]
+  (and rel
+       (or (some #(= rel %) command-files)
+           (= rel extensions-dir)
+           (str/starts-with? rel (str extensions-dir "/")))))
+
 (defn allow-file?
   "May nyma honour the project-controlled FILE at `abs`? Files outside cwd (the
    user's own ~/.nyma etc.) always; gated files and the extensions dir only when
-   trusted."
+   trusted, whether gated by their name or by what they link to."
   [abs]
   (or (trusted?)
-      (not (project-relative? abs))
-      (let [rel (rel-to-cwd abs)]
-        (not (or (some #(= rel %) command-files)
-                 (= rel extensions-dir)
-                 (str/starts-with? rel (str extensions-dir "/")))))))
+      (not (or (gated-rel? (named-rel abs))
+               (and (project-relative? abs) (gated-rel? (rel-to-cwd abs)))))))
 
 (defn project-file-allowed?
   "Stricter than `allow-file?`: ANY file inside cwd is refused while untrusted.
    For readers that take only command-bearing keys from a file (the hook
    bridge reads nothing but `hooks` from `.nyma/settings.json`)."
   [abs]
-  (or (trusted?) (not (project-relative? abs))))
+  (or (trusted?) (and (nil? (named-rel abs)) (not (project-relative? abs)))))
 
 (defn strip-settings
   "A project settings object (plain JS, parsed) with its command-bearing keys

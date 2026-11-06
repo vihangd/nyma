@@ -265,3 +265,48 @@
             (-> (expect (trust/fingerprint (trust/sources d))) (.not.toBe before))
             (-> (expect (:detail (first (trust/sources d)))) (.not.toContain "NODE_OPTIONS")))
           (fs/rmSync d #js {:recursive true}))))))
+
+(describe "a symlink does not get a command file past the gate"
+          (fn []
+            (it "gates by the name a file has, and by what it links to"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-link-"))]
+                    (write! d "conf/mcp.json" {"mcpServers" {"x" {"command" "evil"}}})
+                    (write! d "plugins/evil.mjs" "export default () => {}")
+                    (fs/symlinkSync "conf/mcp.json" (path/join d ".mcp.json"))
+                    (fs/mkdirSync (path/join d ".nyma"))
+                    (fs/symlinkSync "../plugins" (path/join d ".nyma/extensions"))
+                    (fs/symlinkSync ".mcp.json" (path/join d "innocent.json"))
+                    (in-dir d (fn []
+                                (trust/decide! :untrusted)
+                                (-> (expect (trust/allow-file? (path/join d ".mcp.json"))) (.toBe false))
+                                (-> (expect (trust/allow-file? (path/join d ".nyma/extensions"))) (.toBe false))
+                                (-> (expect (trust/allow-file? (path/join d ".nyma/extensions/evil.mjs"))) (.toBe false))
+                                (-> (expect (trust/project-file-allowed? (path/join d ".mcp.json"))) (.toBe false))
+                                ;; the plain file is ordinary until something names it
+                                (-> (expect (trust/allow-file? (path/join d "conf/mcp.json"))) (.toBe true))
+                                (trust/decide! :trusted)
+                                (-> (expect (trust/allow-file? (path/join d ".mcp.json"))) (.toBe true))))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
+            (it "gates through a linked parent directory"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-link-"))]
+                    (write! d "conf/extensions/evil.mjs" "export default () => {}")
+                    (fs/symlinkSync "conf" (path/join d ".nyma"))
+                    (in-dir d (fn []
+                                (trust/decide! :untrusted)
+                                (-> (expect (trust/allow-file? (path/join d ".nyma/extensions"))) (.toBe false))))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
+            (it "still allows a file outside the folder"
+                (fn []
+                  (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-link-"))
+                        o (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-out-"))]
+                    (write! o ".mcp.json" {})
+                    (write! d "x.txt" "x")
+                    (in-dir d (fn []
+                                (trust/decide! :untrusted)
+                                (-> (expect (trust/allow-file? (path/join o ".mcp.json"))) (.toBe true))))
+                    (fs/rmSync d #js {:recursive true :force true})
+                    (fs/rmSync o #js {:recursive true :force true}))))))
