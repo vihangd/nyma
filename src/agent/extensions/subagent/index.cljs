@@ -69,6 +69,23 @@ intermediate tool calls, so put everything that matters in the summary.")
                 :description "Web/docs research. Returns sourced findings."
                 :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}})
 
+(def ^:private read-only-tools ["read" "glob" "grep" "ls" "retrieve_result"])
+
+(defn- all-tools?
+  "`allowed-tools: [\"*\"]`, the one way to ask for every tool."
+  [allowed]
+  (boolean (some #(= "*" %) allowed)))
+
+(defn child-tools
+  "The tools an in-process child may use, nil for all of them. A child has no
+   permission gate, so this list is its only limit, and leaving it out must not
+   mean everything: a role written just to pick a model got bash and write."
+  [allowed]
+  (cond
+    (all-tools? allowed) nil
+    (seq allowed)        allowed
+    :else                read-only-tools))
+
 (defn live-settings
   "A settings manager whose `:get` is the session's own view, so `--settings`
    overrides reach subagents. Only the session's manager holds those; a fresh
@@ -159,7 +176,8 @@ intermediate tool calls, so put everything that matters in the summary.")
            "--permission-mode" (child-permission-mode mode)
            "--max-steps" (str (or steps 20)) "--settings" "{\"max-extensions\":0}" "--model" model
            "--append-system-prompt" sys]
-    (seq allowed) (into ["--tools" (str/join "," allowed)])))
+    (and (seq allowed) (not (all-tools? allowed)))
+    (into ["--tools" (str/join "," allowed)])))
 
 (def ^:private worktree-timeout-ms (* 30 60 1000))
 
@@ -300,7 +318,7 @@ intermediate tool calls, so put everything that matters in the summary.")
       (let [provider   (cfg-get cfg :provider "provider")
             model-id   (or model-override (cfg-get cfg :model "model"))
             sys        (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
-            allowed    (cfg-get cfg :allowed-tools "allowed-tools")
+            allowed    (child-tools (cfg-get cfg :allowed-tools "allowed-tools"))
             resolve-fn (aget api "resolveModel")
             model-obj  (when (and resolve-fn provider model-id)
                          (try (resolve-fn provider model-id) (catch :default _e nil)))]
@@ -320,9 +338,8 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; Rates are keyed provider/model: without this a child's lookup
               ;; missed, and a paid model cost 0.
               (aset (:config child) "active-provider-name" provider)
-              ;; Restrict to the role's read-only (by default) tool set.
               ;; Children never receive the `subagent` tool → depth capped at 1.
-              (when (seq allowed)
+              (when allowed
                 ((:set-active (:tool-registry child)) (set allowed)))
               ;; Caught here, not below: a failed child spent money too. The
               ;; controller is read at abort time: `run` replaces it on entry.

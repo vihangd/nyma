@@ -1,7 +1,7 @@
 (ns subagent-settings.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.settings.manager :refer [defaults]]
-            [agent.extensions.subagent.index :refer [run-isolated-agent live-settings all-agents]]))
+            [agent.extensions.subagent.index :refer [run-isolated-agent live-settings all-agents child-tools worktree-args]]))
 
 (def ^:private read-only-roles [:scout :planner :reviewer :researcher])
 
@@ -93,3 +93,27 @@
             (it "an api without settings falls back to the files"
                 (fn []
                   (-> (expect (fn? (:get (live-settings #js {})))) (.toBe true))))))
+
+(describe "subagent:child-tools"
+          (fn []
+            (it "a role that names no tools is read-only"
+                (fn []
+                  (doseq [none [nil []]]
+                    (let [tools (set (child-tools none))]
+                      (-> (expect (contains? tools "read")) (.toBe true))
+                      (doseq [t ["bash" "write" "edit"]]
+                        (-> (expect (contains? tools t)) (.toBe false)))))))
+
+            (it "a named list is used as it is"
+                (fn []
+                  (-> (expect (child-tools ["bash"])) (.toEqual #js ["bash"]))))
+
+            (it "every tool has to be asked for"
+                (fn []
+                  (-> (expect (child-tools ["*"])) (.toBeNil))))
+
+            (it "* is never passed to a worktree child as a tool name"
+                (fn []
+                  (let [args (fn [t] (vec (worktree-args {:model "m" :sys "s" :allowed t})))]
+                    (-> (expect (.includes (args ["*"]) "--tools")) (.toBe false))
+                    (-> (expect (.includes (args ["read"]) "--tools")) (.toBe true)))))))

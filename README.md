@@ -712,6 +712,11 @@ Larger maps omitted above because they are long, not because they are optional:
 `roles` (12 model/permission/tool-shape presets), `plan-mode`, `subagent`. Read them in
 `manager.cljs`.
 
+A role run as a subagent has no permission gate, so `allowed-tools` is its only limit. A role
+that lists none gets the read-only set (`read`, `glob`, `grep`, `ls`, `retrieve_result`);
+`"allowed-tools": ["*"]` gives it every tool. A worktree child keeps its permission mode as
+the limit, so an unlisted role there is not narrowed.
+
 Project settings cannot widen permissions: `permission-mode` and any `allow` decision in a
 role's `policy`/`permissions` are ignored (with a warning) when they come from
 `.nyma/settings.json`, and honoured only from `~/.nyma/settings.json` or the command line.

@@ -204,6 +204,27 @@
     (-> (expect (js-await (tool-execute api #js {:action "cancel" :job id}))) (.toContain "already"))
     (-> (expect @sent) (.toBe 0))))
 
+(defn ^:async tools-sent [role]
+  (let [sent  (atom nil)
+        model (new MockLanguageModelV4
+                   #js {:doStream (fn [o]
+                                    (reset! sent (mapv #(.-name %) (or (.-tools o) #js [])))
+                                    (js/Promise.resolve #js {:stream (convertArrayToReadableStream text-chunks)}))})
+        api   #js {:resolveModel (fn [_ _] model) :dispatchState (fn [_ _] nil)}]
+    (js-await (run-isolated-agent {:api api :settings-mgr nil :agents {"mine" role}
+                                   :agent-name "mine" :task "go"}))
+    (set @sent)))
+
+(defn ^:async test-custom-role-tools []
+  (let [plain (js-await (tools-sent {:provider "p" :model "m"}))
+        all   (js-await (tools-sent {:provider "p" :model "m" :allowed-tools ["*"]}))]
+    (-> (expect (contains? plain "read")) (.toBe true))
+    (-> (expect (contains? plain "bash")) (.toBe false))
+    (-> (expect (contains? all "bash")) (.toBe true))))
+
+(describe "subagent:custom-role" (fn []
+                                   (it "reaches the model read-only unless it asks for *" test-custom-role-tools)))
+
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)
                              (it "an aborted fan-out starts nothing" test-aborted-never-starts)
