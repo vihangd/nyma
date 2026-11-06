@@ -3,7 +3,12 @@
    define their responses: dispositions on prompt/steer/follow_up, models,
    thinking levels, queue modes, stats, compaction setting."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.modes.pi-rpc :as pi]))
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
+            [agent.core :refer [create-agent]]
+            [agent.modes.pi-rpc :as pi]
+            [agent.sessions.manager :refer [create-session-manager]]))
 
 (defn- make-agent []
   (let [cfg       #js {:model "m1"}
@@ -43,6 +48,33 @@
 (defn- call [agent st cmd]
   (-> (capture (fn [] (pi/handle-line agent st (js/JSON.stringify (clj->js cmd)))))
       (.then (fn [out] (first (filter #(= "response" (.-type %)) out))))))
+
+(defn ^:async test-fork-moves-the-conversation []
+  (let [d     (fs/mkdtempSync (path/join (os/tmpdir) "nyma-pi-fork-"))
+        fp    (path/join d "s.jsonl")
+        _     (fs/writeFileSync fp "" "utf8")
+        mgr   (create-session-manager fp)
+        agent (create-agent {:model "test" :system-prompt "x"})
+        _     (doseq [e [{:role "user" :content "one"}
+                         {:role "assistant" :content "first"}
+                         {:role "user" :content "two"}
+                         {:role "assistant" :content "abandoned"}]]
+                ((:append mgr) e))
+        _     ((:load mgr))
+        _     (reset! (:session agent) mgr)
+        _     (swap! (:state agent) assoc :messages [{:role "assistant" :content "abandoned"}])
+        id    (:id (second ((:get-entries mgr))))
+        out   (js-await (capture (fn [] (pi/handle-line agent (pi/new-st)
+                                                        (js/JSON.stringify (clj->js {:type "fork" :entryId id}))))))
+        r     (first (filter #(= "response" (.-type %)) out))]
+    (-> (expect (.-success r)) (.toBe true))
+    ;; what the next prompt sends, not only what get_messages shows
+    (-> (expect (mapv :content (:messages @(:state agent)))) (.toEqual (clj->js ["one" "first"])))
+    (fs/rmSync d #js {:recursive true :force true})))
+
+(describe "pi-rpc fork"
+          (fn []
+            (it "moves what the model is sent, not just the leaf" test-fork-moves-the-conversation)))
 
 (describe "pi-rpc commands"
           (fn []

@@ -814,7 +814,11 @@
           (write-error! cmd "set_session_name failed"))
 
         "fork"
-        (if (call-session agent :branch (.-entryId cmd))
+        ;; A ctx with a quiet notify: without one it logs to stdout, the protocol.
+        (if (try (builtins/branch-at! agent #js {:ui #js {:notify (fn [_ _] nil)}}
+                                      (session-of agent) (.-entryId cmd) "")
+                 true
+                 (catch :default _e false))
           (write-response! cmd {:text ""})
           (write-error! cmd "fork failed"))
 
