@@ -332,7 +332,7 @@
   (let [api #js {:resolveModel (fn [_ _] (scripted tool-chunks text-chunks)) :dispatchState (fn [_ _] nil)
                  :settings (fn [] {:subagent {} :roles {:mine {:provider "p" :model "m" :allowed-tools ["think"]}}})}
         out (js-await (tool-execute api #js {:agent "mine" :task "go" :steps 1}))]
-    (-> (expect out) (.toContain "### mine (STEP CAP"))))
+    (-> (expect out) (.toContain "(STEP CAP"))))
 
 (defn ^:async test-failed-job-reports []
   (let [sent (atom [])
@@ -388,6 +388,60 @@
 
 (describe "subagent:progress" (fn []
                                 (it "a running child reports each step and is counted" test-progress)))
+
+(defn- allowing-api [model]
+  #js {:resolveModel (fn [_ _] model) :dispatchState (fn [_ _] nil)
+       :checkPermission (fn [& _] (js/Promise.resolve #js {:allowed true}))
+       :settings (fn [] {:roles {:mine {:provider "p" :model "m" :allowed-tools ["think"]}}})})
+
+(defn- id-in [s] (second (.match s (js/RegExp. "\\[(mine-\\d+)\\]"))))
+
+(defn ^:async test-message-finished []
+  (let [prompts (atom [])
+        left    (atom [text-chunks text-chunks])
+        model   (new MockLanguageModelV4
+                     #js {:doStream (fn [o]
+                                      (swap! prompts conj (js/JSON.stringify (.-prompt o)))
+                                      (let [s (first @left)]
+                                        (swap! left rest)
+                                        (js/Promise.resolve #js {:stream (convertArrayToReadableStream s)})))})
+        api     (allowing-api model)
+        out     (js-await (tool-execute api #js {:agent "mine" :task "first task"}))
+        id      (id-in out)
+        again   (js-await (tool-execute api #js {:action "message" :job id :task "second task"}))]
+    (-> (expect again) (.toContain id))
+    (-> (expect (nth @prompts 1)) (.toContain "first task"))
+    (-> (expect (nth @prompts 1)) (.toContain "second task"))))
+
+(defn ^:async test-message-running []
+  (let [prompts (atom [])
+        release (atom nil)
+        model   (new MockLanguageModelV4
+                     #js {:doStream (fn [o]
+                                      (swap! prompts conj (js/JSON.stringify (.-prompt o)))
+                                      (if (= 1 (count @prompts))
+                                        (js/Promise. (fn [ok _]
+                                                       (reset! release
+                                                               #(ok #js {:stream (convertArrayToReadableStream tool-chunks)}))))
+                                        (js/Promise.resolve #js {:stream (convertArrayToReadableStream text-chunks)})))})
+        api     (allowing-api model)
+        _       (js-await (tool-execute api #js {:agent "mine" :task "go" :async true}))
+        _       (js-await (wait 20))
+        listing (js-await (tool-execute api #js {:action "status"}))
+        id      (second (.match listing (js/RegExp. "(mine-\\d+): running")))]
+    (-> (expect (js-await (tool-execute api #js {:action "message" :job id :task "look at b too"})))
+        (.toContain "Sent to"))
+    (@release)
+    (js-await (wait 40))
+    (-> (expect (last @prompts)) (.toContain "look at b too"))))
+
+(describe "subagent:message" (fn []
+                               (it "a finished child continues with what it knows" test-message-finished)
+                               (it "a running child is steered at its next step" test-message-running)
+                               (it "an unknown id says so"
+                                   (fn []
+                                     (-> (tool-execute #js {} #js {:action "message" :job "nope-1" :task "x"})
+                                         (.then (fn [s] (-> (expect s) (.toContain "No subagent")))))))))
 
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)

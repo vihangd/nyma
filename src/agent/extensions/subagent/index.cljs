@@ -18,7 +18,7 @@
   (:require [agent.utils.data :as data]
             [agent.schema :as schema]
             [agent.core :refer [create-agent]]
-            [agent.loop :refer [run]]
+            [agent.loop :refer [run steer]]
             [agent.pricing :as pricing]
             [agent.extensions.model-roles.policy :as policy]
             [agent.providers.registry :as registry]
@@ -45,6 +45,11 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; Async jobs registry — session-scoped (in-memory). {id {:status :result :task :agent}}
 (def ^:private jobs (atom {}))
 (def ^:private job-counter (atom 0))
+;; Every in-process child, by id, so it can be messaged or read about later.
+;; Lost on restart; its transcript is not. {id {:child :drive :label :status :progress}}
+(def ^:private children (atom {}))
+(def ^:private child-counter (atom 0))
+(def ^:private MAX-KEPT-CHILDREN 20)
 
 ;; ---------------------------------------------------------------------------
 ;; Role / agent resolution
@@ -336,6 +341,15 @@ intermediate tool calls, so put everything that matters in the summary.")
       (attach-session-persistence! child sm)
       file)))
 
+(defn- remember-child!
+  "Keep `id`, dropping the oldest finished child past the limit: each holds a
+   whole conversation."
+  [id entry]
+  (swap! children assoc id entry)
+  (when (> (count @children) MAX-KEPT-CHILDREN)
+    (when-let [old (first (remove #(= "running" (:status (get @children %))) (keys @children)))]
+      (swap! children dissoc old))))
+
 (defn- progress-line
   "One running child's latest step, in a form that fits a tool row."
   [agent-name n data]
@@ -446,50 +460,62 @@ intermediate tool calls, so put everything that matters in the summary.")
                  :text (str "Subagent " agent-name " cannot have: " (str/join ", " missing)
                             ". A subagent has builtin tools only, not MCP or extension tools.")}
               (let [transcript (open-transcript! child api agent-name)
-                    stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
-                    _    (some-> signal (.addEventListener "abort" stop #js {:once true}))
-                    _    ((:on (:events child)) "turn_end"
-                                                (fn [step _]
-                                                  (bill-parent! api (step-bill step (str provider "/" model-id)
-                                                                               (pricing/model-cost-key (:config child))))))
+                    id    (str (wt/safe-name agent-name) "-" (swap! child-counter inc))
+                    _     ((:on (:events child)) "turn_end"
+                                                 (fn [step _]
+                                                   (bill-parent! api (step-bill step (str provider "/" model-id)
+                                                                                (pricing/model-cost-key (:config child))))))
                     steps (atom 0)
-                    _    (when on-progress
-                           ((:on (:events child)) "tool_execution_start"
-                                                  (fn [d] (on-progress (progress-line agent-name (swap! steps inc) d)))))
+                    _     ((:on (:events child)) "tool_execution_start"
+                                                 (fn [d]
+                                                   (let [line (progress-line agent-name (swap! steps inc) d)]
+                                                     (swap! children assoc-in [id :progress] line)
+                                                     (when on-progress (on-progress line)))))
                     capped? (atom false)
-                    _    ((:on (:events child)) "turn_finalize"
-                                                (fn [d] (when (.-stepCapped d) (reset! capped? true)) nil))
-                    late? (atom false)
-                    clock (js/setTimeout (fn []
-                                           (reset! late? true)
-                                           (.abort @(:abort-controller child) "timed out"))
-                                         (or timeout-ms default-timeout-ms))
-                    _    (count-running! api 1)
-                    err  (try (js-await (run child task)) nil
-                              (catch :default e e))
-                    _    (count-running! api -1)
-                    _    (js/clearTimeout clock)
-                    _    (some-> signal (.removeEventListener "abort" stop))
-                    gone (some-> signal .-aborted)
-                    st   @(:state child)
-                    said (final-text (:messages st))
-                    status (cond
-                             @late?            "timed-out"
-                             gone              "cancelled"
-                             err               "failed"
-                             (str/blank? said) "empty"
-                             @capped?          "step-capped"
-                             :else             "done")]
-                {:agent agent-name :ok (contains? #{"done" "step-capped"} status)
-                 :status status
-                 :text  (case status
-                          "cancelled" "cancelled"
-                          "failed"    (str "Subagent " agent-name " failed: " (.-message err))
-                          "empty"     (str "Subagent " agent-name " ended without a reply.")
-                          (clip-reply said transcript))
-                 :transcript transcript
-                 :usage (child-usage st (str provider "/" model-id))
-                 :billed? true})))
+                    _     ((:on (:events child)) "turn_finalize"
+                                                 (fn [d] (when (.-stepCapped d) (reset! capped? true)) nil))
+                    ;; One run of this child: its task, then each message to it.
+                    drive
+                    ^:async
+                    (fn [prompt sig]
+                      (reset! capped? false)
+                      (swap! children assoc-in [id :status] "running")
+                      (let [stop  (fn [] (.abort @(:abort-controller child) (.-reason sig)))
+                            _     (some-> sig (.addEventListener "abort" stop #js {:once true}))
+                            late? (atom false)
+                            clock (js/setTimeout (fn []
+                                                   (reset! late? true)
+                                                   (.abort @(:abort-controller child) "timed out"))
+                                                 (or timeout-ms default-timeout-ms))
+                            _     (count-running! api 1)
+                            err   (try (js-await (run child prompt)) nil
+                                       (catch :default e e))
+                            _     (count-running! api -1)
+                            _     (js/clearTimeout clock)
+                            _     (some-> sig (.removeEventListener "abort" stop))
+                            gone  (some-> sig .-aborted)
+                            st    @(:state child)
+                            said  (final-text (:messages st))
+                            status (cond
+                                     @late?            "timed-out"
+                                     gone              "cancelled"
+                                     err               "failed"
+                                     (str/blank? said) "empty"
+                                     @capped?          "step-capped"
+                                     :else             "done")]
+                        (swap! children assoc-in [id :status] status)
+                        {:agent agent-name :id id :ok (contains? #{"done" "step-capped"} status)
+                         :status status
+                         :text  (case status
+                                  "cancelled" "cancelled"
+                                  "failed"    (str "Subagent " agent-name " failed: " (.-message err))
+                                  "empty"     (str "Subagent " agent-name " ended without a reply.")
+                                  (clip-reply said transcript))
+                         :transcript transcript
+                         :usage (child-usage st (str provider "/" model-id))
+                         :billed? true}))]
+                (remember-child! id {:child child :drive drive :label task})
+                (js-await (drive task signal)))))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))
@@ -506,7 +532,7 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; ---------------------------------------------------------------------------
 
 (defn- format-result [r]
-  (str "### " (:agent r)
+  (str "### " (:agent r) (when-let [id (:id r)] (str " [" id "]"))
        (case (:status r)
          "step-capped" " (STEP CAP: may be unfinished)"
          "timed-out"   " (TIMED OUT: may be unfinished)"
@@ -627,25 +653,49 @@ intermediate tool calls, so put everything that matters in the summary.")
     (str "Started background subagent " id " (" label "). "
          "Use the subagent tool with action=\"status\" to check on it.")))
 
-(defn- cancel-job [id]
-  (let [j (get @jobs id)]
+(defn ^:async message-child
+  "A running child gets `text` at its next step. A finished one takes it as a new
+   task, with everything it already knows: the way to retry or follow up."
+  [id text signal]
+  (let [e (get @children id)]
     (cond
+      (nil? e)                  (str "No subagent " id ".")
+      (str/blank? (str text))   "subagent: action=message needs a task."
+      (= "running" (:status e)) (do (steer (:child e) {:role "user" :content text})
+                                    (str "Sent to " id "."))
+      :else (format-results [(js-await ((:drive e) text signal))]))))
+
+(defn- cancel-job [id]
+  (let [j (get @jobs id)
+        c (get @children id)]
+    (cond
+      (and c (= "running" (:status c)))
+      (do (.abort @(:abort-controller (:child c)) "cancelled") (str "Cancelling " id "."))
       (nil? j) (str "No subagent job " id ".")
       (not= "running" (:status j)) (str id " is already " (:status j) ".")
       :else (do (.abort (:ctrl j)) (str "Cancelling " id ".")))))
 
+(defn- children-status []
+  (map (fn [[id c]]
+         (str id ": " (:status c) " — " (let [l (str (:label c))] (subs l 0 (min 60 (count l))))
+              (when (and (= "running" (:status c)) (:progress c)) (str "\n" (:progress c)))))
+       @children))
+
 (defn- jobs-status []
-  (let [js @jobs]
-    (if (empty? js)
+  (let [js @jobs
+        kids (children-status)]
+    (if (and (empty? js) (empty? kids))
       "No subagent jobs."
       (str/join "\n\n"
-                (map (fn [[id j]]
+                (concat
+                 kids
+                 (map (fn [[id j]]
                        (str id ": " (:status j) " — " (:label j)
                             ;; Surface the result so `status` can actually
                             ;; recover output if the follow-up was missed.
                             (when-let [r (:result j)]
                               (str "\n" (if (> (count r) 4000) (str (subs r 0 4000) " …") r)))))
-                     js)))))
+                      js))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tool
@@ -667,8 +717,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                     :doc "Sequential: array of {agent, task, steps?}; '{previous}' in a task is replaced by the prior step's output."}]
    :steps  [:integer {:optional true
                       :doc "Tool-call budget per subagent (default 20). Size it to the task: 3-4 for a lookup or a question about one file, 8-12 for a change spanning several. A subagent out of steps still reports what it has."}]
-   :action [:enum ["run" "status" "cancel"] {:optional true :doc "run (default), status (list background jobs), or cancel (stop the background job named by `job`)."}]
-   :job    [:string {:optional true :doc "Background job id for action=cancel, e.g. job-1."}]
+   :action [:enum ["run" "status" "cancel" "message"] {:optional true :doc "run (default), status (list subagents and background jobs), cancel (stop the one named by `job`), or message (send `task` to the subagent named by `job`)."}]
+   :job    [:string {:optional true :doc "For cancel and message: a subagent id from a result header (scout-3) or a background job id (job-1, cancel only)."}]
    :async  [:boolean {:optional true :doc "Run in background; result is delivered as a follow-up message."}]
    :model  [:string {:optional true :doc "Optional model id override (single mode)."}]
    :isolation [:enum ["worktree"] {:optional true :doc "worktree: each subagent works in its own git worktree (a separate checkout on branch nyma/<name>); its changes come back as that branch, never in your files. Use it to let a subagent EDIT (e.g. the worker role), or to run editing subagents in parallel."}]})
@@ -687,6 +737,7 @@ intermediate tool calls, so put everything that matters in the summary.")
   (case (.-action args)
     "status" (jobs-status)
     "cancel" (cancel-job (.-job args))
+    "message" (js-await (message-child (.-job args) (.-task args) signal))
     (let [settings-mgr (live-settings api)
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
@@ -774,14 +825,14 @@ intermediate tool calls, so put everything that matters in the summary.")
              "Modes: single {agent, task}; parallel {tasks:[{agent,task}]} for INDEPENDENT "
              "read-only work; chain {chain:[{agent,task}]} ('{previous}' = prior output). "
              "Only the subagent's final summary returns; its intermediate tool calls stay "
-             "isolated. A subagent starts with NO memory of this conversation and nothing "
-             "carries over between calls: make every task self-contained (absolute paths, "
-             "exactly what to find or change, any context it needs) and never refer back "
-             "to an earlier call. Ask for findings with file paths and line numbers, not "
+             "isolated. A subagent starts with NO memory of this conversation: make every "
+             "task self-contained (absolute paths, exactly what to find or change, any "
+             "context it needs). To follow up or retry, use action:\"message\" with job "
+             "(the id in its result header) and task; it keeps what it learned. Ask for findings with file paths and line numbers, not "
              "narration. Send independent tasks together, but never give two of them the "
              "same file to edit. `steps` sizes each subagent's tool budget to the task. "
              "async:true runs in the background. action:\"status\" lists jobs; "
-             "action:\"cancel\" with job stops one. "
+             "action:\"cancel\" with job stops one, and message steers one running. "
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
@@ -789,12 +840,14 @@ intermediate tool calls, so put everything that matters in the summary.")
 
   (.registerCommand
    api "agents"
-   #js {:description "List available subagent roles"
+   #js {:description "List subagent roles, and the subagents of this session"
         :handler (fn [_args ctx]
                    (let [sm (live-settings api)
                          agents (all-agents sm)]
                      (.notify (.-ui ctx)
-                              (str "Available subagents:\n" (format-agent-list agents))
+                              (str "Available subagents:\n" (format-agent-list agents)
+                                   (when (or (seq @children) (seq @jobs))
+                                     (str "\n\nThis session:\n" (jobs-status))))
                               "info")))})
 
   (.registerCommand
