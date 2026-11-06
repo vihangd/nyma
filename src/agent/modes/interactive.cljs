@@ -734,6 +734,7 @@
                                          :cost-usd   (+ (or (:total-cost st) 0) (or (:run-cost st) 0)
                                                         (or (:prior-cost st) 0))
                                          :run-steps  (:run-steps st)
+                                         :subagents  (:subagents-running st)
                                          :last-cache-read (:last-cache-read st)
                                          :cost-unknown? (or (:cost-unknown? st) (:prior-cost-unknown? st))
                                          ;; In the store since the cache-token

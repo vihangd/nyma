@@ -96,6 +96,9 @@
                                               :compacted-at-count 0
                                               :last-input-tokens 0
                                               :last-cache-read 0))
+   ;; Children running now, for the status line.
+   :subagent-count   (fn [state data]
+                       (update state :subagents-running (fnil + 0) (:delta data)))
    ;; A different session, so none of these describe it. Not in :messages-cleared:
    ;; /clear stays in its session, and what that session spent stands.
    ;; :extension-tokens stays: budget diffs it, and it only ever grows.

@@ -336,6 +336,18 @@ intermediate tool calls, so put everything that matters in the summary.")
       (attach-session-persistence! child sm)
       file)))
 
+(defn- progress-line
+  "One running child's latest step, in a form that fits a tool row."
+  [agent-name n data]
+  (let [args (or (:args data) {})
+        what (or (get args :path) (get args :command) (get args :pattern) (get args :query))
+        s    (str agent-name " · step " n " · " (:toolName data) (when what (str " " what)))]
+    (if (> (count s) 100) (str (subs s 0 99) "…") s)))
+
+(defn- count-running! [api delta]
+  (when-let [dispatch (aget api "dispatchState")]
+    (dispatch "subagent-count" {:delta delta})))
+
 (defn- step-bill
   "What one finished step of a child on `model` spent, as `bill-parent!` takes it.
    `rates` is the child's own cost key, which is not always the role's spelling."
@@ -372,7 +384,7 @@ intermediate tool calls, so put everything that matters in the summary.")
    child bills the parent step by step, so a budget can stop it; `:billed?` says
    its `:usage` is already counted."
   [opts]
-  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal timeout-ms]} opts
+  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal timeout-ms on-progress]} opts
         cfg (inherit-model (lookup-agent agents agent-name) api)]
     (cond
       ;; Queued items of a fan-out reach here after the abort: none may start.
@@ -440,6 +452,10 @@ intermediate tool calls, so put everything that matters in the summary.")
                                                 (fn [step _]
                                                   (bill-parent! api (step-bill step (str provider "/" model-id)
                                                                                (pricing/model-cost-key (:config child))))))
+                    steps (atom 0)
+                    _    (when on-progress
+                           ((:on (:events child)) "tool_execution_start"
+                                                  (fn [d] (on-progress (progress-line agent-name (swap! steps inc) d)))))
                     capped? (atom false)
                     _    ((:on (:events child)) "turn_finalize"
                                                 (fn [d] (when (.-stepCapped d) (reset! capped? true)) nil))
@@ -448,8 +464,10 @@ intermediate tool calls, so put everything that matters in the summary.")
                                            (reset! late? true)
                                            (.abort @(:abort-controller child) "timed out"))
                                          (or timeout-ms default-timeout-ms))
+                    _    (count-running! api 1)
                     err  (try (js-await (run child task)) nil
                               (catch :default e e))
+                    _    (count-running! api -1)
                     _    (js/clearTimeout clock)
                     _    (some-> signal (.removeEventListener "abort" stop))
                     gone (some-> signal .-aborted)
@@ -662,7 +680,7 @@ intermediate tool calls, so put everything that matters in the summary.")
                (assoc-in [:properties "tasks" :items] task-item)
                (assoc-in [:properties "chain" :items] task-item))))
 
-(defn ^:async tool-execute [api args & [signal]]
+(defn ^:async tool-execute [api args & [signal on-progress]]
   ;; action=status is a pure in-memory read — short-circuit BEFORE touching
   ;; the settings manager / agent .md files (synchronous disk IO), so a
   ;; status poll loop doesn't re-read settings + scan agent dirs each call.
@@ -684,7 +702,10 @@ intermediate tool calls, so put everything that matters in the summary.")
                                                (and sub (get sub "async-by-default"))))]
                          (if (nil? (.-async args)) dflt (boolean (.-async args))))
           ctrl         (when async? (js/AbortController.))
-          base         (cond-> base ctrl (assoc :signal (.-signal ctrl)))]
+          ;; A background job outlives its tool row.
+          base         (cond-> base
+                         ctrl (assoc :signal (.-signal ctrl))
+                         (and on-progress (not ctrl)) (assoc :on-progress on-progress))]
       (cond
       ;; parallel fan-out
         (.-tasks args)
@@ -764,7 +785,7 @@ intermediate tool calls, so put everything that matters in the summary.")
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
-        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal)))}))
+        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal) (some-> ctx .-onUpdate)))}))
 
   (.registerCommand
    api "agents"

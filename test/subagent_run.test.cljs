@@ -109,7 +109,7 @@
         ;; child that does not know its provider.
         k     (str "anthropic/" (.-modelId model))
         api   #js {:resolveModel (fn [_ _] model)
-                   :dispatchState (fn [t d] (swap! bills conj [t d]))}]
+                   :dispatchState (fn [t d] (when (= t "extension-usage") (swap! bills conj [t d])))}]
     (swap! pricing/token-costs assoc k [1 1])
     (let [r (js-await (run-isolated-agent (assoc (base) :api api :agent-name "scout" :task "go")))]
       (swap! pricing/token-costs dissoc k)
@@ -150,7 +150,7 @@
                                     (js/Promise.resolve
                                      #js {:stream (convertArrayToReadableStream tool-chunks)}))})
         api   #js {:resolveModel (fn [_ _] model)
-                   :dispatchState (fn [_ _] (.abort ctrl))}
+                   :dispatchState (fn [t _] (when (= t "extension-usage") (.abort ctrl)))}
         r     (js-await (run-isolated-agent (assoc (base) :api api :agent-name "scout" :task "go"
                                                    :signal (.-signal ctrl))))]
     (-> (expect (:text r)) (.toBe "cancelled"))
@@ -375,6 +375,19 @@
                                           (-> (expect (< (count out) 12000)) (.toBe true))
                                           (-> (expect out) (.toContain "in the transcript"))
                                           (-> (expect (clip-reply "short" nil)) (.toBe "short")))))))
+
+(defn ^:async test-progress []
+  (let [seen   (atom [])
+        counts (atom [])
+        api    #js {:resolveModel (fn [_ _] (scripted tool-chunks text-chunks))
+                    :checkPermission (fn [& _] (js/Promise.resolve #js {:allowed true}))
+                    :dispatchState (fn [t d] (when (= t "subagent-count") (swap! counts conj (:delta d))))}]
+    (js-await (run-on nil {:api api :on-progress #(swap! seen conj %)}))
+    (-> (expect (first @seen)) (.toBe "mine · step 1 · think"))
+    (-> (expect (vec @counts)) (.toEqual #js [1 -1]))))
+
+(describe "subagent:progress" (fn []
+                                (it "a running child reports each step and is counted" test-progress)))
 
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)

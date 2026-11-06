@@ -446,6 +446,7 @@
    "cost"        :right
    "context-pct" :right
    "cache-hit"   :right
+   "subagents"   :right
    "time-spent"  :right})
 
 (defn builtin-ids
