@@ -27,6 +27,7 @@
             [agent.ui.editor-bash :as editor-bash]
             [agent.thinking :as thinking]
             [agent.tool-result-policy :as policy-result]
+            [agent.ui.think-tag-parser :as think-tags]
             ["node:fs" :as fs]
             [clojure.string :as str]))
 
@@ -204,7 +205,11 @@
    messages of its tool calls. Returns [message results], or nil if none open."
   [st fields]
   (when-let [m @(:msg st)]
-    (let [final   (update (merge m fields) :content shape/split-think)
+    (let [final   (update (merge m fields) :content
+                          ;; the block opened at message_start stays empty when
+                          ;; a <think> came first
+                          #(filterv (fn [b] (not (and (= "text" (:type b)) (= "" (:text b)))))
+                                    (shape/split-think %)))
           results @(:results st)]
       (reset! (:msg st) nil)
       (reset! (:text-i st) nil)
@@ -260,6 +265,36 @@
           (let [i (add-block! agent st {:type "text" :text ""})]
             (reset! (:text-i st) i)
             (update! st {:type "text_start" :contentIndex i})))
+        text-delta!
+        (fn [d]
+          (when (nil? @(:text-i st)) (text-start!))
+          (let [i @(:text-i st)]
+            (swap! (:msg st) #(shape/append-at % i :text d))
+            (update! st {:type "text_delta" :contentIndex i :delta d})))
+        text-end!
+        (fn []
+          (when-let [i @(:text-i st)]
+            (reset! (:text-i st) nil)
+            (update! st {:type "text_end" :contentIndex i
+                         :content (get-in @(:msg st) [:content i :text])})))
+        think-start!
+        (fn []
+          (let [i (add-block! agent st {:type "thinking" :thinking ""})]
+            (reset! (:think-i st) i)
+            (update! st {:type "thinking_start" :contentIndex i})))
+        think-delta!
+        (fn [d]
+          (when (nil? @(:think-i st))
+            (reset! (:think-i st) (add-block! agent st {:type "thinking" :thinking ""})))
+          (let [i @(:think-i st)]
+            (swap! (:msg st) #(shape/append-at % i :thinking d))
+            (update! st {:type "thinking_delta" :contentIndex i :delta d})))
+        think-end!
+        (fn []
+          (when-let [i @(:think-i st)]
+            (reset! (:think-i st) nil)
+            (update! st {:type "thinking_end" :contentIndex i
+                         :content (get-in @(:msg st) [:content i :thinking])})))
         handlers
         [["agent_start"
           (fn [_]
@@ -273,40 +308,32 @@
           (fn [chunk]
             ;; `.text` first: message_update carries the AI SDK v7 fullStream
             ;; part. `.textDelta` is the OBJECT stream's field.
-            (let [d (or (.-text chunk) (.-textDelta chunk) "")]
-              (when (nil? @(:text-i st)) (text-start!))
-              (let [i @(:text-i st)]
-                (swap! (:msg st) #(shape/append-at % i :text d))
-                (update! st {:type "text_delta" :contentIndex i :delta d}))))]
+            ;; A model's inline <think> rides this channel; a client renders
+            ;; deltas as they land, so it is split here and not at message_end.
+            (let [[state pieces] (think-tags/scan @(:scan st) (or (.-text chunk) (.-textDelta chunk) ""))]
+              (reset! (:scan st) state)
+              (doseq [[kind d] pieces]
+                (case kind
+                  :text  (text-delta! d)
+                  :think (think-delta! d)
+                  :open  (do (text-end!) (think-start!))
+                  :close (think-end!)))))]
 
          ["message_end"
           (fn [_]
-            (when-let [i @(:text-i st)]
-              (reset! (:text-i st) nil)
-              (update! st {:type "text_end" :contentIndex i
-                           :content (get-in @(:msg st) [:content i :text])})))]
+            (let [{:keys [in? held]} @(:scan st)]
+              (reset! (:scan st) nil)
+              (when (seq held) (if in? (think-delta! held) (text-delta! held)))
+              (when in? (think-end!))
+              (text-end!)))]
 
-         ["reasoning_start"
-          (fn [_]
-            (let [i (add-block! agent st {:type "thinking" :thinking ""})]
-              (reset! (:think-i st) i)
-              (update! st {:type "thinking_start" :contentIndex i})))]
+         ["reasoning_start" (fn [_] (think-start!))]
 
          ["reasoning_delta"
           (fn [chunk]
-            (let [d (or (.-textDelta chunk) (.-text chunk) (.-delta chunk) "")]
-              (when (nil? @(:think-i st))
-                (reset! (:think-i st) (add-block! agent st {:type "thinking" :thinking ""})))
-              (let [i @(:think-i st)]
-                (swap! (:msg st) #(shape/append-at % i :thinking d))
-                (update! st {:type "thinking_delta" :contentIndex i :delta d}))))]
+            (think-delta! (or (.-textDelta chunk) (.-text chunk) (.-delta chunk) "")))]
 
-         ["reasoning_end"
-          (fn [_]
-            (when-let [i @(:think-i st)]
-              (reset! (:think-i st) nil)
-              (update! st {:type "thinking_end" :contentIndex i
-                           :content (get-in @(:msg st) [:content i :thinking])})))]
+         ["reasoning_end" (fn [_] (think-end!))]
 
          ;; The stream's tool-call part. The middleware emits a tool_call of
          ;; its own (no toolCallId, also for script calls); only the stream's
@@ -524,10 +551,12 @@
     (cond
       (map? c) (mapv (fn [[k v]] {:name (str k)
                                   :source (or (some-> (get v :source) str) "extension")
+                                  :sourceInfo {:scope "user"}
                                   :description (or (get v :description) "")})
                      c)
       (sequential? c) (mapv (fn [v] {:name (str (or (:name v) v))
                                      :source "extension"
+                                     :sourceInfo {:scope "user"}
                                      :description (or (:description v) "")})
                             c)
       :else [])))
@@ -809,14 +838,16 @@
           (write-error! cmd "new_session failed"))
 
         "switch_session"
-        (if (try (builtins/replay-session! agent (.-sessionPath cmd)) true
-                 (catch :default _e false))
+        (if (and (fs/existsSync (str (.-sessionPath cmd)))
+                 (try (builtins/replay-session! agent (.-sessionPath cmd)) true
+                      (catch :default _e false)))
           (write-response! cmd {:cancelled false})
           (write-error! cmd "switch_session failed"))
 
         "set_session_name"
         (if (call-session agent :set-session-name (.-name cmd))
-          (write-response! cmd)
+          (do (write-event! {:type "session_info_changed" :name (.-name cmd)})
+              (write-response! cmd))
           (write-error! cmd "set_session_name failed"))
 
         "fork"
@@ -883,7 +914,8 @@
 (defn new-st
   "The translator's mutable state for one pi-rpc channel."
   []
-  {:msg           (atom nil)   ; the open assistant message
+  {:scan          (atom nil)   ; inline <think> across chunks
+   :msg           (atom nil)   ; the open assistant message
    :text-i        (atom nil)   ; its open text block
    :think-i       (atom nil)   ; its open thinking block
    :results       (atom [])    ; toolResult messages for it

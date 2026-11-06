@@ -27,6 +27,38 @@
 (def ^:private close-re-g
   (js/RegExp. "<\\/think(?:ing)?>" "gi"))
 
+(def ^:private scan-open (js/RegExp. "<think(?:ing)?>" "i"))
+(def ^:private scan-close (js/RegExp. "<\\/think(?:ing)?>" "i"))
+
+(defn- partial-tag
+  "Where a tag may be starting at the end of `s`, cut off by a chunk boundary."
+  [s tags]
+  (let [i (.lastIndexOf s "<")]
+    (when (and (>= i 0)
+               (some #(.startsWith % (.toLowerCase (subs s i))) tags))
+      i)))
+
+(defn scan
+  "One streamed chunk through the tags. `state` is {:in? :held}, nil to start;
+   the tags can land anywhere across chunks, so a possible start is held back.
+   Returns [state pieces], pieces being [:text s] [:think s] [:open] [:close].
+   Pure."
+  [state chunk]
+  (loop [s   (str (:held state) chunk)
+         in? (boolean (:in? state))
+         out []]
+    (if-let [m (.exec (if in? scan-close scan-open) s)]
+      (let [before (subs s 0 (.-index m))]
+        (recur (subs s (+ (.-index m) (count (aget m 0))))
+               (not in?)
+               (cond-> out
+                 (seq before) (conj [(if in? :think :text) before])
+                 true         (conj [(if in? :close :open)]))))
+      (let [cut (or (partial-tag s (if in? ["</think>" "</thinking>"] ["<think>" "<thinking>"]))
+                    (count s))]
+        [{:in? in? :held (subs s cut)}
+         (cond-> out (pos? cut) (conj [(if in? :think :text) (subs s 0 cut)]))]))))
+
 (defn split-blocks*
   "Core parser. `orphan?` enables the orphan-closer branch (see
    `split-think-blocks`). Callers that persist their output pass false — a
