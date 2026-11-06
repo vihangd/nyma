@@ -17,6 +17,21 @@
                   (-> (expect (shared/over-budget cfg {:turn 50 :session 1500})) (.toBe :session))))))
 
 (describe "budget extension" (fn [])
+          (it "says which cap stopped the run"
+              (fn []
+                (let [handlers (atom {})
+                      reason   (atom nil)
+                      api      #js {:settings (fn [sec] (let [all #js {:budget #js {:turn-tokens 100}}] (if sec (or (get all sec) {}) all)))
+                                    :on  (fn [evt h] (swap! handlers assoc evt h))
+                                    :off (fn [evt _] (swap! handlers dissoc evt))}
+                      _        (b/activate api)
+                      ctx      #js {:abort (fn [r] (reset! reason r))}]
+                  ((get @handlers "before_agent_start") #js {} ctx)
+                  ((get @handlers "turn_end") #js {:usage #js {:inputTokens 200 :outputTokens 0}} ctx)
+                  (-> (expect (.-subtype @reason)) (.toBe "error_max_budget_tokens"))
+                  (-> (expect (.-name @reason)) (.toBe "AbortError"))
+                  (-> (expect (.-message @reason)) (.toContain "200 > 100")))))
+
           (it "aborts the run when the turn cap is exceeded"
               (fn []
                 (let [handlers (atom {})

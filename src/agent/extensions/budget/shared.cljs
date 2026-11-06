@@ -35,3 +35,12 @@
     (and (:turn-tokens cfg) (> turn (:turn-tokens cfg)))       :turn
     (and (:session-tokens cfg) (> session (:session-tokens cfg))) :session
     :else nil))
+
+(defn stop-reason
+  "An abort reason `-p` can report. Named AbortError because that is how the AI
+   SDK tells an abort from a failure."
+  [subtype msg]
+  (let [e (js/Error. msg)]
+    (set! (.-name e) "AbortError")
+    (set! (.-subtype e) subtype)
+    e))

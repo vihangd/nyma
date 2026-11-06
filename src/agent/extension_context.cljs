@@ -38,9 +38,9 @@
 
          ;; Agent lifecycle
          :isIdle             (fn [] (empty? (:active-executions @(:state agent))))
-         :abort              (fn []
+         :abort              (fn [& [reason]]
                                (when-let [ctrl-atom (:abort-controller agent)]
-                                 (.abort @ctrl-atom)))
+                                 (.abort @ctrl-atom reason)))
          :hasPendingMessages (fn []
                                (or (seq @(:steer-queue agent))
                                    (seq @(:follow-queue agent))))

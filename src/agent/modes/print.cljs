@@ -51,13 +51,26 @@
        (some? c) (str c)
        :else ""))))
 
+(defn- stop-reason
+  "Why the run was aborted, or nil if it was not. An abort with no reason of its
+   own still has the platform's AbortError here."
+  [agent]
+  (let [signal (some-> (:abort-controller agent) deref .-signal)]
+    (when (some-> signal .-aborted) (.-reason signal))))
+
+(defn- stop-message [reason]
+  (or (some-> reason .-message) "run aborted"))
+
 (defn ^:async start
   "`-p` / `--mode print`: run once and print the assistant's answer as plain
-   text."
+   text. A stopped run prints what it has, says why on stderr and exits 1."
   [agent prompt]
   (when prompt
     (js-await (run agent prompt))
-    (println (last-assistant-text (:messages @(:state agent))))))
+    (println (last-assistant-text (:messages @(:state agent))))
+    (when-let [reason (stop-reason agent)]
+      (set! (.-exitCode js/process) 1)
+      (.write (.-stderr js/process) (str "nyma: " (stop-message reason) "\n")))))
 
 (defn- session-id [agent]
   (or (when-let [s @(:session agent)]
@@ -73,20 +86,27 @@
 (defn result-object
   "Build the claude-style result object from the agent's final state.
    `error` is an error string if `run` threw (else nil). is_error is set
-   when the run errored OR produced no assistant text — so orchestrators
-   (e.g. cw) can trigger provider fallback on flaky/empty small-model
-   replies, not just on hard errors. Exposed for tests."
+   when the run errored, was stopped, OR produced no assistant text — so
+   orchestrators (e.g. cw) can trigger provider fallback on flaky/empty
+   small-model replies, not just on hard errors. A stopped run keeps its
+   partial text as `result`; `subtype` says what stopped it. Exposed for tests."
   [agent duration-ms error]
   (let [st    @(:state agent)
         inp   (or (:total-input-tokens st) 0)
         out   (or (:total-output-tokens st) 0)
         text  (last-assistant-text (:messages st))
         empty (str/blank? (str text))
-        err?  (boolean (or error empty))]
+        stop  (stop-reason agent)
+        err?  (boolean (or error empty stop))]
     #js {:type           "result"
+         :subtype        (cond
+                           (not err?) "success"
+                           (some-> stop .-subtype) (.-subtype stop)
+                           :else "error_during_execution")
          :is_error       err?
          :result         (cond
                            error (str "Error: " error)
+                           (and empty stop) (str "Error: " (stop-message stop))
                            empty "Error: empty response (no assistant output)"
                            :else text)
          :session_id     (str (session-id agent))

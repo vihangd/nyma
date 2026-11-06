@@ -1,5 +1,9 @@
 (ns print-result.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
+            [agent.core :refer [create-agent]]
+            [agent.loop :refer [run]]
+            [agent.extensions.budget.shared :as budget]
             [agent.modes.print :refer [result-object last-assistant-text start-result]]))
 
 (defn- fake-agent [state-map session]
@@ -208,3 +212,58 @@
 (describe "--output-format json exit code"
           (fn []
             (it "exits 1 when is_error is true" test-json-mode-exit-1)))
+
+;; ── a stopped run says so ──
+(def ^:private usage-part
+  #js {:inputTokens #js {:total 10} :outputTokens #js {:total 5}})
+
+(def ^:private step-one
+  #js [#js {:type "text-start" :id "t"}
+       #js {:type "text-delta" :id "t" :delta "partial"}
+       #js {:type "text-end" :id "t"}
+       #js {:type "tool-call" :toolCallId "c1" :toolName "think" :input "{\"thought\":\"x\"}"}
+       #js {:type "finish" :finishReason #js {:unified "tool-calls" :raw "tool_use"} :usage usage-part}])
+
+(defn- model-of [calls]
+  (new MockLanguageModelV4
+       ;; The SDK still calls after an abort, with the signal already aborted:
+       ;; a real fetch rejects at once. Only a live call costs anything.
+       #js {:doStream (fn [o]
+                        (when-not (.. o -abortSignal -aborted) (swap! calls inc))
+                        (js/Promise.resolve #js {:stream (convertArrayToReadableStream step-one)}))}))
+
+(defn ^:async stopped-result [reason]
+  (let [calls (atom 0)
+        agent (create-agent {:model (model-of calls) :system-prompt "x" :max-steps 5})]
+    ((:on (:events agent)) "turn_end"
+                           (fn [_] (.abort @(:abort-controller agent) reason)))
+    (js-await (run agent "go"))
+    [(result-object agent 1 nil) @calls]))
+
+(defn ^:async test-cap-stop []
+  (let [[r calls] (js-await (stopped-result (budget/stop-reason "error_max_budget_tokens" "turn cap")))]
+    (-> (expect calls) (.toBe 1))
+    (-> (expect (.-is_error r)) (.toBe true))
+    (-> (expect (.-subtype r)) (.toBe "error_max_budget_tokens"))))
+
+(defn ^:async test-bare-abort []
+  (let [[r _] (js-await (stopped-result js/undefined))]
+    (-> (expect (.-is_error r)) (.toBe true))
+    (-> (expect (.-subtype r)) (.toBe "error_during_execution"))))
+
+(describe "print:stopped run"
+          (fn []
+            (it "a cap reports its subtype and is an error" test-cap-stop)
+            (it "a bare abort is an execution error" test-bare-abort)
+            (it "a finished run is a success"
+                (fn []
+                  (let [a (fake-agent {:messages [{:role "assistant" :content "done"}]} nil)]
+                    (-> (expect (.-subtype (result-object a 1 nil))) (.toBe "success")))))
+            (it "with no text the reason is the result"
+                (fn []
+                  (let [c (js/AbortController.)
+                        a (assoc (fake-agent {:messages []} nil) :abort-controller (atom c))]
+                    (.abort c (budget/stop-reason "error_max_wall_time" "wall-clock budget exceeded (5s)"))
+                    (let [r (result-object a 1 nil)]
+                      (-> (expect (.-result r)) (.toBe "Error: wall-clock budget exceeded (5s)"))
+                      (-> (expect (.-subtype r)) (.toBe "error_max_wall_time"))))))))

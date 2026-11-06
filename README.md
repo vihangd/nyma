@@ -391,7 +391,7 @@ bun run start -- -p "Explain this codebase"
 
 Runs once with the given prompt, prints the response, and exits. Useful for scripting. The first positional arg after `-p` becomes the prompt.
 
-`--output-format json` prints a single claude-style result object instead (`{type, is_error, result, session_id, total_cost_usd, total_cost_partial, usage, duration_ms}`). `total_cost_usd` is `null` when the cost is unknown; `total_cost_partial` is `true` when it is a floor that leaves out spend on an unpriced model. `--output-format stream-json` prints one JSON object per line while the run is in flight, then that same result object as the last line:
+`--output-format json` prints a single claude-style result object instead (`{type, subtype, is_error, result, session_id, total_cost_usd, total_cost_partial, usage, duration_ms}`). `subtype` is `success`, `error_during_execution`, or the cap that stopped the run: `error_max_budget_tokens`, `error_max_wall_time`. A stopped run sets `is_error`, keeps any partial text in `result` and exits 1, in text mode too, which adds the reason on stderr. `total_cost_usd` is `null` when the cost is unknown; `total_cost_partial` is `true` when it is a floor that leaves out spend on an unpriced model. `--output-format stream-json` prints one JSON object per line while the run is in flight, then that same result object as the last line:
 
 ```
 {"type":"message_start"}

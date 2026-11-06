@@ -44,8 +44,10 @@
                     (js/setTimeout
                      (fn []
                        (reset! timer nil)
-                       (d/warn "budget" (str "wall-clock budget exceeded (" secs "s) — aborting run"))
-                       (when (and ctx (.-abort ctx)) ((.-abort ctx))))
+                       (let [msg (str "wall-clock budget exceeded (" secs "s)")]
+                         (d/warn "budget" (str msg " — aborting run"))
+                         (when (and ctx (.-abort ctx))
+                           ((.-abort ctx) (shared/stop-reason "error_max_wall_time" msg)))))
                      (* 1000 secs))))
           nil)
 
@@ -69,11 +71,13 @@
                          (new-extension-tokens!))]
             (swap! totals (fn [t] (-> t (update :turn + spent) (update :session + spent))))
             (when-let [which (shared/over-budget cfg @totals)]
-              (d/warn "budget" (str (name which) " token budget exceeded ("
-                                    (get @totals which) " > "
-                                    (if (= which :turn) (:turn-tokens cfg) (:session-tokens cfg))
-                                    ") — aborting run"))
-              (when (and ctx (.-abort ctx)) ((.-abort ctx))))
+              (let [msg (str (name which) " token budget exceeded ("
+                             (get @totals which) " > "
+                             (if (= which :turn) (:turn-tokens cfg) (:session-tokens cfg))
+                             ")")]
+                (d/warn "budget" (str msg " — aborting run"))
+                (when (and ctx (.-abort ctx))
+                  ((.-abort ctx) (shared/stop-reason "error_max_budget_tokens" msg)))))
             nil))]
 
     ;; Single gate: registration and the returned deactivator can't disagree.
