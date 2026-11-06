@@ -362,33 +362,57 @@ Examples:
   ;; has no package.json to read.
   (js/process.stdout.write (str version "\n")))
 
-(defn- ^:async read-stdin-string
-  "Drain stdin to a string.
+(def stdin-idle-ms
+  "Once a pipe has produced something, how long a silence ends the wait."
+  1000)
 
-   `timeout-ms`, when given, resolves with whatever has arrived so far instead
-   of waiting for EOF. That matters because this resolves ONLY on `\"end\"`:
-   stdin being a pipe that nobody ever closes is completely normal — a wrapper,
-   a supervisor, an editor's task runner — and without a bound, `nyma -p
-   \"prompt\"` blocked forever before emitting a single byte, with the model
-   never contacted. Reproduced as zero output over seven minutes."
-  ([] (read-stdin-string nil))
-  ([timeout-ms]
-   (js/Promise.
-    (fn [resolve _reject]
-      (let [chunks (atom [])
-            done   (atom false)
-            stdin  (.-stdin js/process)
-            finish (fn [] (when-not @done
-                            (reset! done true)
-                            (resolve (.join (clj->js @chunks) ""))))]
-        (.setEncoding stdin "utf8")
-        (.on stdin "data"  (fn [c] (swap! chunks conj c)))
-        (.on stdin "end"   finish)
-        (.on stdin "error" (fn [_] (when-not @done (reset! done true) (resolve ""))))
-        (when timeout-ms
-          (let [t (js/setTimeout finish timeout-ms)]
-            ;; Do not hold the event loop open on this timer's account.
-            (when (.-unref t) (.unref t)))))))))
+(defn read-stream-string
+  "Drain `stream` to a string.
+
+   `timeout-ms`, when given, gives up on a stream that has said nothing by then
+   instead of waiting for EOF. That matters because this resolves ONLY on
+   `\"end\"`: stdin being a pipe that nobody ever closes is completely normal —
+   a wrapper, a supervisor, an editor's task runner — and without a bound, `nyma
+   -p \"prompt\"` blocked forever before emitting a single byte, with the model
+   never contacted. Reproduced as zero output over seven minutes.
+
+   A stream that has started is plainly in use, so it gets `idle-ms` from its last
+   chunk instead. Giving up calls `warn!`: `cargo test | nyma -p \"why\"` looks
+   exactly like that open pipe, and running without its input said nothing."
+  [stream timeout-ms idle-ms warn!]
+  (js/Promise.
+   (fn [resolve _reject]
+     (let [chunks (atom [])
+           done   (atom false)
+           timer  (atom nil)
+           finish (fn []
+                    (when-not @done
+                      (reset! done true)
+                      (when-let [t @timer] (js/clearTimeout t))
+                      (resolve (.join (clj->js @chunks) ""))))
+           give-up (fn []
+                     (when-not @done
+                       (warn! (if (seq @chunks)
+                                "stdin is still open; using what arrived so far."
+                                "nothing on stdin yet and it is still open, so running without it. For slow input, save it first and use `< file`."))
+                       (finish)))
+           arm!   (fn [ms]
+                    (when-let [t @timer] (js/clearTimeout t))
+                    (let [t (js/setTimeout give-up ms)]
+                      (reset! timer t)
+                      ;; Do not hold the event loop open on this timer's account.
+                      (when (.-unref t) (.unref t))))]
+       (.setEncoding stream "utf8")
+       (.on stream "data"  (fn [c]
+                             (swap! chunks conj c)
+                             (when timeout-ms (arm! idle-ms))))
+       (.on stream "end"   finish)
+       (.on stream "error" (fn [_] (when-not @done (reset! done true) (resolve ""))))
+       (when timeout-ms (arm! timeout-ms))))))
+
+(defn- read-stdin-string [timeout-ms]
+  (read-stream-string (.-stdin js/process) timeout-ms stdin-idle-ms
+                      (fn [msg] (.write (.-stderr js/process) (str "nyma: " msg "\n")))))
 
 (defn combine-prompt
   "positional + piped stdin → the one-shot prompt, or nil. Pure.

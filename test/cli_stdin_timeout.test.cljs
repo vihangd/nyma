@@ -23,7 +23,39 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
+            ["node:stream" :refer [PassThrough]]
             [agent.cli :as cli]))
+
+(defn ^:async test-silent-pipe []
+  (let [warned (atom [])
+        s      (js-await (cli/read-stream-string (new PassThrough) 10 50 #(swap! warned conj %)))]
+    (-> (expect s) (.toBe ""))
+    (-> (expect (count @warned)) (.toBe 1))
+    (-> (expect (first @warned)) (.toContain "running without it"))))
+
+(defn ^:async test-started-pipe []
+  (let [p      (new PassThrough)
+        warned (atom [])
+        r      (cli/read-stream-string p 20 80 #(swap! warned conj %))]
+    (.write p "first ")
+    ;; past the first timeout, inside the idle one
+    (js/setTimeout #(.write p "second") 50)
+    (-> (expect (js-await r)) (.toBe "first second"))
+    (-> (expect (first @warned)) (.toContain "using what arrived"))))
+
+(defn ^:async test-closed-pipe []
+  (let [p      (new PassThrough)
+        warned (atom [])
+        r      (cli/read-stream-string p 20 80 #(swap! warned conj %))]
+    (.end p "all of it")
+    (-> (expect (js-await r)) (.toBe "all of it"))
+    (-> (expect (count @warned)) (.toBe 0))))
+
+(describe "reading a pipe beside a prompt"
+          (fn []
+            (it "gives up on silence, and says so" test-silent-pipe)
+            (it "keeps reading a pipe that has started" test-started-pipe)
+            (it "says nothing when the pipe closes" test-closed-pipe)))
 
 (describe "combine-prompt"
           (fn []
