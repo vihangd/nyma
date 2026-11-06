@@ -83,4 +83,5 @@
   (str "Verification gate failed (attempt " attempt "/" max-attempts "): `"
        cmd "` exited " exit-code ".\n\n"
        "```\n" (tail-lines output 40) "\n```\n\n"
-       "Fix the failures before finishing. Do not weaken or delete tests to make them pass."))
+       "Fix the failures before finishing. Do not weaken or delete tests to make them pass. "
+       "If a test is itself wrong, or conflicts with the request, stop and say so instead of changing it."))

@@ -43,6 +43,14 @@
         ;; signals for one logical failure would burn that budget on dupes.
         signalled? (atom false)
 
+        ;; The debug log alone reached nobody, and a human is who this is for.
+        warn!
+        (fn [msg]
+          (d/warn "verify-gate" msg)
+          (let [ui (.-ui api)]
+            (when (and ui (.-available ui) (.-notify ui))
+              (.notify ui msg "warning"))))
+
         end-episode!
         (fn []
           (reset! fix-paths #{})
@@ -77,13 +85,11 @@
                   ;; soft mention for ones made earlier in the same episode.
                   (when (pos? @attempts)
                     (when-let [tampered (seq (shared/tampered-paths @fix-paths))]
-                      (d/warn "verify-gate"
-                              (str "gate passed after edits to graded checks — review: "
-                                   (.join (clj->js (vec tampered)) ", "))))
+                      (warn! (str "gate passed after edits to graded checks — review: "
+                                 (.join (clj->js (vec tampered)) ", "))))
                     (when-let [earlier (seq (shared/tampered-paths @pre-paths))]
-                      (d/warn "verify-gate"
-                              (str "gate also saw pre-failure test edits this episode — worth a look: "
-                                   (.join (clj->js (vec earlier)) ", ")))))
+                      (warn! (str "gate also saw pre-failure test edits this episode — worth a look: "
+                                 (.join (clj->js (vec earlier)) ", ")))))
                   ;; Green. Published so a driver above this gate can tell
                   ;; "verify is settled" from "verify is mid-fix-loop" — the
                   ;; fail/exhausted pair alone only ever says it is red, so a

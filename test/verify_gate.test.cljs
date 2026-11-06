@@ -1,5 +1,8 @@
 (ns verify-gate.test
   (:require ["bun:test" :refer [describe it expect]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
             [agent.extensions.verify-gate.shared :as shared]
             [agent.extensions.verify-gate.index :as vg]))
 
@@ -115,6 +118,31 @@
 ;;; rule written against an exit number is a guess. The gate already has the
 ;;; output in hand and already sends it to the model; it now puts it on the bus
 ;;; too.
+
+(describe "what the gate tells the user"
+          (fn []
+            (it "a failure offers a way out besides changing the test"
+                (fn []
+                  (-> (expect (shared/failure-message "t" 1 "x" 1 2)) (.toContain "stop and say so"))))
+
+            (it "a green gate after a test edit in the fix loop reaches the UI"
+                (^:async
+                 fn []
+                 (let [sent   (atom [])
+                       notes  (atom [])
+                       marker (path/join (os/tmpdir) (str "nyma-green-" (js/Date.now)))
+                       {:keys [api handlers]} (make-api (str "test -f " marker) sent)]
+                   (aset api "ui" #js {:available true :notify (fn [m _] (swap! notes conj m))})
+                   (vg/activate api)
+                   (fire handlers "tool_complete" #js {:toolName "edit" :isError false
+                                                       :args #js {:path "src/a.cljs"}})
+                   (js-await (fire handlers "turn_finalize" #js {:error false}))
+                   (fs/writeFileSync marker "")
+                   (fire handlers "tool_complete" #js {:toolName "edit" :isError false
+                                                       :args #js {:path "test/a.test.cljs"}})
+                   (js-await (fire handlers "turn_finalize" #js {:error false}))
+                   (fs/rmSync marker)
+                   (-> (expect (first @notes)) (.toContain "test/a.test.cljs")))))))
 
 (describe "verify-fail signal"
           (fn []
