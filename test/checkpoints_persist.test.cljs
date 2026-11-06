@@ -36,6 +36,29 @@
   #js {:ui #js {:notify (fn [m _] (swap! notes conj m))
                 :select (fn [_ opts] (js/Promise.resolve (select-answer opts)))}})
 
+(defn- diff-text [{:keys [commands]}]
+  ((.-handler (get @commands "diff")) #js [] #js {:ui #js {:notify (fn [_ _] nil)}}))
+
+(defn ^:async test-diff-follows-the-session []
+  (let [d   (fs/mkdtempSync (path/join (os/tmpdir) "nyma-cpp-diff-"))
+        f   (path/join d "f.txt")
+        sf  (atom (path/join d "session-one.jsonl"))
+        m   (mock-api nil)]
+    (aset (:api m) "getSessionFile" (fn [] @sf))
+    (fs/writeFileSync f "v0")
+    (cpx/activate (:api m))
+    (edit-turn! m f "v1")
+    (-> (expect (diff-text m)) (.toContain "f.txt"))
+    ;; /new in the same process: not this session's file
+    (reset! sf (path/join d "session-two.jsonl"))
+    (-> (expect (diff-text m)) .-not (.toContain "f.txt"))
+    ;; a restart and /resume bring it back
+    (reset! sf (path/join d "session-one.jsonl"))
+    (let [m2 (mock-api (path/join d "session-one.jsonl"))]
+      (cpx/activate (:api m2))
+      (-> (expect (diff-text m2)) (.toContain "f.txt")))
+    (fs/rmSync d #js {:recursive true})))
+
 (defn ^:async test-survives-restart []
   (let [d  (fs/mkdtempSync (path/join (os/tmpdir) "nyma-cpp-"))
         sf (path/join d "session-abc.jsonl")
@@ -136,6 +159,9 @@
     (-> (expect (str @asked)) (.toContain "Restore 1 file(s) changed after this point?"))
     (-> (expect (fs/readFileSync f "utf8")) (.toBe "v1"))
     (fs/rmSync d #js {:recursive true})))
+
+(describe "/diff"
+  (fn [] (it "follows the session, across /new and a restart" test-diff-follows-the-session)))
 
 (describe "/fork and files"
           (fn [] (it "offers to restore files changed after the fork point" test-fork-offers-restore)))

@@ -183,6 +183,17 @@
     (fs/mkdirSync dir #js {:recursive true})
     (fs/writeFileSync (path/join dir "entries.json") (js/JSON.stringify (clj->js m)))))
 
+(defn load-touched [dir]
+  (or (when (and dir (fs/existsSync (path/join dir "touched.json")))
+        (try (set (js/JSON.parse (fs/readFileSync (path/join dir "touched.json") "utf8")))
+             (catch :default _ nil)))
+      #{}))
+
+(defn save-touched! [dir s]
+  (when dir
+    (fs/mkdirSync dir #js {:recursive true})
+    (fs/writeFileSync (path/join dir "touched.json") (js/JSON.stringify (clj->js (vec s))))))
+
 (defn turns-after-fork
   "Turns with saved file changes whose entry is NOT on the branch ending at
    `new-leaf` — they happened after the fork point. `entries` are

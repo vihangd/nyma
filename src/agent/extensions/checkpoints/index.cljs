@@ -18,20 +18,27 @@
         ;; Every file this session changed — edit tools and bash alike — for
         ;; /diff. Never pruned with the rewind groups.
         touched*     (atom #{})
-        touch!       (fn [p] (when p (swap! touched* conj (path/resolve (str p)))))
 
         session-file (fn [] (try (.getSessionFile api) (catch :default _ nil)))
         dir          (fn [] (shared/store-dir (js/process.cwd) (session-file)))
+        touch!       (fn [p]
+                       (when p
+                         (swap! touched* conj (path/resolve (str p)))
+                         (shared/save-touched! (dir) @touched*)))
 
         ;; Load the current session's saved points the first time they are
         ;; needed, and again whenever the session changes (/resume, /new).
         ensure-loaded!
         (fn []
-          (let [sf (session-file)]
-            (when (not= sf @loaded-for)
+          (let [sf   (session-file)
+                prev @loaded-for]
+            (when (not= sf prev)
               (reset! loaded-for sf)
               (reset! checkpoints* (shared/load-all (dir)))
               (reset! turn-entries* (shared/load-turn-entries (dir)))
+              ;; A session gets its file partway through its first turns; what it
+              ;; touched before that is still its own.
+              (reset! touched* (into (shared/load-touched (dir)) (when (nil? prev) @touched*)))
               (reset! pending* {})
               (reset! turn* (if (seq @checkpoints*)
                               (inc (apply max (map js/Number (keys @checkpoints*))))
@@ -112,6 +119,7 @@
                       #js {:description "Everything this session changed: git diff vs HEAD for the files it touched, plus new files"
                            :handler
                            (fn [_args ctx]
+                             (ensure-loaded!)
                              (let [text (shared/diff-report (js/process.cwd) (vec @touched*))
                                    ui   (some-> ctx .-ui)]
                                (cond
