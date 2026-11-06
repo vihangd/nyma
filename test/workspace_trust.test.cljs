@@ -33,7 +33,7 @@
     (write! d ".nyma/settings.json" {"theme"       "nord"
                                      ;; a repo can switch the foreign hook files on itself
                                      "hooks-compat" {"claude" true}
-                                     "verify"      {"cmd" "make evil" "max-attempts" 2}
+                                     "verify"      {"cmd" "make evil" "critic" "reviewer" "max-attempts" 2}
                                      "lsp"         {"typescript" {"command" ["sh" "-c" "evil"]}}
                                      "agent-shell" {"agents" {"x" {"command" "evil"}}}
                                      ;; where a secret header would be sent
@@ -56,7 +56,7 @@
                   (let [d    (hostile-project)
                         srcs (map :source (trust/sources d))]
                     (doseq [want [".nyma/extensions" ".mcp.json db" ".claude/settings.json hooks.PreToolUse"
-                                  ".nyma/settings.json verify.cmd" ".nyma/settings.json lsp.typescript"
+                                  ".nyma/settings.json verify.cmd" ".nyma/settings.json verify.critic" ".nyma/settings.json lsp.typescript"
                                   ".nyma/settings.json agent-shell.agents.x" ".nyma/settings.json codemode.apis.x"]]
                       (-> (expect #js [want (boolean (some #(= want %) srcs))]) (.toEqual #js [want true])))
                     (let [plain (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-plain-"))]
@@ -125,6 +125,7 @@
                                                                     :project-path (path/join d ".nyma" "settings.json")})
                                     pj ((:user-settings m) :project)]
                                 (-> (expect (get-in pj [:verify :cmd])) (.toBeUndefined))
+                                (-> (expect (get-in pj [:verify :critic])) (.toBeUndefined))
                                 (-> (expect (get-in pj [:verify :max-attempts])) (.toBe 2))
                                 (-> (expect (get-in pj [:codemode :apis])) (.toBeUndefined))
                                 (-> (expect (get-in pj [:codemode :enabled])) (.toBe true))

@@ -78,6 +78,9 @@
            {:source (str rel " lsp." id) :detail (js/JSON.stringify (or (aget e "command") (aget e "env")))}))
        (when-let [cmd (some-> (aget obj "verify") (aget "cmd"))]
          [{:source (str rel " verify.cmd") :detail (str cmd)}])
+       ;; Not a command, but a repo should not choose what you pay to run.
+       (when-let [role (some-> (aget obj "verify") (aget "critic"))]
+         [{:source (str rel " verify.critic") :detail (str role)}])
        ;; an OpenAPI spec's base URL and headers (`${ENV}`-expanded) decide
        ;; where the user's secrets are sent
        (when-let [apis (some-> (aget obj "codemode") (aget "apis"))]
@@ -270,7 +273,7 @@
     (let [o (js/Object.assign #js {} obj)]
       (js-delete o "hooks")
       (when-let [v (aget o "verify")]
-        (let [v' (js/Object.assign #js {} v)] (js-delete v' "cmd") (aset o "verify" v')))
+        (let [v' (js/Object.assign #js {} v)] (js-delete v' "cmd") (js-delete v' "critic") (aset o "verify" v')))
       (when-let [lsp (aget o "lsp")]
         (let [l' #js {}]
           (doseq [id (js/Object.keys lsp)]

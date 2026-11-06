@@ -2,9 +2,13 @@
   "Verify-before-done gate: after a turn that edited files, run the
    configured quality command; on failure, inject the output as a follow-up
    so the agent fixes it before stopping. Off unless settings#verify.cmd is
-   set. Attempts are capped so a stubbornly red suite can't loop forever."
+   set. Attempts are capped so a stubbornly red suite can't loop forever.
+   With settings#verify.critic naming a role, a green run also gets one
+   read-only review in a fresh context."
   (:require [agent.debug :as d]
             [agent.tool-metadata :as tool-metadata]
+            [agent.utils.content :as content]
+            [agent.extensions.model-roles.features.review :as review]
             [agent.extensions.verify-gate.shared :as shared]))
 
 (defn ^:async run-cmd [cmd timeout-ms]
@@ -42,6 +46,12 @@
         ;; (small-model/self-tune) budgets its reflections, and 4 identical
         ;; signals for one logical failure would burn that budget on dupes.
         signalled? (atom false)
+        ;; All per prompt, unlike the episode above: a fix loop ends one episode
+        ;; and the critic still owes the whole run one look.
+        run-paths    (atom #{})
+        run-task     (atom nil)
+        red?         (atom false)
+        critic-done? (atom false)
 
         ;; The debug log alone reached nobody, and a human is who this is for.
         warn!
@@ -64,10 +74,61 @@
                      (not (.-isError event)))
             (reset! edited? true)
             (when-let [path (tool-metadata/tool-path (.-args event))]
+              (swap! run-paths conj (str path))
               (swap! (if (pos? @attempts) fix-paths pre-paths) conj (str path)))))
 
+        on-start
+        (fn [_ _]
+          (reset! run-paths #{})
+          (reset! red? false)
+          (reset! critic-done? false)
+          (reset! run-task (when (.-getState api)
+                             (some->> (:messages (.getState api))
+                                      (filter #(= "user" (:role %)))
+                                      last :content content/->text)))
+          nil)
+
+        ;; Awaited inside turn_finalize, because a follow-up queued any later
+        ;; lands after the drain and sits there. Never blocks: a critic that
+        ;; failed has said nothing about the change.
+        critic!
+        (^:async fn [event ctx]
+          (when (and (:critic cfg)
+                     (not @critic-done?)
+                     (not @red?)
+                     (seq @run-paths)
+                     (not (.-stepCapped event))
+                     (not (.-nudged event))
+                     (not (some-> ctx .hasPendingMessages))
+                     (not (aget js/process.env "NYMA_SUBAGENT_DEPTH")))
+            (let [change (shared/run-change @run-paths (js/process.cwd))]
+              (when (or (seq (:diff change)) (seq (:new change)))
+                (reset! critic-done? true)
+                (let [ui     (.-ui api)
+                      _      (when (and ui (.-available ui) (.-notify ui))
+                               (.notify ui (str "Reviewing this change with " (:critic cfg) "…") "info"))
+                      result (try
+                               (js-await (review/ask-child (.getTool api "subagent__subagent") (:critic cfg)
+                                                           (shared/critic-task @run-task change)
+                                                           (.-abortSignal event)))
+                               (catch :default e {:ok false :text (.-message e)}))]
+                  (cond
+                    (nil? result)
+                    (warn! "verify.critic needs the subagent extension")
+
+                    (= "cancelled" (:status result)) nil
+
+                    (not (:ok result))
+                    (warn! (str "critic did not finish: " (:text result)))
+
+                    (review/findings? (:text result))
+                    (let [findings (shared/critic-findings (:text result))]
+                      (reset! last-result {:status :critic :count (count findings)})
+                      ((.-sendUserMessage api) (shared/critic-message findings)
+                                               #js {:deliverAs "followUp"}))))))))
+
         on-finalize
-        (^:async fn [event _ctx]
+        (^:async fn [event ctx]
           (when (and (:cmd cfg)
                      @edited?
                      (not (.-error event)))
@@ -79,6 +140,7 @@
                   (js-await (run-cmd (:cmd cfg) (:timeout-ms cfg)))]
               (if (zero? exit-code)
                 (do
+                  (reset! red? false)
                   ;; "Building to the Test" (2026): in-loop verifiers get
                   ;; satisfied instead of the request. Green after a failure:
                   ;; strong warning for graded-check edits made mid-fix-loop,
@@ -102,6 +164,7 @@
                 ;; Publish a failure signal for small-model/self-tune (additive;
                 ;; no-op if nothing subscribes). Mirrors quality_monitor's bus use.
                 (do
+                  (reset! red? true)
                   (reset! last-result {:status :fail :cmd (:cmd cfg)})
                   (when (and (.-emitGlobal api) (not @signalled?))
                     (reset! signalled? true)
@@ -135,7 +198,9 @@
                               "` exited " exit-code "). Do NOT edit further — summarize the "
                               "remaining failures for the user:\n\n```\n"
                               (shared/tail-lines output 40) "\n```")
-                         #js {:deliverAs "followUp"}))))))))]
+                         #js {:deliverAs "followUp"})))))))
+          (when-not (.-error event)
+            (js-await (critic! event ctx))))]
 
     ;; Registered OUTSIDE the branch below. It sat in the `else` — the
     ;; verify-is-OFF arm — while `last-result` is only ever set in the `:cmd`
@@ -158,14 +223,18 @@
                              :color (col :success "#9ece6a")}
                   :fail #js {:visible? true :content " verify ✗"
                              :color (col :error "#f7768e")}
+                  :critic #js {:visible? true :content (str " critic " (:count @last-result))
+                               :color (col :warning "#e0af68")}
                   ;; Nothing has run yet — and "no result" is not a pass.
                   #js {:visible? false})))}))
 
-    (if (:cmd cfg)
+    (if (or (:cmd cfg) (:critic cfg))
       (do
+        (.on api "agent_start" on-start)
         (.on api "tool_complete" on-complete)
         (.on api "turn_finalize" on-finalize)
         (fn []
+          (.off api "agent_start" on-start)
           (.off api "tool_complete" on-complete)
           (.off api "turn_finalize" on-finalize)))
 

@@ -6,20 +6,25 @@
    The gate runs a configured quality command after any turn that edited
    files; a failure is fed back as a follow-up so the agent fixes it before
    stopping."
-  (:require [agent.tool-metadata :as tool-metadata]))
+  (:require [clojure.string :as str]
+            [agent.tool-metadata :as tool-metadata]
+            [agent.utils.git-files :as git]))
 
 (def default-config
-  {:cmd nil :max-attempts 2 :timeout-ms 120000})
+  {:cmd nil :critic nil :max-attempts 2 :timeout-ms 120000})
 
 (defn config
-  "Read the `verify` settings section. Gate is off unless `cmd` is set:
-   {\"verify\": {\"cmd\": \"bun test\", \"max-attempts\": 2, \"timeout-ms\": 120000}}"
+  "Read the `verify` settings section. Gate is off unless `cmd` is set, critic
+   unless `critic` names a role:
+   {\"verify\": {\"cmd\": \"bun test\", \"critic\": \"reviewer\",
+               \"max-attempts\": 2, \"timeout-ms\": 120000}}"
   [settings]
   (let [v (when settings (aget settings "verify"))]
     (merge default-config
            (when v
              (cond-> {}
                (aget v "cmd")          (assoc :cmd (aget v "cmd"))
+               (aget v "critic")       (assoc :critic (aget v "critic"))
                (aget v "max-attempts") (assoc :max-attempts (aget v "max-attempts"))
                (aget v "timeout-ms")   (assoc :timeout-ms (aget v "timeout-ms")))))))
 
@@ -32,7 +37,7 @@
 ;; An unrecognised key in the section is the signal that someone did try —
 ;; `"comand"`, `"command"`, `"maxAttempts"` — and got silence for it.
 
-(def known-keys ["cmd" "max-attempts" "timeout-ms"])
+(def known-keys ["cmd" "critic" "max-attempts" "timeout-ms"])
 
 (defn unknown-keys
   "Keys in the `verify` settings section that no reader looks at. Pure."
@@ -85,3 +90,51 @@
        "```\n" (tail-lines output 40) "\n```\n\n"
        "Fix the failures before finishing. Do not weaken or delete tests to make them pass. "
        "If a test is itself wrong, or conflicts with the request, stop and say so instead of changing it."))
+
+;; ── critic ───────────────────────────────────────────────────────────────
+;; One read-only review of a run's change, in a fresh context. Review earns its
+;; keep from a fresh context and a stronger model, and loses it to noise and
+;; repeat rounds: so one round, few findings, each with a way to check it, and
+;; the transcript stays out. Reasoning it is handed would be reasoning it agrees with.
+
+(def max-findings 3)
+(def max-diff-chars 60000)
+(def max-task-chars 4000)
+
+(defn run-change
+  "The diff and new files for the paths a run edited, and only those: the user's
+   own uncommitted work is not this run's to answer for."
+  [paths cwd]
+  (let [ps (vec paths)]
+    {:diff (git/run-git-args (into ["diff" "HEAD" "--"] ps) cwd)
+     :new  (remove str/blank? (str/split-lines
+                               (git/run-git-args (into ["ls-files" "--others" "--exclude-standard" "--"] ps) cwd)))}))
+
+(defn critic-task
+  "What the critic is told. Pure."
+  [task {:keys [diff new]}]
+  (str "Review a change another agent just made, for defects its tests would not catch: "
+       "wrong logic, missed edge cases, data loss, races, broken error handling, or not doing "
+       "what was asked. Ignore style. Read the code around the change where the diff alone "
+       "cannot settle it. Report only what you can show: a concrete input or state that "
+       "gives a wrong result.\n\n"
+       "Output at most " max-findings " findings, most severe first, one per line, exactly as:\n"
+       "path:line — problem — input or state that shows it\n"
+       "No preamble, no praise. If nothing qualifies, output exactly: No findings.\n\n"
+       "What was asked:\n" (subs (str task) 0 (min (count (str task)) max-task-chars)) "\n"
+       (when (seq new) (str "\nNew files (not in the diff; read them):\n  " (str/join "\n  " new) "\n"))
+       "\nDiff" (when (> (count diff) max-diff-chars) " (truncated)") ":\n"
+       (subs diff 0 (min (count diff) max-diff-chars))))
+
+(defn critic-findings
+  "The lines of a critic's reply to act on, at most `max-findings`. Pure."
+  ;; ponytail: trusts one finding per line, as the prompt asks
+  [text]
+  (vec (take max-findings (remove str/blank? (str/split-lines (str text))))))
+
+(defn critic-message
+  "Follow-up carrying the findings. A reviewer's claim, not a fact. Pure."
+  [findings]
+  (str "An independent review of this change raised the following. Reviewers are often "
+       "wrong: verify each against the code, fix the real ones, and say which you rejected "
+       "and why.\n\n" (str/join "\n" findings)))

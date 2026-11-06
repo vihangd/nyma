@@ -30,6 +30,19 @@
                                  :maxBuffer (* 64 1024 1024)}))
      (catch :default _ ""))))
 
+(defn run-git-args
+  "`run-git` with no shell between: for arguments nyma did not write, such as
+   paths a model named. \"\" on any failure."
+  [args cwd]
+  (try
+    (str/trim (cp/execFileSync "git" (clj->js args)
+                               #js {:encoding "utf-8"
+                                    :cwd (or cwd js/undefined)
+                                    ;; See run-git: stderr must not reach the TUI.
+                                    :stdio #js ["ignore" "pipe" "ignore"]
+                                    :maxBuffer (* 64 1024 1024)}))
+    (catch :default _ "")))
+
 (defn run-git-raw
   "Like `run-git` but trims only the TRAILING newline, never leading whitespace.
 

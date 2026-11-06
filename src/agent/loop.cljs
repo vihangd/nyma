@@ -1137,7 +1137,10 @@
                                                  ;; turn: a handler that wants to shape
                                                  ;; that retry (thinking off) can rely
                                                  ;; on it running next.
-                                                 :nudged       @nudged?}))
+                                                 :nudged       @nudged?
+                                                 ;; For a handler that does slow work here:
+                                                 ;; the run is not over, and Esc must reach it.
+                                                 :abortSignal  (some-> (:abort-controller agent) deref .-signal)}))
 
            ;; Auto-compaction. Deliberately BETWEEN turns: a compaction landing
            ;; mid-task is documented to send the model off the rails. Skipped on

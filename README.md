@@ -838,6 +838,20 @@ Project-scoped in practice — the command is repo-specific, so it belongs in
 `.nyma/settings.json` rather than the global file. See
 `src/agent/extensions/verify_gate/`.
 
+`critic` names a role that reviews the change once per prompt, after `cmd` is
+green (or after any edit, with no `cmd`). It runs as a read-only subagent in a
+fresh context: it gets your request and the diff of the files this run edited,
+not the transcript. Up to three findings go back to the agent to verify and fix;
+the fix is checked by `cmd`, not reviewed again. A critic that fails only warns.
+
+```json
+{ "verify": { "cmd": "bun test", "critic": "advisor" } }
+```
+
+It costs one subagent per prompt that edits code, and a false finding costs a
+turn. Published results favour a clearly stronger model than the one writing the
+code; a peer model adds little, so pick the role accordingly. Off by default.
+
 ## Extensions
 
 Extensions add tools, commands, keyboard shortcuts, middleware, and UI hooks. They can be written in ClojureScript or TypeScript.
@@ -888,7 +902,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `thinking_renderer` | `thinking-renderer` | Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams |
 | `todos` | `todos` | Persistent todo ledger for session-scoped task tracking |
 | `token_suite` | `token-suite` | Token optimizations, smart compaction, live cost preview (`/token-preview`) |
-| `verify_gate` | `verify-gate` | Runs a configured test/typecheck command after any turn that edited files and feeds failures back (off unless `verify.cmd` is set) |
+| `verify_gate` | `verify-gate` | Runs a configured test/typecheck command after any turn that edited files and feeds failures back, then optionally has a role review the change (off unless `verify.cmd` or `verify.critic` is set) |
 | `workspace_config` | `workspace-config` | Per-project aliases and flags from `.nyma/settings.json` |
 <!-- /generated: builtin-extensions -->
 

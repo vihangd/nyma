@@ -45,14 +45,13 @@
   (if (get-in settings [:roles :deep :model]) "deep" "reviewer"))
 
 (defn ^:async ask-child
-  "One read-only child on `role`, by way of the `subagent` tool, so billing, the
-   timeout and the transcript come with it. Its result map, or nil when the
+  "One read-only child on `role`, by way of `tool`, the subagent tool, so billing,
+   the timeout and the transcript come with it. Its result map, or nil when the
    subagent extension is off."
-  [api role task & [signal]]
-  (let [tool (try (.getTool api "subagent__subagent") (catch :default _ nil))]
-    (when (and tool (.-execute tool))
-      (js-await ((.-execute tool) #js {:agent role :task task :async false}
-                                  #js {:raw true :abortSignal signal})))))
+  [tool role task & [signal]]
+  (when (and tool (.-execute tool))
+    (js-await ((.-execute tool) #js {:agent role :task task :async false}
+                                #js {:raw true :abortSignal signal}))))
 
 (defn- start-turn!
   "A queued follow-up is drained only when a run ends, and nothing runs here."
@@ -90,7 +89,7 @@
                       "info")
               nil)
           (let [_      (notify ui (str "Reviewing changes against " ref "…") "info")
-                result (js-await (ask-child api (review-role (.settings api))
+                result (js-await (ask-child (.getTool api "subagent__subagent") (review-role (.settings api))
                                             (str system-prompt "\n\nRead the code around the change where the diff alone cannot settle it.\n\n"
                                                  (user-prompt {:label     (if base (str "everything since " base) "uncommitted changes")
                                                                :stat      (git/run-git (str "diff --stat '" ref "'") root)
