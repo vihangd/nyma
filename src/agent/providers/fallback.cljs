@@ -14,7 +14,20 @@
    falling back would hide a setup error behind a model nobody chose. That is why
    `should-fall-back?` says no to 401 and to context overflow even though both
    stop the turn dead."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.model-info :as model-info]))
+
+;; ── how ──────────────────────────────────────────────────────────
+
+(defn retarget!
+  "Point the request `cfg` at `model`. Its other fields were built for the model
+   that failed: providerOptions carry that provider's thinking dialect, and a
+   max_tokens above the new model's limit is a 400 on the retry."
+  [cfg model spec]
+  (aset cfg "model" model)
+  (aset cfg "providerOptions" #js {})
+  (when-let [cap (aget cfg "maxOutputTokens")]
+    (aset cfg "maxOutputTokens" (min cap (or (model-info/max-output spec) 8000)))))
 
 ;; ── when ─────────────────────────────────────────────────────────
 

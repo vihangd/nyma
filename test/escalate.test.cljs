@@ -717,3 +717,42 @@
                        (-> (expect (:stop-run @st)) (.toBeUndefined))
                        (-> (expect (vec @(:set-calls c))) (.toEqual ["yun/opus-5"]))))))))))
 
+(describe "escalate:review-fixes" (fn []
+  (it "remembers the model it left, not the one it switched to"
+      (fn []
+        ;; A live spec follows setModel, so reading it after the switch recorded
+        ;; the target: revert! then set the expensive model and called it done.
+        (let [c    (collector)
+              live (atom "zen/cheap-1")
+              st   (atom {:model "zen/cheap-1" :messages [{:role "user" :content "fix X"}]})
+              api  (fake-api st (assoc c :settings (assoc settings :escalate {:mode "auto" :retries-before-escalate 0})))]
+          (aset api "getActiveModelSpec" (fn [] @live))
+          (aset api "setModel" (fn [m] (reset! live m)))
+          (esc/apply-escalation! api "yun/opus-5" "stalled")
+          (-> (expect (:escalated-from @st)) (.toBe "zen/cheap-1")))))
+  (it "leaves a code-mode script's nested calls alone"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)
+              nested (fn [] (js/Object.assign (tool-done "bash" "{\"a\":1}") #js {:nested true}))]
+          (doseq [_ (range 8)]
+            (-> (expect (esc/on-tool-complete api (nested))) (.toBeFalsy)))
+          (-> (expect (:stop-run @st)) (.toBeUndefined)))))
+  (it "polling a quiet background job is not a repeat"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (doseq [_ (range 8)] (esc/on-tool-complete api (tool-done "bash-suite__job_output" "no new output")))
+          (-> (expect (:stop-run @st)) (.toBeUndefined)))))
+  (it "a stop leaves no history to trip the next model"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)]
+          (doseq [_ (range 6)] (esc/on-tool-complete api (tool-done "bash" "same")))
+          (-> (esc/on-turn-finalize api #js {:toolCalls 6 :noOpTurns 0})
+              (.then (fn []
+                       (esc/on-tool-complete api (tool-done "bash" "same"))
+                       (-> (expect (:stop-run @st)) (.toBeUndefined))))))))
+  (it "a final stream error switches nothing"
+      (fn []
+        (let [c (collector) st (atom {:model "zen/cheap-1"}) api (fake-api st c)
+              r (esc/on-provider-error api #js {:message "429 rate limit" :config #js {} :final true})]
+          (-> (expect r) (.toBeFalsy))
+          (-> (expect (count @(:set-calls c))) (.toBe 0)))))))

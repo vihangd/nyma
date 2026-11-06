@@ -253,6 +253,7 @@
                                                         :duration   duration
                                                         :cancelled  (boolean (:cancelled ctx))
                                                         :isError    (boolean (:result-is-error ctx))
+                                                        :nested     (boolean (:nested? ctx))
                                                         :details    (:result-details ctx)})))
         ctx        (if-let [mod-result (get complete-result "result")]
                      (assoc ctx :result (str mod-result))

@@ -398,7 +398,8 @@
           (let [msg   (str (or (aget data "message") ""))
                 cfg   (aget data "config")
                 from  (str (or (aget data "model") ""))]
-            (when (and cfg (fb/should-fall-back? msg))
+            ;; :final — the loop will not honour a retry, so nothing would run on it.
+            (when (and cfg (not (aget data "final")) (fb/should-fall-back? msg))
               (let [state (.getState api)
                     roles (get-roles api)
                     role  (get roles (or (:active-role state) :default))
@@ -420,7 +421,7 @@
                                    (catch :default _e nil))]
                     (when model
                       (.set attempted cfg (conj tried spec))
-                      (aset cfg "model" model)
+                      (fb/retarget! cfg model spec)
                       ;; Said once, in the transcript. Answering from a model the
                       ;; status line does not name is worse than failing.
                       (d/warn "model-roles" (fb/announcement from spec msg))

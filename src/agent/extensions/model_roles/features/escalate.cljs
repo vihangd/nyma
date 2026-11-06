@@ -22,6 +22,7 @@
   (:require [agent.utils.content :as content]
             [agent.utils.stall :as stall]
             [agent.tool-metadata :as tool-metadata]
+            [agent.providers.fallback :as fallback]
             [clojure.string :as str]
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.debug :as d]
@@ -262,11 +263,7 @@
     (when (and st-config (.-resolveModel api))
       (try
         (let [obj (.resolveModel api provider model-id)]
-          (when obj
-            (aset st-config "model" obj)
-            ;; providerOptions were built from the OLD model's thinking config;
-            ;; shipping one provider's dialect to another's model is a 400.
-            (aset st-config "providerOptions" #js {})))
+          (when obj (fallback/retarget! st-config obj spec)))
         (catch :default e
           (d/warn "escalate" (str "resolveModel failed for " spec ": " (.-message e))))))
     ;; Report the real outcome. This returned `true` unconditionally, and the
@@ -326,9 +323,12 @@
   (let [st   (state-atom api)
         cfg  (config (settings api))
         msgs (vec (:messages @st))
+        ;; Before the switch: setModel rewrites the config this reads, and
+        ;; revert! needs the model to go back to.
+        from (current-spec api)
         {:keys [messages request]}
         (if (:prune cfg)
-          (prune-tail msgs (stall-note (current-spec api) reason))
+          (prune-tail msgs (stall-note from reason))
           {:messages msgs :request nil})]
     (swap! st assoc
            :messages       messages)
@@ -345,7 +345,7 @@
       (do
         (swap! st assoc
                :escalated-to   spec
-               :escalated-from (current-spec api)
+               :escalated-from from
                :escalations    (inc (or (:escalations @st) 0)))
         (notify api (str "⚡ escalated to " spec " — " reason
                          ". /escalate off to go back.") "warning")
@@ -466,7 +466,8 @@
                    (< (- (js/Date.now) (:escalate-tried-at s)) cool))
         tried (conj (set (when fresh (:escalate-tried s))) (str (current-spec api)))
         nxt   (next-fallback chain tried)]
-    (when (and kind nxt (.-config data))
+    ;; :final — the loop will not honour a retry, so nothing would run on it.
+    (when (and kind nxt (.-config data) (not (.-final data)))
       ;; Capture BEFORE the swap: setModel updates state, so reading it after
       ;; reports the fallback as the model that failed.
       (let [failed (current-spec api)]
@@ -499,7 +500,7 @@
   (let [s   (cur-state api)
         cfg (config (settings api))]
     ;; One-shot: the flag ends this pass of the run, not the ones queued after.
-    (swap! (state-atom api) dissoc :stop-run :repeat-stopped)
+    (swap! (state-atom api) dissoc :stop-run :repeat-stopped :repeat-sigs)
     (when (and (not= (mode cfg) "off")
                (not (:escalate-disarmed s))
                (not (:plan-mode s))        ; opusplan already owns the model there
@@ -521,6 +522,8 @@
 ;; repeat detection
 ;; ---------------------------------------------------------------------------
 
+(def ^:private polling-tools #{"subagent" "job_output" "list_jobs"})
+
 (defn repeat-note
   "What the model reads on the call that repeats. Names the call: telling a
    model which check failed recovers far more runs than retrying it blind."
@@ -536,8 +539,9 @@
    and can get out by itself. Twice the threshold ends the run, and the stall
    check at turn_finalize takes it from there.
 
-   Subagent status is exempt: waiting on a background job looks exactly like a
-   repeat, and is not one."
+   Polling is exempt: waiting on a background job looks exactly like a repeat,
+   and is not one. So are calls inside a code-mode script, whose results are
+   data the script parses, and whose own loops are not the model repeating."
   [api data]
   (let [st   (state-atom api)
         cfg  (config (settings api))
@@ -546,7 +550,8 @@
     (when (and (pos? n)
                (not= (mode cfg) "off")
                (not (.-cancelled data))
-               (not (tool-metadata/matches-any-tool-name? tool #{"subagent"})))
+               (not (.-nested data))
+               (not (tool-metadata/matches-any-tool-name? tool polling-tools)))
       (let [sig  (str (stall/tool-call-sig tool (.-args data))
                       "=" (stall/result-fingerprint (.-result data)))
             sigs (:repeat-sigs (swap! st update :repeat-sigs

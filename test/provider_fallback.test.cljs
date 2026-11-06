@@ -141,3 +141,12 @@
       (fn []
         (doseq [m ["HTTP 503: try later" "status 502" "500 Internal"]]
           (-> (expect #js [m (fb/should-fall-back? m)]) (.toEqual #js [m true])))))))
+
+(describe "retarget!" (fn []
+  (it "drops what was built for the failed model"
+      (fn []
+        (let [cfg #js {:model "old" :providerOptions #js {:anthropic #js {}} :maxOutputTokens 128000}]
+          (fb/retarget! cfg "new" "gpt-4")
+          (-> (expect (.-model cfg)) (.toBe "new"))
+          (-> (expect (.-anthropic (.-providerOptions cfg))) (.toBeUndefined))
+          (-> (expect (< (.-maxOutputTokens cfg) 128000)) (.toBe true)))))))
