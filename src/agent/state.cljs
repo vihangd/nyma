@@ -94,7 +94,8 @@
                                               :skill-allowed-tools {}
                                               :skill-tools {}
                                               :compacted-at-count 0
-                                              :last-input-tokens 0))
+                                              :last-input-tokens 0
+                                              :last-cache-read 0))
    ;; Wholesale replacement (context relief pruning). Goes through the store
    ;; so subscribers see it, instead of a raw swap! on the shared atom.
    :messages-replaced (fn [state data]
@@ -126,7 +127,9 @@
                            ;; NB counts RUNS, not model steps — usage is
                            ;; dispatched once per run from result.totalUsage.
                            ;; :total-steps is the per-step figure.
-                           (update :turn-count (fnil inc 0))))
+                           (update :turn-count (fnil inc 0))
+                           ;; The live figures are in the totals now.
+                           (dissoc :run-cost :run-steps)))
    ;; Spend by an extension that called a model of its own — advisor (and
    ;; through it small-model's supervisor and self-tune), handoff, spec_driven,
    ;; smart_compaction. They call `generateText` directly and used to read only

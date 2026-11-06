@@ -246,6 +246,28 @@
         (try (aset e "message" (str m " — " detail)) (catch :default _ nil)))))
   e)
 
+(defn- cache-split
+  "The cached share of a usage object's input, as [read write]."
+  [u]
+  [(or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
+   (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)])
+
+(defn- add-live-step
+  "One finished step into the figures the status line shows while a run is going.
+   Totals only move at run end, so a long run otherwise reads as free. Separate
+   from :usage-updated, which stays once per run: rows, `turn-count` and the
+   after_provider_request subscribers all count runs."
+  [st cost-key u]
+  (let [[cr cw] (cache-split u)]
+    (-> st
+        (update :run-steps (fnil inc 0))
+        (update :run-cost (fnil + 0)
+                (calculate-turn-cost cost-key
+                                     {:input-tokens       (some-> u .-inputTokens)
+                                      :output-tokens      (some-> u .-outputTokens)
+                                      :cache-read-tokens  cr
+                                      :cache-write-tokens cw})))))
+
 (defn- inject-steer-messages!
   "Move steer queue messages into agent state between tool steps."
   [agent]
@@ -271,7 +293,7 @@
                (str "user-message: " (.slice (str user-message) 0 200)
                     " | msg-count: " (count (:messages @state))))
 
-    (swap! state dissoc :step-extensions :stop-run)
+    (swap! state dissoc :step-extensions :stop-run :run-cost :run-steps)
 
     ;; Append user message via event store (or direct swap for backwards compat)
     (if-let [store (:store agent)]
@@ -490,7 +512,7 @@
               ;; null-usage (finish part never fires), which would record ZERO
               ;; tokens for exactly the runaway run a budget abort killed —
               ;; fall back to the sum of completed steps.
-              step-usage (atom {:input 0 :output 0})
+              step-usage (atom {:input 0 :output 0 :cache-read 0 :cache-write 0})
 
               ;; Build mutable streamText config
               ;; maxRetries: number of RETRIES on transient errors (429, 503,
@@ -601,15 +623,25 @@
                                                   ;; usage, so one bad step cannot
                                                   ;; zero the meter.
                                                   (when (pos? (or (.-inputTokens u) 0))
-                                                    (swap! state assoc :last-input-tokens (.-inputTokens u)))
+                                                    (swap! state assoc
+                                                           :last-input-tokens (.-inputTokens u)
+                                                           :last-cache-read (first (cache-split u))))
                                                   (swap! step-usage
-                                                         (fn [t] (-> t
-                                                                     (update :input + (or (.-inputTokens u) 0))
-                                                                     (update :output + (or (.-outputTokens u) 0))))))
+                                                         (fn [t] (let [[cr cw] (cache-split u)]
+                                                                   (-> t
+                                                                       (update :input + (or (.-inputTokens u) 0))
+                                                                       (update :output + (or (.-outputTokens u) 0))
+                                                                       (update :cache-read + cr)
+                                                                       (update :cache-write + cw))))))
                                                 (when-let [tc (.-toolCalls step)]
                                                   (swap! tools-this-turn + (count tc)))
                                                 (emit "turn_end" step)
-                                                (inject-steer-messages! agent))}
+                                                (inject-steer-messages! agent)
+                                                ;; Last: the SDK swallows a throw
+                                                ;; here, which would skip the rest.
+                                                (swap! state add-live-step
+                                                       (model-cost-key (:config agent))
+                                                       (.-usage step)))}
 
               ;; before_provider_request — extensions can MUTATE st-config in place
               provider-result (js-await
@@ -828,7 +860,10 @@
                                              (if (and (nil? (.-inputTokens u))
                                                       (pos? (+ (:input @step-usage) (:output @step-usage))))
                                                #js {:inputTokens  (:input @step-usage)
-                                                    :outputTokens (:output @step-usage)}
+                                                    :outputTokens (:output @step-usage)
+                                                    :inputTokenDetails
+                                                    #js {:cacheReadTokens  (:cache-read @step-usage)
+                                                         :cacheWriteTokens (:cache-write @step-usage)}}
                                                u))
                             ;; Normalize finishReason to a plain string here, at
                             ;; the single emit point, so every agent_end consumer
@@ -863,8 +898,7 @@
                                 ;; them out. Same field the event payload below
                                 ;; already reads — the cost line just ignored it,
                                 ;; overstating a cache-heavy turn ~3x.
-                                cache-read    (or (some-> usage .-inputTokenDetails .-cacheReadTokens) 0)
-                                cache-write   (or (some-> usage .-inputTokenDetails .-cacheWriteTokens) 0)
+                                [cache-read cache-write] (cache-split usage)
                                 cost-model-id (model-cost-key (:config agent))
                                 cost          (calculate-turn-cost
                                                cost-model-id

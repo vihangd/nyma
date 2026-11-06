@@ -333,7 +333,8 @@ with every section below present.
                        ;; The figure from before the summary describes a
                        ;; conversation that is gone; the meter would show it
                        ;; until the next step reports.
-                       :last-input-tokens (te/estimate-messages-tokens msgs))))))
+                       :last-input-tokens (te/estimate-messages-tokens msgs)
+                       :last-cache-read 0)))))
     true))
 
 (def ^:private min-new-summary-chars
