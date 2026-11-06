@@ -32,14 +32,19 @@
    command. No grant can vouch for what they run, so they never get one."
   #{"bash" "sh" "zsh" "fish" "dash" "ksh" "csh" "tcsh"
     "python" "python2" "python3" "pypy" "pypy3" "ipython" "node" "perl" "ruby" "php"
-    "lua" "tclsh" "Rscript" "pwsh" "osascript" "awk"
+    "lua" "tclsh" "Rscript" "pwsh" "osascript" "awk" "gawk" "mawk" "nawk" "uvx"
     "sudo" "doas" "su" "env" "xargs" "find" "eval" "exec" "nohup" "timeout" "nice"
     "time" "watch" "ssh" "command" "builtin"})
 
 (def ^:private code-verbs
-  "Subcommands that run code passed as arguments, on tools otherwise granted by
-   verb."
-  #{"deno eval" "deno repl"})
+  "Subcommands that run code or a command passed as arguments, on tools otherwise
+   granted by verb: `uv run pytest` must not cover `uv run bash -c …`. `npm run`
+   and its kin are not here: they take only a script the project already defines."
+  #{"deno eval" "deno repl" "deno run" "deno task"
+    "bun run" "bun x" "bun exec" "npm exec" "npm x" "pnpm exec" "pnpm dlx"
+    "yarn exec" "yarn dlx" "uv run" "uv tool" "poetry run" "cargo run" "go run"
+    "dotnet run" "docker run" "docker exec" "docker compose"
+    "kubectl exec" "kubectl run" "kubectl debug"})
 
 (defn- code-runner?
   "First word of `c` — by name or path (`/bin/sh`), and with any version suffix

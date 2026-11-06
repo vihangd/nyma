@@ -16,6 +16,25 @@
             [agent.core]
             [agent.commands.builtins]))
 
+(describe "verbs that run what they are given"
+          (fn []
+            (it "never get a grant"
+                (fn []
+                  (doseq [c ["uv run pytest" "uvx ruff" "docker run alpine" "docker exec x sh"
+                             "docker compose run x" "npm exec -- rimraf x" "pnpm dlx y" "yarn dlx y"
+                             "bun run x.ts" "bun x y" "deno run x.ts" "cargo run" "go run ." "poetry run x"
+                             "kubectl exec p -- sh" "gawk 1"]]
+                    (-> (expect #js [c (sg/grant-base c)]) (.toEqual #js [c js/undefined])))))
+            (it "are not covered by a grant saved before they were excluded"
+                (fn []
+                  (-> (expect (sg/grant-matches? "uv run" "uv run bash -c 'rm -rf ~/work'")) (.toBe false))
+                  (-> (expect (sg/grant-matches? "docker run" "docker run -v /:/h alpine rm -rf /h/x")) (.toBe false))))
+            (it "leaves verbs that take only a project's own script"
+                (fn []
+                  (-> (expect (sg/grant-base "npm run test")) (.toBe "npm run"))
+                  (-> (expect (sg/grant-base "uv sync")) (.toBe "uv sync"))
+                  (-> (expect (sg/grant-base "docker ps")) (.toBe "docker ps"))))))
+
 (describe "grant-base / grant-matches?"
           (fn []
             (it "verb + subcommand for subcommand tools, else the verb; none for compound"
