@@ -68,9 +68,10 @@
   [setting model-key & [window input]]
   (let [cap (or setting (model-info/max-output model-key) 8000)]
     (if (and (number? window) (pos? window))
-      (max 1024 (min cap
-                     (js/Math.floor (/ window 2))
-                     (- window (js/Math.ceil (* 1.1 (or input 0))))))
+      ;; The floor is for the window's share only: a lower setting or model
+      ;; limit is an instruction, and a server may refuse more than its limit.
+      (min cap (max 1024 (min (js/Math.floor (/ window 2))
+                              (- window (js/Math.ceil (* 1.1 (or input 0)))))))
       cap)))
 
 (def cut-off-nudge

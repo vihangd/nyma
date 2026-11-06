@@ -87,7 +87,10 @@
           (-> (expect (< (loop/output-cap nil "anthropic/claude-opus-5-5" 1000000 900000) 10001)) (.toBe true))
           (-> (expect (loop/output-cap 100000 "x" 131072 1000)) (.toBe 65536))
           (-> (expect (loop/output-cap 100000 "x" 8192 100000)) (.toBe 1024))
-          (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))))
+          (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))
+          ;; the floor is the window's, and never lifts a setting
+          (-> (expect (loop/output-cap 500 "x" 131072 1000)) (.toBe 500))
+          (-> (expect (loop/output-cap 500 "x" 8192 100000)) (.toBe 500))))
 
     (it "honours what the user set"
         (fn [] (-> (expect (cap-for {:max-output-tokens 4000})) (.toBe 4000))))
