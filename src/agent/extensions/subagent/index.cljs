@@ -44,12 +44,12 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; Role / agent resolution
 ;; ---------------------------------------------------------------------------
 
-;; Built-in subagent roles owned by THIS extension. settings.json merges
-;; its :roles SHALLOWLY (a user roles map REPLACES the defaults), so we
-;; cannot rely on settings/manager defaults for these — define them here
-;; and merge defaults < settings.roles < markdown so they always exist
-;; while remaining user-overridable. Read-only by default (evidence
-;; boundary: single-threaded edits + isolated read-only exploration).
+;; Built-in subagent roles owned by THIS extension. A user's settings.json
+;; :roles map REPLACES the settings defaults, so we cannot rely on those —
+;; define them here and merge defaults < settings.roles < markdown, per key
+;; (see `all-agents`), so they always exist and an override changes only what
+;; it names. Read-only by default (evidence boundary: single-threaded edits +
+;; isolated read-only exploration).
 (def ^:private default-subagent-roles
   {:scout      {:provider "anthropic" :model "claude-haiku-4-5"
                 :allowed-tools ["read" "glob" "grep" "ls"]
@@ -68,10 +68,22 @@ intermediate tool calls, so put everything that matters in the summary.")
                 :description "Web/docs research. Returns sourced findings."
                 :system-prompt "You are a researcher. Gather information from docs/web and return a sourced summary with URLs. Do not modify files."}})
 
-(defn- all-agents
+(defn live-settings
+  "A settings manager whose `:get` is the session's own view, so `--settings`
+   overrides reach subagents. Only the session's manager holds those; a fresh
+   one reads the files alone. The rest of the fresh manager stays, because the
+   child's permission gate calls `:tool-allowed?` on it."
+  [api]
+  (let [sm (create-settings-manager)]
+    (if (aget api "settings")
+      (assoc sm :get (fn [] (.settings api)))
+      sm)))
+
+(defn all-agents
   "Merge built-in subagent roles < settings.roles < markdown agents
-   (.nyma/agents). Later sources override earlier. Returns
-   {keyword-or-string -> role-config}."
+   (.nyma/agents). Later sources override earlier, key by key: a role naming
+   only a model keeps the built-in's `allowed-tools`, which is all that stands
+   between a child and every tool. Returns {keyword-or-string -> role-config}."
   [settings-mgr]
   (let [settings ((:get settings-mgr))
         ;; settings.roles also holds the PRIMARY's roles. The model-less ones
@@ -80,7 +92,7 @@ intermediate tool calls, so put everything that matters in the summary.")
         roles    (into {} (filter (fn [[_ cfg]] (or (:model cfg) (get cfg "model")))
                                   (or (:roles settings) {})))
         md       (agents-md/load-agents)]
-    (merge default-subagent-roles roles md)))
+    (merge-with merge default-subagent-roles roles md)))
 
 (defn- lookup-agent
   "Find a role-config by name. Squint: keywords ARE strings, so a single
@@ -472,7 +484,7 @@ intermediate tool calls, so put everything that matters in the summary.")
   ;; status poll loop doesn't re-read settings + scan agent dirs each call.
   (if (= (.-action args) "status")
     (jobs-status)
-    (let [settings-mgr (create-settings-manager)
+    (let [settings-mgr (live-settings api)
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
           base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
@@ -554,7 +566,7 @@ intermediate tool calls, so put everything that matters in the summary.")
    api "agents"
    #js {:description "List available subagent roles"
         :handler (fn [_args ctx]
-                   (let [sm (create-settings-manager)
+                   (let [sm (live-settings api)
                          agents (all-agents sm)]
                      (.notify (.-ui ctx)
                               (str "Available subagents:\n" (format-agent-list agents))

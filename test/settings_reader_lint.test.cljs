@@ -166,6 +166,8 @@
 (def ^:private no-declaration-ok
   {"advisor"
    "reads only the core `roles` table ((:advisor (:roles settings))); the section belongs to settings/manager, not to this extension"
+   "subagent"
+   "reads only the core `roles` and `subagent` sections, which belong to settings/manager; it hands the whole view to its children"
    "custom_provider_relay"
    "its setting is the top-level `providers` ARRAY; manifest-defaults expresses section -> {key -> default} only, and would register array indices as keys"
    "custom_provider_local"

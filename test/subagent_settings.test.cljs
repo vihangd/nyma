@@ -1,7 +1,7 @@
 (ns subagent-settings.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.settings.manager :refer [defaults]]
-            [agent.extensions.subagent.index :refer [run-isolated-agent]]))
+            [agent.extensions.subagent.index :refer [run-isolated-agent live-settings all-agents]]))
 
 (def ^:private read-only-roles [:scout :planner :reviewer :researcher])
 
@@ -68,3 +68,28 @@
                       (.then (fn [r]
                                (-> (expect (:ok r)) (.toBe false))
                                (-> (expect (:text r)) (.toContain "Could not resolve")))))))))
+
+(describe "subagent:role-overrides"
+          (fn []
+            (it "--settings roles reach the tool, through the session's settings"
+                (fn []
+                  (let [api    #js {:settings (fn [] {:roles {:mine {:model "m"}}})}
+                        agents (all-agents (live-settings api))]
+                    (-> (expect (:model (get agents "mine"))) (.toBe "m")))))
+
+            (it "a role naming only a model keeps the built-in's tool limits"
+                (fn []
+                  (let [api    #js {:settings (fn [] {:roles {:scout {:model "cheap"}}})}
+                        scout  (get (all-agents (live-settings api)) "scout")]
+                    (-> (expect (:model scout)) (.toBe "cheap"))
+                    (-> (expect (vec (:allowed-tools scout)))
+                        (.toEqual #js ["read" "glob" "grep" "ls"])))))
+
+            (it "the child's manager still answers its permission gate"
+                (fn []
+                  (let [sm (live-settings #js {:settings (fn [] {})})]
+                    (-> (expect (fn? (:tool-allowed? sm))) (.toBe true)))))
+
+            (it "an api without settings falls back to the files"
+                (fn []
+                  (-> (expect (fn? (:get (live-settings #js {})))) (.toBe true))))))
