@@ -21,6 +21,7 @@
     "pretest": "npx squint compile",
     "test": "bun test dist",
     "test:fast": "npx squint compile && bun test --parallel dist",
+    "test:pilish": "bash scripts/test-pilish.sh",
     "repl": "npx squint repl",
     "gen:bench-ledger": "bun scripts/gen-bench-ledger.mjs",
     "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",
