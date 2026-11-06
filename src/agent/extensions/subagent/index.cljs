@@ -128,10 +128,22 @@ intermediate tool calls, so put everything that matters in the summary.")
       [js/process.execPath cli]
       [js/process.execPath])))
 
+(defn child-permission-mode
+  "A worktree isolates the checkout, not the machine: a child's shell reaches
+   past it. So a child gets no more than its parent. Edits stay allowed, being
+   what a worktree is for; shell and network ask, which `-p` answers with no.
+   Only a parent the user put in full-auto passes that on."
+  [parent-mode]
+  (case (str parent-mode)
+    "full-auto" "full-auto"
+    "plan"      "plan"
+    "accept-edits"))
+
 (defn worktree-args
   "Flags for the child run, from the role config."
-  [{:keys [model sys allowed steps]}]
-  (cond-> ["-p" "--output-format" "json" "--no-session" "--permission-mode" "full-auto"
+  [{:keys [model sys allowed steps mode]}]
+  (cond-> ["-p" "--output-format" "json" "--no-session"
+           "--permission-mode" (child-permission-mode mode)
            "--max-steps" (str (or steps 20)) "--settings" "{\"max-extensions\":0}" "--model" model
            "--append-system-prompt" sys]
     (seq allowed) (into ["--tools" (str/join "," allowed)])))
@@ -139,7 +151,7 @@ intermediate tool calls, so put everything that matters in the summary.")
 (def ^:private worktree-timeout-ms (* 30 60 1000))
 
 (defn ^:async run-in-worktree [opts cfg]
-  (let [{:keys [agent-name task model-override max-steps signal command]} opts
+  (let [{:keys [api agent-name task model-override max-steps signal command]} opts
         provider (cfg-get cfg :provider "provider")
         model-id (or model-override (cfg-get cfg :model "model"))
         allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
@@ -149,7 +161,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                        (conj (worktree-args {:model   (if provider (str provider "/" model-id) model-id)
                                              :sys     (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
                                              :allowed allowed
-                                             :steps   max-steps})
+                                             :steps   max-steps
+                                             :mode    (when api (:permission-mode (.getState api)))})
                              task))
             proc (js/Bun.spawn (clj->js argv)
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"

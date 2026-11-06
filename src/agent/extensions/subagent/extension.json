@@ -6,7 +6,8 @@
     "commands",
     "model",
     "ui",
-    "messages"
+    "messages",
+    "state"
   ],
   "dependsOn": [
     "model-roles"

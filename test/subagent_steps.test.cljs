@@ -3,7 +3,7 @@
    though run-isolated-agent already accepted :max-steps. Borrowed from
    apprentice's `turns` argument: the parent sizes the budget to the task."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.extensions.subagent.index :refer [steps-arg steps-ceiling worktree-args]]))
+            [agent.extensions.subagent.index :refer [steps-arg steps-ceiling worktree-args child-permission-mode]]))
 
 (describe "subagent:steps-arg" (fn []
                                  (it "accepts a positive integer, floors a float"
@@ -35,3 +35,15 @@
               i    (.indexOf args "--settings")]
           (-> (expect (js/JSON.parse (nth args (inc i)))) (.toEqual #js {"max-extensions" 0})))))))
 
+(describe "subagent:worktree-permissions" (fn []
+  (it "a child gets no more than its parent"
+      (fn []
+        (-> (expect (child-permission-mode "default")) (.toBe "accept-edits"))
+        (-> (expect (child-permission-mode nil)) (.toBe "accept-edits"))
+        (-> (expect (child-permission-mode "accept-edits")) (.toBe "accept-edits"))
+        (-> (expect (child-permission-mode "plan")) (.toBe "plan"))
+        (-> (expect (child-permission-mode "full-auto")) (.toBe "full-auto"))))
+  (it "reaches the child's flags"
+      (fn []
+        (let [args (vec (worktree-args {:model "m" :sys "s" :mode "default"}))]
+          (-> (expect (nth args (inc (.indexOf args "--permission-mode")))) (.toBe "accept-edits")))))))

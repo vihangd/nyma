@@ -169,7 +169,7 @@
     :manifest  #js {"namespace" "stats-dashboard" "description" "Usage stats and cost aggregation dashboard" "capabilities" #js ["commands" "events" "state" "ui"] "dependsOn" #js []}}
    {:namespace "subagent"
     :module    ext-subagent
-    :manifest  #js {"namespace" "subagent" "description" "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs, and git-worktree isolation for editing children (/worktrees)" "capabilities" #js ["tools" "commands" "model" "ui" "messages"] "dependsOn" #js ["model-roles"]}}
+    :manifest  #js {"namespace" "subagent" "description" "Context-isolated delegation built on roles: parallel fan-out, chains, background jobs, and git-worktree isolation for editing children (/worktrees)" "capabilities" #js ["tools" "commands" "model" "ui" "messages" "state"] "dependsOn" #js ["model-roles"]}}
    {:namespace "thinking-renderer"
     :module    ext-thinking-renderer
     :manifest  #js {"namespace" "thinking-renderer" "description" "Collapsible thinking/reasoning widget with token counts, for ACP agents and native reasoning streams" "capabilities" #js ["events" "ui" "flags"] "dependsOn" #js []}}
