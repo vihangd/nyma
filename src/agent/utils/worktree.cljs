@@ -30,7 +30,8 @@
     (if (seq n) (subs n 0 (min 40 (count n))) "wt")))
 
 (defn create!
-  "New worktree `name` off HEAD. Returns {:path :branch :base :root}.
+  "New worktree `name` off HEAD, or on its branch if that outlived an earlier
+   checkout. Returns {:path :branch :base :root}.
    The worktrees dir ignores itself, so the user's .gitignore is untouched."
   [cwd name]
   (let [root (or (repo-root cwd) (throw (js/Error. "not inside a git repository")))
@@ -38,11 +39,15 @@
         nm   (safe-name name)
         p    (path/join dir nm)
         br   (str "nyma/" nm)
-        base (git root "rev-parse" "HEAD")]
+        kept (try (git root "rev-parse" "--verify" "--quiet" (str "refs/heads/" br))
+                  (catch :default _ nil))
+        base (or (not-empty kept) (git root "rev-parse" "HEAD"))]
     (fs/mkdirSync dir #js {:recursive true})
     (let [ign (path/join dir ".gitignore")]
       (when-not (fs/existsSync ign) (fs/writeFileSync ign "*\n")))
-    (git root "worktree" "add" "-q" "-b" br p base)
+    (if (seq kept)
+      (git root "worktree" "add" "-q" p br)
+      (git root "worktree" "add" "-q" "-b" br p base))
     {:path p :branch br :base base :root root}))
 
 (defn open!

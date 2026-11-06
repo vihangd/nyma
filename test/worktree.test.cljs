@@ -83,6 +83,10 @@
                     (-> (expect (wt/remove! d "feat")) (.toBe "kept"))
                     (-> (expect (git d "branch" "--list" "nyma/feat")) (.toContain "nyma/feat"))
                     (-> (expect (wt/remove! d "feat")) (.toBeFalsy))
+                    ;; the kept branch comes back with its work
+                    (let [t2 (wt/open! d "feat")]
+                      (-> (expect (:branch t2)) (.toBe "nyma/feat"))
+                      (-> (expect (fs/existsSync (path/join (:path t2) "f.txt"))) (.toBe true)))
                     (fs/rmSync d #js {:recursive true :force true}))))))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
