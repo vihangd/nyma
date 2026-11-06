@@ -585,7 +585,7 @@ Third-party adapters can register via `gateway.core/register-channel-type!` from
 | `--thinking` | Extended thinking: `off`…`xhigh` | `off` |
 | `--session` | Custom session path | a fresh file per launch |
 | `--fork` | Branch a copy of an existing session | — |
-| `--no-session` | Disable session persistence | — |
+| `--no-session` | Disable session persistence, and skip `nyma.db`: no usage rows, Ctrl+R history or `/stats` | — |
 | `--trust` | Run this folder's project-defined commands without asking, this run only (see Workspace Trust) | — |
 | `--max-steps <n>` | Cap model steps (tool-call rounds) per run; a capped run reports, then gets another block if it made progress | `100` (setting `max-steps`) |
 | `--append-system-prompt <text>` | Append text to the system prompt for this run (kept across `/reload`) | — |

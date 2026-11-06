@@ -312,7 +312,8 @@ Session:
       --fork <path>      Branch a copy of an existing session into a new file.
       --session <path>   Use a specific session file (jsonl).
                          (Default: a fresh session file per launch.)
-      --no-session       Don't read or write any session file.
+      --no-session       Don't read or write any session file, or record
+                         usage and prompts in ~/.nyma/nyma.db.
       --max-steps <n>    Cap model steps (tool-call rounds) per run. Default: 100
                          (settings max-steps). A capped run reports, then gets
                          another block if it made progress (settings
@@ -1017,8 +1018,10 @@ Examples:
     ;; The SQLite store behind prompt_history (Ctrl+R) and /stats. Both read
     ;; `api.__sqlite-store` and both shipped with nothing setting it, so the
     ;; picker was always empty and /stats always said "require SQLite storage".
-    ;; Cross-session by design (~/.nyma/nyma.db), so --no-session does not
-    ;; disable it. Usage rows come from the store's usage dispatches.
+    ;; Cross-session (~/.nyma/nyma.db), and --no-session skips it all the same:
+    ;; no usage rows, Ctrl+R history or /stats. Worktree children rely on that,
+    ;; their parent records what they spend, and so do bench runs and ThinkRail's
+    ;; model listing. Usage rows come from the store's usage dispatches.
     (when-not (:no-session values)
       (try
         (let [db-path (npath/join (.. js/process -env -HOME) ".nyma" "nyma.db")
