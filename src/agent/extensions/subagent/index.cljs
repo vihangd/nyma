@@ -301,22 +301,25 @@ intermediate tool calls, so put everything that matters in the summary.")
             ;; Both pipes drained AT ONCE: reading stdout to EOF first left a
             ;; child that filled the stderr pipe (64 KB of warnings) blocked on
             ;; the write, stdout never closing, and the parent waiting forever.
-            [lines err] (js-await (js/Promise.all #js [(read-lines (.-stdout proc) on-line)
+            [lines err code] (js-await (js/Promise.all #js [(read-lines (.-stdout proc) on-line)
                                                        (.text (js/Response. (.-stderr proc)))
                                                        (.-exited proc)]))
             _    (some-> signal (.removeEventListener "abort" kill))
             out  (:tail lines)
-            res  (try (js/JSON.parse (:last lines)) (catch :default _ nil))
+            ;; The last line is only an answer if it says so: a child killed
+            ;; mid-run leaves a usage line there.
+            res  (let [r (try (js/JSON.parse (:last lines)) (catch :default _ nil))]
+                   (when (= "result" (some-> r .-type)) r))
+            bad? (or (nil? res) (.-is_error res) (not (zero? code)))
             ;; Separately guarded: the child's answer is worth returning even
             ;; when closing its checkout fails — which then stays for the user.
             done (try (wt/finish! tree (str "nyma subagent " agent-name ": " (subs (str task) 0 (min 60 (count (str task))))))
                       (catch :default e {:error (str (.-message e)) :path (:path tree) :branch (:branch tree)}))]
         {:agent agent-name
-         :ok    (and (some? res) (not (.-is_error res)))
+         :ok    (not bad?)
          :status (cond
                    (some-> signal .-aborted) "cancelled"
-                   (nil? res)                "failed"
-                   (.-is_error res)          "failed"
+                   bad?                      "failed"
                    :else                     "done")
          :text  (str (if res
                        (clip-reply (.-result res) nil)

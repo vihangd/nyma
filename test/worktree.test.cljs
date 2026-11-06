@@ -126,7 +126,7 @@
     (try
       (let [r (js-await (sub/run-in-worktree
                          {:agent-name "noisy" :task "t"
-                          :command ["sh" "-c" "head -c 200000 /dev/zero | tr '\\0' x >&2; echo '{\"result\":\"fine\"}'"]}
+                          :command ["sh" "-c" "head -c 200000 /dev/zero | tr '\\0' x >&2; echo '{\"type\":\"result\",\"result\":\"fine\"}'"]}
                          {:provider "p" :model "m"}))]
         (-> (expect (:text r)) (.toContain "fine")))
       (finally
@@ -139,9 +139,26 @@
     (try
       (let [r (js-await (sub/run-in-worktree
                          {:agent-name "w" :task "t"
-                          :command ["sh" "-c" "printf '{\"result\":\"depth=%s\"}' \"$NYMA_SUBAGENT_DEPTH\""]}
+                          :command ["sh" "-c" "printf '{\"type\":\"result\",\"result\":\"depth=%s\"}' \"$NYMA_SUBAGENT_DEPTH\""]}
                          {:provider "p" :model "m"}))]
         (-> (expect (:text r)) (.toContain "depth=1")))
+      (finally
+        (js/process.chdir prev)
+        (fs/rmSync d #js {:recursive true :force true})))))
+
+(defn ^:async test-dead-child-is-no-success []
+  (let [d (temp-repo) prev (js/process.cwd)
+        run (fn [script]
+              (sub/run-in-worktree {:agent-name "w" :task "t" :command ["sh" "-c" script]}
+                                   {:provider "p" :model "m"}))]
+    (js/process.chdir d)
+    (try
+      ;; killed mid-run: a usage line is all it left
+      (let [r (js-await (run "echo '{\"type\":\"usage\",\"inputTokens\":1}'; exit 137"))]
+        (-> (expect (:ok r)) (.toBe false))
+        (-> (expect (:status r)) (.toBe "failed")))
+      (let [r (js-await (run "echo '{\"type\":\"result\",\"result\":\"x\"}'; exit 1"))]
+        (-> (expect (:ok r)) (.toBe false)))
       (finally
         (js/process.chdir prev)
         (fs/rmSync d #js {:recursive true :force true})))))
@@ -169,6 +186,7 @@
 
 (describe "worktree child process"
           (fn [] (it "drains stderr and stdout together" test-noisy-child 20000)
+            (it "a child that died is a failure, whatever its last line" test-dead-child-is-no-success 20000)
             (it "bills tokens as they land, and the cost once" test-bills-as-it-goes 20000)
             (it "is told it is a child, so it registers no subagent tool" test-child-cannot-delegate 20000)))
 
