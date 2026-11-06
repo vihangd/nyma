@@ -1,7 +1,7 @@
 (ns subagent-settings.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.settings.manager :refer [defaults]]
-            [agent.extensions.subagent.index :as sub :refer [run-isolated-agent live-settings all-agents child-tools worktree-args]]))
+            [agent.extensions.subagent.index :as sub :refer [run-isolated-agent live-settings all-agents child-tools worktree-args inherit-model]]))
 
 (def ^:private read-only-roles [:scout :planner :reviewer :researcher])
 
@@ -131,3 +131,32 @@
                       (finally (js-delete js/process.env "NYMA_SUBAGENT_DEPTH")))
                     (-> (expect (count @tools)) (.toBe 0))
                     (-> (expect (.includes (vec @cmds) "agents")) (.toBe true)))))))
+
+(describe "subagent:inherit-model"
+          (fn []
+            (let [api #js {:getActiveModelSpec (fn [] "zai/glm-5.3-flash")}
+                  on  (fn [cfg] (inherit-model cfg api))]
+              (it "a shipped role on another provider takes the parent's model"
+                  (fn []
+                    (let [r (on {:provider "anthropic" :model "claude-haiku-4-5" :shipped? true})]
+                      (-> (expect (:provider r)) (.toBe "zai"))
+                      (-> (expect (:model r)) (.toBe "glm-5.3-flash")))))
+
+              (it "a role the user named stays as named"
+                  (fn []
+                    (-> (expect (:model (on {:provider "minimax" :model "M2.7"}))) (.toBe "M2.7"))))
+
+              (it "inherit and no model both take the parent's"
+                  (fn []
+                    (-> (expect (:model (on {:provider "anthropic" :model "inherit"}))) (.toBe "glm-5.3-flash"))
+                    (-> (expect (:provider (on {:provider "anthropic"}))) (.toBe "zai"))))
+
+              (it "only shipped roles are marked shipped"
+                  (fn []
+                    (let [agents (all-agents (live-settings #js {:settings (fn [] {:roles {:scout {:provider "x" :model "m"}}})}))]
+                      (-> (expect (:shipped? (get agents "scout"))) (.toBe false))
+                      (-> (expect (:shipped? (get agents "planner"))) (.toBe true)))))
+
+              (it "an unknown role stays unknown"
+                  (fn []
+                    (-> (expect (on nil)) (.toBeFalsy)))))))

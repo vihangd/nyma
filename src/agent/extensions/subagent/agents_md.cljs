@@ -38,6 +38,7 @@
         tools    (parse-tools (fm-get fm "tools"))
         provider (or (fm-get fm "provider") "anthropic")
         model    (fm-get fm "model")]
+    ;; No model: run-child gives it the parent's.
     [nm (cond-> {:provider provider
                  :description (or (fm-get fm "description") "")
                  :system-prompt (or body "")}

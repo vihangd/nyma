@@ -20,6 +20,8 @@
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]
             [agent.pricing :as pricing]
+            [agent.extensions.model-roles.policy :as policy]
+            [agent.providers.registry :as registry]
             [agent.tool-metadata :as tool-metadata]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.extensions.subagent.concurrency :as conc]
@@ -127,8 +129,24 @@ intermediate tool calls, so put everything that matters in the summary.")
         ;; tool — cannot be run as a child, so they must not be offered as one.
         roles    (into {} (filter (fn [[_ cfg]] (or (:model cfg) (get cfg "model")))
                                   (or (:roles settings) {})))
-        md       (agents-md/load-agents)]
-    (merge-with merge default-subagent-roles roles md)))
+        md       (agents-md/load-agents)
+        named?   (fn [k] (or (cfg-get (get roles k) :model "model")
+                             (cfg-get (get md k) :model "model")))
+        shipped  (into {} (map (fn [[k cfg]] [k (assoc cfg :shipped? (not (named? k)))])
+                               default-subagent-roles))]
+    (merge-with merge shipped roles md)))
+
+(defn inherit-model
+  "A role takes the parent's model when it says `inherit` or names none, and when
+   it is a shipped role on another provider, which the user may have no key for."
+  [cfg api]
+  (let [spec (when (and cfg (aget api "getActiveModelSpec")) (.getActiveModelSpec api))
+        [prov model] (when spec (registry/split-model-spec spec))
+        m    (when cfg (cfg-get cfg :model "model"))]
+    (cond
+      (nil? model)                      cfg
+      (or (nil? m) (= "inherit" m))     (assoc cfg :provider prov :model model)
+      :else (policy/inherit-default-model cfg (not (:shipped? cfg)) prov model))))
 
 (defn- lookup-agent
   "Find a role-config by name. Squint: keywords ARE strings, so a single
@@ -318,7 +336,7 @@ intermediate tool calls, so put everything that matters in the summary.")
    its `:usage` is already counted."
   [opts]
   (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal timeout-ms]} opts
-        cfg (lookup-agent agents agent-name)]
+        cfg (inherit-model (lookup-agent agents agent-name) api)]
     (cond
       ;; Queued items of a fan-out reach here after the abort: none may start.
       (some-> signal .-aborted)
@@ -656,6 +674,15 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; /agents command
 ;; ---------------------------------------------------------------------------
 
+(defn- role-summary
+  "The roles that can run, for the tool's description."
+  [agents]
+  (str/join ", " (keep (fn [[k cfg]]
+                         (when-not (false? (cfg-get cfg :enabled "enabled"))
+                           (let [d (cfg-get cfg :description "description")]
+                             (str k (when (seq d) (str " (" d ")"))))))
+                       agents)))
+
 (defn- format-agent-list [agents]
   (str/join "\n"
             (map (fn [[k cfg]]
@@ -677,9 +704,12 @@ intermediate tool calls, so put everything that matters in the summary.")
         :safety #js {:long-running? true :capabilities #js ["execution"] :category "meta"}
         :description
         (str "Delegate to context-isolated subagents (built on roles). "
-             "Default subagent roles are READ-ONLY (scout/planner/reviewer/researcher) "
-             "— use for exploration, planning, review, research. Keep code EDITS on the "
-             "main thread (editing subagents fragment shared state). "
+             "Roles: " (role-summary (all-agents (live-settings api))) ". "
+             "A role is READ-ONLY unless it lists other tools; use one for exploration, "
+             "planning, review, research. Keep code EDITS on the main thread (editing "
+             "subagents fragment shared state). Each subagent costs a whole context: one "
+             "for a lookup, parallel only for genuinely independent reads, and do it "
+             "yourself when you already know the file. "
              "Modes: single {agent, task}; parallel {tasks:[{agent,task}]} for INDEPENDENT "
              "read-only work; chain {chain:[{agent,task}]} ('{previous}' = prior output). "
              "Only the subagent's final summary returns; its intermediate tool calls stay "
@@ -689,7 +719,8 @@ intermediate tool calls, so put everything that matters in the summary.")
              "to an earlier call. Ask for findings with file paths and line numbers, not "
              "narration. Send independent tasks together, but never give two of them the "
              "same file to edit. `steps` sizes each subagent's tool budget to the task. "
-             "async:true runs in the background. action:\"status\" lists jobs. "
+             "async:true runs in the background. action:\"status\" lists jobs; "
+             "action:\"cancel\" with job stops one. "
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
