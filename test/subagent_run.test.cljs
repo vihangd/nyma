@@ -2,7 +2,7 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain]]
+            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute]]
             [agent.pricing :as pricing]))
 
 ;; ── B2 regression: final-text returns the last ASSISTANT message ──
@@ -131,3 +131,55 @@
 (describe "subagent:billing" (fn []
                                (it "adds a child's spend to the parent, once" test-child-billed)
                                (it "bills steps a failed child already paid for" test-failed-child-billed)))
+
+;; ── abort: the parent's signal stops a child ──
+(defn- hanging
+  "A model that answers nothing until it is aborted."
+  []
+  (new MockLanguageModelV4
+       #js {:doStream (fn [o]
+                        (js/Promise. (fn [_ reject]
+                                       (.addEventListener (.-abortSignal o) "abort"
+                                                          (fn [] (reject (js/Error. "aborted")))))))}))
+
+(defn- wait [ms] (js/Promise. (fn [ok] (js/setTimeout ok ms))))
+
+(defn ^:async test-abort-stops-child []
+  (let [ctrl (js/AbortController.)
+        api  #js {:resolveModel (fn [_ _] (hanging)) :dispatchState (fn [_ _] nil)}
+        p    (run-isolated-agent (assoc (base) :api api :agent-name "scout" :task "go"
+                                        :signal (.-signal ctrl)))]
+    (js-await (wait 20))
+    (.abort ctrl)
+    (let [r (js-await p)]
+      (-> (expect (:ok r)) (.toBe false))
+      (-> (expect (:text r)) (.toBe "cancelled")))))
+
+(defn ^:async test-aborted-never-starts []
+  (let [ctrl  (js/AbortController.)
+        asked (atom 0)
+        api   #js {:resolveModel (fn [_ _] (swap! asked inc) (hanging))}]
+    (.abort ctrl)
+    (let [rs (js-await (run-parallel (assoc (base) :api api :signal (.-signal ctrl))
+                                     [#js {:agent "scout" :task "a"}
+                                      #js {:agent "planner" :task "b"}]))]
+      (-> (expect (mapv :text rs)) (.toEqual #js ["cancelled" "cancelled"]))
+      (-> (expect @asked) (.toBe 0)))))
+
+(defn ^:async test-cancel-job []
+  (let [sent (atom 0)
+        api  #js {:resolveModel (fn [_ _] (hanging)) :dispatchState (fn [_ _] nil)
+                  :settings (fn [] {}) :sendUserMessage (fn [& _] (swap! sent inc))}
+        out  (js-await (tool-execute api #js {:agent "scout" :task "go" :async true}))
+        id   (first (.match out (js/RegExp. "job-\\d+")))]
+    (js-await (wait 20))
+    (-> (expect (js-await (tool-execute api #js {:action "cancel" :job id}))) (.toContain "Cancelling"))
+    (js-await (wait 20))
+    (-> (expect (js-await (tool-execute api #js {:action "status"}))) (.toContain (str id ": cancelled")))
+    (-> (expect (js-await (tool-execute api #js {:action "cancel" :job id}))) (.toContain "already"))
+    (-> (expect @sent) (.toBe 0))))
+
+(describe "subagent:abort" (fn []
+                             (it "the parent's abort stops a running child" test-abort-stops-child)
+                             (it "an aborted fan-out starts nothing" test-aborted-never-starts)
+                             (it "a background job is cancelled by id, without a follow-up" test-cancel-job)))

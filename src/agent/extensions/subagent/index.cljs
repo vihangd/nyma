@@ -252,12 +252,16 @@ intermediate tool calls, so put everything that matters in the summary.")
 
 (defn ^:async run-child
   "Spawn one isolated child agent for `task` under role `agent-name`.
-   opts: {:api :settings-mgr :agents :agent-name :task :model-override :max-steps}
+   opts: {:api :settings-mgr :agents :agent-name :task :model-override :max-steps :signal}
    Returns {:agent :ok :text :usage} (or {:ok false :text <error>})."
   [opts]
-  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps]} opts
+  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal]} opts
         cfg (lookup-agent agents agent-name)]
     (cond
+      ;; Queued items of a fan-out reach here after the abort: none may start.
+      (some-> signal .-aborted)
+      {:agent agent-name :ok false :text "cancelled"}
+
       (nil? cfg)
       {:agent agent-name :ok false
        :text (str "Unknown subagent role: " agent-name)}
@@ -303,14 +307,20 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; Children never receive the `subagent` tool → depth capped at 1.
               (when (seq allowed)
                 ((:set-active (:tool-registry child)) (set allowed)))
-              ;; Caught here, not below: a failed child spent money too.
-              (let [err (try (js-await (run child task)) nil
-                             (catch :default e e))
-                    st  @(:state child)]
-                {:agent agent-name :ok (nil? err)
-                 :text  (if err
-                          (str "Subagent " agent-name " failed: " (.-message err))
-                          (final-text (:messages st)))
+              ;; Caught here, not below: a failed child spent money too. The
+              ;; controller is read at abort time: `run` replaces it on entry.
+              (let [stop (fn [] (.abort @(:abort-controller child) (.-reason signal)))
+                    _    (some-> signal (.addEventListener "abort" stop #js {:once true}))
+                    err  (try (js-await (run child task)) nil
+                              (catch :default e e))
+                    _    (some-> signal (.removeEventListener "abort" stop))
+                    gone (some-> signal .-aborted)
+                    st   @(:state child)]
+                {:agent agent-name :ok (and (nil? err) (not gone))
+                 :text  (cond
+                          gone "cancelled"
+                          err  (str "Subagent " agent-name " failed: " (.-message err))
+                          :else (final-text (:messages st)))
                  :usage (child-usage st (str provider "/" model-id))}))
             (catch :default e
               {:agent agent-name :ok false
@@ -416,15 +426,19 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; Async job handling (MVP): run in background, deliver result as follow-up
 ;; ---------------------------------------------------------------------------
 
-(defn ^:async start-async-job [api run-thunk label]
+(defn ^:async start-async-job
+  "`ctrl` is the job's own: it outlives the turn that started it, so the turn's
+   abort must not reach it. `cancel-job` does."
+  [api run-thunk label ctrl]
   (let [id (str "job-" (swap! job-counter inc))]
-    (swap! jobs assoc id {:status "running" :label label :result nil})
+    (swap! jobs assoc id {:status "running" :label label :result nil :ctrl ctrl})
     ;; fire-and-forget; deliver completion via follow-up message
     (-> (run-thunk)
         (.then (fn [results]
-                 (let [text (format-results results)]
-                   (swap! jobs assoc id {:status "done" :label label :result text})
-                   (when-let [send (aget api "sendUserMessage")]
+                 (let [text (format-results results)
+                       gone (.. ctrl -signal -aborted)]
+                   (swap! jobs assoc id {:status (if gone "cancelled" "done") :label label :result text})
+                   (when-let [send (when-not gone (aget api "sendUserMessage"))]
                      (send (str "[subagent " id " complete] " label "\n\n" text)
                            #js {:deliverAs "followUp"})))))
         (.catch (fn [e]
@@ -432,6 +446,13 @@ intermediate tool calls, so put everything that matters in the summary.")
                                         :result (str (.-message e))}))))
     (str "Started background subagent " id " (" label "). "
          "Use the subagent tool with action=\"status\" to check on it.")))
+
+(defn- cancel-job [id]
+  (let [j (get @jobs id)]
+    (cond
+      (nil? j) (str "No subagent job " id ".")
+      (not= "running" (:status j)) (str id " is already " (:status j) ".")
+      :else (do (.abort (:ctrl j)) (str "Cancelling " id ".")))))
 
 (defn- jobs-status []
   (let [js @jobs]
@@ -466,7 +487,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                     :doc "Sequential: array of {agent, task, steps?}; '{previous}' in a task is replaced by the prior step's output."}]
    :steps  [:integer {:optional true
                       :doc "Tool-call budget per subagent (default 20). Size it to the task: 3-4 for a lookup or a question about one file, 8-12 for a change spanning several. A subagent out of steps still reports what it has."}]
-   :action [:enum ["run" "status"] {:optional true :doc "run (default) or status (list background jobs)."}]
+   :action [:enum ["run" "status" "cancel"] {:optional true :doc "run (default), status (list background jobs), or cancel (stop the background job named by `job`)."}]
+   :job    [:string {:optional true :doc "Background job id for action=cancel, e.g. job-1."}]
    :async  [:boolean {:optional true :doc "Run in background; result is delivered as a follow-up message."}]
    :model  [:string {:optional true :doc "Optional model id override (single mode)."}]
    :isolation [:enum ["worktree"] {:optional true :doc "worktree: each subagent works in its own git worktree (a separate checkout on branch nyma/<name>); its changes come back as that branch, never in your files. Use it to let a subagent EDIT (e.g. the worker role), or to run editing subagents in parallel."}]})
@@ -482,8 +504,9 @@ intermediate tool calls, so put everything that matters in the summary.")
   ;; action=status is a pure in-memory read — short-circuit BEFORE touching
   ;; the settings manager / agent .md files (synchronous disk IO), so a
   ;; status poll loop doesn't re-read settings + scan agent dirs each call.
-  (if (= (.-action args) "status")
-    (jobs-status)
+  (case (.-action args)
+    "status" (jobs-status)
+    "cancel" (cancel-job (.-job args))
     (let [settings-mgr (live-settings api)
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
@@ -495,27 +518,29 @@ intermediate tool calls, so put everything that matters in the summary.")
                              sub  (:subagent s)
                              dflt (boolean (or (:async-by-default sub)
                                                (and sub (get sub "async-by-default"))))]
-                         (if (nil? (.-async args)) dflt (boolean (.-async args))))]
+                         (if (nil? (.-async args)) dflt (boolean (.-async args))))
+          ctrl         (when async? (js/AbortController.))
+          base         (cond-> base ctrl (assoc :signal (.-signal ctrl)))]
       (cond
       ;; parallel fan-out
         (.-tasks args)
         (let [thunk (fn [] (run-parallel base (.-tasks args)))]
           (if async?
-            (js-await (start-async-job api thunk "parallel"))
+            (js-await (start-async-job api thunk "parallel" ctrl))
             (format-results (js-await (thunk)))))
 
       ;; sequential chain
         (.-chain args)
         (let [thunk (fn [] (run-chain base (.-chain args)))]
           (if async?
-            (js-await (start-async-job api thunk "chain"))
+            (js-await (start-async-job api thunk "chain" ctrl))
             (format-results (js-await (thunk)))))
 
       ;; single
         (and (.-agent args) (.-task args))
         (let [thunk (fn [] (run-single-list base (.-agent args) (.-task args) (.-model args)))]
           (if async?
-            (js-await (start-async-job api thunk (.-agent args)))
+            (js-await (start-async-job api thunk (.-agent args) ctrl))
             (format-results (js-await (thunk)))))
 
         :else
