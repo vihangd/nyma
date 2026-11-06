@@ -236,7 +236,8 @@ Modes (default: interactive):
                          The prompt is the first positional argument.
       --output-format <f> With -p: 'text' (default), 'json' — a single
                          claude-style result object {result, is_error,
-                         session_id, total_cost_usd, usage, duration_ms} for
+                         session_id, total_cost_usd, total_cost_partial,
+                         usage, duration_ms} for
                          headless orchestrators (e.g. cw) — or 'stream-json':
                          one JSON object per line as the run progresses
                          (message_update text, tool_execution_*, usage), then

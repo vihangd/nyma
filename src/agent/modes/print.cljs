@@ -16,7 +16,7 @@
 ;; ── claude-style result object (`-p --output-format json`) ──
 ;; A single JSON object matching the de-facto `claude -p --output-format json`
 ;; contract, so headless orchestrators (e.g. cw) can consume nyma like claude:
-;;   { type, is_error, result, session_id, total_cost_usd, usage{…}, duration_ms }
+;;   { type, is_error, result, session_id, total_cost_usd, total_cost_partial, usage{…}, duration_ms }
 
 (defn- strip-reasoning
   "Drop <think> blocks from one-shot output — unless that leaves nothing.
@@ -97,8 +97,13 @@
          :total_cost_usd (let [c (:total-cost st)]
                            (cond
                              (and (number? c) (pos? c)) c
-                             (pricing/priced? (model-info/config-model-key (:config agent))) (or c 0)
+                             ;; The session's model is not always what answered:
+                             ;; a fallback may have spent on an unpriced one.
+                             (and (not (:cost-unknown? st))
+                                  (pricing/priced? (model-info/config-model-key (:config agent)))) (or c 0)
                              :else nil))
+         ;; A number that leaves out spend on an unpriced model is a floor.
+         :total_cost_partial (boolean (and (:cost-unknown? st) (pos? (or (:total-cost st) 0))))
          ;; num_turns and the cache figures were absent or hardcoded to zero.
          ;; Both are now read from the store: the cache split is the biggest
          ;; cost lever there is, and a turn count is what a turn budget has to

@@ -63,6 +63,23 @@
                         r (result-object a 0 nil)]
                     (-> (expect (.-total_cost_usd r)) (.toBeNull))))) 
 
+            (it "reports null when a priced session's spend went to an unpriced model"
+                (fn []
+                  (let [a (assoc (fake-agent {:messages [{:role "assistant" :content "y"}]
+                                              :cost-unknown? true} nil)
+                                 :config #js {:model #js {:modelId "claude-sonnet-5"}})
+                        r (result-object a 0 nil)]
+                    (-> (expect (.-total_cost_usd r)) (.toBeNull))
+                    (-> (expect (.-total_cost_partial r)) (.toBe false)))))
+
+            (it "marks a total that leaves out unpriced spend as partial"
+                (fn []
+                  (let [a (fake-agent {:messages [{:role "assistant" :content "y"}]
+                                       :total-cost 0.0123 :cost-unknown? true} nil)
+                        r (result-object a 0 nil)]
+                    (-> (expect (.-total_cost_usd r)) (.toBe 0.0123))
+                    (-> (expect (.-total_cost_partial r)) (.toBe true)))))
+
             (it "reports 0 for a PRICED model that genuinely spent nothing"
                 (fn []
                   ;; the other half of the contract: null must mean "unknown",
