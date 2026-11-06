@@ -426,7 +426,8 @@
                                   (when models
                                     ((:register (:model-registry agent))
                                      (into {} (mapcat (fn [m]
-                                                        (let [meta {:context-window (:context-window m)}
+                                                        (let [meta {:context-window (:context-window m)
+                                                                    :max-tokens     (:max-tokens m)}
                                                               q    [[(qualify (:id m)) meta]]]
                                                           (if gateway?
                                                             q

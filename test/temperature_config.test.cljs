@@ -83,6 +83,10 @@
         (fn []
           (-> (expect (loop/output-cap 4000 "anthropic/claude-opus-5-5")) (.toBe 4000))
           (-> (expect (loop/output-cap nil "anthropic/claude-opus-5-5")) (.toBe 128000))
+          ;; inside the window: the request has to fit with its input
+          (-> (expect (< (loop/output-cap nil "anthropic/claude-opus-5-5" 1000000 900000) 10001)) (.toBe true))
+          (-> (expect (loop/output-cap 100000 "x" 131072 1000)) (.toBe 65536))
+          (-> (expect (loop/output-cap 100000 "x" 8192 100000)) (.toBe 1024))
           (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))))
 
     (it "honours what the user set"

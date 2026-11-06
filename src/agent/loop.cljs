@@ -58,9 +58,19 @@
 
 (defn output-cap
   "`max_tokens` for a request: the user's setting, the model's own limit, or
-   8000 when neither is known."
-  [setting model-key]
-  (or setting (model-info/max-output model-key) 8000))
+   8000 when neither is known, kept inside the context window. Some servers
+   reject input + max_tokens over the window, and 16 models here declare an
+   output limit as large as the window itself.
+
+   `input` is the estimate for this pass's first request. A run's context grows
+   after that, hence half the window at most: there is no later point to adjust."
+  [setting model-key & [window input]]
+  (let [cap (or setting (model-info/max-output model-key) 8000)]
+    (if (and (number? window) (pos? window))
+      (max 1024 (min cap
+                     (js/Math.floor (/ window 2))
+                     (- window (js/Math.ceil (* 1.1 (or input 0))))))
+      cap)))
 
 (def cut-off-nudge
   "Borrowed from mini-swe-agent's format_error_template, which answers a
@@ -543,10 +553,13 @@
                              ;; that plans in prose can spend an entire turn
                              ;; without ever calling a tool.
                              :maxOutputTokens (output-cap
-                                               (:max-output-tokens config)
+                                               (or (:max-output-tokens config)
+                                                   (when model-registry (:max-tokens ((:get model-registry) model-key))))
                                                (model-info/model-key
                                                 (aget (:config agent) "active-provider-name")
-                                                active-model))
+                                                active-model)
+                                               context-window
+                                               (:last-content-estimate @state))
                              :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        #js [(stepCountIs (if final-report? 1 (:max-steps config)))
                                                   ;; An extension saw a loop.
