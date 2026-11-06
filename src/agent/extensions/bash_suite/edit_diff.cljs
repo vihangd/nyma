@@ -147,15 +147,19 @@
    knowable without a content snapshot: a path absent from the before-status
    was clean (its content is HEAD's) or did not exist. A path already dirty
    before the command is left out — its pre-command content was never seen.
+   Nor can it be said when the command changed a .gitignore: a file that had been
+   ignored shows up new, and calling it absent has /undo delete it.
    Returns [{:path abs :state content-or-nil}], nil meaning \"did not exist\"."
   [before after paths]
-  (let [root (or (:root after) (:root before))]
+  (let [root   (or (:root after) (:root before))
+        rules? (some #(or (= ".gitignore" %) (str/ends-with? % "/.gitignore")) paths)]
     (->> paths
          (remove #(contains? (:status before) %))
          (take max-pre-paths)
          (keep (fn [p]
                  (when-let [known (head-state root p)]
-                   (assoc known :path (if root (str root "/" p) p)))))
+                   (when-not (and rules? (nil? (:state known)))
+                     (assoc known :path (if root (str root "/" p) p))))))
          vec)))
 
 (defn with-summary

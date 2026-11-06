@@ -38,6 +38,12 @@
           (-> (expect (contains? pre "new.txt")) (.toBe true))
           (-> (expect (get pre "new.txt")) (.toBeFalsy)))))
 
+  (it "a changed .gitignore makes a new-looking file unknown, not absent"
+      (fn []
+        (let [pre (pre-of (git-repo!) [".gitignore" "secret.env" "a.txt"])]
+          (-> (expect (contains? pre "secret.env")) (.toBe false))
+          (-> (expect (get pre "a.txt")) (.toBe "one\ntwo\n")))))
+
   (it "leaves out what it cannot state, because nil would make /undo delete it"
       (fn []
         (let [dir (git-repo!)]
