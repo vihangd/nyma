@@ -4,6 +4,7 @@
   "capabilities": [
     "tools",
     "commands",
+    "events",
     "model",
     "ui",
     "messages",

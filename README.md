@@ -712,10 +712,22 @@ Larger maps omitted above because they are long, not because they are optional:
 `roles` (12 model/permission/tool-shape presets), `plan-mode`, `subagent`. Read them in
 `manager.cljs`.
 
-A role run as a subagent has no permission gate, so `allowed-tools` is its only limit. A role
-that lists none gets the read-only set (`read`, `glob`, `grep`, `ls`, `retrieve_result`);
-`"allowed-tools": ["*"]` gives it every tool. A worktree child keeps its permission mode as
-the limit, so an unlisted role there is not narrowed.
+A role run as a subagent is limited by `allowed-tools` and by your permission gate: a child's
+tool calls go through this session's mode and policy, and a prompt names the child. A role that
+lists none gets the read-only set (`read`, `glob`, `grep`, `ls`, `retrieve_result`);
+`"allowed-tools": ["*"]` gives it every builtin. A subagent has builtins only, so a role naming
+an MCP or extension tool is refused. A worktree child keeps its permission mode as the limit, so
+an unlisted role there is not narrowed. `.nyma/agents/*.md` and project role tool lists are
+ignored until the folder is trusted.
+
+A role with `"model": "inherit"` or no model uses the parent's, and so does a built-in role whose
+provider is not the one you are on.
+
+Each subagent's result header gives its id and how it ended, and an in-process child is saved under
+`subagents/` beside the session, so `nyma --session <path>` opens it. The model can continue one
+with `action: "message"`. `/agents` lists this session's. `subagent.timeout-seconds` (1800) and
+`subagent.max-children` (16 per prompt) bound them. Budgets see an in-process child's tokens and
+cost each step, and a worktree child's tokens each step and its cost at the end.
 
 Project settings cannot widen permissions: `permission-mode` and any `allow` decision in a
 role's `policy`/`permissions` are ignored (with a warning) when they come from

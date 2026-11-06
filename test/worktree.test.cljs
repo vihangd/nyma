@@ -146,8 +146,30 @@
         (js/process.chdir prev)
         (fs/rmSync d #js {:recursive true :force true})))))
 
+(defn ^:async test-bills-as-it-goes []
+  (let [d (temp-repo) prev (js/process.cwd)
+        bills (atom [])
+        lines (str "{\"type\":\"usage\",\"inputTokens\":100,\"outputTokens\":5}\n"
+                   "{\"type\":\"usage\",\"inputTokens\":200,\"outputTokens\":5}\n"
+                   "{\"type\":\"result\",\"result\":\"ok\",\"total_cost_usd\":0.5,"
+                   "\"usage\":{\"input_tokens\":300,\"output_tokens\":10}}\n")
+        api   #js {:getState (fn [] {}) :dispatchState (fn [t m] (when (= t "extension-usage") (swap! bills conj m)))}]
+    (js/process.chdir d)
+    (try
+      (let [r (js-await (sub/run-isolated-agent
+                         {:api api :isolation "worktree" :agent-name "w" :task "t"
+                          :agents {"w" {:provider "p" :model "m"}}
+                          :command ["sh" "-c" (str "printf '" lines "'")]}))]
+        (-> (expect (:ok r)) (.toBe true))
+        (-> (expect (mapv :input-tokens @bills)) (.toEqual #js [100 200 0]))
+        (-> (expect (:cost (last @bills))) (.toBe 0.5)))
+      (finally
+        (js/process.chdir prev)
+        (fs/rmSync d #js {:recursive true :force true})))))
+
 (describe "worktree child process"
           (fn [] (it "drains stderr and stdout together" test-noisy-child 20000)
+            (it "bills tokens as they land, and the cost once" test-bills-as-it-goes 20000)
             (it "is told it is a child, so it registers no subagent tool" test-child-cannot-delegate 20000)))
 
 ((.skipIf describe (not (fs/existsSync cli))) "subagent isolation: worktree"

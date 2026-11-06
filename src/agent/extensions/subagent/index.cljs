@@ -50,6 +50,8 @@ intermediate tool calls, so put everything that matters in the summary.")
 (def ^:private children (atom {}))
 (def ^:private child-counter (atom 0))
 (def ^:private MAX-KEPT-CHILDREN 20)
+;; Children started since the user last asked for something.
+(def ^:private spawned (atom 0))
 
 ;; ---------------------------------------------------------------------------
 ;; Role / agent resolution
@@ -218,7 +220,7 @@ intermediate tool calls, so put everything that matters in the summary.")
 (defn worktree-args
   "Flags for the child run, from the role config."
   [{:keys [model sys allowed steps mode]}]
-  (cond-> ["-p" "--output-format" "json" "--no-session"
+  (cond-> ["-p" "--output-format" "stream-json" "--no-session"
            "--permission-mode" (child-permission-mode mode)
            "--max-steps" (str (or steps 20)) "--settings" "{\"max-extensions\":0}" "--model" model
            "--append-system-prompt" sys]
@@ -229,8 +231,35 @@ intermediate tool calls, so put everything that matters in the summary.")
 
 (def ^:private child-env "NYMA_SUBAGENT_DEPTH")
 
+(defn ^:async read-lines
+  "Call `on-line` with each line of `stream` as it arrives. Resolves the last
+   non-blank line and a tail of what came, for a child that printed no result."
+  [stream on-line]
+  (let [reader  (.getReader stream)
+        decoder (js/TextDecoder.)
+        buf     (atom "")
+        lst     (atom nil)
+        tail    (atom "")
+        take!   (fn [line]
+                  (when-not (str/blank? line)
+                    (reset! lst line)
+                    (reset! tail (let [t (str @tail line "\n")]
+                                   (subs t (max 0 (- (count t) 4000)))))
+                    (on-line line)))]
+    (loop []
+      (let [{:keys [done value]} (let [r (js-await (.read reader))]
+                                   {:done (.-done r) :value (.-value r)})]
+        (when-not done
+          (swap! buf str (.decode decoder value #js {:stream true}))
+          (let [parts (.split @buf "\n")]
+            (reset! buf (.pop parts))
+            (doseq [line parts] (take! line)))
+          (recur))))
+    (take! @buf)
+    {:last @lst :tail @tail}))
+
 (defn ^:async run-in-worktree [opts cfg]
-  (let [{:keys [api agent-name task model-override max-steps signal command timeout-ms]} opts
+  (let [{:keys [api agent-name task model-override max-steps signal command timeout-ms on-progress]} opts
         provider (cfg-get cfg :provider "provider")
         model-id (or model-override (cfg-get cfg :model "model"))
         allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
@@ -252,14 +281,32 @@ intermediate tool calls, so put everything that matters in the summary.")
             ;; Cancelling the parent's turn ends the child too.
             kill (fn [] (try (.kill proc) (catch :default _ nil)))
             _    (some-> signal (.addEventListener "abort" kill #js {:once true}))
+            spec (if provider (str provider "/" model-id) model-id)
+            live (atom {:input 0 :output 0})
+            steps (atom 0)
+            ;; Tokens as they land, so a budget sees a child it cannot reach
+            ;; any other way. The cost comes with the result, once.
+            on-line (fn [line]
+                      (when-let [m (try (js/JSON.parse line) (catch :default _ nil))]
+                        (case (.-type m)
+                          "usage" (let [i (or (.-inputTokens m) 0) o (or (.-outputTokens m) 0)]
+                                    (swap! live (fn [t] (-> t (update :input + i) (update :output + o))))
+                                    (bill-parent! api {:model spec :input i :output o :cost 0
+                                                       :cache-read 0 :cache-write 0}))
+                          "tool_execution_start"
+                          (when on-progress
+                            (on-progress (progress-line agent-name (swap! steps inc)
+                                                        {:toolName (.-toolName m) :args (.-args m)})))
+                          nil)))
             ;; Both pipes drained AT ONCE: reading stdout to EOF first left a
             ;; child that filled the stderr pipe (64 KB of warnings) blocked on
             ;; the write, stdout never closing, and the parent waiting forever.
-            [out err] (js-await (js/Promise.all #js [(.text (js/Response. (.-stdout proc)))
-                                                    (.text (js/Response. (.-stderr proc)))
-                                                    (.-exited proc)]))
+            [lines err] (js-await (js/Promise.all #js [(read-lines (.-stdout proc) on-line)
+                                                       (.text (js/Response. (.-stderr proc)))
+                                                       (.-exited proc)]))
             _    (some-> signal (.removeEventListener "abort" kill))
-            res  (try (js/JSON.parse out) (catch :default _ nil))
+            out  (:tail lines)
+            res  (try (js/JSON.parse (:last lines)) (catch :default _ nil))
             ;; Separately guarded: the child's answer is worth returning even
             ;; when closing its checkout fails — which then stays for the user.
             done (try (wt/finish! tree (str "nyma subagent " agent-name ": " (subs (str task) 0 (min 60 (count (str task))))))
@@ -284,9 +331,10 @@ intermediate tool calls, so put everything that matters in the summary.")
                             "\nMerge with: git merge " (:branch done))
                        :else "No file changes; the worktree was removed."))
          ;; Its --no-session skips nyma.db, so this is the only record of it.
-         :usage {:model  (if provider (str provider "/" model-id) model-id)
-                 :input  (or (some-> res .-usage .-input_tokens) 0)
-                 :output (or (some-> res .-usage .-output_tokens) 0)
+         ;; What `on-line` billed is not billed again.
+         :usage {:model  spec
+                 :input  (max 0 (- (or (some-> res .-usage .-input_tokens) 0) (:input @live)))
+                 :output (max 0 (- (or (some-> res .-usage .-output_tokens) 0) (:output @live)))
                  :cache-read  (or (some-> res .-usage .-cache_read_input_tokens) 0)
                  :cache-write (or (some-> res .-usage .-cache_creation_input_tokens) 0)
                  :cost   (or (some-> res .-total_cost_usd) 0.0)
@@ -404,6 +452,13 @@ intermediate tool calls, so put everything that matters in the summary.")
       ;; Queued items of a fan-out reach here after the abort: none may start.
       (some-> signal .-aborted)
       {:agent agent-name :ok false :status "cancelled" :text "cancelled"}
+
+      ;; A model that keeps delegating spends without limit: depth caps the
+      ;; tree, not its width over a run.
+      (and (:max-children opts) (> (swap! spawned inc) (:max-children opts)))
+      {:agent agent-name :ok false
+       :text (str "Subagent limit reached for this run (" (:max-children opts)
+                  "). Finish with what you have; subagent.max-children raises it.")}
 
       (nil? cfg)
       {:agent agent-name :ok false
@@ -744,7 +799,8 @@ intermediate tool calls, so put everything that matters in the summary.")
           base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
                                 :steps-ceiling ceiling :isolation (.-isolation args) :signal signal
                                 :timeout-ms (when-let [s (get (:subagent ((:get settings-mgr))) "timeout-seconds")]
-                                              (* 1000 s))}
+                                              (* 1000 s))
+                                :max-children (or (get (:subagent ((:get settings-mgr))) "max-children") 16)}
                          (steps-arg (.-steps args) ceiling)
                          (assoc :max-steps (steps-arg (.-steps args) ceiling)))
           async?       (let [s    ((:get settings-mgr))
@@ -807,6 +863,8 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; ---------------------------------------------------------------------------
 
 (defn ^:export default [api]
+  (when (aget api "on")
+    (.on api "agent_start" (fn [_ _] (reset! spawned 0) nil)))
   ;; A worktree child is a whole nyma: without this it could delegate too.
   (when-not (aget js/process.env child-env)
   (.registerTool

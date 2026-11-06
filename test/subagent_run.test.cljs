@@ -443,6 +443,16 @@
                                      (-> (tool-execute #js {} #js {:action "message" :job "nope-1" :task "x"})
                                          (.then (fn [s] (-> (expect s) (.toContain "No subagent")))))))))
 
+(defn ^:async test-spawn-cap []
+  (let [start  (fn [] (run-on (scripted text-chunks) {:max-children 1}))
+        before (js-await (run-on (scripted text-chunks) {:max-children 100000}))
+        _      before
+        r      (js-await (start))]
+    (-> (expect (:ok r)) (.toBe false))
+    (-> (expect (:text r)) (.toContain "limit reached"))))
+
+(describe "subagent:spawn-cap" (fn [] (it "a run cannot start children without end" test-spawn-cap)))
+
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)
                              (it "an aborted fan-out starts nothing" test-aborted-never-starts)
