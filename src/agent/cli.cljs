@@ -405,7 +405,7 @@ Examples:
                      (when-not @done
                        (warn! (if (seq @chunks)
                                 "stdin is still open; using what arrived so far."
-                                "nothing on stdin yet and it is still open, so running without it. For slow input, save it first and use `< file`."))
+                                "nothing on stdin yet and it is still open, so running without it. To wait for it, end the command with `-`."))
                        (finish)))
            arm!   (fn [ms]
                     (when-let [t @timer] (js/clearTimeout t))
@@ -448,6 +448,14 @@ Examples:
    felt, long enough for a pipe that is mid-write."
   150)
 
+(defn stdin-operand
+  "positionals → [prompt wait?]. A `-` after the prompt, or alone, is POSIX's
+   name for stdin: read it to EOF. The bounds exist because an open pipe and a
+   slow one look the same from here, and only the caller knows which it has."
+  [positionals]
+  (let [wait? (= "-" (last positionals))]
+    [(first (if wait? (butlast positionals) positionals)) wait?]))
+
 (defn- ^:async resolve-one-shot-prompt
   "For print/json modes: combine the positional prompt with piped stdin.
    - positional only            → positional
@@ -460,7 +468,7 @@ Examples:
   ;; core/pos? for every later binding — the stdin branch below then called a
   ;; boolean and print mode died with "pos_QMARK_2 is not a function" whenever
   ;; stdin was not a TTY, i.e. in every pipe, script and CI invocation.
-  (let [pos      (first positionals)
+  (let [[pos wait?] (stdin-operand positionals)
         has-pos? (and (string? pos) (pos? (count pos)))
         piped?   (not (.-isTTY (.-stdin js/process)))
         ;; Bounded ONLY when a positional prompt is also present. With a
@@ -471,7 +479,7 @@ Examples:
         ;; EOF is the only correct thing to do.
         stdin    (when piped?
                    (js-await (read-stdin-string
-                              (when has-pos? stdin-with-prompt-timeout-ms))))]
+                              (when (and has-pos? (not wait?)) stdin-with-prompt-timeout-ms))))]
     (combine-prompt pos stdin)))
 
 (def output-formats #{"text" "json" "stream-json"})

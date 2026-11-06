@@ -142,3 +142,15 @@
          ;; was unbounded. Anything under 20s proves it is not waiting on EOF.
                                              (-> (expect #js [ms (< ms 20000)]) (.toEqual #js [ms true]))))
                                          30000)))
+
+(describe "stdin-operand"
+          (fn []
+            (it "a trailing - waits for stdin, and is not the prompt"
+                (fn []
+                  (-> (expect (cli/stdin-operand ["why" "-"])) (.toEqual #js ["why" true]))
+                  (-> (expect (first (cli/stdin-operand ["-"]))) (.toBeFalsy))
+                  (-> (expect (second (cli/stdin-operand ["-"]))) (.toBe true))))
+            (it "no operand keeps the bounded read"
+                (fn []
+                  (-> (expect (cli/stdin-operand ["why"])) (.toEqual #js ["why" false]))
+                  (-> (expect (second (cli/stdin-operand []))) (.toBe false))))))
