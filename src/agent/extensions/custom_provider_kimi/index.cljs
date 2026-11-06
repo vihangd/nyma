@@ -88,6 +88,10 @@
             (aset body "chat_template_kwargs" kwargs)
             (when (nil? (.-preserve_thinking body))
               (aset body "preserve_thinking" true))
+            ;; Refused otherwise: "invalid temperature: only 1 is allowed for
+            ;; this model". Its value depends on the thinking mode, so the
+            ;; server picks.
+            (js-delete body "temperature")
             (js/JSON.stringify body))
           (catch :default _ lifted))))))
 

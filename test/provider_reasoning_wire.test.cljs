@@ -101,6 +101,12 @@
                   (let [b (rewrite (kimi/make-request-rewriter "kimi-k2.6") nil)]
                     (-> (expect (.-thinking (.-chat_template_kwargs b))) (.toBe false)))))
 
+            (it "sends no temperature to a thinking model, which refuses nyma's"
+                (fn []
+                  (let [body (js/JSON.stringify #js {:model "kimi-k2.6" :temperature 0.2 :messages #js []})
+                        b    (rewrite (kimi/make-request-rewriter "kimi-k2.6") body)]
+                    (-> (expect (.-temperature b)) (.toBeUndefined)))))
+
             (it "on for a thinking model when a level is set"
                 (fn []
                   (reset! kimi/level-fn-atom (fn [] "medium"))
