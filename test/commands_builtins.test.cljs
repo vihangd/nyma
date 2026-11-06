@@ -705,3 +705,27 @@
                   (-> (expect (coerce-setting-value " 42 ")) (.toBe 42))
                   (-> (expect (coerce-setting-value "false")) (.toBe false))
                   (-> (expect (coerce-setting-value "claude-opus-5")) (.toBe "claude-opus-5"))))))
+
+(describe "session switch"
+          (fn []
+            (doseq [[label switch!] [["/new" builtins/new-session!]
+                                     ["/resume" (fn [a] (builtins/replay-session! a "/tmp/other.jsonl"))]]]
+              (it (str label " leaves no totals from the last session")
+                  (fn []
+                    (let [agent (make-agent-with-builtins)]
+                      (swap! (:state agent) assoc :total-cost 3 :total-input-tokens 9 :total-steps 2
+                             :cost-unknown? true :prior-cost 1)
+                      (switch! agent)
+                      (let [st @(:state agent)]
+                        (-> (expect (:total-cost st)) (.toBe 0))
+                        (-> (expect (:total-input-tokens st)) (.toBe 0))
+                        (-> (expect (:total-steps st)) (.toBe 0))
+                        (-> (expect (:cost-unknown? st)) (.toBeUndefined))
+                        (-> (expect (:prior-cost st)) (.toBeUndefined)))))))
+
+            (it "/clear stays in its session, so its spend stands"
+                (fn []
+                  (let [agent (make-agent-with-builtins)]
+                    (swap! (:state agent) assoc :total-cost 3)
+                    ((:dispatch! (:store agent)) :messages-cleared {})
+                    (-> (expect (:total-cost @(:state agent))) (.toBe 3)))))))

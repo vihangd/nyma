@@ -96,6 +96,16 @@
                                               :compacted-at-count 0
                                               :last-input-tokens 0
                                               :last-cache-read 0))
+   ;; A different session, so none of these describe it. Not in :messages-cleared:
+   ;; /clear stays in its session, and what that session spent stands.
+   ;; :extension-tokens stays: budget diffs it, and it only ever grows.
+   :session-switched (fn [state _data]
+                       (-> state
+                           (assoc :total-input-tokens 0 :total-output-tokens 0
+                                  :total-cache-read-tokens 0 :total-cache-write-tokens 0
+                                  :total-cost 0.0 :total-steps 0 :turn-count 0)
+                           (dissoc :run-cost :run-steps :cost-unknown?
+                                   :prior-cost :prior-cost-unknown?)))
    ;; Wholesale replacement (context relief pruning). Goes through the store
    ;; so subscribers see it, instead of a raw swap! on the shared atom.
    :messages-replaced (fn [state data]

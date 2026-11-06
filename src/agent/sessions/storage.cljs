@@ -141,14 +141,18 @@
                     "SELECT SUM(input_tokens) as total_input,
                             SUM(output_tokens) as total_output,
                             SUM(cost_usd) as total_cost,
-                            COUNT(*) as turn_count
+                            SUM(COALESCE(turn_id, '') != 'extension') as turn_count
                        FROM usage WHERE session_file = ?")
-             row (first (.all stmt session-file))]
+             row (first (.all stmt session-file))
+             models (.prepare db
+                      "SELECT DISTINCT model FROM usage
+                        WHERE session_file = ? AND input_tokens > 0")]
          (when row
            {:total-input-tokens  (or (.-total_input row) 0)
             :total-output-tokens (or (.-total_output row) 0)
             :total-cost          (or (.-total_cost row) 0)
-            :turn-count          (or (.-turn_count row) 0)})))
+            :turn-count          (or (.-turn_count row) 0)
+            :models              (mapv #(.-model %) (.all models session-file))})))
 
      :upsert-branch-summary
      (fn [summary-map]

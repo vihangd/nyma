@@ -753,6 +753,7 @@
                   (when-let [file ((:get-file-path sess))]
                     ((:switch-file sess) (new-session-path (path/dirname file))))))]
     ((:dispatch! (:store agent)) :messages-cleared {})
+    ((:dispatch! (:store agent)) :session-switched {})
     ((:emit (:events agent)) "session_start" {:reason "new"})
     fresh))
 
@@ -777,6 +778,7 @@
     (try
       (skills/deactivate-all-skills! agent)
       ((:dispatch! (:store agent)) :messages-cleared {})
+      ((:dispatch! (:store agent)) :session-switched {})
       (doseq [msg (session->seed-messages ((:build-context sm)))]
         ((:dispatch! (:store agent)) :message-added {:message msg}))
       (finally

@@ -47,6 +47,17 @@
          :outputTokens (or (:total-output-tokens s) 0)
          :messageCount (count (:messages s))}))
 
+(defn load-prior-usage!
+  "What the current session spent in earlier processes. Apart from the totals on
+   purpose: `-p` reports those per run, and /stats reads them as this process's."
+  [agent sqlite]
+  (when-let [file-of (some-> @(:session agent) :get-file-path)]
+    (when-let [file (file-of)]
+      (let [{:keys [total-cost models]} ((:get-session-usage sqlite) file)]
+        (swap! (:state agent) assoc
+               :prior-cost total-cost
+               :prior-cost-unknown? (boolean (some #(not (pricing/priced? %)) models)))))))
+
 (defn usage-row
   "The `usage` row for a store event, nil when the event is not spend."
   [agent event-type data]
@@ -1013,7 +1024,10 @@ Examples:
              (when-let [row (usage-row agent event-type data)]
                (try
                  ((:record-usage sqlite) row)
-                 (catch :default e (d/debug "sqlite" (str "usage row: " (.-message e)))))))))
+                 (catch :default e (d/debug "sqlite" (str "usage row: " (.-message e))))))))
+          (load-prior-usage! agent sqlite)
+          ;; /resume and pi-rpc's switch land on a session with a history too.
+          ((:on (:events agent)) "session_start" (fn [_] (load-prior-usage! agent sqlite))))
         (catch :default e
           (d/warn "sqlite" (str "store unavailable: " (.-message e))))))
 

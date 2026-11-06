@@ -13,7 +13,8 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
             [agent.commands.builtins :refer [register-builtins]]
-            [agent.cli :refer [usage-row agent-stats
+            [agent.pricing :as pricing]
+            [agent.cli :refer [usage-row load-prior-usage! agent-stats
                                sigint-action
                                emit-session-ready!
                                emit-session-shutdown!
@@ -270,3 +271,37 @@
                     ((:on (:events agent)) "session_shutdown" (fn [_] (swap! shut inc)))
                     ((:handler (get @(:commands agent) "exit")) [] nil)
                     (-> (expect @shut) (.toBe 0)))))))
+
+;;; ─── a session's history ────────────────────────────────────────────
+
+(defn- agent-on-file [file]
+  (let [agent (create-agent {:model "test-model" :system-prompt "x"})]
+    (reset! (:session agent) {:get-file-path (fn [] file)})
+    agent))
+
+(defn- store-of [rows]
+  {:get-session-usage (fn [_] rows)})
+
+(describe "cli/load-prior-usage!"
+          (fn []
+            (it "keeps what earlier processes spent apart from the totals"
+                (fn []
+                  (let [agent (agent-on-file "s.jsonl")]
+                    (swap! pricing/token-costs assoc "x/priced" [1 1])
+                    (load-prior-usage! agent (store-of {:total-cost 1.5 :models ["x/priced"]}))
+                    (swap! pricing/token-costs dissoc "x/priced")
+                    (-> (expect (:prior-cost @(:state agent))) (.toBe 1.5))
+                    (-> (expect (:prior-cost-unknown? @(:state agent))) (.toBe false))
+                    (-> (expect (:total-cost @(:state agent))) (.toBe 0)))))
+
+            (it "an unpriced model in the history leaves the figure a floor"
+                (fn []
+                  (let [agent (agent-on-file "s.jsonl")]
+                    (load-prior-usage! agent (store-of {:total-cost 1 :models ["x/never-priced"]}))
+                    (-> (expect (:prior-cost-unknown? @(:state agent))) (.toBe true)))))
+
+            (it "a session with no file has no history"
+                (fn []
+                  (let [agent (agent-on-file nil)]
+                    (load-prior-usage! agent (store-of {:total-cost 9 :models []}))
+                    (-> (expect (:prior-cost @(:state agent))) (.toBeUndefined)))))))

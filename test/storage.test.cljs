@@ -90,6 +90,20 @@
           (-> (expect (:turn-count usage)) (.toBe 2)))
         ((:close store)))))
 
+  (it "get-session-usage counts turns, not extension rows, and lists paid models"
+    (fn []
+      (let [store (make-store)]
+        ((:upsert-usage store) {:session-file "s1" :turn-id "t1" :model "a/m"
+                                 :input-tokens 100 :output-tokens 50 :cost-usd 0.01})
+        ((:upsert-usage store) {:session-file "s1" :turn-id "extension" :model "b/m"
+                                 :input-tokens 100 :output-tokens 50 :cost-usd 0.01})
+        ((:upsert-usage store) {:session-file "s1" :turn-id "t2" :model "c/m"
+                                 :input-tokens 0 :output-tokens 0 :cost-usd 0})
+        (let [usage ((:get-session-usage store) "s1")]
+          (-> (expect (:turn-count usage)) (.toBe 2))
+          (-> (expect (.sort (vec (:models usage)))) (.toEqual #js ["a/m" "b/m"])))
+        ((:close store)))))
+
   (it "get-session-usage for unknown session returns zeros"
     (fn []
       (let [store (make-store)]

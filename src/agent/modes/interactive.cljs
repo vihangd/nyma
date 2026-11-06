@@ -730,10 +730,11 @@
                                          ;; figures each step; the provider's own
                                          ;; input count is the context fill, not
                                          ;; the tree-walking estimate.
-                                         :cost-usd   (+ (or (:total-cost st) 0) (or (:run-cost st) 0))
+                                         :cost-usd   (+ (or (:total-cost st) 0) (or (:run-cost st) 0)
+                                                        (or (:prior-cost st) 0))
                                          :run-steps  (:run-steps st)
                                          :last-cache-read (:last-cache-read st)
-                                         :cost-unknown? (:cost-unknown? st)
+                                         :cost-unknown? (or (:cost-unknown? st) (:prior-cost-unknown? st))
                                          ;; In the store since the cache-token
                                          ;; work and never passed on, so
                                          ;; cache-read/cache-write could not
@@ -1384,7 +1385,7 @@
                                                              (catch :default _ nil)))
                               :file-path     (when sess (try ((:get-file-path sess))
                                                              (catch :default _ nil)))
-                              :total-cost    (:total-cost st)})]
+                              :total-cost    (:prior-cost st)})]
               (note banner)
               (note kbr/first-launch-hint)))))
 
