@@ -598,6 +598,9 @@
                                 (dbg/warn "extensions" (str "emitGlobal refused: `" event
                                                           "` is a permission-gate event only the core may emit"))
                                 ((:emit (:events agent)) event data)))
+         ;; Only a mode with a submit path answers `turn_request`; anywhere else
+         ;; the emit reaches nobody and the text is lost.
+         :canStartTurn      (fn [] (pos? ((:handler-count (:events agent)) "turn_request")))
 
        ;; ── Flags ──────────────────────────────────────────────
        ;; The pending-argv lookup matters: extensions load (cli.cljs)

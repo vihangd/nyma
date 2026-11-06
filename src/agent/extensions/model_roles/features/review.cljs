@@ -54,11 +54,12 @@
                                 #js {:raw true :abortSignal signal}))))
 
 (defn- start-turn!
-  "A queued follow-up is drained only when a run ends, and nothing runs here."
+  "A queued message waits for a run, and none is running. Where no mode can start
+   one (pi-rpc, acp) it still reaches the next prompt."
   [api text]
-  (if-let [emit (aget api "emitGlobal")]
-    (emit "turn_request" #js {:text text})
-    ((aget api "sendUserMessage") text #js {:deliverAs "followUp"})))
+  (if (and (aget api "canStartTurn") (.canStartTurn api))
+    (.emitGlobal api "turn_request" #js {:text text})
+    ((aget api "sendUserMessage") text)))
 
 (defn ^:async run!
   "The /review flow."

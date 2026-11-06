@@ -83,6 +83,7 @@
    ;; its own is the one that has to report what it spent.
    :recordModelUsage :model
    :emitGlobal :events
+   :canStartTurn :events
    :getState :state
    :dispatch :state
    :dispatchState :state

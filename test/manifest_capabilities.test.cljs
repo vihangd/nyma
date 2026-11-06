@@ -11,7 +11,7 @@
 
 ;; Gated methods → required capability (from extension_scope.cljs).
 (def ^:private method->cap
-  {"on" "events" "off" "events" "emitGlobal" "events"
+  {"on" "events" "off" "events" "emitGlobal" "events" "canStartTurn" "events"
    "registerTool" "tools" "unregisterTool" "tools"
    "getActiveTools" "tools" "getAllTools" "tools" "getTool" "tools" "setActiveTools" "tools" "executeTool" "tools"
    "overrideTool" "tools-override" "unoverrideTool" "tools-override"

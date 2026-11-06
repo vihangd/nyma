@@ -20,15 +20,17 @@
     d))
 
 (defn- harness [confirm seen]
-  (let [notes (atom []) overlay (atom nil) sent (atom nil) reply (atom nil)]
-    {:notes notes :overlay overlay :sent sent
+  (let [notes (atom []) overlay (atom nil) sent (atom nil) reply (atom nil) queued (atom nil)]
+    {:notes notes :overlay overlay :sent sent :queued queued
      :reply reply
      :api #js {:settings (fn [& _] {:roles {}})
                :getTool (fn [n] (when (= n "subagent__subagent")
                                   #js {:execute (fn [args _]
                                                   (reset! seen args)
                                                   (js/Promise.resolve @reply))}))
-               :emitGlobal (fn [evt d] (when (= evt "turn_request") (reset! sent (.-text d))))}
+               :canStartTurn (fn [] true)
+               :emitGlobal (fn [evt d] (when (= evt "turn_request") (reset! sent (.-text d))))
+               :sendUserMessage (fn [m] (reset! queued m))}
      :ctx #js {:ui #js {:notify      (fn [m _] (swap! notes conj m))
                         :showOverlay (fn [t] (reset! overlay t))
                         :confirm     (fn [_] (js/Promise.resolve confirm))}}}))
@@ -60,6 +62,17 @@
     (-> (expect @sent) (.toBeNull))
     (fs/rmSync d #js {:recursive true})))
 
+(defn ^:async test-no-submit-path []
+  (let [d (repo) seen (atom nil)
+        {:keys [api ctx sent queued reply]} (harness true seen)]
+    (aset api "canStartTurn" (fn [] false))
+    (fs/writeFileSync (path/join d "a.txt") "two\n")
+    (reset! reply (found "a.txt:1 — high — x — y"))
+    (js-await (review/run! api [] ctx {:cwd d}))
+    (-> (expect @sent) (.toBeNull))
+    (-> (expect @queued) (.toContain "a.txt:1"))
+    (fs/rmSync d #js {:recursive true})))
+
 (defn ^:async test-base-and-guards []
   (let [d (repo) seen (atom nil)
         {:keys [api ctx notes sent reply]} (harness false seen)]
@@ -83,5 +96,6 @@
 (describe "/review"
           (fn []
             (it "reviews uncommitted changes and hands findings to the agent" test-uncommitted)
-            (it "reports a failed child instead of calling it clean" test-child-failed)
+            (it "keeps the fix request where no mode can start a turn" test-no-submit-path)
+(it "reports a failed child instead of calling it clean" test-child-failed)
 (it "reviews since a base; guards bad revisions" test-base-and-guards)))
