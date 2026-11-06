@@ -102,7 +102,13 @@
   (let [m (str/lower-case (str msg))]
     (when (seq m)
       (some (fn [[kind pats]]
-              (when (some (fn [p] (.includes m p)) pats) kind))
+              (when (some (fn [p]
+                            ;; A status code, not digits inside "250000 tokens".
+                            (if (.test #"^\d+$" p)
+                              (.test (js/RegExp. (str "(?<!\\d)" p "(?!\\d)")) m)
+                              (.includes m p)))
+                          pats)
+                kind))
             error-patterns))))
 
 (defn retryable?

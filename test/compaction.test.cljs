@@ -387,7 +387,9 @@
                 (fn []
                   ;; Retrying a rate limit by compacting would throw away
                   ;; context for nothing.
-                  (doseq [m ["429 rate limit exceeded" "ECONNREFUSED" "invalid api key"]]
+                  (doseq [m ["429 rate limit exceeded" "ECONNREFUSED" "invalid api key"
+                             "max_tokens must be less than 8192"
+                             "file size exceeds the maximum allowed"]]
                     (-> (expect (cmp/context-overflow-error? #js {:message m})) (.toBe false)))))
 
             (it "survives a nil or string error"

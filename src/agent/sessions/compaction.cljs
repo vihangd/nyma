@@ -890,7 +890,8 @@ Keep the summary concise but preserve all actionable information.")
   ;; Providers phrase this a dozen ways and none of them is a stable code.
   ["context length" "context_length" "maximum context" "context window"
    "too many tokens" "prompt is too long" "input is too long"
-   "reduce the length" "exceeds the maximum" "max_tokens" "token limit"])
+   "reduce the length" "exceeds the maximum number of tokens" "exceed context"
+   "token limit"])
 
 (defn context-overflow-error?
   "Is this provider error 'your prompt does not fit'?
@@ -902,30 +903,29 @@ Keep the summary concise but preserve all actionable information.")
     (boolean (some #(str/includes? msg %) overflow-patterns))))
 
 (defn ^:async recover-from-overflow!
-  "Compact and rebuild `st-config`'s messages after a context-overflow error.
+  "Compact after a context-overflow error. True if the history got shorter; the
+   caller rebuilds its request from `build-context`. Never throws: the overflow
+   is the error worth reporting, not a failed summary.
 
    The safety net pi and OpenCode V2 both have and nyma did not. It matters
    most where the declared context window is wrong or missing — relay and local
    providers — because then the threshold trigger cannot know it should have
    fired. Forced: the estimate already proved wrong by overflowing, so its
-   opinion is worthless here.
-
-   Mutating st-config in place is the documented contract for this object
-   (loop.cljs: 'extensions can MUTATE st-config in place'); it is nyma's own
-   request config, not the model's tool-call args."
-  [agent st-config]
+   opinion is worthless here."
+  [agent]
   (when-let [session (some-> (:session agent) deref)]
-    (js-await (compact session
-                       (:model (:config agent))
-                       (:events agent)
-                       (merge {:model-registry (:model-registry agent)
-                               :model-key (model-info/config-model-key (:config agent))
-                               :state-atom (:state agent)}
-                              (settings->opts (resolve-settings (:settings agent)))
-                              {:force? true})))
-    (let [rebuilt ((:build-context session))]
-      (aset st-config "messages" (clj->js rebuilt))
-      (d/warn "[compaction] context overflow — compacted and retrying"
-              {:messages (count rebuilt)})
-      true)))
+    (try
+      (let [done (js-await (compact session
+                                    (:model (:config agent))
+                                    (:events agent)
+                                    (merge {:model-registry (:model-registry agent)
+                                            :model-key (model-info/config-model-key (:config agent))
+                                            :state-atom (:state agent)}
+                                           (settings->opts (resolve-settings (:settings agent)))
+                                           {:force? true})))]
+        (when done (d/warn "[compaction] context overflow — compacted"))
+        (some? done))
+      (catch :default e
+        (d/warn "[compaction] overflow recovery failed:" (.-message e))
+        false))))
 

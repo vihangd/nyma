@@ -685,6 +685,8 @@
                 turn-finish (atom nil)
                 ;; One overflow recovery per turn — a second is a real error.
                 overflow-recovered? (atom false)
+                ;; This pass ended on an overflow it could not recover from.
+                overflowed? (atom false)
                 ;; A block is NOT a real turn outcome (no plan/answer produced) —
                 ;; flag it so turn_finalize carries error=true and the plan gate
                 ;; skips (notifies) instead of running its approval flow on the
@@ -719,51 +721,41 @@
                         (try
                           (js-await (streamText st-config))
                           (catch :default e
-                            ;; Context overflow: compact and retry ONCE. The
-                            ;; threshold trigger cannot help when the declared
-                            ;; window is wrong or missing, which is exactly the
-                            ;; case for relay and local providers. A second
-                            ;; overflow is a real error, never a loop.
-                            (if (and (compaction/context-overflow-error? e)
-                                     (not @overflow-recovered?))
-                              (do (reset! overflow-recovered? true)
-                                  (js-await (compaction/recover-from-overflow! agent st-config))
-                                  (js-await (streamText st-config)))
-                              (let [err-result (js-await
-                                                (emit-collect "provider_error"
-                                                              #js {:error   e
-                                                                   :message (.-message e)
-                                                                   :model   model-id
-                                                                   :config  st-config}))]
-                                (if (get err-result "retry")
-                                  ;; Looped, not single-shot: a fallback chain
-                                  ;; with two entries could otherwise never get
-                                  ;; past the first, because a second throw here
-                                  ;; left no one to ask. Bounded at 4 — a chain
-                                  ;; longer than that is a configuration to fix,
-                                  ;; not a condition to ride out.
-                                  (loop [n 0 last-err e]
-                                    (let [r (try
-                                              {:ok (js-await (streamText st-config))}
-                                              (catch :default e2 {:err e2}))]
-                                      (cond
-                                        (:ok r) (:ok r)
-                                        (>= n 3) (throw (with-provider-detail! (:err r)))
-                                        :else
-                                        (let [again (js-await
-                                                     (emit-collect
-                                                      "provider_error"
-                                                      #js {:error   (:err r)
-                                                           :message (.-message (:err r))
-                                                           :model   model-id
-                                                           :config  st-config}))]
-                                          (if (get again "retry")
-                                            (recur (inc n) (:err r))
-                                            (throw (with-provider-detail! (:err r))))))))
-                                  ;; Attach the provider's own explanation
-                                  ;; before this leaves the loop — it is the
-                                  ;; only place the raw error is still in hand.
-                                  (throw (with-provider-detail! e)))))))
+                            (let [err-result (js-await
+                                              (emit-collect "provider_error"
+                                                            #js {:error   e
+                                                                 :message (.-message e)
+                                                                 :model   model-id
+                                                                 :config  st-config}))]
+                              (if (get err-result "retry")
+                                ;; Looped, not single-shot: a fallback chain
+                                ;; with two entries could otherwise never get
+                                ;; past the first, because a second throw here
+                                ;; left no one to ask. Bounded at 4 — a chain
+                                ;; longer than that is a configuration to fix,
+                                ;; not a condition to ride out.
+                                (loop [n 0 last-err e]
+                                  (let [r (try
+                                            {:ok (js-await (streamText st-config))}
+                                            (catch :default e2 {:err e2}))]
+                                    (cond
+                                      (:ok r) (:ok r)
+                                      (>= n 3) (throw (with-provider-detail! (:err r)))
+                                      :else
+                                      (let [again (js-await
+                                                   (emit-collect
+                                                    "provider_error"
+                                                    #js {:error   (:err r)
+                                                         :message (.-message (:err r))
+                                                         :model   model-id
+                                                         :config  st-config}))]
+                                        (if (get again "retry")
+                                          (recur (inc n) (:err r))
+                                          (throw (with-provider-detail! (:err r))))))))
+                                ;; Attach the provider's own explanation
+                                ;; before this leaves the loop — it is the
+                                ;; only place the raw error is still in hand.
+                                (throw (with-provider-detail! e))))))
                         accumulated (atom "")
                         aborted     (atom false)
                         ;; The provider's own explanation, if the stream carried
@@ -784,7 +776,11 @@
                               ;; An error part is a real turn outcome, not a
                               ;; chunk to forward under a nil event name.
                               (when (= "error" (.-type chunk-val))
-                                (let [msg (stream-error-message chunk-val)]
+                                ;; The status text alone says nothing: "prompt
+                                ;; is too long" is in the response body.
+                                (let [e   (.-error chunk-val)
+                                      _   (when (and e (not (string? e))) (with-provider-detail! e))
+                                      msg (stream-error-message chunk-val)]
                                   (reset! stream-error (or msg "stream error"))
                                   (dbg/error "loop" (str "provider stream error: " (or msg chunk-val)))))
                               (if (= evt-type "message_update")
@@ -845,18 +841,38 @@
                       ;; again, commits and deploys included.
                       (let [can-retry? (and (nil? @(:retry-state agent)) (< attempt 2)
                                             (zero? @tools-this-turn))
-                            r          (js-await
-                                        (emit-collect "provider_error"
-                                                      #js {:message @stream-error
-                                                           :source  "stream"
-                                                           :model   model-id
-                                                           :final   (not can-retry?)
-                                                           :config  st-config}))]
-                        (when (and can-retry? (get r "retry"))
-                          (reset! stream-error nil)
-                          (reset! accumulated "")
-                          (reset! (:retry-state agent)
-                                  {:reason "provider-fallback" :inject []}))))
+                            _          (reset! overflowed?
+                                               (compaction/context-overflow-error? @stream-error))
+                            ;; Context overflow: compact and retry ONCE, ahead of
+                            ;; any fallback. The threshold trigger cannot help
+                            ;; when the declared window is wrong or missing, the
+                            ;; case for relay and local providers. A second
+                            ;; overflow is a real error, never a loop.
+                            recovered? (when (and @overflowed? can-retry? (not @overflow-recovered?))
+                                         (reset! overflow-recovered? true)
+                                         (js-await (compaction/recover-from-overflow! agent)))]
+                        (if recovered?
+                          (do
+                            (aset st-config "messages"
+                                  (clj->js (js-await (pdf/lower-for-model (build-context agent) model-key))))
+                            (reset! overflowed? false)
+                            (reset! stream-error nil)
+                            (reset! accumulated "")
+                            (reset! (:retry-state agent)
+                                    {:reason "context-overflow" :inject []}))
+                          (let [r (js-await
+                                   (emit-collect "provider_error"
+                                                 #js {:message @stream-error
+                                                      :source  "stream"
+                                                      :model   model-id
+                                                      :final   (not can-retry?)
+                                                      :config  st-config}))]
+                            (when (and can-retry? (get r "retry"))
+                              (reset! overflowed? false)
+                              (reset! stream-error nil)
+                              (reset! accumulated "")
+                              (reset! (:retry-state agent)
+                                      {:reason "provider-fallback" :inject []}))))))
 
                   ;; Aborted → inject messages and retry (max 2 times)
                     (if-let [retry @(:retry-state agent)]
@@ -896,8 +912,10 @@
                             ;; providers end such a stream cleanly, so `.text`
                             ;; resolves "" and the failure would otherwise be
                             ;; reported as a model that answered with nothing.
+                            ;; An overflow fails even with text: that is the
+                            ;; step before it, mid-work, not an answer.
                             _              (when (and @stream-error
-                                                      (str/blank? (str final-text)))
+                                                      (or @overflowed? (str/blank? (str final-text))))
                                              (throw (js/Error. @stream-error)))
                             usage          (let [{:keys [input output cache-read cache-write]} @step-usage]
                                              #js {:inputTokens  input
@@ -1113,6 +1131,9 @@
            ;; the error path so a failed turn is not summarized as progress.
             (when-not @turn-error
               (js-await (compaction/maybe-auto-compact! agent)))
+            ;; The exception: left as it is, the next prompt overflows too.
+            (when (and @overflowed? (not @overflow-recovered?))
+              (js-await (compaction/recover-from-overflow! agent)))
 
             (if @turn-error
              ;; Surface the error after the gate had its chance (don't drain).

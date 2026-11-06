@@ -54,6 +54,11 @@
                   (-> (expect (esc/error-kind "503 service unavailable")) (.toBe "server"))
                   (-> (expect (esc/error-kind "fetch failed: ECONNRESET")) (.toBe "network"))
                   (-> (expect (esc/error-kind "model not found: nope")) (.toBe "not-found"))))
+
+            (it "a status code is not digits inside a number"
+                (fn []
+                  (-> (expect (esc/error-kind "prompt is too long: 250000 tokens")) (.toBeFalsy))
+                  (-> (expect (esc/error-kind "HTTP 500")) (.toBe "server"))))
             (it "does not treat a real model error as retryable"
                 (fn []
                   (-> (expect (esc/error-kind "invalid tool arguments")) (.toBeFalsy))
