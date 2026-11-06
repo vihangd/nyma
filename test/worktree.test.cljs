@@ -100,7 +100,7 @@
     (aset env "NYMA_NO_MODEL_DISCOVERY" "1")
     (js/process.chdir d)
     (try
-      (let [r (js-await (sub/run-in-worktree {:agent-name "worker" :task "create made.txt"}
+      (let [r (js-await (sub/run-in-worktree {:agent-name "worker" :task "- create made.txt"}
                                              {:provider "faketest" :model "m1"}))]
         (-> (expect (:ok r)) (.toBe true))
         (-> (expect (:text r)) (.toContain "wrote made.txt"))

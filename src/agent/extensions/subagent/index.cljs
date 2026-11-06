@@ -163,7 +163,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                                              :allowed allowed
                                              :steps   max-steps
                                              :mode    (when api (:permission-mode (.getState api)))})
-                             task))
+                             ;; The model writes this: `- fix the bug` is no flag.
+                             "--" task))
             proc (js/Bun.spawn (clj->js argv)
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
                                     :env js/process.env
