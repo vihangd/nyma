@@ -520,10 +520,10 @@
               ;; the session keeps the PDF for a later capable model.
               messages (js-await (pdf/lower-for-model messages model-key))
 
-              ;; Per-step usage sum: on abort the SDK resolves totalUsage as
-              ;; null-usage (finish part never fires), which would record ZERO
-              ;; tokens for exactly the runaway run a budget abort killed —
-              ;; fall back to the sum of completed steps.
+              ;; Per-step usage sum, the pass's bill. `totalUsage` covers one
+              ;; streamText call, so a retry drops every step the discarded
+              ;; attempt paid for, and on abort it resolves null-usage, which
+              ;; would record ZERO for the runaway run a budget abort killed.
               step-usage (atom {:input 0 :output 0 :cache-read 0 :cache-write 0})
 
               ;; Build mutable streamText config
@@ -653,13 +653,18 @@
                                                                        (update :cache-write + cw))))))
                                                 (when-let [tc (.-toolCalls step)]
                                                   (swap! tools-this-turn + (count tc)))
-                                                (emit "turn_end" step)
-                                                (inject-steer-messages! agent)
-                                                ;; Last: the SDK swallows a throw
+                                                ;; Before the emit, so a handler
+                                                ;; reads this step's figures. Caught
+                                                ;; because the SDK swallows a throw
                                                 ;; here, which would skip the rest.
-                                                (swap! state add-live-step
-                                                       (request-cost-key agent @request-config)
-                                                       (.-usage step)))}
+                                                (try
+                                                  (swap! state add-live-step
+                                                         (request-cost-key agent @request-config)
+                                                         (.-usage step))
+                                                  (catch :default e
+                                                    (dbg/error "loop" (str "step cost: " (.-message e)))))
+                                                (emit "turn_end" step)
+                                                (inject-steer-messages! agent))}
 
               _ (reset! request-config st-config)
               ;; before_provider_request — extensions can MUTATE st-config in place
@@ -873,17 +878,13 @@
                             _              (when (and @stream-error
                                                       (str/blank? (str final-text)))
                                              (throw (js/Error. @stream-error)))
-                            usage          (let [u (js-await (.-totalUsage result))]
-                                             ;; Aborted runs resolve null-usage; the
-                                             ;; per-step sum is the truth then.
-                                             (if (and (nil? (.-inputTokens u))
-                                                      (pos? (+ (:input @step-usage) (:output @step-usage))))
-                                               #js {:inputTokens  (:input @step-usage)
-                                                    :outputTokens (:output @step-usage)
-                                                    :inputTokenDetails
-                                                    #js {:cacheReadTokens  (:cache-read @step-usage)
-                                                         :cacheWriteTokens (:cache-write @step-usage)}}
-                                               u))
+                            usage          (let [{:keys [input output cache-read cache-write]} @step-usage]
+                                             #js {:inputTokens  input
+                                                  :outputTokens output
+                                                  :totalTokens  (+ input output)
+                                                  :inputTokenDetails
+                                                  #js {:cacheReadTokens  cache-read
+                                                       :cacheWriteTokens cache-write}})
                             ;; Normalize finishReason to a plain string here, at
                             ;; the single emit point, so every agent_end consumer
                             ;; (finalize_warn, spec_driven, …) sees a string.
@@ -913,18 +914,11 @@
                         (when (and usage store)
                           (let [input-tokens  (or (.-inputTokens usage) 0)
                                 output-tokens (or (.-outputTokens usage) 0)
-                                ;; inputTokens INCLUDES these; the cost fn splits
-                                ;; them out. Same field the event payload below
-                                ;; already reads — the cost line just ignored it,
-                                ;; overstating a cache-heavy turn ~3x.
                                 [cache-read cache-write] (cache-split usage)
                                 cost-model-id (request-cost-key agent st-config)
-                                cost          (calculate-turn-cost
-                                               cost-model-id
-                                               {:input-tokens  input-tokens
-                                                :output-tokens output-tokens
-                                                :cache-read-tokens  cache-read
-                                                :cache-write-tokens cache-write})]
+                                ;; Each step at the rates of the model that ran
+                                ;; it: a fallback can change model mid-pass.
+                                cost          (or (:run-cost @state) 0)]
                             (reset! usage-billed? true)
                             ((:dispatch! store) :usage-updated
                                                 {:input-tokens input-tokens :output-tokens output-tokens
@@ -939,9 +933,8 @@
                               ;; are left alone, so nothing they report can change
                               ;; how we budget for them.
                               ;;
-                              ;; SINGLE-STEP RUNS ONLY. `usage` here is
-                              ;; `totalUsage`, the sum across every step of the
-                              ;; run, while the estimate above describes the FIRST
+                              ;; SINGLE-STEP RUNS ONLY. `usage` here is the sum
+                              ;; across every step of the run, while the estimate above describes the FIRST
                               ;; request. Comparing them on a five-step tool turn
                               ;; reported about five times the content as
                               ;; injection. A one-step turn is the only one where

@@ -7,6 +7,7 @@
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
             [agent.loop :refer [run]]
             [agent.pricing :as pricing]
+            [agent.providers.fallback :as fallback]
             [test-util.agent-harness :refer [make-test-agent]]))
 
 (defn- usage [input]
@@ -130,6 +131,29 @@
       (-> (expect (:total-cache-read-tokens st)) (.toBe 900000))
       (-> (expect (:total-cost st)) (.toBeCloseTo 0.19 6))
       (-> (expect (:run-cost st)) (.toBeUndefined)))))
+
+(defn ^:async test-retry-bills-both-models []
+  ;; A pays for a step that then errors; the fallback to B answers.
+  (let [spent #js [#js {:type "error" :error "boom"}
+                   #js {:type "finish" :finishReason #js {:unified "error" :raw "error"}
+                        :usage (usage 1000000)}]
+        b     (scripted-model [(text-step 1000000)])
+        agent (make-test-agent {:model (scripted-model [spent])})
+        undo  (with-rates! agent)]
+    (swap! pricing/token-costs assoc "b/m" [3 3])
+    ((:on (:events agent)) "provider_error"
+                           (fn [d] (fallback/retarget! (.-config d) b "b/m") #js {:retry true}))
+    (js-await (run agent "go"))
+    (undo)
+    (swap! pricing/token-costs dissoc "b/m")
+    (let [st @(:state agent)]
+      (-> (expect (:total-input-tokens st)) (.toBe 2000000))
+      ;; $1 at A's rates, $3 at B's, and each output token at its own.
+      (-> (expect (:total-cost st)) (.toBeCloseTo 4 3)))))
+
+(describe "loop:retry-usage" (fn []
+                               (it "a discarded attempt is billed, each model at its rates"
+                                   test-retry-bills-both-models)))
 
 (describe "loop:live-usage" (fn []
                               (it "a run that fails after paid steps keeps their spend"

@@ -125,7 +125,7 @@
                            (update :total-cost (fnil + 0.0) (:cost data))
                            (update :total-steps (fnil + 0) (or (:steps data) 0))
                            ;; NB counts RUNS, not model steps — usage is
-                           ;; dispatched once per run from result.totalUsage.
+                           ;; dispatched once per run, the sum of its steps.
                            ;; :total-steps is the per-step figure.
                            (update :turn-count (fnil inc 0))
                            ;; The live figures are in the totals now.
