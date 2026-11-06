@@ -19,42 +19,58 @@
     (git! d "add" ".") (git! d "commit" "-qm" "init")
     d))
 
-(defn- harness [confirm]
-  (let [notes (atom []) overlay (atom nil) sent (atom nil)]
+(defn- harness [confirm seen]
+  (let [notes (atom []) overlay (atom nil) sent (atom nil) reply (atom nil)]
     {:notes notes :overlay overlay :sent sent
+     :reply reply
      :api #js {:settings (fn [& _] {:roles {}})
-               :__state_atom (atom {:model "stub-model"})
-               :sendUserMessage (fn [m] (reset! sent m))}
+               :getTool (fn [n] (when (= n "subagent__subagent")
+                                  #js {:execute (fn [args _]
+                                                  (reset! seen args)
+                                                  (js/Promise.resolve @reply))}))
+               :emitGlobal (fn [evt d] (when (= evt "turn_request") (reset! sent (.-text d))))}
      :ctx #js {:ui #js {:notify      (fn [m _] (swap! notes conj m))
                         :showOverlay (fn [t] (reset! overlay t))
                         :confirm     (fn [_] (js/Promise.resolve confirm))}}}))
 
-(defn- gen-returning [text seen]
-  (fn [opts] (reset! seen opts) (js/Promise.resolve #js {:text text})))
+(defn- found [text] {:ok true :status "done" :text text})
 
 (defn ^:async test-uncommitted []
   (let [d (repo) seen (atom nil)
-        {:keys [api ctx overlay sent]} (harness true)]
+        {:keys [api ctx overlay sent reply]} (harness true seen)]
     (fs/writeFileSync (path/join d "a.txt") "one\ntwo\n")
     (fs/writeFileSync (path/join d "new.txt") "n\n")
-    (js-await (review/run! api [] ctx {:cwd d :gen (gen-returning "a.txt:2 — high — off by one — fix it" seen)}))
-    (-> (expect (.-prompt @seen)) (.toContain "+two"))
-    (-> (expect (.-prompt @seen)) (.toContain "new.txt"))
+    (reset! reply (found "a.txt:2 — high — off by one — fix it"))
+    (js-await (review/run! api [] ctx {:cwd d}))
+    (-> (expect (.-task @seen)) (.toContain "+two"))
+    (-> (expect (.-task @seen)) (.toContain "new.txt"))
+    (-> (expect (.-agent @seen)) (.toBe "reviewer"))
     (-> (expect @overlay) (.toContain "off by one"))
-    ;; confirmed → the findings go to the agent
+    ;; confirmed → the findings start a turn
     (-> (expect @sent) (.toContain "a.txt:2 — high"))
+    (fs/rmSync d #js {:recursive true})))
+
+(defn ^:async test-child-failed []
+  (let [d (repo) seen (atom nil)
+        {:keys [api ctx notes sent reply]} (harness true seen)]
+    (fs/writeFileSync (path/join d "a.txt") "two\n")
+    (reset! reply {:ok false :text "Could not resolve model"})
+    (js-await (review/run! api [] ctx {:cwd d}))
+    (-> (expect (last @notes)) (.toContain "Could not resolve model"))
+    (-> (expect @sent) (.toBeNull))
     (fs/rmSync d #js {:recursive true})))
 
 (defn ^:async test-base-and-guards []
   (let [d (repo) seen (atom nil)
-        {:keys [api ctx notes sent]} (harness false)]
+        {:keys [api ctx notes sent reply]} (harness false seen)]
     (fs/writeFileSync (path/join d "b.txt") "b\n")
     (git! d "add" ".") (git! d "commit" "-qm" "b")
     ;; clean tree: nothing uncommitted, but HEAD~1 has a change
-    (js-await (review/run! api [] ctx {:cwd d :gen (gen-returning "x" seen)}))
+    (js-await (review/run! api [] ctx {:cwd d}))
     (-> (expect (last @notes)) (.toContain "try /review <base>"))
-    (js-await (review/run! api ["HEAD~1"] ctx {:cwd d :gen (gen-returning "No findings." seen)}))
-    (-> (expect (.-prompt @seen)) (.toContain "+b"))
+    (reset! reply (found "No findings."))
+    (js-await (review/run! api ["HEAD~1"] ctx {:cwd d}))
+    (-> (expect (.-task @seen)) (.toContain "+b"))
     (-> (expect (last @notes)) (.toContain "no findings"))
     (-> (expect @sent) (.toBeNull))
     ;; anything a shell would read is refused before it reaches git
@@ -67,4 +83,5 @@
 (describe "/review"
           (fn []
             (it "reviews uncommitted changes and hands findings to the agent" test-uncommitted)
-            (it "reviews since a base; guards bad revisions" test-base-and-guards)))
+            (it "reports a failed child instead of calling it clean" test-child-failed)
+(it "reviews since a base; guards bad revisions" test-base-and-guards)))

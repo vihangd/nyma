@@ -83,7 +83,7 @@ the one handler that needed it never fired.
 | `tool_result` | src/agent/loop.cljs (stream-event-types), src/agent/middleware.cljs | - | - |
 | `turn_end` | src/agent/loop.cljs | src/agent/extensions/budget/index.cljs, src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/subagent/index.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `turn_finalize` | src/agent/loop.cljs | src/agent/extensions/checkpoints/index.cljs, src/agent/extensions/model_roles/features/escalate.cljs, src/agent/extensions/model_roles/features/plan_mode.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/thinking_budget.cljs, src/agent/extensions/subagent/index.cljs, src/agent/extensions/verify_gate/index.cljs, src/agent/modes/pi_rpc.cljs, src/agent/sessions/manager.cljs | error, errorMessage, finishReason, max-steps, no-op-turns, noOpTurns, nudged, state, stepCapped, toolCalls |
-| `turn_request` | src/agent/commands/builtins.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | echo, text |
+| `turn_request` | src/agent/commands/builtins.cljs, src/agent/extensions/model_roles/features/review.cljs, src/agent/extensions/spec_driven/index.cljs | src/agent/modes/interactive.cljs | echo, text |
 | `turn_start` | src/agent/loop.cljs | src/agent/extensions/desktop_notify/index.cljs, src/agent/extensions/small_model/quality_monitor.cljs, src/agent/extensions/small_model/stream_rules.cljs, src/agent/extensions/thinking_renderer/index.cljs, src/agent/middleware/self_reminder.cljs, src/agent/modes/pi_rpc.cljs | - |
 | `user_bash` | src/agent/ui/editor_bash.cljs | - | blocked, command, exit-code, reason, stderr, stdout |
 | `user_eval` | src/agent/ui/editor_eval.cljs | - | blocked, exit-code, expr, reason, stderr, stdout, unavailable |
@@ -107,7 +107,7 @@ that matters least often, which is why this is worth a table of its own.
 | `session_ready` | 2 | cwd, extensions, model | **reason** |
 | `session_start` | 3 | reason | **previousSessionFile** |
 | `spec_task_complete` | 2 | spec, task | **line, line-idx, source, text** |
-| `turn_request` | 2 | text | **echo** |
+| `turn_request` | 3 | text | **echo** |
 | `user_bash` | 2 | blocked, command, exit-code, stderr, stdout | **reason** |
 
 ## pi-compat events

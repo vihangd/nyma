@@ -785,7 +785,7 @@ intermediate tool calls, so put everything that matters in the summary.")
                (assoc-in [:properties "tasks" :items] task-item)
                (assoc-in [:properties "chain" :items] task-item))))
 
-(defn ^:async tool-execute [api args & [signal on-progress]]
+(defn ^:async tool-execute [api args & [signal on-progress raw?]]
   ;; action=status is a pure in-memory read — short-circuit BEFORE touching
   ;; the settings manager / agent .md files (synchronous disk IO), so a
   ;; status poll loop doesn't re-read settings + scan agent dirs each call.
@@ -831,9 +831,10 @@ intermediate tool calls, so put everything that matters in the summary.")
       ;; single
         (and (.-agent args) (.-task args))
         (let [thunk (fn [] (run-single-list base (.-agent args) (.-task args) (.-model args)))]
-          (if async?
-            (js-await (start-async-job api thunk (.-agent args) ctrl))
-            (format-results (js-await (thunk)))))
+          (cond
+            async? (js-await (start-async-job api thunk (.-agent args) ctrl))
+            raw?   (first (js-await (thunk)))
+            :else  (format-results (js-await (thunk)))))
 
         :else
         "subagent: provide {agent, task}, or tasks:[...], or chain:[...], or action:\"status\"."))))
@@ -894,7 +895,11 @@ intermediate tool calls, so put everything that matters in the summary.")
              "isolation:\"worktree\" gives each subagent its own git checkout so it may edit "
              "safely, even in parallel; its work returns as a branch to merge.")
         :parameters tool-parameters
-        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal) (some-> ctx .-onUpdate)))}))
+        ;; ctx.raw is for another extension calling this directly: the result
+        ;; map rather than text, so it need not parse a header. The model has
+        ;; no way to set it.
+        :execute (fn [args ctx] (tool-execute api args (some-> ctx .-abortSignal) (some-> ctx .-onUpdate)
+                                              (some-> ctx .-raw)))}))
 
   (.registerCommand
    api "agents"

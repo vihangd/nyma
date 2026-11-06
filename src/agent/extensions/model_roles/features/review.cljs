@@ -1,13 +1,14 @@
 (ns agent.extensions.model-roles.features.review
   "/review [base] — the `deep` role reviews a diff and returns ranked
-   findings; on confirmation they go to the agent to fix.
+   findings; on confirmation they go to the agent to fix. It runs as a
+   read-only subagent: it can open the code around the change, and what it
+   spends counts.
 
    Reviewing meant installing the pr-review skill or asking /advisor, which
    sees the conversation rather than the change. This reads the change
    itself: `git diff HEAD` (everything uncommitted) by default, or
    `git diff <base>` — committed and uncommitted since base."
-  (:require ["ai" :refer [generateText]]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [agent.utils.git-files :as git]))
 
 (def max-diff-chars 80000)
@@ -38,18 +39,31 @@
 (defn- notify [ui msg level]
   (when (and ui (.-notify ui)) (.notify ui msg level)))
 
-(defn- review-model
-  "The `deep` role's model, else the current one."
-  [api settings]
-  (let [role (get-in settings [:roles :deep])]
-    (or (when (and role (:provider role) (:model role) (aget api "resolveModel"))
-          (try ((aget api "resolveModel") (:provider role) (:model role)) (catch :default _ nil)))
-        (when-let [a (aget api "__state_atom")]
-          (try (:model @a) (catch :default _ nil))))))
+(defn- review-role
+  "The `deep` role, else the read-only reviewer on the current model."
+  [settings]
+  (if (get-in settings [:roles :deep :model]) "deep" "reviewer"))
+
+(defn ^:async ask-child
+  "One read-only child on `role`, by way of the `subagent` tool, so billing, the
+   timeout and the transcript come with it. Its result map, or nil when the
+   subagent extension is off."
+  [api role task & [signal]]
+  (let [tool (try (.getTool api "subagent__subagent") (catch :default _ nil))]
+    (when (and tool (.-execute tool))
+      (js-await ((.-execute tool) #js {:agent role :task task :async false}
+                                  #js {:raw true :abortSignal signal})))))
+
+(defn- start-turn!
+  "A queued follow-up is drained only when a run ends, and nothing runs here."
+  [api text]
+  (if-let [emit (aget api "emitGlobal")]
+    (emit "turn_request" #js {:text text})
+    ((aget api "sendUserMessage") text #js {:deliverAs "followUp"})))
 
 (defn ^:async run!
-  "The /review flow. `gen` is injectable for tests (defaults to generateText)."
-  [api args ctx & [{:keys [gen cwd]}]]
+  "The /review flow."
+  [api args ctx & [{:keys [cwd]}]]
   (let [ui   (some-> ctx .-ui)
         cwd  (or cwd (js/process.cwd))
         root (git/run-git "rev-parse --show-toplevel" cwd)
@@ -75,25 +89,26 @@
                               (when-not base " — try /review <base>, e.g. /review main"))
                       "info")
               nil)
-          (if-let [model (review-model api (.settings api))]
-            (let [_      (notify ui (str "Reviewing changes against " ref "…") "info")
-                  result (js-await ((or gen generateText)
-                                    #js {:model  model
-                                         :system system-prompt
-                                         :prompt (user-prompt {:label     (if base (str "everything since " base) "uncommitted changes")
+          (let [_      (notify ui (str "Reviewing changes against " ref "…") "info")
+                result (js-await (ask-child api (review-role (.settings api))
+                                            (str system-prompt "\n\nRead the code around the change where the diff alone cannot settle it.\n\n"
+                                                 (user-prompt {:label     (if base (str "everything since " base) "uncommitted changes")
                                                                :stat      (git/run-git (str "diff --stat '" ref "'") root)
                                                                :untracked untracked
-                                                               :diff      diff})
-                                         :maxOutputTokens 4096}))
-                  text   (str/trim (str (.-text result)))]
-              (cond
-                (not (findings? text)) (notify ui "/review: no findings." "info")
-                (and ui (.-showOverlay ui)) (.showOverlay ui (str "Review against " ref "\n\n" text))
-                :else (notify ui text "info"))
-              (when (and (findings? text) ui (.-confirm ui) (aget api "sendUserMessage")
-                         (js-await (.confirm ui "Ask the agent to fix these findings?")))
-                ((aget api "sendUserMessage")
-                 (str "Code review findings for " (if base (str "the changes since " base) "the uncommitted changes")
-                      ". Verify each against the code and fix the real ones; say which you rejected and why.\n\n" text)))
-              text)
-            (do (notify ui "/review: no model to review with — set settings.roles.deep." "error") nil)))))))
+                                                               :diff      diff}))))
+                text   (str/trim (str (:text result)))]
+            (cond
+              (nil? result)    (do (notify ui "/review: needs the subagent extension." "error") nil)
+              (not (:ok result)) (do (notify ui (str "/review failed: " text) "error") nil)
+              :else
+              (do
+                (cond
+                  (not (findings? text)) (notify ui "/review: no findings." "info")
+                  (and ui (.-showOverlay ui)) (.showOverlay ui (str "Review against " ref "\n\n" text))
+                  :else (notify ui text "info"))
+                (when (and (findings? text) ui (.-confirm ui)
+                           (js-await (.confirm ui "Ask the agent to fix these findings?")))
+                  (start-turn! api
+                               (str "Code review findings for " (if base (str "the changes since " base) "the uncommitted changes")
+                                    ". Verify each against the code and fix the real ones; say which you rejected and why.\n\n" text)))
+                text))))))))
