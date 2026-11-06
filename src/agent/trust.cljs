@@ -6,7 +6,7 @@
    name commands nyma would otherwise run with no prompt at all: code in
    `.nyma/extensions/` (imported at startup), MCP servers in `.mcp.json` and
    friends (spawned at session start, in every mode), hooks, LSP server
-   commands, `verify.cmd`, ACP agent commands. Subagent definitions count too:
+   commands, `verify.cmd`, `agent-state.command`, ACP agent commands. Subagent definitions count too:
    their tool list is what a child may run. Cloning a repo and starting nyma in
    it was enough.
 
@@ -78,6 +78,8 @@
            {:source (str rel " lsp." id) :detail (js/JSON.stringify (or (aget e "command") (aget e "env")))}))
        (when-let [cmd (some-> (aget obj "verify") (aget "cmd"))]
          [{:source (str rel " verify.cmd") :detail (str cmd)}])
+       (when-let [cmd (some-> (aget obj "agent-state") (aget "command"))]
+         [{:source (str rel " agent-state.command") :detail (js/JSON.stringify cmd)}])
        ;; Not a command, but a repo should not choose what you pay to run.
        (when-let [role (some-> (aget obj "verify") (aget "critic"))]
          [{:source (str rel " verify.critic") :detail (str role)}])
@@ -274,6 +276,8 @@
       (js-delete o "hooks")
       (when-let [v (aget o "verify")]
         (let [v' (js/Object.assign #js {} v)] (js-delete v' "cmd") (js-delete v' "critic") (aset o "verify" v')))
+      (when-let [st (aget o "agent-state")]
+        (let [s' (js/Object.assign #js {} st)] (js-delete s' "command") (aset o "agent-state" s')))
       (when-let [lsp (aget o "lsp")]
         (let [l' #js {}]
           (doseq [id (js/Object.keys lsp)]
