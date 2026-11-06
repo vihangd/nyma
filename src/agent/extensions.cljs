@@ -537,7 +537,8 @@
                                     cw     (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)]
                                 (when (and store (pos? (+ input output)))
                                   ((:dispatch! store) :extension-usage
-                                   {:input-tokens       input
+                                   {:model              (str model-spec)
+                                    :input-tokens       input
                                     :output-tokens      output
                                     :cache-read-tokens  cr
                                     :cache-write-tokens cw

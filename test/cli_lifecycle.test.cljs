@@ -13,7 +13,7 @@
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
             [agent.commands.builtins :refer [register-builtins]]
-            [agent.cli :refer [agent-stats
+            [agent.cli :refer [usage-row agent-stats
                                sigint-action
                                emit-session-ready!
                                emit-session-shutdown!
@@ -21,6 +21,30 @@
 
 (defn- make-agent []
   (create-agent {:model "test" :system-prompt "test"}))
+
+;;; ─── usage-row ───────────────────────────────────────────────────────
+
+(describe "cli/usage-row"
+  (fn []
+    (it "records a run under the model that answered, as a turn"
+        (fn []
+          (let [agent (create-agent {:model "test" :system-prompt "x"})
+                row   (usage-row agent :usage-updated {:request-spec "p/fb" :input-tokens 1
+                                                       :output-tokens 2 :cost 0.5})]
+            (-> (expect (:model row)) (.toBe "p/fb"))
+            (-> (expect (:turn-id row)) (.toBeFalsy)))))
+    (it "records extension spend under its own model, marked as not a turn"
+        (fn []
+          (let [agent (create-agent {:model "test" :system-prompt "x"})
+                row   (usage-row agent :extension-usage {:model "p/child" :input-tokens 1
+                                                         :output-tokens 2 :cost 0.5})]
+            (-> (expect (:model row)) (.toBe "p/child"))
+            (-> (expect (:turn-id row)) (.toBe "extension")))))
+    (it "skips what spent nothing and what is not spend"
+        (fn []
+          (let [agent (create-agent {:model "test" :system-prompt "x"})]
+            (-> (expect (usage-row agent :extension-usage {:model "p/c" :cost 0})) (.toBeFalsy))
+            (-> (expect (usage-row agent :message-added {})) (.toBeFalsy)))))))
 
 ;;; ─── agent-stats ─────────────────────────────────────────────────────
 

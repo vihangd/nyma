@@ -47,6 +47,32 @@
          :outputTokens (or (:total-output-tokens s) 0)
          :messageCount (count (:messages s))}))
 
+(defn usage-row
+  "The `usage` row for a store event, nil when the event is not spend."
+  [agent event-type data]
+  (let [extension? (= event-type :extension-usage)
+        input      (:input-tokens data)
+        output     (:output-tokens data)]
+    (when (or (= event-type :usage-updated)
+              (and extension? (pos? (+ (or input 0) (or output 0)))))
+      {:session-file (str (or (when-let [s @(:session agent)]
+                                (when (fn? (:session-file s)) ((:session-file s))))
+                              ""))
+       :turn-id      (when extension? storage/extension-turn-id)
+       ;; PROVIDER-QUALIFIED, matching the key the cost beside it
+       ;; was priced with. A bare id merged Anthropic-direct and
+       ;; relayed spend for the same model name into one row,
+       ;; totalled from two different rate tables, and nothing in
+       ;; the usage report could say where the money went.
+       :model        (let [m (:model (:config agent))]
+                       (or (:request-spec data)
+                           (:model data)
+                           (model-info/config-model-key (:config agent))
+                           (if (string? m) m (or (and m (.-modelId m)) ""))))
+       :input-tokens  input
+       :output-tokens output
+       :cost          (:cost data)})))
+
 (defn ^:async emit-session-shutdown!
   "Synchronous half of the shutdown sequence (used by the 'exit' handler):
    fires session_shutdown, session_end_summary, then session_end. The
@@ -947,7 +973,7 @@ Examples:
     ;; `api.__sqlite-store` and both shipped with nothing setting it, so the
     ;; picker was always empty and /stats always said "require SQLite storage".
     ;; Cross-session by design (~/.nyma/nyma.db), so --no-session does not
-    ;; disable it. Usage rows come from the store's :usage-updated dispatch.
+    ;; disable it. Usage rows come from the store's usage dispatches.
     (when-not (:no-session values)
       (try
         (let [db-path (npath/join (.. js/process -env -HOME) ".nyma" "nyma.db")
@@ -960,24 +986,9 @@ Examples:
           (aset api "__sqlite-store" sqlite)
           ((:subscribe (:store agent))
            (fn [event-type state data]
-             (when (= event-type :usage-updated)
+             (when-let [row (usage-row agent event-type data)]
                (try
-                 ((:record-usage sqlite)
-                  {:session-file (str (or (when-let [s @(:session agent)]
-                                            (when (fn? (:session-file s)) ((:session-file s))))
-                                          ""))
-                   ;; PROVIDER-QUALIFIED, matching the key the cost beside it
-                   ;; was priced with. A bare id merged Anthropic-direct and
-                   ;; relayed spend for the same model name into one row,
-                   ;; totalled from two different rate tables, and nothing in
-                   ;; the usage report could say where the money went.
-                   :model        (let [m (:model (:config agent))]
-                                   (or (:request-spec data)
-                                       (model-info/config-model-key (:config agent))
-                                       (if (string? m) m (or (and m (.-modelId m)) ""))))
-                   :input-tokens (:input-tokens data)
-                   :output-tokens (:output-tokens data)
-                   :cost         (:cost data)})
+                 ((:record-usage sqlite) row)
                  (catch :default e (d/debug "sqlite" (str "usage row: " (.-message e)))))))))
         (catch :default e
           (d/warn "sqlite" (str "store unavailable: " (.-message e))))))

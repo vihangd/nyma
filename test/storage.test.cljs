@@ -1,6 +1,6 @@
 (ns storage.test
   (:require ["bun:test" :refer [describe it expect afterEach]]
-            [agent.sessions.storage :refer [create-sqlite-store]]))
+            [agent.sessions.storage :as storage :refer [create-sqlite-store]]))
 
 (def ^:private test-db-path ":memory:")
 
@@ -132,6 +132,24 @@
           (-> (expect (count path)) (.toBe 1))
           (-> (expect (:content (first path))) (.toBe "v2")))
         ((:close store)))))
+
+  (it "an extension row is spend, not a turn"
+      (fn []
+        (let [store (storage/create-sqlite-store ":memory:")]
+          ((:record-usage store) {:model "m1" :input-tokens 10 :output-tokens 5 :cost 0.5 :session-file "s"})
+          ((:record-usage store) {:model "m1" :input-tokens 1 :output-tokens 1 :cost 0.25 :session-file "s"
+                                  :turn-id storage/extension-turn-id})
+          ((:record-usage store) {:model "m2" :input-tokens 1 :output-tokens 1 :cost 0.25 :session-file "s"
+                                  :turn-id storage/extension-turn-id})
+          (let [totals ((:get-usage-totals store))
+                by     (into {} (map (fn [m] [(:model m) m]) ((:get-usage-by-model store))))
+                day    (first ((:get-usage-by-day store) 1))]
+            (-> (expect (:total-cost totals)) (.toBeCloseTo 1.0))
+            (-> (expect (:turn-count totals)) (.toBe 1))
+            (-> (expect (:turns (get by "m1"))) (.toBe 1))
+            (-> (expect (:turns (get by "m2"))) (.toBe 0))
+            (-> (expect (:turns day)) (.toBe 1)))
+          ((:close store)))))
 
   (it "record-usage rows are what the dashboard sums"
     (fn []

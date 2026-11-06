@@ -114,6 +114,7 @@
     (-> (expect (:ok r)) (.toBe true))
     (-> (expect (count bills)) (.toBe 1))
     (-> (expect t) (.toBe "extension-usage"))
+    (-> (expect (:model d)) (.toBe "anthropic/m1"))
     (-> (expect (:input-tokens d)) (.toBe 1000000))
     (-> (expect (:cache-read-tokens d)) (.toBe 400))
     (-> (expect (:cost d)) (.toBeCloseTo 1 6))))

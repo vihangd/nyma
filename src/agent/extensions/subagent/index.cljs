@@ -196,7 +196,9 @@ intermediate tool calls, so put everything that matters in the summary.")
                        (str "Worktree branch `" (:branch done) "` (" (:commits done) " commit(s)):\n" (:stat done)
                             "\nMerge with: git merge " (:branch done))
                        :else "No file changes; the worktree was removed."))
-         :usage {:input  (or (some-> res .-usage .-input_tokens) 0)
+         ;; Its --no-session skips nyma.db, so this is the only record of it.
+         :usage {:model  (if provider (str provider "/" model-id) model-id)
+                 :input  (or (some-> res .-usage .-input_tokens) 0)
                  :output (or (some-> res .-usage .-output_tokens) 0)
                  :cache-read  (or (some-> res .-usage .-cache_read_input_tokens) 0)
                  :cache-write (or (some-> res .-usage .-cache_creation_input_tokens) 0)
@@ -211,10 +213,11 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; ---------------------------------------------------------------------------
 
 (defn- child-usage
-  "What a child spent. :run-cost holds steps of a run that died before its usage
-   was folded into the total."
-  [st]
-  {:input  (or (:total-input-tokens st) 0)
+  "What a child on `model` spent. :run-cost holds steps of a run that died before
+   its usage was folded into the total."
+  [st model]
+  {:model  model
+   :input  (or (:total-input-tokens st) 0)
    :output (or (:total-output-tokens st) 0)
    :cache-read  (or (:total-cache-read-tokens st) 0)
    :cache-write (or (:total-cache-write-tokens st) 0)
@@ -226,7 +229,8 @@ intermediate tool calls, so put everything that matters in the summary.")
   [api usage]
   (when-let [dispatch (and api usage (aget api "dispatchState"))]
     (dispatch "extension-usage"
-              {:input-tokens       (:input usage)
+              {:model              (:model usage)
+               :input-tokens       (:input usage)
                :output-tokens      (:output usage)
                :cache-read-tokens  (:cache-read usage)
                :cache-write-tokens (:cache-write usage)
@@ -291,7 +295,7 @@ intermediate tool calls, so put everything that matters in the summary.")
                  :text  (if err
                           (str "Subagent " agent-name " failed: " (.-message err))
                           (final-text (:messages st)))
-                 :usage (child-usage st)}))
+                 :usage (child-usage st (str provider "/" model-id))}))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))

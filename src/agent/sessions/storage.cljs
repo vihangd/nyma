@@ -69,6 +69,10 @@
       (assoc base :metadata (js/JSON.parse meta-str))
       base)))
 
+(def extension-turn-id
+  "The turn_id of a usage row that is spend without being a turn of the agent."
+  "extension")
+
 (defn create-sqlite-store
   "Create a SQLite storage mirror for session data.
    Uses bun:sqlite (synchronous API, fast, built-in).
@@ -206,7 +210,8 @@
 
      ;; The `usage` table had three readers and no writer: the dashboard summed
      ;; rows nothing ever inserted. cli.cljs records one row per run from the
-     ;; store's :usage-updated dispatch.
+     ;; store's :usage-updated dispatch, and one per extension or subagent call
+     ;; from :extension-usage, marked by `extension-turn-id`: spend, not a turn.
      :record-usage
      (fn [{:keys [session-file turn-id model input-tokens output-tokens cost]}]
        (let [stmt (.prepare db
@@ -221,7 +226,8 @@
        (let [stmt (.prepare db
                     "SELECT model, SUM(input_tokens) as total_input,
                             SUM(output_tokens) as total_output,
-                            SUM(cost_usd) as total_cost, COUNT(*) as turns
+                            SUM(cost_usd) as total_cost,
+                            SUM(COALESCE(turn_id, '') != 'extension') as turns
                        FROM usage GROUP BY model ORDER BY total_cost DESC")
              rows (.all stmt)]
          (mapv (fn [row]
@@ -238,7 +244,8 @@
                     "SELECT date(timestamp/1000, 'unixepoch') as day,
                             SUM(input_tokens) as total_input,
                             SUM(output_tokens) as total_output,
-                            SUM(cost_usd) as total_cost, COUNT(*) as turns
+                            SUM(cost_usd) as total_cost,
+                            SUM(COALESCE(turn_id, '') != 'extension') as turns
                        FROM usage GROUP BY day ORDER BY day DESC LIMIT ?")
              rows (.all stmt (or limit 30))]
          (mapv (fn [row]
@@ -255,7 +262,7 @@
                     "SELECT SUM(input_tokens) as total_input,
                             SUM(output_tokens) as total_output,
                             SUM(cost_usd) as total_cost,
-                            COUNT(*) as turn_count,
+                            SUM(COALESCE(turn_id, '') != 'extension') as turn_count,
                             COUNT(DISTINCT session_file) as session_count
                        FROM usage")
              row (first (.all stmt))]
