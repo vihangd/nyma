@@ -4,6 +4,7 @@
    - Structural: verify retry-state atom and event bus semantics (no streamText mock needed)
    - Event shape: verify stream_filter handlers receive and return the right data"
   (:require ["bun:test" :refer [describe it expect]]
+            ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
             [agent.core :refer [create-agent]]
             [agent.loop :refer [run]]))
 
@@ -132,3 +133,65 @@
         ;; exits before the retry loop is entered. Full retry loop tests
         ;; require a streamText mock and live in integration tests.
                                                        (-> (expect true) (.toBe true))))))
+
+;;; ─── a filter abort, end to end ─────────────────────────────────────
+
+(def ^:private usage-part
+  #js {:inputTokens #js {:total 10} :outputTokens #js {:total 5}})
+
+(defn- text-step [text]
+  #js [#js {:type "text-start" :id "t"}
+       #js {:type "text-delta" :id "t" :delta text}
+       #js {:type "text-end" :id "t"}
+       #js {:type "finish" :finishReason #js {:unified "stop" :raw "stop"} :usage usage-part}])
+
+(def ^:private tool-step
+  #js [#js {:type "tool-call" :toolCallId "c1" :toolName "think"
+            :input "{\"thought\":\"x\"}"}
+       #js {:type "finish" :finishReason #js {:unified "tool-calls" :raw "tool-calls"} :usage usage-part}])
+
+(defn- scripted
+  "Answers with each of `steps`, recording every request in `calls`."
+  [calls steps]
+  (let [left (atom steps)]
+    (new MockLanguageModelV4
+         #js {:doStream (fn [o]
+                          (swap! calls conj o)
+                          (let [s (first @left)]
+                            (swap! left rest)
+                            (js/Promise.resolve #js {:stream (convertArrayToReadableStream s)})))})))
+
+(defn- reject-bad! [agent]
+  ((:on (:events agent)) "stream_filter"
+                         (fn [d] (when (.includes (.-chunk d) "bad")
+                                   #js {:abort true :reason "no"
+                                        :inject #js [#js {:role "user" :content "be good"}]}))))
+
+(defn ^:async test-abort-ends-attempt []
+  (let [calls (atom [])
+        agent (create-agent {:model (scripted calls [(text-step "bad") (text-step "good")])
+                             :system-prompt "x"})]
+    (reject-bad! agent)
+    (js-await (run agent "go"))
+    (let [[one two] @calls]
+      (-> (expect (count @calls)) (.toBe 2))
+      (-> (expect (.. one -abortSignal -aborted)) (.toBe true))
+      (-> (expect (.. two -abortSignal -aborted)) (.toBe false))
+      (-> (expect (js/JSON.stringify (.-prompt one))) (.not.toContain "be good"))
+      (-> (expect (js/JSON.stringify (.-prompt two))) (.toContain "be good")))
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "good"))))
+
+(defn ^:async test-no-retry-after-tool []
+  (let [calls (atom [])
+        agent (create-agent {:model (scripted calls [tool-step (text-step "bad")])
+                             :system-prompt "x"})]
+    (reject-bad! agent)
+    (js-await (run agent "go"))
+    (-> (expect (count @calls)) (.toBe 2))
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "bad"))))
+
+(describe "loop: stream_filter abort" (fn []
+                                        (it "ends the attempt's request, and the retry sees what was injected"
+                                            test-abort-ends-attempt)
+                                        (it "does not rerun a pass that ran a tool"
+                                            test-no-retry-after-tool)))

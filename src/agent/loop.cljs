@@ -708,7 +708,14 @@
                   (reset! (:retry-state agent) nil)
 
                 ;; AI SDK call — with provider_error emit-collect fallback
-                  (let [result
+                  (let [;; Ends this attempt's request alone: a filter abort must
+                        ;; not reach the run, which retries.
+                        attempt-ctrl (js/AbortController.)
+                        _ (aset st-config "abortSignal"
+                                (if-let [c (:abort-controller agent)]
+                                  (js/AbortSignal.any #js [(.-signal @c) (.-signal attempt-ctrl)])
+                                  (.-signal attempt-ctrl)))
+                        result
                         (try
                           (js-await (streamText st-config))
                           (catch :default e
@@ -765,8 +772,10 @@
                         stream-error (atom nil)]
 
                   ;; Stream events with stream_filter on text deltas
-                    (let [iter (.call (aget (.-fullStream result) js/Symbol.asyncIterator)
-                                      (.-fullStream result))]
+                  ;; Read once: each read of the getter tees the stream, and a
+                  ;; branch nobody drains buffers the whole response.
+                    (let [full (.-fullStream result)
+                          iter (.call (aget full js/Symbol.asyncIterator) full)]
                       (loop []
                         (let [chunk (js-await (.next iter))]
                           (when (and (not (.-done chunk)) (not @aborted))
@@ -792,14 +801,23 @@
                                                          #js {:delta @accumulated
                                                               :chunk piece
                                                               :type  evt-type}))]
-                                      (when (get filter-result "abort")
+                                      ;; Only before a tool has run, as for a
+                                      ;; provider retry: a retry restarts the
+                                      ;; pass, and what ran would run again.
+                                      (when (and (get filter-result "abort")
+                                                 (zero? @tools-this-turn))
                                         (reset! aborted true)
                                         (reset! (:retry-state agent)
                                                 {:reason (get filter-result "reason")
                                                  :inject (or (get filter-result "inject") [])})))
                                     (when-not @aborted (emit evt-type chunk-val))))
                                 (emit evt-type chunk-val)))
-                            (when-not @aborted (recur))))))
+                            (when-not @aborted (recur)))))
+                      ;; `return` alone leaves the request open: it cancels one
+                      ;; branch of the tee, and the provider keeps generating.
+                      (when @aborted
+                        (.abort attempt-ctrl "stream_filter")
+                        (-> (.return iter) (.catch (fn [_] nil)))))
 
                   ;; A stream `error` part — not a throw — is how an unreachable
                   ;; or overloaded provider actually arrives. Verified against
@@ -848,6 +866,9 @@
                           (if-let [store (:store agent)]
                             ((:dispatch! store) :message-added {:message msg})
                             (swap! state update :messages conj msg)))
+                        ;; The request was built before these existed.
+                        (aset st-config "messages"
+                              (.concat (aget st-config "messages") (clj->js (:inject retry))))
                         (if (< attempt 2)
                           (recur (inc attempt))
                         ;; Max retries exceeded
