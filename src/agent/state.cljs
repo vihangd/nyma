@@ -132,7 +132,7 @@
                            (dissoc :run-cost :run-steps)))
    ;; Spend by an extension that called a model of its own — advisor (and
    ;; through it small-model's supervisor and self-tune), handoff, spec_driven,
-   ;; smart_compaction. They call `generateText` directly and used to read only
+   ;; smart_compaction, and subagent children. They call `generateText` directly and used to read only
    ;; `.text`, so none of it reached any total: a benchmark arm making six
    ;; Opus-5 consults reported the same cost and tokens as one making none.
    ;;

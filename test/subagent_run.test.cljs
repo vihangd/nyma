@@ -1,7 +1,9 @@
 (ns subagent-run.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
-            [agent.extensions.subagent.index :refer [final-text run-parallel run-chain]]))
+            ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
+            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain]]
+            [agent.pricing :as pricing]))
 
 ;; ── B2 regression: final-text returns the last ASSISTANT message ──
 (describe "subagent:final-text" (fn [])
@@ -69,3 +71,60 @@
                       names (set (keys tools))]
                   (-> (expect (contains? names "subagent")) (.toBe false))
                   (-> (expect (contains? names "subagent__subagent")) (.toBe false))))))
+
+;; ── what a child spends reaches the parent's totals ──
+(def ^:private tool-chunks
+  #js [#js {:type "tool-call" :toolCallId "c1" :toolName "think"
+            :input "{\"thought\":\"working\"}"}
+       #js {:type "finish" :finishReason #js {:unified "tool-calls" :raw "tool-calls"}
+            :usage #js {:inputTokens  #js {:total 1000000 :cacheRead 400 :cacheWrite 0}
+                        :outputTokens #js {:total 0}}}])
+
+(def ^:private text-chunks
+  #js [#js {:type "text-start" :id "t1"}
+       #js {:type "text-delta" :id "t1" :delta "done"}
+       #js {:type "text-end" :id "t1"}
+       #js {:type "finish" :finishReason #js {:unified "stop" :raw "stop"}
+            :usage #js {:inputTokens  #js {:total 1000000 :cacheRead 400 :cacheWrite 0}
+                        :outputTokens #js {:total 0}}}])
+
+(defn- scripted [& steps]
+  (let [left (atom steps)]
+    (new MockLanguageModelV4
+         #js {:doStream (fn [_]
+                          (let [s (first @left)]
+                            (swap! left rest)
+                            (js/Promise.resolve #js {:stream (convertArrayToReadableStream s)})))})))
+
+(defn ^:async bill-of
+  "Run a child on `model`, priced at $1/M, and return [result dispatches]."
+  [model]
+  (let [bills (atom [])
+        k     (pricing/model-cost-key #js {:model model})
+        api   #js {:resolveModel (fn [_ _] model)
+                   :dispatchState (fn [t d] (swap! bills conj [t d]))}]
+    (swap! pricing/token-costs assoc k [1 1])
+    (let [r (js-await (run-isolated-agent (assoc (base) :api api :agent-name "scout" :task "go")))]
+      (swap! pricing/token-costs dissoc k)
+      [r @bills])))
+
+(defn ^:async test-child-billed []
+  (let [[r bills] (js-await (bill-of (scripted text-chunks)))
+        [t d]     (first bills)]
+    (-> (expect (:ok r)) (.toBe true))
+    (-> (expect (count bills)) (.toBe 1))
+    (-> (expect t) (.toBe "extension-usage"))
+    (-> (expect (:input-tokens d)) (.toBe 1000000))
+    (-> (expect (:cache-read-tokens d)) (.toBe 400))
+    (-> (expect (:cost d)) (.toBeCloseTo 1 6))))
+
+(defn ^:async test-failed-child-billed []
+  (let [[r bills] (js-await (bill-of (scripted tool-chunks
+                                               #js [#js {:type "error" :error "boom"}])))
+        [_ d]     (first bills)]
+    (-> (expect (:ok r)) (.toBe false))
+    (-> (expect (:cost d)) (.toBeCloseTo 1 6))))
+
+(describe "subagent:billing" (fn []
+                               (it "adds a child's spend to the parent, once" test-child-billed)
+                               (it "bills steps a failed child already paid for" test-failed-child-billed)))

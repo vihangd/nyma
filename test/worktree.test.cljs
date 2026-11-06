@@ -104,6 +104,7 @@
                                              {:provider "faketest" :model "m1"}))]
         (-> (expect (:ok r)) (.toBe true))
         (-> (expect (:text r)) (.toContain "wrote made.txt"))
+        (-> (expect (:cache-read (:usage r))) (.toBe 0))
         (-> (expect (:text r)) (.toContain "git merge nyma/worker-"))
         ;; the user's tree is untouched; the branch has the file
         (-> (expect (fs/existsSync (path/join d "made.txt"))) (.toBe false))

@@ -198,6 +198,8 @@ intermediate tool calls, so put everything that matters in the summary.")
                        :else "No file changes; the worktree was removed."))
          :usage {:input  (or (some-> res .-usage .-input_tokens) 0)
                  :output (or (some-> res .-usage .-output_tokens) 0)
+                 :cache-read  (or (some-> res .-usage .-cache_read_input_tokens) 0)
+                 :cache-write (or (some-> res .-usage .-cache_creation_input_tokens) 0)
                  :cost   (or (some-> res .-total_cost_usd) 0.0)
                  :cost-unknown? (or (nil? (some-> res .-total_cost_usd))
                                     (boolean (some-> res .-total_cost_partial)))}})
@@ -208,7 +210,30 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; Core: run one isolated child agent and return its summary + usage
 ;; ---------------------------------------------------------------------------
 
-(defn ^:async run-isolated-agent
+(defn- child-usage
+  "What a child spent. :run-cost holds steps of a run that died before its usage
+   was folded into the total."
+  [st]
+  {:input  (or (:total-input-tokens st) 0)
+   :output (or (:total-output-tokens st) 0)
+   :cache-read  (or (:total-cache-read-tokens st) 0)
+   :cache-write (or (:total-cache-write-tokens st) 0)
+   :cost   (+ (or (:total-cost st) 0.0) (or (:run-cost st) 0))
+   :cost-unknown? (boolean (:cost-unknown? st))})
+
+(defn- bill-parent!
+  "A child keeps its own totals, so the parent's cost left out all its work."
+  [api usage]
+  (when-let [dispatch (and api usage (aget api "dispatchState"))]
+    (dispatch "extension-usage"
+              {:input-tokens       (:input usage)
+               :output-tokens      (:output usage)
+               :cache-read-tokens  (:cache-read usage)
+               :cache-write-tokens (:cache-write usage)
+               :cost               (:cost usage)
+               :cost-unknown?      (:cost-unknown? usage)})))
+
+(defn ^:async run-child
   "Spawn one isolated child agent for `task` under role `agent-name`.
    opts: {:api :settings-mgr :agents :agent-name :task :model-override :max-steps}
    Returns {:agent :ok :text :usage} (or {:ok false :text <error>})."
@@ -258,18 +283,25 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; Children never receive the `subagent` tool → depth capped at 1.
               (when (seq allowed)
                 ((:set-active (:tool-registry child)) (set allowed)))
-              (js-await (run child task))
-              (let [st   @(:state child)
-                    msgs (:messages st)]
-                {:agent agent-name :ok true
-                 :text  (final-text msgs)
-                 :usage {:input  (or (:total-input-tokens st) 0)
-                         :output (or (:total-output-tokens st) 0)
-                         :cost   (or (:total-cost st) 0.0)
-                         :cost-unknown? (boolean (:cost-unknown? st))}}))
+              ;; Caught here, not below: a failed child spent money too.
+              (let [err (try (js-await (run child task)) nil
+                             (catch :default e e))
+                    st  @(:state child)]
+                {:agent agent-name :ok (nil? err)
+                 :text  (if err
+                          (str "Subagent " agent-name " failed: " (.-message err))
+                          (final-text (:messages st)))
+                 :usage (child-usage st)}))
             (catch :default e
               {:agent agent-name :ok false
                :text (str "Subagent " agent-name " failed: " (.-message e))})))))))
+
+(defn ^:async run-isolated-agent
+  "`run-child`, with what it spent added to the parent's totals."
+  [opts]
+  (let [r (js-await (run-child opts))]
+    (bill-parent! (:api opts) (:usage r))
+    r))
 
 ;; ---------------------------------------------------------------------------
 ;; Result formatting
