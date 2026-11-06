@@ -21,7 +21,8 @@
             (it "verb + subcommand for subcommand tools, else the verb; none for compound"
                 (fn []
                   (doseq [[cmd want] [["git push origin main" "git push"]
-                                      ["git -C x status" "git"]
+                                      ["git -C x status" "git -C x status"]
+                                      ["bun --version" "bun --version"]
                                       ["pytest -x tests/" "pytest"]
                                       ["ls" "ls"]
                                       ["echo hi; rm -rf ~" nil]
@@ -146,3 +147,26 @@
                     ((:apply-overrides settings) {:permissions {:allow ["todo_write"]}})
                     (-> (expect ((:tool-allowed? settings) "todo_write")) (.toBe true))
                     (-> (expect ((:tool-allowed? settings) "write")) (.toBe false)))))))
+
+(describe "grant scope" (fn []
+  (it "a flag where the verb goes grants that command only"
+      (fn []
+        (-> (expect (sg/grant-matches? (sg/grant-base "bun --version") "bun -e 'evil()'")) (.toBe false))
+        (-> (expect (sg/grant-matches? (sg/grant-base "git -c core.pager=x log") "git push")) (.toBe false))))
+  (it "a bare verb tool grant, new or saved, covers only itself"
+      (fn []
+        (-> (expect (sg/grant-matches? "git" "git push --force")) (.toBe false))
+        (-> (expect (sg/grant-matches? "bun" "bun -e 'evil()'")) (.toBe false))
+        (-> (expect (sg/grant-matches? "git" "git")) (.toBe true))))
+  (it "an env prefix never gets a grant, and an old one matches nothing"
+      (fn []
+        (-> (expect (sg/grant-base "FOO=1 make")) (.toBeFalsy))
+        (-> (expect (sg/grant-matches? "FOO=1" "FOO=1 rm -rf ~")) (.toBe false))))
+  (it "versioned interpreters and code verbs are code runners"
+      (fn []
+        (doseq [c ["python3.12 -c 'x'" "ruby3.2 -e 'x'" "deno eval 'x'" "/usr/bin/python3.11 x.py"]]
+          (-> (expect (sg/grant-base c)) (.toBeFalsy)))))
+  (it "plain verbs keep working"
+      (fn []
+        (-> (expect (sg/grant-matches? (sg/grant-base "pytest -x") "pytest tests/")) (.toBe true))
+        (-> (expect (sg/grant-matches? (sg/grant-base "git push origin") "git push --force")) (.toBe true))))))
