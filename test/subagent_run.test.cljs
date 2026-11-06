@@ -7,7 +7,7 @@
             [agent.extensions :refer [create-extension-api]]
             [agent.extension-scope :refer [create-scoped-api]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
-            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute child-tools]]
+            [agent.extensions.subagent.index :refer [final-text run-isolated-agent run-parallel run-chain tool-execute child-tools start-async-job]]
             [agent.pricing :as pricing]))
 
 ;; ── B2 regression: final-text returns the last ASSISTANT message ──
@@ -296,6 +296,58 @@
 (describe "subagent:tools" (fn []
                              (it "a tool the child cannot have is refused before spending"
                                  test-missing-tool-refused)))
+
+(defn ^:async run-on [model extra]
+  (js-await (run-isolated-agent
+             (merge {:api #js {:resolveModel (fn [_ _] model) :dispatchState (fn [_ _] nil)}
+                     :settings-mgr nil :agents {"mine" {:provider "p" :model "m" :allowed-tools ["think"]}}
+                     :agent-name "mine" :task "go"}
+                    extra))))
+
+(defn ^:async test-step-cap-status []
+  (let [r (js-await (run-on (scripted tool-chunks text-chunks) {:max-steps 1}))]
+    (-> (expect (:status r)) (.toBe "step-capped"))
+    (-> (expect (:ok r)) (.toBe true))
+    (-> (expect (:text r)) (.toBe "done"))))
+
+(def ^:private silent-chunks
+  #js [#js {:type "finish" :finishReason #js {:unified "stop" :raw "stop"}
+            :usage #js {:inputTokens #js {:total 1} :outputTokens #js {:total 0}}}])
+
+(defn ^:async test-empty-status []
+  (let [r (js-await (run-on (scripted silent-chunks) {}))]
+    (-> (expect (:status r)) (.toBe "empty"))
+    (-> (expect (:ok r)) (.toBe false))))
+
+(defn ^:async test-timeout-status []
+  (let [r (js-await (run-on (hanging) {:timeout-ms 20}))]
+    (-> (expect (:status r)) (.toBe "timed-out"))
+    (-> (expect (:ok r)) (.toBe false))))
+
+(defn ^:async test-done-status []
+  (let [r (js-await (run-on (scripted text-chunks) {}))]
+    (-> (expect (:status r)) (.toBe "done"))))
+
+(defn ^:async test-header-says-capped []
+  (let [api #js {:resolveModel (fn [_ _] (scripted tool-chunks text-chunks)) :dispatchState (fn [_ _] nil)
+                 :settings (fn [] {:subagent {} :roles {:mine {:provider "p" :model "m" :allowed-tools ["think"]}}})}
+        out (js-await (tool-execute api #js {:agent "mine" :task "go" :steps 1}))]
+    (-> (expect out) (.toContain "### mine (STEP CAP"))))
+
+(defn ^:async test-failed-job-reports []
+  (let [sent (atom [])
+        api  #js {:sendUserMessage (fn [m _] (swap! sent conj m))}]
+    (js-await (start-async-job api (fn [] (js/Promise.reject (js/Error. "broke"))) "x" (js/AbortController.)))
+    (js-await (wait 5))
+    (-> (expect (first @sent)) (.toContain "broke"))))
+
+(describe "subagent:status" (fn []
+                              (it "a clean finish is done" test-done-status)
+                              (it "a step-capped child says so and keeps its report" test-step-cap-status)
+                              (it "no reply is not a success" test-empty-status)
+                              (it "a child past its deadline is stopped" test-timeout-status)
+                              (it "the parent reads the cap in the header" test-header-says-capped)
+                              (it "a failed background job tells the parent" test-failed-job-reports)))
 
 (describe "subagent:abort" (fn []
                              (it "the parent's abort stops a running child" test-abort-stops-child)

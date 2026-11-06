@@ -197,12 +197,12 @@ intermediate tool calls, so put everything that matters in the summary.")
     (and (seq allowed) (not (all-tools? allowed)))
     (into ["--tools" (str/join "," allowed)])))
 
-(def ^:private worktree-timeout-ms (* 30 60 1000))
+(def ^:private default-timeout-ms (* 30 60 1000))
 
 (def ^:private child-env "NYMA_SUBAGENT_DEPTH")
 
 (defn ^:async run-in-worktree [opts cfg]
-  (let [{:keys [api agent-name task model-override max-steps signal command]} opts
+  (let [{:keys [api agent-name task model-override max-steps signal command timeout-ms]} opts
         provider (cfg-get cfg :provider "provider")
         model-id (or model-override (cfg-get cfg :model "model"))
         allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
@@ -220,8 +220,7 @@ intermediate tool calls, so put everything that matters in the summary.")
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
                                     :env (js/Object.assign #js {} js/process.env
                                                            (doto #js {} (aset child-env "1")))
-                                    ;; ponytail: fixed 30 min ceiling; a setting when a task needs longer
-                                    :timeout worktree-timeout-ms :killSignal "SIGTERM"})
+                                    :timeout (or timeout-ms default-timeout-ms) :killSignal "SIGTERM"})
             ;; Cancelling the parent's turn ends the child too.
             kill (fn [] (try (.kill proc) (catch :default _ nil)))
             _    (some-> signal (.addEventListener "abort" kill #js {:once true}))
@@ -239,6 +238,11 @@ intermediate tool calls, so put everything that matters in the summary.")
                       (catch :default e {:error (str (.-message e)) :path (:path tree) :branch (:branch tree)}))]
         {:agent agent-name
          :ok    (and (some? res) (not (.-is_error res)))
+         :status (cond
+                   (some-> signal .-aborted) "cancelled"
+                   (nil? res)                "failed"
+                   (.-is_error res)          "failed"
+                   :else                     "done")
          :text  (str (if res (.-result res) (str "child produced no result: " (str/trim (str err out))))
                      "\n\n"
                      (cond
@@ -307,16 +311,18 @@ intermediate tool calls, so put everything that matters in the summary.")
 (defn ^:async run-child
   "Spawn one isolated child agent for `task` under role `agent-name`.
    opts: {:api :settings-mgr :agents :agent-name :task :model-override :max-steps :signal}
-   Returns {:agent :ok :text :usage} (or {:ok false :text <error>}). An in-process
+   Returns {:agent :ok :status :text :usage} (or {:ok false :text <error>}).
+   :status is how it ended: done, step-capped, empty, failed, cancelled or
+   timed-out. Only done and step-capped are :ok. An in-process
    child bills the parent step by step, so a budget can stop it; `:billed?` says
    its `:usage` is already counted."
   [opts]
-  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal]} opts
+  (let [{:keys [api settings-mgr agents agent-name task model-override max-steps signal timeout-ms]} opts
         cfg (lookup-agent agents agent-name)]
     (cond
       ;; Queued items of a fan-out reach here after the abort: none may start.
       (some-> signal .-aborted)
-      {:agent agent-name :ok false :text "cancelled"}
+      {:agent agent-name :ok false :status "cancelled" :text "cancelled"}
 
       (nil? cfg)
       {:agent agent-name :ok false
@@ -378,16 +384,35 @@ intermediate tool calls, so put everything that matters in the summary.")
                                                 (fn [step _]
                                                   (bill-parent! api (step-bill step (str provider "/" model-id)
                                                                                (pricing/model-cost-key (:config child))))))
+                    capped? (atom false)
+                    _    ((:on (:events child)) "turn_finalize"
+                                                (fn [d] (when (.-stepCapped d) (reset! capped? true)) nil))
+                    late? (atom false)
+                    clock (js/setTimeout (fn []
+                                           (reset! late? true)
+                                           (.abort @(:abort-controller child) "timed out"))
+                                         (or timeout-ms default-timeout-ms))
                     err  (try (js-await (run child task)) nil
                               (catch :default e e))
+                    _    (js/clearTimeout clock)
                     _    (some-> signal (.removeEventListener "abort" stop))
                     gone (some-> signal .-aborted)
-                    st   @(:state child)]
-                {:agent agent-name :ok (and (nil? err) (not gone))
-                 :text  (cond
-                          gone "cancelled"
-                          err  (str "Subagent " agent-name " failed: " (.-message err))
-                          :else (final-text (:messages st)))
+                    st   @(:state child)
+                    said (final-text (:messages st))
+                    status (cond
+                             @late?            "timed-out"
+                             gone              "cancelled"
+                             err               "failed"
+                             (str/blank? said) "empty"
+                             @capped?          "step-capped"
+                             :else             "done")]
+                {:agent agent-name :ok (contains? #{"done" "step-capped"} status)
+                 :status status
+                 :text  (case status
+                          "cancelled" "cancelled"
+                          "failed"    (str "Subagent " agent-name " failed: " (.-message err))
+                          "empty"     (str "Subagent " agent-name " ended without a reply.")
+                          said)
                  :usage (child-usage st (str provider "/" model-id))
                  :billed? true})))
             (catch :default e
@@ -406,7 +431,14 @@ intermediate tool calls, so put everything that matters in the summary.")
 ;; ---------------------------------------------------------------------------
 
 (defn- format-result [r]
-  (str "### " (:agent r) (when-not (:ok r) " (FAILED)") "\n" (:text r)))
+  (str "### " (:agent r)
+       (case (:status r)
+         "step-capped" " (STEP CAP: may be unfinished)"
+         "timed-out"   " (TIMED OUT: may be unfinished)"
+         "cancelled"   " (CANCELLED)"
+         "empty"       " (EMPTY)"
+         (when-not (:ok r) " (FAILED)"))
+       "\n" (:text r)))
 
 (defn- format-results [results]
   (str/join "\n\n" (map format-result results)))
@@ -511,7 +543,11 @@ intermediate tool calls, so put everything that matters in the summary.")
                            #js {:deliverAs "followUp"})))))
         (.catch (fn [e]
                   (swap! jobs assoc id {:status "error" :label label
-                                        :result (str (.-message e))}))))
+                                        :result (str (.-message e))})
+                  ;; A parent told only of successes takes silence for work.
+                  (when-let [send (aget api "sendUserMessage")]
+                    (send (str "[subagent " id " failed] " label "\n\n" (.-message e))
+                          #js {:deliverAs "followUp"})))))
     (str "Started background subagent " id " (" label "). "
          "Use the subagent tool with action=\"status\" to check on it.")))
 
@@ -579,7 +615,9 @@ intermediate tool calls, so put everything that matters in the summary.")
           agents       (all-agents settings-mgr)
           ceiling      (steps-ceiling ((:get settings-mgr)))
           base         (cond-> {:api api :settings-mgr settings-mgr :agents agents
-                                :steps-ceiling ceiling :isolation (.-isolation args) :signal signal}
+                                :steps-ceiling ceiling :isolation (.-isolation args) :signal signal
+                                :timeout-ms (when-let [s (get (:subagent ((:get settings-mgr))) "timeout-seconds")]
+                                              (* 1000 s))}
                          (steps-arg (.-steps args) ceiling)
                          (assoc :max-steps (steps-arg (.-steps args) ceiling)))
           async?       (let [s    ((:get settings-mgr))
