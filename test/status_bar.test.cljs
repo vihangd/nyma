@@ -100,7 +100,7 @@
                                           (let [text (render-bar bar 80)]
                                             (-> (expect (.includes text "gpt-4o")) (.toBe true))
                                             (-> (expect (.includes text "streaming")) (.toBe true))
-                                            (-> (expect (.includes text "3")) (.toBe true))))))
+                                            (-> (expect (.includes text "turn 4")) (.toBe true))))))
 
                                   (it "ignores nil setState"
                                       (fn []
@@ -385,6 +385,36 @@
                     (-> (expect (> (count (distinct @frames)) 1)) (.toBe true)))))))
 
 (describe "status-bar usage segments" (fn []
+  (it "says when the model has no known price"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :cost-usd 0 :cost-unknown? true})
+          (-> (expect (render-bar bar 120)) (.toContain "$?"))
+          (.setState bar #js {:model "m" :cost-usd 1.2 :cost-unknown? true})
+          (-> (expect (render-bar bar 120)) (.toContain "$1.20+?")))))
+  (it "keeps a sub-cent cost visible"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :cost-usd 0.004})
+          (-> (expect (render-bar bar 120)) (.toContain "$0.0040")))))
+  (it "shows the last request's cache hit rate, hidden at zero"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :last-cache-read 9400 :ctx-used 10000})
+          (-> (expect (render-bar bar 120)) (.toContain "cache:94%"))
+          (.setState bar #js {:model "m" :last-cache-read 0 :ctx-used 10000})
+          (-> (expect (render-bar bar 120)) (.not.toContain "cache:")))))
+  (it "labels finished prompts, and the one in flight with its step"
+      (fn []
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :turn-count 1})
+          (-> (expect (render-bar bar 120)) (.toContain "1 turn "))
+          (.setState bar #js {:model "m" :turn-count 1 :streaming true :run-steps 87})
+          (-> (expect (render-bar bar 120)) (.toContain "turn 2 · step 87")))))
   (it "renders cost and context fill when the bar has usage state"
       (fn []
         (segs/reset-registry!) (segs/install-builtins!)

@@ -1,5 +1,5 @@
 (ns agent.ui.status-line-segments
-  "Segment registry + 20 built-in segments for the status line.
+  "Segment registry + 21 built-in segments for the status line.
 
    A segment is a map of {:id :category :render} where :render is a
    function taking a context map and returning {:content :color :visible?}
@@ -17,7 +17,8 @@
 
    All segments should degrade gracefully when their data is missing —
    return {:visible? false} rather than rendering empty noise."
-  (:require [agent.utils.home :as home]
+  (:require [agent.pricing :as pricing]
+            [agent.utils.home :as home]
              ["node:path" :as path]
             ["node:os" :as os]))
 
@@ -145,11 +146,6 @@
       (>= n 1000)    (str (.toFixed (/ n 1000) 1) "k")
       :else          (str n))))
 
-(defn- format-cost [n]
-  (if (or (nil? n) (zero? n))
-    "$0.00"
-    (str "$" (.toFixed n 2))))
-
 (defn- format-duration-ms [ms]
   (let [m (or ms 0)
         secs   (js/Math.floor (/ m 1000))
@@ -259,11 +255,23 @@
                (get-in theme [:colors :muted] "#565f89"))
       (hidden))))
 
-(defn- cost-seg [{:keys [cost-usd theme]}]
+(defn- cost-seg [{:keys [cost-usd cost-unknown? theme]}]
   ;; Hidden at zero: auto-appended, a permanent `$0.00` on a fresh session
-  ;; is noise.
-  (if (pos? (or cost-usd 0))
-    (visible (format-cost cost-usd)
+  ;; is noise. A model with no known rates costs 0 here whatever it really
+  ;; costs, so that says so instead of hiding.
+  (let [cost  (or cost-usd 0)
+        color (get-in theme [:colors :secondary] "#9ece6a")]
+    (cond
+      cost-unknown? (visible (if (pos? cost) (str (pricing/format-cost cost) "+?") "$?") color)
+      (pos? cost)   (visible (pricing/format-cost cost) color)
+      :else         (hidden))))
+
+(defn- cache-hit-seg [{:keys [last-cache-read ctx-used theme]}]
+  ;; The last request, not session totals: those include other models'
+  ;; extension spend. Hidden at zero because @ai-sdk/openai turns a missing
+  ;; field into 0, so `0%` would claim a miss we cannot tell from silence.
+  (if (and (pos? (or last-cache-read 0)) (pos? (or ctx-used 0)))
+    (visible (str "cache:" (min 100 (js/Math.round (/ (* 100 last-cache-read) ctx-used))) "%")
              (get-in theme [:colors :secondary] "#9ece6a"))
     (hidden)))
 
@@ -420,6 +428,7 @@
    ["hostname"      :workspace hostname-seg]
    ["cache-read"    :usage    cache-read-seg]
    ["cache-write"   :usage    cache-write-seg]
+   ["cache-hit"     :usage    cache-hit-seg]
    ["activity"      :agent    activity-seg]
    ["compact-in"    :usage    compact-in-seg]])
 
@@ -438,6 +447,7 @@
   {"activity"    :left
    "cost"        :right
    "context-pct" :right
+   "cache-hit"   :right
    "time-spent"  :right})
 
 (defn builtin-ids

@@ -111,7 +111,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/ui/repo_poller.cljs` | `agent.ui.repo-poller` | Keeps the status line's git figures current without touching a render. |
 | `src/agent/ui/skill_picker.cljs` | `agent.ui.skill-picker` | Fuzzy-searchable skill picker component for ui.custom(). |
 | `src/agent/ui/status_bar.cljs` | `agent.ui.status-bar` | Pi-tui Component: one-line status bar at the bottom of the screen. |
-| `src/agent/ui/status_line_segments.cljs` | `agent.ui.status-line-segments` | Segment registry + 20 built-in segments for the status line. |
+| `src/agent/ui/status_line_segments.cljs` | `agent.ui.status-line-segments` | Segment registry + 21 built-in segments for the status line. |
 | `src/agent/ui/theme_catalog.cljs` | `agent.ui.theme-catalog` | A bundled theme pack: well-known base16 palettes converted to nyma's theme schema. |
 | `src/agent/ui/themes.cljs` | `agent.ui.themes` | — |
 | `src/agent/ui/think_tag_parser.cljs` | `agent.ui.think-tag-parser` | Parse inline <think>…</think> tags emitted by reasoning models that stream chain-of-thought through the normal content channel (MiniMax M… |

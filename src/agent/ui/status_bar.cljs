@@ -83,6 +83,15 @@
   (str (fg border) " │ " (RESET)
        (when color (fg color)) content (RESET)))
 
+(defn- turn-label
+  "`done` counts finished prompts, so the one in flight is the next."
+  [done streaming steps]
+  (let [done (or done 0)]
+    (cond
+      streaming   (str "turn " (inc done) (when (pos? (or steps 0)) (str " · step " steps)))
+      (= 1 done)  "1 turn"
+      (pos? done) (str done " turns"))))
+
 (defn create-status-bar
   "Returns a pi-tui Component that renders a one-line status bar.
    Call .setState({model, role, streaming, turn-count}) to update.
@@ -106,7 +115,7 @@
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model provider streaming turn-count role]} @state
+                   (let [{:keys [model provider streaming turn-count role run-steps]} @state
                          theme     (theme-now)
                          primary   (get-in theme [:colors :primary]   "#7aa2f7")
                          secondary (get-in theme [:colors :secondary] "#9ece6a")
@@ -152,14 +161,14 @@
                                          (if streaming
                                            (str (fg secondary) (BOLD) "● streaming" (RESET))
                                            (str (fg muted) (DIM) "ready" (RESET)))
-                                         (when (pos? turn-count)
+                                         (when-let [label (turn-label turn-count streaming run-steps)]
                                            (str (fg border) " │" (RESET)
-                                                (fg muted) (DIM) " " turn-count " turns" (RESET)))
+                                                (fg muted) (DIM) " " label (RESET)))
                                          " ")
                          ;; Extension auto-append segments.
-                         ;; Usage/context numbers refresh once per turn (the
-                         ;; store dispatches :usage-updated per run); only the
-                         ;; elapsed clock is per-tick, derived from
+                         ;; Usage/context numbers refresh per step, whenever
+                         ;; setState brings them; only the elapsed clock is
+                         ;; computed per-tick, derived from
                          ;; :streaming-since at render so the 100 ms tick moves it.
                          st         @state
                          since      (:streaming-since st)
@@ -184,6 +193,8 @@
                                      :model-id        model
                                      :cache-read      (:cache-read st)
                                      :cache-write     (:cache-write st)
+                                     :last-cache-read (:last-cache-read st)
+                                     :cost-unknown?   (:cost-unknown? st)
                                      :token-total     (let [i (or (:token-in st) 0)
                                                             o (or (:token-out st) 0)]
                                                         (when (pos? (+ i o)) (+ i o)))
