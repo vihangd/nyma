@@ -219,3 +219,17 @@
                                  (fire! agent "turn_finalize" #js {:error true})
                                  (unsub))))]
                     (-> (expect (last (types-of evs))) (.toBe "agent_settled")))))))
+
+(describe "a prompt that lands after the run was reported over"
+          (fn []
+            (it "opens a new run when its turn starts"
+                (fn []
+                  (let [agent (fake-agent) st (st-of)
+                        evs (capture
+                             (fn []
+                               (let [unsub (subscribe-events! agent st)]
+                                 (fire! agent "agent_start" #js {})
+                                 (fire! agent "turn_finalize" #js {})
+                                 (fire! agent "turn_start" #js {})
+                                 (unsub))))]
+                    (-> (expect (count (filter #(= % "agent_start") (types-of evs)))) (.toBe 2)))))))

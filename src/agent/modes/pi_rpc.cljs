@@ -374,7 +374,13 @@
          ;; and 5 ends. pi's contract is a pair, so the wire alternates
          ;; strictly: every turn_end is preceded by exactly one turn_start.
          ["turn_start"
-          (fn [_] (open-turn! st))]
+          (fn [_]
+            ;; A prompt that arrived during the post-turn compaction drains into
+            ;; the loop after its run was already reported over: a new run to pi.
+            (when-not @(:streaming? st)
+              (reset! (:streaming? st) true)
+              (write-event! {:type "agent_start"}))
+            (open-turn! st))]
 
          ["turn_end"
           (fn [step]
@@ -616,7 +622,14 @@
 (defn- start-run! [agent st content]
   (reset! (:running? st) true)
   (-> (run agent content)
-      (.catch (fn [e] (js/console.error "[pi-rpc] run error:" e)))
+      (.catch (fn [e]
+                (js/console.error "[pi-rpc] run error:" e)
+                ;; Thrown before the turn wrapper, so turn_finalize never ran:
+                ;; without this the client streams forever and sees no error.
+                (when @(:streaming? st)
+                  (end-turn! agent st nil {:stopReason "error" :errorMessage (str (.-message e))})
+                  (end-run! st)
+                  (write-event! {:type "agent_settled" :aborted false}))))
       (.finally (fn [] (reset! (:running? st) false)))))
 
 (defn- cycle-model!
