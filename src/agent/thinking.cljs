@@ -71,14 +71,14 @@
 
 (defn adaptive-model?
   "Whether this Claude model takes ADAPTIVE thinking (`effort`), not a token
-   budget. Opus/Sonnet 4.6 and every later Claude, Fable and Mythos.
+   budget. Opus/Sonnet 4.6, Haiku 5 and every later Claude, Fable and Mythos.
 
    nyma sent `{type enabled, budgetTokens}` to every Claude. Opus 5, Opus
    4.8/4.7 and Sonnet 5 reject `budget_tokens` with a 400; for Opus 5.5,
    Sonnet 5.5 and Fable the AI SDK quietly swaps in adaptive thinking but
    drops the level, so `/thinking high` and `/thinking low` behaved the same."
   [model]
-  (boolean (re-find #"claude-(fable|mythos)-|claude-(opus|sonnet)-(4-[6-9]|[5-9])" (model-id model))))
+  (boolean (re-find #"claude-(fable|mythos)-|claude-(opus|sonnet)-(4-[6-9]|[5-9])|claude-haiku-[5-9]" (model-id model))))
 
 (defn rejects-sampling?
   "Current Claude models refuse non-default temperature/top_p with a 400:

@@ -307,3 +307,9 @@
   (it "declines an unrecognised Gemini rather than risking a 400"
       (fn []
         (-> (expect (thinking/gemini-thinking-model? (gemini "gemini-1.5-pro"))) (.toBe false))))))
+
+(describe "thinking/adaptive-model?" (fn []
+                                       (it "Haiku 5 refuses a token budget; Haiku 4.5 needs one"
+                                           (fn []
+                                             (-> (expect (thinking/adaptive-model? "claude-haiku-5-5")) (.toBe true))
+                                             (-> (expect (thinking/adaptive-model? "claude-haiku-4-5")) (.toBe false))))))

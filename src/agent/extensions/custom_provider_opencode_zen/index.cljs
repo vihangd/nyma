@@ -1,5 +1,7 @@
 (ns agent.extensions.custom-provider-opencode-zen.index
-  (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+  (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
+            ["@ai-sdk/openai" :refer [createOpenAI]]
+            [clojure.string :as str]
             [agent.debug :as d]
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.credentials :as credentials]
@@ -109,7 +111,11 @@
               (str "No OpenCode Zen credentials found. Set the OPENCODE_ZEN_API_KEY "
                    "env var or run /login opencode-zen to save a key. "
                    "Sign up at https://opencode.ai/auth"))))
-    (let [protocol (get-in known-by-id [id :protocol] :chat)
+    (let [;; Claude ids come from the live list, so have no :protocol. The
+          ;; Messages API is the only path cache_control survives: on /chat a
+          ;; Claude model read 0 from cache at full price.
+          protocol (get-in known-by-id [id :protocol]
+                           (if (str/starts-with? (str id) "claude") :anthropic :chat))
           opts     #js {:apiKey  key
                         :baseURL (resolve-base-url)}]
       ;; Zen proxies some chat-protocol models (e.g. big-pickle → DeepSeek)
@@ -131,10 +137,12 @@
                 (if @rescue-enabled?
                   (rescue/wrap-fetch-with-rescue f @active-tools-atom)
                   f))))
-      (let [provider (createOpenAI opts)]
-        (case protocol
-          :responses (.responses provider id)
-          :chat      (.chat provider id))))))
+      (if (= protocol :anthropic)
+        ((createAnthropic opts) id)
+        (let [provider (createOpenAI opts)]
+          (case protocol
+            :responses (.responses provider id)
+            :chat      (.chat provider id)))))))
 
 (defn ^:export default [api]
   ;; Opt-in, settings-driven — the same shape `local` and `relay` already use,

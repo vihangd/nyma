@@ -127,6 +127,22 @@
                                                                                  (aset js/process.env "OPENCODE_ZEN_API_KEY" orig)
                                                                                  (js-delete js/process.env "OPENCODE_ZEN_API_KEY")))))))
 
+                                                                   (it "a Claude id from the live list takes the Messages API, where caching works"
+                                                                       (fn []
+                                                                         (let [orig (aget js/process.env "OPENCODE_ZEN_API_KEY")]
+                                                                           (try
+                                                                             (aset js/process.env "OPENCODE_ZEN_API_KEY" "sk-test-env")
+                                                                             (let [agent (create-agent {:model "test" :system-prompt "test"})
+                                                                                   api   (create-extension-api agent)
+                                                                                   _     ((.-default zen-ext) api)
+                                                                                   entry ((:get (:provider-registry agent)) "opencode-zen")
+                                                                                   model ((:create-model entry) "claude-haiku-5-5")]
+                                                                               (-> (expect (.-provider model)) (.toContain "anthropic")))
+                                                                             (finally
+                                                                               (if orig
+                                                                                 (aset js/process.env "OPENCODE_ZEN_API_KEY" orig)
+                                                                                 (js-delete js/process.env "OPENCODE_ZEN_API_KEY")))))))
+
                                                                    (it "creates a model when OPENCODE_ZEN_API_KEY is set (responses branch)"
                                                                        (fn []
                                                                          (let [orig (aget js/process.env "OPENCODE_ZEN_API_KEY")]
