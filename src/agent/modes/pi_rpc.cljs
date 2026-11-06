@@ -26,6 +26,7 @@
             [agent.commands.share :as share]
             [agent.ui.editor-bash :as editor-bash]
             [agent.thinking :as thinking]
+            [agent.tool-result-policy :as policy-result]
             ["node:fs" :as fs]
             [clojure.string :as str]))
 
@@ -340,18 +341,23 @@
 
          ["tool_execution_end"
           (fn [data]
-            (let [id (:execId data)]
+            ;; What the model saw. `:result` is the terminal's copy: wrapped to
+            ;; its width, full of escapes and capped for the screen.
+            (let [id   (:execId data)
+                  text (str (if-let [env (:resultEnvelope data)]
+                              (policy-result/model-string env)
+                              (:result data)))]
               (write-event! {:type "tool_execution_end"
                              :toolCallId id
                              :toolName (:toolName data)
-                             :result {:content [{:type "text" :text (str (:result data))}]
+                             :result {:content [{:type "text" :text text}]
                                       :details (or (:details data) {})}
                              :isError (boolean (:isError data))})
               (if (contains? @nested id)
                 (swap! nested disj id)
                 (swap! (:results st) conj
                        (shape/tool-result-message {:id id :name (:toolName data)
-                                                   :text (:result data) :details (:details data)
+                                                   :text text :details (:details data)
                                                    :error? (:isError data)})))))]
 
          ["before_compact"

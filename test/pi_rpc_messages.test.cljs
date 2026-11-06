@@ -58,7 +58,8 @@
        ;; a call from inside a script is no toolCall of the model's
        (fire! agent "tool_execution_start" {:execId "n1" :toolName "read" :args {} :nested true})
        (fire! agent "tool_execution_end" {:execId "n1" :toolName "read" :result "x"})
-       (fire! agent "tool_execution_end" {:execId "c1" :toolName "read" :result "A"})
+       (fire! agent "tool_execution_end" {:execId "c1" :toolName "read" :result "\u001b[2mterminal copy"
+                                          :resultEnvelope {:data "A"}})
        (fire! agent "tool_execution_end" {:execId "c2" :toolName "bash" :result "B" :isError true})
        (fire! agent "turn_end" (step "tool-calls" "Looking"))
        (fire! agent "message_start" #js {:type "text-start"})
