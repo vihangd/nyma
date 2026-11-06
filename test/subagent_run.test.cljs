@@ -100,7 +100,9 @@
   "Run a child on `model`, priced at $1/M, and return [result dispatches]."
   [model]
   (let [bills (atom [])
-        k     (pricing/model-cost-key #js {:model model})
+        ;; Provider-qualified only, as real rates are: a bare key would hide a
+        ;; child that does not know its provider.
+        k     (str "anthropic/" (.-modelId model))
         api   #js {:resolveModel (fn [_ _] model)
                    :dispatchState (fn [t d] (swap! bills conj [t d]))}]
     (swap! pricing/token-costs assoc k [1 1])

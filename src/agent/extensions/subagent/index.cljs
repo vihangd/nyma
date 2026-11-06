@@ -283,6 +283,9 @@ intermediate tool calls, so put everything that matters in the summary.")
                                        :system-prompt sys
                                        :max-steps     (or max-steps 20)
                                        :settings      settings-mgr})]
+              ;; Rates are keyed provider/model: without this a child's lookup
+              ;; missed, and a paid model cost 0.
+              (aset (:config child) "active-provider-name" provider)
               ;; Restrict to the role's read-only (by default) tool set.
               ;; Children never receive the `subagent` tool → depth capped at 1.
               (when (seq allowed)
