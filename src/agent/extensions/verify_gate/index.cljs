@@ -50,6 +50,7 @@
         ;; and the critic still owes the whole run one look.
         run-paths    (atom #{})
         run-task     (atom nil)
+        run-base     (atom nil)
         red?         (atom false)
         critic-done? (atom false)
 
@@ -80,6 +81,7 @@
         on-start
         (fn [_ _]
           (reset! run-paths #{})
+          (reset! run-base (shared/head (js/process.cwd)))
           (reset! red? false)
           (reset! critic-done? false)
           (reset! run-task (when (.-getState api)
@@ -98,10 +100,11 @@
                      (not @red?)
                      (seq @run-paths)
                      (not (.-stepCapped event))
+                     (not (.-finalReport event))
                      (not (.-nudged event))
                      (not (some-> ctx .hasPendingMessages))
                      (not (aget js/process.env "NYMA_SUBAGENT_DEPTH")))
-            (let [change (shared/run-change @run-paths (js/process.cwd))]
+            (let [change (shared/run-change @run-paths (js/process.cwd) @run-base)]
               (when (or (seq (:diff change)) (seq (:new change)))
                 (reset! critic-done? true)
                 (let [ui     (.-ui api)

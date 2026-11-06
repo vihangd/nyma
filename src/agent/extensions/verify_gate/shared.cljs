@@ -6,7 +6,9 @@
    The gate runs a configured quality command after any turn that edited
    files; a failure is fed back as a follow-up so the agent fixes it before
    stopping."
-  (:require [clojure.string :as str]
+  (:require ["node:fs" :as fs]
+            ["node:path" :as path]
+            [clojure.string :as str]
             [agent.tool-metadata :as tool-metadata]
             [agent.utils.git-files :as git]))
 
@@ -101,14 +103,36 @@
 (def max-diff-chars 60000)
 (def max-task-chars 4000)
 
+(defn head
+  "The commit a run starts from, so work it commits still counts as its change."
+  [cwd]
+  (not-empty (git/run-git-args ["rev-parse" "HEAD"] cwd)))
+
+(defn- repo-path
+  "`p` relative to `root`, nil outside it: git refuses the whole command for one
+   such path."
+  [root cwd p]
+  (let [abs (path/resolve cwd (str p))
+        abs (try (fs/realpathSync abs)
+                 (catch :default _
+                   (try (path/join (fs/realpathSync (path/dirname abs)) (path/basename abs))
+                        (catch :default _ abs))))
+        rel (path/relative root abs)]
+    (when-not (or (empty? rel) (str/starts-with? rel "..") (path/isAbsolute rel))
+      rel)))
+
 (defn run-change
-  "The diff and new files for the paths a run edited, and only those: the user's
-   own uncommitted work is not this run's to answer for."
-  [paths cwd]
-  (let [ps (vec paths)]
-    {:diff (git/run-git-args (into ["diff" "HEAD" "--"] ps) cwd)
-     :new  (remove str/blank? (str/split-lines
-                               (git/run-git-args (into ["ls-files" "--others" "--exclude-standard" "--"] ps) cwd)))}))
+  "The diff since `base` (default HEAD) and new files for the paths a run edited,
+   and only those: the user's own uncommitted work is not this run's to answer
+   for."
+  [paths cwd & [base]]
+  (let [root (git/run-git-args ["rev-parse" "--show-toplevel"] cwd)
+        ps   (when (seq root) (vec (keep #(repo-path root cwd %) paths)))]
+    (if (empty? ps)
+      {:diff "" :new []}
+      {:diff (git/run-git-args (into ["diff" (or base "HEAD") "--"] ps) root)
+       :new  (remove str/blank? (str/split-lines
+                                 (git/run-git-args (into ["ls-files" "--others" "--exclude-standard" "--"] ps) root)))})))
 
 (defn critic-task
   "What the critic is told. Pure."

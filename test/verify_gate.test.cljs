@@ -246,6 +246,17 @@
                (js-await (fire handlers "turn_finalize" #js {:error false}))
                (-> (expect (count @calls)) (.toBe 2)))))))
 
+    (it "a path outside the repo does not lose the rest, and committed work still counts"
+        (fn []
+          (in-repo
+           ^:async (fn []
+             (let [cwd  (js/process.cwd)
+                   base (shared/head cwd)]
+               (-> (expect (:diff (shared/run-change ["a.txt" "/tmp/elsewhere.md"] cwd))) (.toContain "+two"))
+               (git! cwd "commit" "-qam" "run committed it")
+               (-> (expect (:diff (shared/run-change ["a.txt"] cwd))) (.toBe ""))
+               (-> (expect (:diff (shared/run-change ["a.txt"] cwd base))) (.toContain "+two")))))))
+
     (it "says nothing on No findings"
         (fn []
           (in-repo
@@ -264,7 +275,8 @@
                (edit! (:handlers red) "a.txt")
                (js-await (fire (:handlers red) "turn_finalize" #js {:error false}))
                (-> (expect (count @(:calls red))) (.toBe 0)))
-             (doseq [ev [#js {:error true} #js {:error false :stepCapped true} #js {:error false :nudged true}]]
+             (doseq [ev [#js {:error true} #js {:error false :stepCapped true} #js {:error false :nudged true}
+                         #js {:error false :finalReport true}]]
                (let [{:keys [calls handlers]} (critic-harness "exit 0" finding)]
                  (edit! handlers "a.txt")
                  (js-await (fire handlers "turn_finalize" ev))

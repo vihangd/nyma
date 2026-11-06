@@ -1133,6 +1133,9 @@
                                                  ;; mid-work, not a finished answer.
                                                  :stepCapped   (and (not @turn-error) (not final-report?)
                                                                     (>= @steps-this-run (:max-steps config)))
+                                                 ;; This pass is the closing report of a run
+                                                 ;; that was stopped: nothing may reopen it.
+                                                 :finalReport  final-report?
                                                  ;; A continue-nudge WAS queued for this
                                                  ;; turn: a handler that wants to shape
                                                  ;; that retry (thinking off) can rely
