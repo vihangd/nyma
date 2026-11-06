@@ -217,7 +217,8 @@
         (if (and (not cli-provider) (str/includes? raw-model "/"))
           (registry-utils/split-model-spec raw-model)
           [(or cli-provider (:provider merged) "anthropic") raw-model])
-        p-config  ((:get provider-registry) provider)]
+        p-config  ((:get provider-registry) provider)
+        failure   (atom nil)]
     ;; Auto-refresh OAuth credentials if needed
     (when-let [oauth-cfg (:oauth p-config)]
       (let [creds (oauth/load-credentials provider)]
@@ -232,7 +233,8 @@
     {:model    (try ((:resolve provider-registry) provider model-id)
                      ;; An unknown provider throws here; the caller still needs
                      ;; to know WHAT was asked for to say so.
-                    (catch :default _ nil))
+                    (catch :default e (reset! failure (.-message e)) nil))
+     :error    @failure
      :provider provider
      :model-id model-id
      ;; Reported rather than warned about: this function runs TWICE, and the
@@ -1095,6 +1097,10 @@ Examples:
                           (str "Unknown provider '" (:provider late-resolved)
                                "' for model '" (:model-id late-resolved) "'")
                           #js {:registered (clj->js known)}))))
+            ;; A known provider that still gave no model said why, usually a
+            ;; missing key. The first request is where that gets read.
+            (when (and (:provider-known? late-resolved) (:error late-resolved))
+              (swap! (:state agent) assoc :model-error (:error late-resolved)))
             (when-let [m (:model late-resolved)]
               (set! (.-model (:config agent)) m)
               (aset (:config agent) "active-provider-name"

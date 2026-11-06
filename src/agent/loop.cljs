@@ -410,6 +410,7 @@
                                (when (seq (str (or spec ""))) (str " for '" spec "'"))
                                ". "
                                (cond
+                                 (:model-error @state) (:model-error @state)
                                  env               (str "Set " env " or run /login " provider ".")
                                  (seq provider)    (str "Run /login " provider ", or check its entry in ~/.nyma/settings.json.")
                                  :else             "Configure a provider with /login <provider>."))))))

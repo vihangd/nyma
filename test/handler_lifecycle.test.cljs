@@ -65,6 +65,12 @@
                         "No model configured"))
     (-> (expect ((:handler-count (:events agent)) "message_update")) (.toBe 0))))
 
+(defn ^:async test-no-model-says-why []
+  (let [agent (make-test-agent)
+        _     (throw-from-run! agent)]
+    (swap! (:state agent) assoc :model-error "No credentials for relay")
+    (js-await (.toThrow (.-rejects (expect (run agent "go"))) "No credentials for relay"))))
+
 (defn ^:async test-handler-count-never-exceeds-one-across-throw-then-success []
   ;; First turn throws; second turn succeeds.
   ;; At no point should there be > 1 handler; after the second turn count = 0.
@@ -137,6 +143,7 @@
                 test-handler-count-zero-after-successful-turn)
             (it "handler count is 0 after two consecutive successful turns"
                 test-handler-count-zero-after-two-consecutive-turns)
+            (it "no model says what the provider said" test-no-model-says-why)
             (it "handler count is 0 when run-fn throws (original bug)"
                 test-handler-count-zero-when-run-throws)
             (it "handler count never exceeds 1 across throw-then-success"

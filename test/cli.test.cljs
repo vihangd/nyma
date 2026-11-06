@@ -141,6 +141,14 @@
                     (-> (expect (:provider r)) (.toBe "anthropic"))
                     (-> (expect (:model-id r)) (.toBe "claude-sonnet-4-20250514")))))
 
+            (it "says why a known provider gave no model"
+                (fn []
+                  (let [reg {:get     (fn [_] {:name "p"})
+                             :resolve (fn [_ _] (throw (js/Error. "No credentials for p")))}
+                        r   (resolve-model-via-registry reg {:model "p/m"} {})]
+                    (-> (expect (:error r)) (.toBe "No credentials for p"))
+                    (-> (expect (:provider-known? r)) (.toBe true)))))
+
             (it "reports nil rather than throwing when the provider is unknown"
                 (fn []
           ;; The caller turns this into "No model configured for '<spec>'" —
