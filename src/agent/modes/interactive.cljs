@@ -7,6 +7,7 @@
             ["@earendil-works/pi-tui" :refer [TuiMainScreen ProcessTerminal Editor
                                               CombinedAutocompleteProvider
                                               matchesKey]]
+            [agent.pricing :as pricing]
             [agent.loop :refer [run steer follow-up run-turn-with-update-handler]]
             [agent.commands.resolver :refer [resolve-command split-skill-invocation]]
             [agent.commands.parser :as parser]
@@ -445,7 +446,7 @@
                       (last (.split (str file-path) "/")))
                     "previous session")
           cost  (when (and (number? total-cost) (pos? total-cost))
-                  (str " — $" (.toFixed total-cost 2) " so far"))]
+                  (str " — " (pricing/format-cost total-cost) " so far"))]
       (str "Resumed " label " — " message-count
            (if (= 1 message-count) " message" " messages")
            (or cost "")))))
