@@ -105,7 +105,10 @@
         ;; another folder is refused: trust and settings belong to this one
         (send! {:jsonrpc "2.0" :id 5 :method "session/new" :params {:cwd (js/process.cwd) :mcpServers []}})
         (js-await (wait-for #(by-id 5) 5000))
-        (-> (expect (.. (by-id 5) -error -message)) (.toContain "serves the folder it was started in")))
+        (-> (expect (.. (by-id 5) -error -message)) (.toContain "serves the folder it was started in"))
+        (send! {:jsonrpc "2.0" :id 6 :method "session/new" :params {:cwd home :mcpServers []}})
+        (js-await (wait-for #(by-id 6) 5000))
+        (-> (expect (.. (by-id 6) -result -sessionId)) (.not.toBe sid)))
       (finally
         (.kill proc)
         (js-await (.-exited proc))

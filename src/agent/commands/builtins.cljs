@@ -737,6 +737,25 @@
           (notify ctx (str (if (= sub "disable") "Disabled " "Enabled ") ns
                            " (" (name scope) "). /reload to apply.")))))))
 
+(defn new-session!
+  "Start over: a fresh session file when there is one, and no skills, grants or
+   counts left from the last. Returns the new file. Switched BEFORE the clear and
+   the emit so anything listening on session_start already sees the new path."
+  [agent]
+  (skills/deactivate-all-skills! agent)
+  ;; Actually switch the file. Without this the manager kept appending to the
+  ;; same JSONL, so a later `nyma -c` replayed the old conversation and the new
+  ;; one as ONE session.
+  (let [fresh (when-let [sess @(:session agent)]
+                (when (and (fn? (:switch-file sess))
+                           (fn? (:get-file-path sess)))
+                  ;; No file with --no-session, and always in ACP.
+                  (when-let [file ((:get-file-path sess))]
+                    ((:switch-file sess) (new-session-path (path/dirname file))))))]
+    ((:dispatch! (:store agent)) :messages-cleared {})
+    ((:emit (:events agent)) "session_start" {:reason "new"})
+    fresh))
+
 (defn replay-session!
   "Switch the session manager to `file-path` and reseed the store from it.
 
@@ -955,24 +974,7 @@
           {:group       :session
            :description "Start a FRESH session file — the old one stays on disk and is resumable"
            :handler (fn [_args ctx]
-                      (skills/deactivate-all-skills! agent)
-                      ;; Actually switch the file, which is what the description
-                      ;; above promises. Without this the manager kept appending
-                      ;; to the same JSONL, so a later `nyma -c` replayed the old
-                      ;; conversation and the new one as ONE session. `/resume`
-                      ;; and `/import` have always used switch-file; /new simply
-                      ;; never called it.
-                      ;;
-                      ;; Placed BEFORE the clear and the emit so anything
-                      ;; listening on session_start already sees the new path.
-                      (let [fresh
-                            (when-let [sess @(:session agent)]
-                              (when (and (fn? (:switch-file sess))
-                                         (fn? (:get-file-path sess)))
-                                (let [dir (path/dirname ((:get-file-path sess)))]
-                                  ((:switch-file sess) (new-session-path dir)))))]
-                        ((:dispatch! (:store agent)) :messages-cleared {})
-                        ((:emit (:events agent)) "session_start" {:reason "new"})
+                      (let [fresh (new-session! agent)]
                         (notify ctx (if fresh
                                       (str "New session started — " (path/basename fresh))
                                       "New session started"))))}

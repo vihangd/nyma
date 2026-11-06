@@ -1,7 +1,7 @@
 (ns commands-builtins.test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.core :refer [create-agent]]
-            [agent.commands.builtins :refer [register-builtins informative-name model->item
+            [agent.commands.builtins :as builtins :refer [register-builtins informative-name model->item
                                              unknown-provider-message registered-providers
                                              handle-settings settings-row nested-setting?
                                              coerce-setting-value]]
@@ -63,6 +63,19 @@
                                                      "compact" "debug" "reload"
                                                      "name" "session" "copy" "hotkeys" "export" "resume" "import"]]
                                           (-> (expect (contains? names cmd)) (.toBe true))))))
+
+                                (it "new-session! clears what a thread leaves behind, and says so"
+                                    (fn []
+                                      (let [agent  (make-agent-with-builtins)
+                                            starts (atom 0)]
+                                        ((:on (:events agent)) "session_start" (fn [_ _] (swap! starts inc)))
+                                        (swap! (:state agent) assoc :messages [{:role "user" :content "x"}]
+                                               :compacted-at-count 40 :last-input-tokens 9000)
+                                        (builtins/new-session! agent)
+                                        (-> (expect (count (:messages @(:state agent)))) (.toBe 0))
+                                        (-> (expect (:compacted-at-count @(:state agent))) (.toBe 0))
+                                        (-> (expect (:last-input-tokens @(:state agent))) (.toBe 0))
+                                        (-> (expect @starts) (.toBe 1)))))
 
   ;; These two tests lock the aliases in so a future edit cannot
   ;; silently drop them.

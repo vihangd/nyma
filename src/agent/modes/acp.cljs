@@ -10,7 +10,8 @@
    person. One process serves one session at a time, in the folder it was
    started in: a second `session/new` starts over, as /new does, and one for
    another folder is refused."
-  (:require [agent.utils.jsonl-stdin :refer [read-lines!]]
+  (:require [agent.commands.builtins :as builtins]
+            [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.loop :refer [run]]
             [agent.utils.content :as content]
             [agent.version :as version]
@@ -203,7 +204,7 @@
                          (not= (fs/realpathSync cwd) (fs/realpathSync launch-dir)))
                   (reply-error! id -32602 (str "nyma serves the folder it was started in (" launch-dir
                                                "); start another nyma for " cwd))
-                  (do (swap! (:state agent) assoc :messages [])
+                  (do (when @session-id (builtins/new-session! agent))
                       (reset! session-id (str "nyma-" (js/Date.now)))
                       (reply! id {:sessionId @session-id :modes (modes agent)}))))
 
