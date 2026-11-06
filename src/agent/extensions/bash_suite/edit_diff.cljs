@@ -115,6 +115,33 @@
     (when (seq rows)
       (str "Files changed by this command:\n" (str/join "\n" rows)))))
 
+(def ^:private max-pre-bytes
+  "Checkpoints' own limit: it holds file contents in memory and on disk."
+  (* 2 1024 1024))
+
+(def ^:private max-pre-paths
+  "Each path costs two synchronous git spawns inside the tool call."
+  200)
+
+(defn- head-state
+  "{:state content} for `p` at HEAD, {:state nil} when HEAD does not have it, and
+   nil when that cannot be said: a state of nil tells /undo to DELETE the file.
+   Too big, not valid UTF-8 (a state is a string) and any git failure are all
+   unknown, so /undo leaves the file alone."
+  [root p]
+  (let [opts #js {:cwd root :maxBuffer (inc max-pre-bytes)
+                  :stdio #js ["ignore" "pipe" "ignore"]}]
+    (try
+      (let [line (str/trim (str (cp/execFileSync "git" #js ["ls-tree" "-l" "HEAD" "--" p] opts)))]
+        (if (empty? line)
+          {:state nil}
+          (when (<= (js/parseInt (aget (.split line (js/RegExp. "\\s+")) 3)) max-pre-bytes)
+            (let [buf (cp/execFileSync "git" #js ["show" (str "HEAD:" p)] opts)
+                  s   (.toString buf "utf8")]
+              (when (.equals buf (js/Buffer.from s "utf8"))
+                {:state s})))))
+      (catch :default _ nil))))
+
 (defn pre-states
   "For each changed path, what it was BEFORE the command, when that is
    knowable without a content snapshot: a path absent from the before-status
@@ -123,17 +150,13 @@
    Returns [{:path abs :state content-or-nil}], nil meaning \"did not exist\"."
   [before after paths]
   (let [root (or (:root after) (:root before))]
-    (vec (keep (fn [p]
-                 (when-not (contains? (:status before) p)
-                   (let [abs     (if root (str root "/" p) p)
-                         tracked (seq (git/run-git (str "ls-tree --name-only HEAD -- '" (str/replace p "'" "'\\''") "'") root))]
-                     {:path abs
-                      :state (when tracked
-                               (try (str (cp/execFileSync "git" #js ["show" (str "HEAD:" p)]
-                                                          #js {:cwd root :encoding "utf8" :maxBuffer (* 64 1024 1024)
-                                                               :stdio #js ["ignore" "pipe" "ignore"]}))
-                                    (catch :default _ nil)))})))
-               paths))))
+    (->> paths
+         (remove #(contains? (:status before) %))
+         (take max-pre-paths)
+         (keep (fn [p]
+                 (when-let [known (head-state root p)]
+                   (assoc known :path (if root (str root "/" p) p)))))
+         vec)))
 
 (defn with-summary
   "The bash result with the summary attached. The result is the bash tool's

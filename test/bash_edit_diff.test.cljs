@@ -19,6 +19,46 @@
     (cp/execSync "git add . && git -c user.email=t@t -c user.name=t commit -q -m a" #js {:cwd dir :stdio "ignore"})
     dir))
 
+(defn- commit-all! [dir]
+  (cp/execSync "git add . && git -c user.email=t@t -c user.name=t commit -q -m more" #js {:cwd dir :stdio "ignore"}))
+
+(defn- pre-of [dir paths]
+  (let [snap {:root dir :status {}}]
+    (into {} (map (fn [e] [(path/basename (:path e)) (:state e)])
+                  (ed/pre-states snap snap paths)))))
+
+(describe "bash-suite:edit-diff pre-states" (fn []
+  (afterEach (fn [] (doseq [d @dirs] (fs/rmSync d #js {:recursive true :force true})) (reset! dirs []) nil))
+
+  (it "gives HEAD's content, and nil only for a file HEAD does not have"
+      (fn []
+        (let [dir (git-repo!)
+              pre (pre-of dir ["a.txt" "new.txt"])]
+          (-> (expect (get pre "a.txt")) (.toBe "one\ntwo\n"))
+          (-> (expect (contains? pre "new.txt")) (.toBe true))
+          (-> (expect (get pre "new.txt")) (.toBeFalsy)))))
+
+  (it "leaves out what it cannot state, because nil would make /undo delete it"
+      (fn []
+        (let [dir (git-repo!)]
+          (fs/writeFileSync (path/join dir "bin.dat") (js/Buffer.from #js [255 254 0 1]))
+          (fs/writeFileSync (path/join dir "big.txt") (.repeat "x" (+ 1 (* 2 1024 1024))))
+          (commit-all! dir)
+          (let [pre (pre-of dir ["bin.dat" "big.txt"])]
+            (-> (expect (contains? pre "bin.dat")) (.toBe false))
+            (-> (expect (contains? pre "big.txt")) (.toBe false))))))
+
+  (it "says nothing when git cannot answer"
+      (fn []
+        (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "nyma-editdiff-"))]
+          (swap! dirs conj dir)
+          (-> (expect (contains? (pre-of dir ["a.txt"]) "a.txt")) (.toBe false)))))
+
+  (it "stops at a bound however many files a command touched"
+      (fn []
+        (let [dir (git-repo!)]
+          (-> (expect (count (pre-of dir (mapv #(str "f" %) (range 500))))) (.toBe 200)))))))
+
 (describe "bash-suite:edit-diff" (fn []
                                    (afterEach (fn [] (doseq [d @dirs] (fs/rmSync d #js {:recursive true :force true})) (reset! dirs []) nil))
 
