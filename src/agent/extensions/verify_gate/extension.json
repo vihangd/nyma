@@ -8,9 +8,7 @@
     "tools",
     "ui"
   ],
-  "dependsOn": [
-    "model-roles"
-  ],
+  "dependsOn": [],
   "settings": {
     "verify": {
       "cmd": null,

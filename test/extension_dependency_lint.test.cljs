@@ -56,7 +56,10 @@
    here it broke something: agent_shell must activate BEFORE model_roles so
    model_roles' guarded /plan sees agent_shell's and skips (otherwise both
    register and /plan resolves to nothing)."
-  {"agent_shell" #{"model-roles"}})
+  {"agent_shell" #{"model-roles"}
+   ;; Pure helpers only, and a declared dependency would take the deterministic
+   ;; gate down with model-roles when a user disables that.
+   "verify_gate" #{"model-roles"}})
 
 (defn undeclared
   "Required extensions absent from `depends-on`. Pure, for the self-test."
