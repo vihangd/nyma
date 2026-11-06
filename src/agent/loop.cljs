@@ -753,7 +753,11 @@
                   ;; StopFailure among them). `:final` tells a handler its
                   ;; retry will not be honoured.
                     (when @stream-error
-                      (let [can-retry? (and (nil? @(:retry-state agent)) (< attempt 2))
+                      ;; Only before a tool has run: a retry restarts from this
+                      ;; pass's opening messages, so what already ran would run
+                      ;; again, commits and deploys included.
+                      (let [can-retry? (and (nil? @(:retry-state agent)) (< attempt 2)
+                                            (zero? @tools-this-turn))
                             r          (js-await
                                         (emit-collect "provider_error"
                                                       #js {:message @stream-error

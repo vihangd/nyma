@@ -90,5 +90,30 @@
     (-> (expect (last @seen)) (.toBe true))
     (-> (expect (first @seen)) (.toBe false))))
 
+(defn ^:async t-no-retry-after-a-tool-ran []
+  ;; A retry restarts the pass from its opening messages, so a fallback model
+  ;; would run the same commands again.
+  (let [agent (make-test-agent)
+        calls (atom 0)
+        seen  (atom [])
+        tool-step #js [#js {:type "tool-call" :toolCallId "c1" :toolName "think"
+                            :input "{\"thought\":\"x\"}"}
+                       #js {:type "finish" :finishReason #js {:unified "tool-calls" :raw "tool-calls"}
+                            :usage #js {:inputTokens #js {:total 1} :outputTokens #js {:total 1}}}]
+        fail-step #js [#js {:type "error" :error (js/Error. "upstream overloaded")}]]
+    (set! (.-model (:config agent))
+          (new MockLanguageModelV4
+               #js {:doStream (fn [_]
+                                (swap! calls inc)
+                                (js/Promise.resolve
+                                 #js {:stream (convertArrayToReadableStream
+                                               (if (= 1 @calls) tool-step fail-step))}))}))
+    ((:on (:events agent)) "provider_error"
+                           (fn [d] (swap! seen conj (boolean (.-final d))) #js {:retry true}))
+    (try (js-await (run agent "say ok")) (catch :default _ nil))
+    (-> (expect @calls) (.toBe 2))
+    (-> (expect (vec @seen)) (.toEqual (clj->js [true])))))
+
 (describe "provider_error on stream errors"
-          (fn [] (it "fires on every attempt, the last marked final" t-final-attempt-still-reported)))
+          (fn [] (it "fires on every attempt, the last marked final" t-final-attempt-still-reported)
+            (it "is not retried once a tool has run" t-no-retry-after-a-tool-ran)))
