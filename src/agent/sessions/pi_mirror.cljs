@@ -50,7 +50,7 @@
   [e parent extra]
   (let [id   (:id e)
         ts   (iso (:timestamp e))
-        base {:id id :parentId parent :timestamp ts}
+        base {:id id :parentId (or parent nil) :timestamp ts}
         msg  (fn [m] (assoc base :type "message" :message m))
         md   (or (:metadata e) {})
         role (:role e)]
@@ -77,7 +77,9 @@
       (= role "session-name") [(assoc base :type "session_info" :name (str (:content e)))]
       :else [])))
 
-(defn- jsonl [ms] (str (str/join "\n" (map #(js/JSON.stringify (clj->js %)) ms)) "\n"))
+;; `type` first: pilish routes lines by that prefix without parsing them.
+(defn- jsonl [ms]
+  (str (str/join "\n" (map #(js/JSON.stringify (clj->js (merge {:type (:type %)} %))) ms)) "\n"))
 
 (defn add-usage [a b]
   (let [b (select-keys b [:input :output :cacheRead :cacheWrite :totalTokens :cost])]

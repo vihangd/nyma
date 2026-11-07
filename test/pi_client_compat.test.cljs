@@ -198,6 +198,8 @@
         (-> (expect (.-type head)) (.toBe "session"))
         (-> (expect (.-version head)) (.toBe 3))
         (-> (expect (.-id head)) (.toBe "mir-1"))
+        (doseq [l (filter seq (.split (fs/readFileSync file "utf8") "\n"))]
+          (-> (expect (.startsWith l "{\"type\":")) (.toBe true)))
         (-> (expect (path/basename (path/dirname file)))
             (.toBe (mirror/cwd-dir (fs/realpathSync home))))
         (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "assistant" "toolResult" "assistant"]))

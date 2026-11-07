@@ -8,6 +8,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'ert)
 (require 'pilish)
 
@@ -61,6 +62,42 @@
       (should (nyma-e2e--wait
                (lambda () (equal (buffer-local-value 'pilish--session-name chat) "Renamed"))
                10)))))
+
+(ert-deftest nyma-e2e/session-browser-and-reopen ()
+  "A session shows in the browser, and opening its file brings it back."
+  (let* ((dir (make-temp-file "pilish-nyma-" t))
+         (default-directory (file-name-as-directory dir))
+         (kill-buffer-query-functions nil))
+    (pilish)
+    (let* ((chat (nyma-e2e--buffer 'pilish-chat-mode))
+           (file nil))
+      (should (nyma-e2e--wait
+               (lambda () (eq (buffer-local-value 'pilish--status chat) 'idle)) 15))
+      (nyma-e2e--turn chat "Reply with the single word BROWSEME and nothing else." "BROWSEME")
+      (setq file (plist-get
+                  (plist-get (pilish--rpc-sync (buffer-local-value 'pilish--process chat)
+                                               '(:type "get_state") 10)
+                             :data)
+                  :sessionFile))
+      (should (file-exists-p file))
+      (with-current-buffer chat (pilish-session-browser))
+      (let ((browser (nyma-e2e--buffer 'pilish-session-browser-mode)))
+        (should browser)
+        (should (nyma-e2e--wait
+                 (lambda () (string-match-p "BROWSEME" (nyma-e2e--text browser)))
+                 15))
+        (kill-buffer browser))
+      ;; Batch Emacs has nobody to answer "really kill?".
+      (cl-letf (((symbol-function 'yes-or-no-p) #'always)
+                ((symbol-function 'y-or-n-p) #'always))
+        (let ((input (buffer-local-value 'pilish--input-buffer chat)))
+          (kill-buffer chat)
+          (when (buffer-live-p input) (kill-buffer input))))
+      (let ((chat (pilish-open-session-file file)))
+        (should (nyma-e2e--wait
+                 (lambda () (and (buffer-live-p chat)
+                                 (string-match-p "BROWSEME" (nyma-e2e--text chat))))
+                 30))))))
 
 (provide 'nyma-e2e-test)
 ;;; nyma-e2e-test.el ends here
