@@ -109,3 +109,15 @@
                                                 (aset js/globalThis "__nyma" #js {:answer 42})
                                                 (-> (loader/eval-expr! "(+ 1 (.-answer js/globalThis.__nyma))")
                                                     (.then (fn [v] (-> (expect v) (.toBe 43)))))))))
+
+(describe "extension-loader:reload-one! and -e"
+          (fn []
+            (it "an --extension file keeps what it was loaded with"
+                ^:async (fn []
+                          (let [root (fs/mkdtempSync (path/join (os/tmpdir) "nyma-reload-e-"))
+                                f    (path/join root "guard.ts")
+                                _    (fs/writeFileSync f "export default async (pi) => { await pi.exec('true', []); };\n")
+                                api  (create-extension-api (create-agent {:model "test" :system-prompt "x"}))
+                                old  (first (js-await (loader/discover-and-load [] api [] [f])))]
+                            (-> (expect (some? (js-await (loader/reload-one! api old)))) (.toBe true))
+                            (fs/rmSync root #js {:recursive true :force true}))))))

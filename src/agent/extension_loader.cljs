@@ -415,6 +415,7 @@
                           ;; its static module, never from an import of
                           ;; "builtin:<ns>".
                           :module     module
+                          :cli?       cli?
                           :scope      scoped
                           :deactivate (when (fn? result) result)}))))
             (catch :default e
@@ -474,7 +475,7 @@
    hash); a TS/JS one is re-imported past the module cache with a query
    string. A builtin's module is static — its code cannot change without a
    restart — so reloading one resets its state, nothing more."
-  [api {:keys [path entry namespace manifest module] :as old}]
+  [api {:keys [path entry namespace manifest module cli?] :as old}]
   (js-await (deactivate-one! old))
   (let [scoped-box (atom nil)]
     (try
@@ -484,7 +485,7 @@
                      module                  (.-default module)
                      (cljs-extension? path)  (js-await (load-squint-extension path))
                      :else                   (.-default (js-await (js/import (str (path/resolve path) "?t=" (js/Date.now))))))
-            caps   (capabilities-of manifest namespace path false)
+            caps   (capabilities-of manifest namespace path cli?)
             scoped (create-scoped-api api namespace caps)
             _      (reset! scoped-box scoped)
             result (when ext-fn (js-await (ext-fn scoped)))]
