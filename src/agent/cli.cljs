@@ -692,12 +692,15 @@ Examples:
    - --continue / -c      → most recent session in sessions-dir (interactive only)
    - --resume  / -r       → numbered pre-TUI picker over sessions-dir (interactive)
    - interactive default  → a fresh ~/.nyma/sessions/<ts>.jsonl per launch
-   - pi-rpc               → the same, and -c, as pi's rpc mode persists: a
-                            frontend lists and reopens its chats from these"
+   - pi-rpc, --mode json  → the same, and -c, as pi persists: a frontend lists
+                            and reopens its chats from these. So does -p
+                            given --session-dir."
   [values mode sessions-dir]
-  (let [one-shot?    (contains? #{"print" "json"} mode)
+  (let [one-shot?    (and (= mode "print") (not (:session-dir values)))
         interactive? (= mode "interactive")
-        pi-rpc?      (= mode "pi-rpc")
+        ;; Harbor's `--mode json --session-dir d`, then `--continue`, resumes.
+        pi-rpc?      (or (contains? #{"pi-rpc" "json"} mode)
+                         (and (= mode "print") (:session-dir values)))
         ;; -c/-r/--fork were accepted and then dropped on the floor in one-shot
         ;; mode: the cond's `one-shot?` clause wins before any of them is read.
         ;; A flag that parses, prints nothing and does nothing is the worst of
@@ -1404,7 +1407,7 @@ Examples:
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           "json"        (let [p (js-await (resolve-one-shot-prompt positionals))]
                           (when-not p (die-no-prompt! "--mode json"))
-                          (js-await (print-mode/start-json agent p))
+                          (js-await (pi-rpc/start-json agent p))
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).

@@ -113,56 +113,6 @@
       (finally
         (deactivate-all loaded)))))
 
-;;; ─── JSON mode ───────────────────────────────────────────────────────
-
-(defn ^:async test-print-mode-start-json-emits-valid-json-array []
-  ;; start-json prints the full messages array as JSON. Capture stdout and
-  ;; assert JSON.parse round-trips it into something with both the user
-  ;; prompt and the blocked assistant reply.
-  (let [{:keys [agent api]} (make-loaded-agent)
-        loaded   (js-await (discover-and-load [(builtin-dir)] api))
-        captured (atom [])
-        orig-log (.-log js/console)]
-    (try
-      ((:on (:events agent)) "before_provider_request"
-                             (fn [_] #js {:block true :reason "BLOCK-VIA-JSON"}))
-      (set! (.-log js/console) (fn [& args] (swap! captured conj (.join (clj->js args) " "))))
-      (js-await (print-mode/start-json agent "hello json mode"))
-      (set! (.-log js/console) orig-log)
-      ;; Exactly one console.log emission, containing the JSON dump
-      (-> (expect (count @captured)) (.toBeGreaterThanOrEqual 1))
-      (let [json-str (first @captured)
-            parsed   (js/JSON.parse json-str)]
-        ;; parsed is an array of message objects
-        (-> (expect (.-length parsed)) (.toBeGreaterThanOrEqual 2))
-        ;; First message: the user prompt
-        (-> (expect (.-content (aget parsed 0))) (.toBe "hello json mode"))
-        (-> (expect (.-role (aget parsed 0))) (.toBe "user"))
-        ;; Last message: the blocked assistant reply
-        (let [last-msg (aget parsed (- (.-length parsed) 1))]
-          (-> (expect (.-role last-msg)) (.toBe "assistant"))
-          (-> (expect (.-content last-msg)) (.toBe "BLOCK-VIA-JSON"))))
-      (finally
-        (set! (.-log js/console) orig-log)
-        (deactivate-all loaded)))))
-
-(defn ^:async test-print-mode-start-json-noop-on-nil-prompt []
-  (let [{:keys [agent api]} (make-loaded-agent)
-        loaded   (js-await (discover-and-load [(builtin-dir)] api))
-        captured (atom [])
-        orig-log (.-log js/console)]
-    (try
-      (set! (.-log js/console) (fn [& args] (swap! captured conj args)))
-      (js-await (print-mode/start-json agent nil))
-      (set! (.-log js/console) orig-log)
-      ;; No log calls — early return on nil
-      (-> (expect (count @captured)) (.toBe 0))
-      (finally
-        (set! (.-log js/console) orig-log)
-        (deactivate-all loaded)))))
-
-;;; ─── modelId in tool ctx survives the loaded-extension stack ─────────
-
 (defn ^:async test-modelid-on-tool-ctx-after-real-loader []
   ;; The middleware sets ext-ctx.modelId to the active model id. Verify
   ;; the loaded extension stack doesn't break this — registering a tool
@@ -200,8 +150,4 @@
             (it "print-mode/start with nil prompt is a noop"
                 test-print-mode-start-noop-on-nil-prompt)
             (it "modelId on tool ctx survives the loaded extension stack"
-                test-modelid-on-tool-ctx-after-real-loader)
-            (it "print-mode/start-json emits a parseable JSON messages array"
-                test-print-mode-start-json-emits-valid-json-array)
-            (it "print-mode/start-json with nil prompt is a noop"
-                test-print-mode-start-json-noop-on-nil-prompt)))
+                test-modelid-on-tool-ctx-after-real-loader)))

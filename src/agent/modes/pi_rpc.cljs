@@ -936,6 +936,20 @@
    :turn-open?    (atom false)
    :pending-ui    (atom {})})
 
+(defn ^:async start-json
+  "`--mode json`: pi's session header, then the RPC event stream for one run."
+  [agent prompt]
+  (let [st    (new-st)
+        unsub (subscribe-events! agent st)
+        sess  @(:session agent)
+        file  (when sess ((:get-file-path sess)))]
+    (write-event! {:type "session" :version 3
+                   :id (or (shape/session-id file) (str (js/crypto.randomUUID)))
+                   :timestamp (.toISOString (js/Date.))
+                   :cwd (js/process.cwd)})
+    (js-await (start-run! agent st prompt))
+    (unsub)))
+
 (defn ^:async start
   "Enter pi-rpc mode: wire the event translator and the RPC-backed ui, then read
    JSONL commands from stdin until EOF. Returns a cleanup thunk.

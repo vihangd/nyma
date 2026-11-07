@@ -7,7 +7,8 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.cli :refer [normalize-argv apply-tool-flags! find-session selected-provider]]
-            [agent.utils.credentials :as credentials]))
+            [agent.utils.credentials :as credentials]
+            [test-util.fake-model-server :as fms]))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
 
@@ -91,6 +92,43 @@
       (-> (expect (.-command r)) (.toBe "parse"))
       (-> (expect (.-success r)) (.toBe false)))
     (fs/rmSync home #js {:recursive true :force true})))
+
+(defn ^:async run-json [home argv]
+  (let [proc (js/Bun.spawn (clj->js (concat ["bun" cli "--print" "--mode" "json"] argv
+                                            ["--provider" "faketest" "--model" "m1"]))
+                           #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "ignore"
+                                :env (js/Object.assign #js {} js/process.env
+                                                       #js {:HOME home :NYMA_NO_MODEL_DISCOVERY "1"})})]
+    (.end (.-stdin proc))
+    (let [out (js-await (.text (js/Response. (.-stdout proc))))]
+      {:exit  (js-await (.-exited proc))
+       :lines (mapv #(js/JSON.parse %) (filter seq (.split out "\n")))})))
+
+(defn ^:async test-json-stream []
+  ;; Harbor's two calls: a run, then --continue in the same --session-dir.
+  (let [srv  (fms/start!)
+        home (fms/temp-home! (:base-url srv))
+        dir  (path/join home "store")]
+    (try
+      ((:script! srv) {:text "first answer"} {:text "second answer"})
+      (let [{:keys [exit lines]} (js-await (run-json home ["--session-dir" dir "say one"]))
+            types (mapv #(.-type %) lines)]
+        (-> (expect exit) (.toBe 0))
+        (-> (expect (.-type (first lines))) (.toBe "session"))
+        (-> (expect (.-version (first lines))) (.toBe 3))
+        (-> (expect (.-cwd (first lines))) (.toBe (fs/realpathSync home)))
+        (doseq [t ["agent_start" "turn_start" "message_update" "turn_end" "agent_end" "agent_settled"]]
+          (-> (expect (clj->js types)) (.toContain t)))
+        (-> (expect (clj->js types)) (.not.toContain "response")))
+      (let [{:keys [exit]} (js-await (run-json home ["--session-dir" dir "--continue" "say two"]))]
+        (-> (expect exit) (.toBe 0))
+        (-> (expect (js/JSON.stringify (clj->js (fms/request-messages srv 1)))) (.toContain "first answer")))
+      (finally
+        ((:stop srv))
+        (fs/rmSync home #js {:recursive true :force true})))))
+
+(describe "--mode json"
+  (fn [] (it "streams pi's events and resumes with --continue" test-json-stream 60000)))
 
 (describe "--mode rpc"
   (fn [] (it "answers bad JSON on the wire" test-parse-error 30000)))

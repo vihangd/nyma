@@ -7,12 +7,6 @@
             [agent.utils.event-json :refer [step-usage]]
             [clojure.string :as str]))
 
-(defn ^:async start-json [agent prompt]
-  (when prompt
-    (js-await (run agent prompt))
-    (let [messages (:messages @(:state agent))]
-      (println (js/JSON.stringify (clj->js messages) nil 2)))))
-
 ;; ── claude-style result object (`-p --output-format json`) ──
 ;; A single JSON object matching the de-facto `claude -p --output-format json`
 ;; contract, so headless orchestrators (e.g. cw) can consume nyma like claude:
