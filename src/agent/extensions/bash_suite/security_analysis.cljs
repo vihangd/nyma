@@ -1,6 +1,7 @@
 (ns agent.extensions.bash-suite.security-analysis
   (:require ["shell-quote" :as shell-quote]
             [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
 ;; ── Command classification tables ────────────────────────────
@@ -117,8 +118,9 @@
         ;; An optional directory: `/bin/sh -c '…'` hid the script, since the
         ;; char before `sh` was `/`, not a separator.
         interp  "(?:^|[\\s;&|(`])(?:[^\\s;&|(`'\"]*/)?(?:bash|sh|zsh|fish|dash|ksh|csh|tcsh)"
-        ;; -c, including combined short flags like -lc / -ic
-        dash-c  (js/RegExp. (str interp "\\s+(?:-[a-zA-Z]*c[a-zA-Z]*)\\s+(['\"])([\\s\\S]*?)\\1") "g")
+        ;; -c, including combined short flags like -lc / -ic, after any other
+        ;; words: `bash -e -c '…'`, `bash -o pipefail -c '…'`
+        dash-c  (js/RegExp. (str interp "(?:\\s+[^\\s;&|'\"]+)*?\\s+(?:-[a-zA-Z]*c[a-zA-Z]*)\\s+(['\"])([\\s\\S]*?)\\1") "g")
         ;; here-string, quoted or bare
         here-q  (js/RegExp. (str interp "\\s*<<<\\s*(['\"])([\\s\\S]*?)\\1") "g")
         here-b  (js/RegExp. (str interp "\\s*<<<\\s*([^\\s'\"][^\\n;&|]*)") "g")
@@ -264,6 +266,8 @@
       (contains? read-only-commands cmd-name) :read-only
       (contains? network-commands cmd-name)   :network
       (contains? write-commands cmd-name)     :write
+      ;; `bash ./x.sh`, `nohup sh x`: what these run is not in the words here
+      (shell-grant/code-runner? args-str)     :write
       :else                                   :safe)))
 
 (defn- check-pipe-to-interpreter

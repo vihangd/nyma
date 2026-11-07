@@ -54,7 +54,7 @@
     "dotnet run" "docker run" "docker exec" "docker compose"
     "kubectl exec" "kubectl run" "kubectl debug"})
 
-(defn- code-runner?
+(defn code-runner?
   "First word of `c` — by name or path (`/bin/sh`), and with any version suffix
    (`python3.12`) — is a code runner. So is an env-assignment prefix: it is not
    the command, and `FOO=1 rm -rf ~` would ride on a grant for `FOO=1 make`."
