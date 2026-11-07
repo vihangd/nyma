@@ -25,7 +25,7 @@
    "reasoning-end"   "reasoning_end"
    "tool-input-start" "tool_input_start"
    "tool-input-delta" "tool_input_delta"
-   "tool-call"       "tool_call"
+   "tool-call"       "tool_call_streamed"
    "tool-result"     "tool_result"
    ;; NOTE: "finish-step" and "finish" are deliberately unmapped. onStepFinish
    ;; already emits "turn_end" with the richer StepResult, and the loop emits

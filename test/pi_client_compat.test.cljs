@@ -243,6 +243,35 @@
     (it "is not read as pi's file unless it is one"
         (fn [] (-> (expect (mirror/nyma-session "/no/such.jsonl")) (.toBe "/no/such.jsonl"))))))
 
+(defn ^:async test-pi-guard []
+  ;; The guard overstory-style tools write: it must stop the tool, not advise.
+  (let [srv  (fms/start!)
+        home (fms/temp-home! (:base-url srv))]
+    (fs/mkdirSync (path/join home ".pi" "extensions") #js {:recursive true})
+    (fs/writeFileSync (path/join home ".pi" "extensions" "guard.ts")
+                      (str "export default function (pi) {"
+                           " pi.on('tool_call', (e) => {"
+                           "  if (e.toolName === 'write' && e.input.path === 'no.txt')"
+                           "   return { block: true, reason: 'guarded' };"
+                           "  if (e.toolName === 'write') e.input.path = 'moved.txt';"
+                           " }); }"))
+    (try
+      ((:script! srv) {:tool-call {:name "write" :args {:path "no.txt" :content "x"}}}
+                      {:tool-call {:name "write" :args {:path "yes.txt" :content "x"}}}
+                      {:text "done"})
+      (let [{:keys [lines]} (js-await (run-json home ["--no-session" "--trust" "go"]))
+            ends (filter #(= "tool_execution_end" (.-type %)) lines)]
+        (-> (expect (fs/existsSync (path/join home "no.txt"))) (.toBe false))
+        (-> (expect (js/JSON.stringify (.-result (first ends)))) (.toContain "guarded"))
+        (-> (expect (fs/existsSync (path/join home "yes.txt"))) (.toBe false))
+        (-> (expect (fs/existsSync (path/join home "moved.txt"))) (.toBe true)))
+      (finally
+        ((:stop srv))
+        (fs/rmSync home #js {:recursive true :force true})))))
+
+(describe "a pi extension in .pi/extensions"
+  (fn [] (it "blocks a tool and edits its input" test-pi-guard 60000)))
+
 (describe "--mode json"
   (fn [] (it "streams pi's events and resumes with --continue" test-json-stream 60000)))
 

@@ -50,11 +50,11 @@
        (fire! agent "message_update" #js {:type "text-delta" :text "Look"})
        (fire! agent "message_update" #js {:type "text-delta" :text "ing"})
        (fire! agent "message_end" #js {:type "text-end"})
-       (fire! agent "tool_call" #js {:type "tool-call" :toolCallId "c1" :toolName "read" :input #js {:path "a"}})
+       (fire! agent "tool_call_streamed" #js {:type "tool-call" :toolCallId "c1" :toolName "read" :input #js {:path "a"}})
        (fire! agent "tool_execution_start" {:execId "c1" :toolName "read" :args {:path "a"}})
        ;; c2 starts before the loop reads its tool-call part
        (fire! agent "tool_execution_start" {:execId "c2" :toolName "bash" :args {:command "ls"}})
-       (fire! agent "tool_call" #js {:type "tool-call" :toolCallId "c2" :toolName "bash" :input #js {:command "ls"}})
+       (fire! agent "tool_call_streamed" #js {:type "tool-call" :toolCallId "c2" :toolName "bash" :input #js {:command "ls"}})
        ;; a call from inside a script is no toolCall of the model's
        (fire! agent "tool_execution_start" {:execId "n1" :toolName "read" :args {} :nested true})
        (fire! agent "tool_execution_end" {:execId "n1" :toolName "read" :result "x"})

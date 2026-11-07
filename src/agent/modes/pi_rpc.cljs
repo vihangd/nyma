@@ -360,7 +360,7 @@
          ;; The stream's tool-call part. The middleware emits a tool_call of
          ;; its own (no toolCallId, also for script calls); only the stream's
          ;; is the model's.
-         ["tool_call"
+         ["tool_call_streamed"
           (fn [data]
             (when-let [id (.-toolCallId data)]
               (add-tool-call! agent st id (.-toolName data) (.-input data))))]
@@ -645,9 +645,10 @@
         n    (fn [role] (count (filter #(= role (:role %)) ms)))
         in   (or (:total-input-tokens s) 0)
         out  (or (:total-output-tokens s) 0)
-        sess (session-of agent)]
-    {:sessionFile (when sess (try ((:get-file-path sess)) (catch :default _ nil)))
-     :sessionId (or (when sess (try ((:get-session-name sess)) (catch :default _ nil))) "session")
+        sess (session-of agent)
+        file (when sess (try ((:get-file-path sess)) (catch :default _ nil)))]
+    {:sessionFile (some-> file pi-mirror/public-file)
+     :sessionId (or (shape/session-id file) (when sess (try ((:get-session-name sess)) (catch :default _ nil))) "session")
      :userMessages (n "user") :assistantMessages (n "assistant")
      :toolCalls (n "toolResult") :toolResults (n "toolResult")
      :totalMessages (count ms)

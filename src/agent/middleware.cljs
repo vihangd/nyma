@@ -134,7 +134,8 @@
   "Enter stage: emit-collect before_tool_call so handlers can cancel or transform args.
    Handlers return {block: true, reason: '...'} to cancel, {skip: true, result: '...'} to
    short-circuit with a canned result (tool_result/tool_complete events still fire),
-   or {args: modified} to transform args. Also fires tool_call for pi-compatibility.
+   or {args: modified} to transform args. Then pi's tool_call, which can do the
+   same to `input`: a guard written for pi must hold here.
 
    Merge semantics for multiple handlers (emit-collect):
      block/cancel — boolean OR (any handler can cancel)
@@ -148,8 +149,20 @@
                   :args     (clj->js (:args ctx))
                   :execId   (:exec-id ctx)}
         result (js-await ((:emit-collect events) "before_tool_call" data))
-        ;; Also emit tool_call for pi-compat (fire-and-forget)
-        _      ((:emit events) "tool_call" data)]
+        ;; After, so it sees args a handler above rewrote. Its own copy: pi's
+        ;; handlers edit `input` in place.
+        sent   (js/JSON.stringify (or (get result "args") (clj->js (:args ctx))))
+        pi     #js {:type       "tool_call"
+                    :toolName   (:tool-name ctx)
+                    :toolCallId (:exec-id ctx)
+                    :input      (js/JSON.parse (or sent "{}"))}
+        pi-res (when-not (or (get result "block") (get result "cancel"))
+                 (js-await ((:emit-collect events) "tool_call" pi)))
+        edited (let [now (js/JSON.stringify (.-input pi))]
+                 (when (not= now sent) (.-input pi)))
+        result (cond-> result
+                 (get pi-res "block") (assoc "block" true "reason" (get pi-res "reason"))
+                 edited               (assoc "args" edited))]
     (cond
       (or (get result "block") (get result "cancel"))
       (assoc ctx :cancelled true

@@ -29,7 +29,7 @@
     (it "maps tool-call to tool_call"
       (fn []
         (-> (expect (get stream-event-types "tool-call"))
-            (.toBe "tool_call"))))
+            (.toBe "tool_call_streamed"))))
 
     (it "maps tool-result to tool_result"
       (fn []
