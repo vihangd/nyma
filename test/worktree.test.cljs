@@ -122,6 +122,29 @@
         (fs/rmSync d #js {:recursive true :force true})
         (try (fs/rmSync home #js {:recursive true :force true}) (catch :default _ nil))))))
 
+(defn ^:async test-child-stays-in-checkout []
+  (let [srv   (fms/start!)
+        home  (fms/temp-home! (:base-url srv))
+        d     (temp-repo)
+        out   (path/join home "outside.txt")
+        prev  (js/process.cwd)
+        env   (.-env js/process)
+        saved {"HOME" (aget env "HOME") "NYMA_NO_MODEL_DISCOVERY" (aget env "NYMA_NO_MODEL_DISCOVERY")}]
+    ((:script! srv) {:tool-call {:name "write" :args {:path out :content "x\n"}}}
+                    {:text "tried"})
+    (aset env "HOME" home)
+    (aset env "NYMA_NO_MODEL_DISCOVERY" "1")
+    (js/process.chdir d)
+    (try
+      (js-await (sub/run-in-worktree {:agent-name "worker" :task "t"} {:provider "faketest" :model "m1"}))
+      (-> (expect (fs/existsSync out)) (.toBe false))
+      (finally
+        (js/process.chdir prev)
+        (doseq [[k v] saved] (if v (aset env k v) (js-delete env k)))
+        ((:stop srv))
+        (fs/rmSync d #js {:recursive true :force true})
+        (try (fs/rmSync home #js {:recursive true :force true}) (catch :default _ nil))))))
+
 (defn ^:async test-noisy-child []
   ;; 200 KB on stderr before any stdout: reading stdout to EOF first left the
   ;; child blocked on a full stderr pipe and the parent waiting forever.
@@ -195,4 +218,5 @@
             (it "is told it is a child, so it registers no subagent tool" test-child-cannot-delegate 20000)))
 
 ((.skipIf describe (not (fs/existsSync cli))) "subagent isolation: worktree"
-                                              (fn [] (it "edits land on a branch, not in the user's tree" test-subagent-in-worktree 60000)))
+                                              (fn [] (it "edits land on a branch, not in the user's tree" test-subagent-in-worktree 60000)
+                                                (it "cannot edit outside its checkout" test-child-stays-in-checkout 60000)))

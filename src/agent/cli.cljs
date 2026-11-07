@@ -1285,6 +1285,8 @@ Examples:
 
       ;; Register .nymaignore file access restrictions
       (file-access/register-access-check (:events agent) (js/process.cwd))
+      (when-let [root (.. js/process -env -NYMA_WRITE_ROOT)]
+        (file-access/register-write-root (:events agent) root))
 
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)

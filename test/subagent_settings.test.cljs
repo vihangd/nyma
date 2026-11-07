@@ -116,7 +116,15 @@
                 (fn []
                   (let [args (fn [t] (vec (worktree-args {:model "m" :sys "s" :allowed t})))]
                     (-> (expect (.includes (args ["*"]) "--tools")) (.toBe false))
-                    (-> (expect (.includes (args ["read"]) "--tools")) (.toBe true)))))))
+                    (-> (expect (.includes (args ["read"]) "--tools")) (.toBe true)))))
+
+            (it "a worktree role naming no tools can edit, not run"
+                (fn []
+                  (let [tools (fn [mode] (let [a (vec (worktree-args {:model "m" :sys "s" :mode mode}))]
+                                           (nth a (inc (.indexOf a "--tools")))))]
+                    (-> (expect (tools "default")) (.toContain "write"))
+                    (-> (expect (tools "default")) (.not.toContain "bash"))
+                    (-> (expect (tools "plan")) (.not.toContain "write")))))))
 
 (describe "subagent:depth"
           (fn []

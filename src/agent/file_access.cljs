@@ -38,6 +38,33 @@
       {:allowed false :reason (str "Blocked by .nymaignore: " file-path)}
       {:allowed true})))
 
+(defn- real-path
+  "`p` with symlinks resolved, as far up as it exists yet."
+  [p]
+  (loop [d (path/resolve p) tail []]
+    (if (fs/existsSync d)
+      (apply path/join (fs/realpathSync d) tail)
+      (recur (path/dirname d) (into [(path/basename d)] tail)))))
+
+(defn outside-root?
+  [root p]
+  (let [r (real-path root)
+        f (real-path p)]
+    (not (or (= f r) (str/starts-with? f (str r path/sep))))))
+
+(defn register-write-root
+  "Refuse edits outside `root`: a worktree child runs in accept-edits, which
+   would write ~/.zshrc as readily as a file in its checkout."
+  [events root]
+  ((:on events) "before_tool_call"
+                (fn [data]
+                  (let [tool-name (or (.-name data) (.-toolName data))
+                        p         (tm/tool-path (.-args data))]
+                    (when (and (string? p) (tm/file-editing? tool-name) (outside-root? root p))
+                      #js {:block true
+                           :reason (str "Outside this worktree: " p ". Edit files under " root)})))
+                100))
+
 (defn register-access-check
   "Register a high-priority before_tool_call handler that checks file access."
   [events cwd]

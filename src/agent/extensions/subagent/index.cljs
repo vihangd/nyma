@@ -223,6 +223,14 @@ intermediate tool calls, so put everything that matters in the summary.")
     "plan"      "plan"
     "accept-edits"))
 
+(defn worktree-tools
+  "`child-tools` for a worktree child, whose job is editing: a role naming no
+   tools can still write, in its checkout."
+  [allowed mode]
+  (if (or (seq allowed) (= "plan" mode))
+    (child-tools allowed mode)
+    (into read-only-tools ["write" "edit"])))
+
 (defn worktree-args
   "Flags for the child run, from the role config."
   [{:keys [model sys allowed steps mode]}]
@@ -230,8 +238,8 @@ intermediate tool calls, so put everything that matters in the summary.")
            "--permission-mode" (child-permission-mode mode)
            "--max-steps" (str (or steps 20)) "--settings" "{\"max-extensions\":0}" "--model" model
            "--append-system-prompt" sys]
-    (and (seq allowed) (not (all-tools? allowed)))
-    (into ["--tools" (str/join "," allowed)])))
+    (seq (worktree-tools allowed mode))
+    (into ["--tools" (str/join "," (worktree-tools allowed mode))])))
 
 (def ^:private default-timeout-ms (* 30 60 1000))
 
@@ -282,7 +290,9 @@ intermediate tool calls, so put everything that matters in the summary.")
             proc (js/Bun.spawn (clj->js argv)
                                #js {:cwd (:path tree) :stdin "ignore" :stdout "pipe" :stderr "pipe"
                                     :env (js/Object.assign #js {} js/process.env
-                                                           (doto #js {} (aset child-env "1")))
+                                                           (doto #js {}
+                                                             (aset child-env "1")
+                                                             (aset "NYMA_WRITE_ROOT" (:path tree))))
                                     :timeout (or timeout-ms default-timeout-ms) :killSignal "SIGTERM"})
             ;; Cancelling the parent's turn ends the child too.
             kill (fn [] (try (.kill proc) (catch :default _ nil)))

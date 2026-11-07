@@ -1,6 +1,9 @@
 (ns file-access.test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.file-access :refer [matches-pattern? check-access]]))
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
+            [agent.file-access :refer [matches-pattern? check-access outside-root?]]))
 
 (describe "file-access:matches-pattern" (fn []
   (it "*.env matches .env"
@@ -43,3 +46,17 @@
     (fn []
       (let [result (check-access "anything.txt" [])]
         (-> (expect (:allowed result)) (.toBe true)))))))
+
+(describe "file-access:outside-root?"
+          (fn []
+            (it "holds against a sibling name and a symlink, and allows a new file"
+                (fn []
+                  (let [d    (fs/mkdtempSync (path/join (os/tmpdir) "nyma-root-"))
+                        root (path/join d "wt")]
+                    (fs/mkdirSync root)
+                    (fs/symlinkSync d (path/join root "out"))
+                    (-> (expect (outside-root? root (path/join root "new" "a.txt"))) (.toBe false))
+                    (-> (expect (outside-root? root (path/join d "wt2" "a.txt"))) (.toBe true))
+                    (-> (expect (outside-root? root (path/join root "out" "a.txt"))) (.toBe true))
+                    (-> (expect (outside-root? root "/etc/x")) (.toBe true))
+                    (fs/rmSync d #js {:recursive true :force true}))))))
