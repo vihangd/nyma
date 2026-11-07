@@ -160,16 +160,22 @@
                           (swap! cur assoc :held []))
                       :else (swap! cur assoc :held all))))
         open!   (fn [source]
-                  ;; First sight of this file: everything already in it counts.
+                  ;; First sight of this file: everything already in it counts,
+                  ;; and what an earlier run mirrored is not written again.
                   (let [es (when (fs/existsSync source) (read-entries source))
                         m  (locate source es)
+                        had (if (fs/existsSync (:file m))
+                              (set (map :id (read-entries (:file m))))
+                              #{})
                         {:keys [lines ids]}
                         (reduce (fn [{:keys [lines ids]} e]
                                   (let [r (step! e ids nil)]
                                     {:lines (into lines (:lines r)) :ids (:ids r)}))
                                 {:lines [] :ids {}} es)]
                     (reset! cur {:source source :file (:file m) :ids ids :held [] :meta m})
-                    (write! lines (some #(= "user" (:role %)) es))))
+                    (reset! last-model nil)
+                    (write! (vec (remove #(contains? had (:id %)) lines))
+                            (some #(= "user" (:role %)) es))))
         on-entry (fn [e]
                    (when-not @failed?
                      (try

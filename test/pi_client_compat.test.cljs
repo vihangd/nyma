@@ -213,7 +213,21 @@
         (doseq [[a b] (partition 2 1 (rest lines))]
           (-> (expect (.-parentId b)) (.toBe (.-id a))))
         (fs/renameSync (path/join home "kept.jsonl") nyma-file)
-        (-> (expect (mirror/nyma-session file)) (.toBe nyma-file)))
+        (-> (expect (mirror/nyma-session file)) (.toBe nyma-file))
+        ;; A second run on the same session adds to the copy, and only that.
+        ((:script! srv) {:text "second run"})
+        (let [proc (js/Bun.spawn (clj->js ["bun" cli "--print" "--mode" "json" "--provider" "faketest"
+                                           "--model" "m1" "--session" nyma-file "again"])
+                                 #js {:cwd home :stdin "pipe" :stdout "ignore" :stderr "ignore"
+                                      :env (js/Object.assign #js {} js/process.env proc-env
+                                                             #js {:HOME home :NYMA_NO_MODEL_DISCOVERY "1"})})]
+          (.end (.-stdin proc))
+          (js-await (.-exited proc)))
+        (fs/renameSync nyma-file (path/join home "kept.jsonl"))
+        (let [lines (:lines (mirror-lines store))
+              ids   (mapv #(.-id %) (rest lines))]
+          (-> (expect (count (set ids))) (.toBe (count ids)))
+          (-> (expect (count (filter #(= "user" (some-> % .-message .-role)) lines))) (.toBe 2))))
       (finally
         ((:stop srv))
         (fs/rmSync home #js {:recursive true :force true})))))
