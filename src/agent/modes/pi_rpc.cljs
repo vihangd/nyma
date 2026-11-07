@@ -299,8 +299,9 @@
         handlers
         [["agent_start"
           (fn [_]
-            (reset! (:streaming? st) true)
-            (write-event! {:type "agent_start"}))]
+            (when-not @(:streaming? st)
+              (reset! (:streaming? st) true)
+              (write-event! {:type "agent_start"})))]
 
          ["message_start"
           (fn [_] (text-start!))]
@@ -380,7 +381,8 @@
                              :toolName (:toolName data)
                              :result {:content [{:type "text" :text text}]
                                       :details (or (:details data) {})}
-                             :isError (boolean (:isError data))})
+                             :isError (boolean (:isError data))
+                             :durationMs (or (:duration data) 0)})
               (if (contains? @nested id)
                 (swap! nested disj id)
                 (swap! (:results st) conj
@@ -470,6 +472,11 @@
              (when (and (= ev :message-added) (not (:replaying-session? state)))
                (let [m (:message data)]
                  (when (= "user" (:role m))
+                   ;; pi opens the run first; the loop adds the prompt first.
+                   (when (and @(:running? st) (not @(:streaming? st)))
+                     (reset! (:streaming? st) true)
+                     (write-event! {:type "agent_start"})
+                     (open-turn! st))
                    (let [pm (shape/->pi-message m)]
                      (write-event! {:type "message_start" :message pm})
                      (write-event! {:type "message_end" :message pm})

@@ -121,7 +121,9 @@
         (-> (expect (.-cwd (first lines))) (.toBe (fs/realpathSync home)))
         (doseq [t ["agent_start" "turn_start" "message_update" "turn_end" "agent_end" "agent_settled"]]
           (-> (expect (clj->js types)) (.toContain t)))
-        (-> (expect (clj->js types)) (.not.toContain "response")))
+        (-> (expect (clj->js types)) (.not.toContain "response"))
+        (-> (expect (clj->js (take 4 types)))
+            (.toEqual #js ["session" "agent_start" "turn_start" "message_start"])))
       (let [{:keys [exit]} (js-await (run-json home ["--session-dir" dir "--continue" "say two"]))]
         (-> (expect exit) (.toBe 0))
         (-> (expect (js/JSON.stringify (clj->js (fms/request-messages srv 1)))) (.toContain "first answer")))
