@@ -21,6 +21,17 @@
         (= base "index.mjs")  (= base "index.js")
         (= base "index.ts"))))
 
+(defn- pi-entry?
+  "pi's rule for a directory of extensions, `entry` relative to it: `*.ts` and
+   `*/index.ts`. Helpers and `node_modules` sit beside those, with no manifest
+   to say so."
+  [entry]
+  (let [parts (.split entry path/sep)]
+    (and (or (cljs-extension? entry) (ts-js-extension? entry))
+         (not= "node_modules" (first parts))
+         (or (= 1 (count parts))
+             (and (= 2 (count parts)) (entry-point? entry))))))
+
 (defn- dep-resolvable?
   "Check if an npm package is resolvable from CWD using Bun's resolver."
   [pkg-name]
@@ -244,7 +255,12 @@
            pkg (path/join p "package.json")
            pi  (when (fs/existsSync pkg)
                  (try (aget (js/JSON.parse (fs/readFileSync pkg "utf8")) "pi") (catch :default _ nil)))
-           rel (fn [xs] (mapv #(path/resolve p %) (or xs [])))]
+           rel (fn [xs] (mapv #(path/resolve p %) (or xs [])))
+           ;; A pi package may list a directory, which means what is in it.
+           expand (fn [f]
+                    (if (and (fs/existsSync f) (.isDirectory (fs/statSync f)))
+                      (mapv #(path/join f %) (filter pi-entry? (vec (fs/readdirSync f #js {:recursive true}))))
+                      [f]))]
        (cond
          (not (fs/existsSync p))
          (do (d/warn "extensions" (str "--extension: no such path " p)) acc)
@@ -252,7 +268,7 @@
          (.isFile (fs/statSync p)) (update acc :files conj p)
 
          pi (-> acc
-                (update :files into (rel (aget pi "extensions")))
+                (update :files into (mapcat expand (rel (aget pi "extensions"))))
                 (update :skill-dirs into (rel (aget pi "skills"))))
 
          :else (let [idx (some #(let [f (path/join p %)] (when (fs/existsSync f) f))
@@ -297,7 +313,8 @@
         (let [entries (js-await (.readdir fsp dir #js {:recursive true}))]
           (doseq [entry entries]
             (let [full-path (path/join dir entry)]
-              (when (or (cljs-extension? entry) (ts-js-extension? entry))
+              (when (and (or (cljs-extension? entry) (ts-js-extension? entry))
+                         (not (.includes (.split entry path/sep) "node_modules")))
                 ;; Multi-file extension filtering:
                 ;; If the file's directory — or ANY ancestor up to the scan
                 ;; root — contains extension.json, only load that extension's
@@ -311,8 +328,10 @@
                                          (fs/existsSync (path/join d "extension.json")) true
                                          (or (= d dir) (= d (path/dirname d))) false
                                          :else (recur (path/dirname d))))]
-                  (when (or (not has-manifest?)    ;; single-file ext: always load
-                            (entry-point? entry))  ;; multi-file ext: only load index
+                  (when (if has-manifest?
+                          (entry-point? entry)     ;; multi-file ext: only load index
+                          (or (not (pi-extension? full-path false))  ;; single-file ext: always load
+                              (pi-entry? entry)))
                     (try
                       (let [manifest (js-await (load-manifest full-path))
                             ns-str   (or (and manifest (.-namespace manifest))

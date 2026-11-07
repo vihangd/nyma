@@ -94,3 +94,37 @@
                                                    (fn [cfg] (reset! seen (.-system cfg)) #js {:block true}))
                             (js-await (run agent "hi"))
                             (-> (expect @seen) (.toContain "PROBE RULE")))))))
+
+(defn- marker! [f tag]
+  (fs/mkdirSync (path/dirname f) #js {:recursive true})
+  (fs/writeFileSync f (str "globalThis.__piScan = (globalThis.__piScan || []).concat('" tag "');\n"
+                           "export default () => {};\n")))
+
+(describe "a directory of pi extensions"
+          (fn []
+            (it "loads *.ts and */index.ts, not helpers or node_modules"
+                ^:async (fn []
+                          (let [root (fs/mkdtempSync (path/join (os/tmpdir) "pi-scan-"))
+                                ext  (path/join root ".pi" "extensions")
+                                api  (create-extension-api (create-agent {:model "test" :system-prompt "x"}))]
+                            (marker! (path/join ext "top.ts") "top")
+                            (marker! (path/join ext "foo" "index.ts") "foo")
+                            (marker! (path/join ext "foo" "util.ts") "util")
+                            (marker! (path/join ext "foo" "node_modules" "x" "index.js") "dep")
+                            (aset js/globalThis "__piScan" #js [])
+                            (let [loaded (js-await (discover-and-load [ext] api []))]
+                              (-> (expect (.sort (aget js/globalThis "__piScan"))) (.toEqual #js ["foo" "top"]))
+                              (js-await (deactivate-all loaded)))
+                            (fs/rmSync root #js {:recursive true :force true}))))
+
+            (it "a pi package may list a directory"
+                (fn []
+                  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "pi-pkg-dir-"))]
+                    (marker! (path/join dir "ext" "a.ts") "a")
+                    (marker! (path/join dir "ext" "b" "index.ts") "b")
+                    (marker! (path/join dir "ext" "b" "helper.ts") "h")
+                    (fs/writeFileSync (path/join dir "package.json")
+                                      (js/JSON.stringify #js {:pi #js {:extensions #js ["./ext"]}}))
+                    (-> (expect (.sort (clj->js (mapv #(path/relative dir %) (:files (extension-targets [dir]))))))
+                        (.toEqual #js ["ext/a.ts" "ext/b/index.ts"]))
+                    (fs/rmSync dir #js {:recursive true :force true}))))))
