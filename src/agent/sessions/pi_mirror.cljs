@@ -9,6 +9,7 @@
             ["node:path" :as path]
             [clojure.string :as str]
             [agent.debug :as d]
+            [agent.pricing :as pricing]
             [agent.utils.home :as home]
             [agent.utils.pi-shape :as shape]))
 
@@ -24,6 +25,10 @@
   "pi's folder name for `cwd`: `/a/b:c` → `--a-b-c--`."
   [cwd]
   (str "--" (-> cwd (str/replace #"^[/\\]" "") (str/replace #"[/\\:]" "-")) "--"))
+
+;; Source file → this mirror's `{:file :ms}`, and whether the mirror is on.
+(defonce ^:private located (atom {}))
+(defonce ^:private enabled? (atom false))
 
 (defn- iso [ms] (.toISOString (js/Date. (or ms (js/Date.now)))))
 
@@ -55,7 +60,8 @@
                                         {:stopReason "stop"} extra))]
       (= role "tool_call")
       (let [call {:id (or (:tool-call-id md) id "") :name (or (:tool-name md) "")
-                  :args (or (:args md) {}) :text (:content e) :ts (:timestamp e)}]
+                  :args (or (:args md) {}) :text (:content e) :ts (:timestamp e)
+                  :error? (:is-error md)}]
         [(msg (merge (shape/assistant-message {})
                      {:stopReason "toolUse" :timestamp (:timestamp e)
                       :content [{:type "toolCall" :id (:id call) :name (:name call)
@@ -73,11 +79,13 @@
 
 (defn- jsonl [ms] (str (str/join "\n" (map #(js/JSON.stringify (clj->js %)) ms)) "\n"))
 
-(defn- add-usage [a b]
-  (if a
-    (reduce (fn [acc k] (update acc k + (or (get b k) 0)))
-            a [:input :output :cacheRead :cacheWrite :totalTokens])
-    (select-keys b [:input :output :cacheRead :cacheWrite :totalTokens :cost])))
+(defn add-usage [a b]
+  (let [b (select-keys b [:input :output :cacheRead :cacheWrite :totalTokens :cost])]
+    (if a
+      (-> (reduce (fn [acc k] (update acc k + (or (get b k) 0)))
+                  a [:input :output :cacheRead :cacheWrite :totalTokens])
+          (update-in [:cost :total] + (or (get-in b [:cost :total]) 0)))
+      b)))
 
 (defn- read-entries [file]
   (->> (.split (fs/readFileSync file "utf8") "\n")
@@ -98,39 +106,67 @@
         (catch :default _ nil))
       path))
 
+(defn- locate
+  "This source's mirror path. Fixed on first ask: pi reports a session's file
+   before it exists, and a client holds on to that path."
+  [source es]
+  (or (get @located source)
+      (let [ms   (or (:timestamp (first es)) (js/Date.now))
+            cwd  (or (some-> (first es) :metadata :cwd) (js/process.cwd))
+            file (mirror-file (path/join (base-dir) (cwd-dir cwd)) (shape/session-id source) ms)
+            m    {:file file :ms ms :cwd cwd}]
+        (swap! located assoc source m)
+        m)))
+
+(defn public-file
+  "The session file to tell a client about: the mirror when it is on."
+  [source]
+  (if (and @enabled? (seq (str source)))
+    (:file (locate source (when (fs/existsSync source) (read-entries source))))
+    source))
+
 (defn attach!
-  "Mirror `session` from here on. A failed write warns once and stops the
-   mirror: a usage tracker never gets to take the session down with it."
+  "Mirror `session` from here on. As in pi, a session has no file until it has
+   a user message. A failed write warns once and stops the mirror: a usage
+   tracker never gets to take the session down with it."
   [agent session]
-  (let [cur     (atom nil)    ; {:source :file :ids}
+  (let [cur     (atom nil)    ; {:source :file :ids :held}
         pending (atom nil)    ; usage since the last assistant message
         failed? (atom false)
         model   (fn []
                   (let [m (.-model (:config agent))]
                     {:provider (str (or (aget (:config agent) "active-provider-name") ""))
                      :model    (str (or (and m (.-modelId m)) m ""))}))
-        leaf    (fn [ids e] (get ids (:parent-id e)))
         step!   (fn [e ids extra]
-                  (let [ls (entry->lines e (leaf ids e) extra)]
+                  (let [up (get ids (:parent-id e))
+                        ls (entry->lines e up extra)]
                     {:lines ls
-                     :ids   (assoc ids (:id e) (if (seq ls) (:id (last ls)) (leaf ids e)))}))
+                     :ids   (assoc ids (:id e) (if (seq ls) (:id (last ls)) up))}))
+        write!  (fn [lines user?]
+                  (let [{:keys [file source held meta]} @cur
+                        all (into held lines)]
+                    (cond
+                      (fs/existsSync file)
+                      (do (when (seq lines) (fs/appendFileSync file (jsonl lines)))
+                          (swap! cur assoc :held []))
+                      user?
+                      (do (fs/mkdirSync (path/dirname file) #js {:recursive true})
+                          (fs/writeFileSync file (jsonl (cons (header (shape/session-id source) source
+                                                                      (:cwd meta) (:ms meta))
+                                                              all)))
+                          (swap! cur assoc :held []))
+                      :else (swap! cur assoc :held all))))
         open!   (fn [source]
                   ;; First sight of this file: everything already in it counts.
-                  (let [es   (read-entries source)
-                        ms   (:timestamp (first es))
-                        id   (shape/session-id source)
-                        cwd  (or (some-> (first es) :metadata :cwd) (js/process.cwd))
-                        dir  (path/join (base-dir) (cwd-dir cwd))
-                        file (mirror-file dir id ms)
+                  (let [es (when (fs/existsSync source) (read-entries source))
+                        m  (locate source es)
                         {:keys [lines ids]}
                         (reduce (fn [{:keys [lines ids]} e]
                                   (let [r (step! e ids nil)]
                                     {:lines (into lines (:lines r)) :ids (:ids r)}))
                                 {:lines [] :ids {}} es)]
-                    (when-not (fs/existsSync file)
-                      (fs/mkdirSync dir #js {:recursive true})
-                      (fs/writeFileSync file (jsonl (cons (header id source cwd ms) lines))))
-                    (reset! cur {:source source :file file :ids ids})))
+                    (reset! cur {:source source :file (:file m) :ids ids :held [] :meta m})
+                    (write! lines (some #(= "user" (:role %)) es))))
         on-entry (fn [e]
                    (when-not @failed?
                      (try
@@ -142,12 +178,15 @@
                                            (cond-> (model) usage (assoc :usage usage)))
                                    {:keys [lines ids]} (step! e (:ids @cur) extra)]
                                (when usage (reset! pending nil))
-                               (when (seq lines) (fs/appendFileSync (:file @cur) (jsonl lines)))
-                               (swap! cur assoc :ids ids))
+                               (swap! cur assoc :ids ids)
+                               (write! lines (= "user" (:role e))))
                              (open! source))))
                        (catch :default err
                          (reset! failed? true)
                          (d/warn "pi-mirror" (str "stopped: " (.-message err)))))))]
+    (reset! enabled? true)
     ((:on (:events agent)) "turn_end"
-                           (fn [step] (swap! pending add-usage (shape/usage step))))
+                           (fn [step]
+                             (swap! pending add-usage
+                                    (shape/usage step (pricing/model-cost-key (:config agent))))))
     ((:set-on-append session) on-entry)))

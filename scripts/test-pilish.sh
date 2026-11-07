@@ -37,11 +37,9 @@ load=(--batch -Q -L . -L test -L "$root/test/pilish"
 export HOME=$home PI_RUN_INTEGRATION=1 PI_INTEGRATION_BACKENDS=real
 [ -d "$home/.emacs.d/tree-sitter" ] || emacs "${load[@]}" -l scripts/install-ts-grammars.el >/dev/null 2>&1
 
-# Left out, on purpose: both assert pi's session file, not the protocol.
-#   first-user-persists: pi creates the file lazily; nyma creates it at start.
-#   name-persists-across-session-file: greps for pi's `session_info` entry.
+# pi.sessions on: pilish reads session files itself, so it gets pi's format.
 emacs "${load[@]}" -l pilish -l pilish-integration-test -l nyma-e2e-test \
-  --eval "(setq pilish-executable '(\"$nyma\") pilish-extra-args '(\"--trust\"))" \
+  --eval "(setq pilish-executable '(\"$nyma\") pilish-extra-args '(\"--trust\" \"--settings\" \"{\\\"pi\\\":{\\\"sessions\\\":true}}\"))" \
   --eval "(setq pilish-test-rpc-timeout 30)" \
-  --eval "(ert-run-tests-batch-and-exit '(and (or \"/real\$\" \"^nyma-e2e/\") (not (or \"first-user-persists\" \"name-persists-across-session-file\"))))" \
+  --eval "(ert-run-tests-batch-and-exit '(or \"/real\$\" \"^nyma-e2e/\"))" \
   </dev/null

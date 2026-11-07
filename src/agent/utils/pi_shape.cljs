@@ -7,7 +7,8 @@
    `agent.modes.pi-rpc` writes these; a stateful assistant message is built
    here block by block and snapshotted as `partial` on every update, which is
    what ThinkRail renders from."
-  (:require [agent.utils.content :as content]
+  (:require [agent.pricing :as pricing]
+            [agent.utils.content :as content]
             [agent.utils.event-json :refer [step-usage]]
             [agent.ui.think-tag-parser :as think]
             [clojure.string :as str]))
@@ -58,15 +59,21 @@
 
 (defn usage
   "StepResult usage → pi's Usage, keeping `inputTokens`/`outputTokens`, which
-   `@agentproto/adapter-pi` reads off `turn_end.message.usage`."
-  [step]
+   `@agentproto/adapter-pi` reads off `turn_end.message.usage`. `cost-key` prices
+   it. pi splits the cost by kind; nyma prices a turn whole, so only :total moves."
+  [step & [cost-key]]
   (let [u  (step-usage step)
         in (or (:inputTokens u) 0)
         out (or (:outputTokens u) 0)
         cr (or (some-> step .-usage .-inputTokenDetails .-cacheReadTokens) 0)
         cw (or (some-> step .-usage .-inputTokenDetails .-cacheWriteTokens) 0)]
     (cond-> {:input in :output out :cacheRead cr :cacheWrite cw :totalTokens (+ in out)
-             :cost {:input 0 :output 0 :cacheRead 0 :cacheWrite 0 :total 0}}
+             :cost {:input 0 :output 0 :cacheRead 0 :cacheWrite 0
+                    :total (if cost-key
+                             (pricing/calculate-turn-cost cost-key {:input-tokens in :output-tokens out
+                                                                    :cache-read-tokens cr
+                                                                    :cache-write-tokens cw})
+                             0)}}
       u (merge u))))
 
 (defn assistant-message
@@ -115,12 +122,13 @@
 (defn tool-result-message
   "A finished tool execution → pi ToolResultMessage. `:result` is kept beside
    pi's fields for consumers of nyma's earlier turn_end shape."
-  [{:keys [id name text details error?]}]
+  [{:keys [id name text details error? duration]}]
   (let [content [{:type "text" :text (str text)}]]
-    {:role "toolResult" :toolCallId (str id) :toolName (str name)
-     :content content :details (or details {}) :isError (boolean error?)
-     :result {:content content :details (or details {})}
-     :timestamp (js/Date.now)}))
+    (cond-> {:role "toolResult" :toolCallId (str id) :toolName (str name)
+             :content content :details (or details {}) :isError (boolean error?)
+             :result {:content content :details (or details {})}
+             :timestamp (js/Date.now)}
+      duration (assoc :durationMs duration))))
 
 (defn entries->messages
   "Session branch entries → pi messages, for `get_messages` and history.
@@ -149,6 +157,7 @@
                                            :name (or (:tool-name md) "")
                                            :args (or (:args md) {})
                                            :text (:content e)
+                                           :error? (:is-error md)
                                            :ts   (:timestamp e)})))
 
             (contains? #{"user" "assistant"} role)

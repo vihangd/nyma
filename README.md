@@ -1097,6 +1097,8 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 | `message_start` | emit | A streamed text block begins |
 | `message_update` | emit | A streamed text delta |
 | `message_end` | emit | A streamed text block ends |
+| `tool_input_start` | emit | The model began streaming a tool call's arguments |
+| `tool_input_delta` | emit | A piece of a tool call's arguments |
 | `tool_call` | emit | The model requested a tool call |
 | `tool_result` | emit | A tool call returned |
 | `tool_execution_start` | emit | Middleware: a tool began executing |

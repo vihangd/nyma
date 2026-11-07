@@ -53,6 +53,8 @@
    ["message_start"         {:kind :emit :doc "A streamed text block begins"}]
    ["message_update"        {:kind :emit :doc "A streamed text delta"}]
    ["message_end"           {:kind :emit :doc "A streamed text block ends"}]
+   ["tool_input_start"      {:kind :emit :doc "The model began streaming a tool call's arguments"}]
+   ["tool_input_delta"      {:kind :emit :doc "A piece of a tool call's arguments"}]
    ["tool_call"             {:kind :emit :doc "The model requested a tool call"}]
    ["tool_result"           {:kind :emit :doc "A tool call returned"}]
    ["tool_execution_start"  {:kind :emit :doc "Middleware: a tool began executing"}]

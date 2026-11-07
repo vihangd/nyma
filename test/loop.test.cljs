@@ -61,9 +61,9 @@
         (-> (expect (get stream-event-types "reasoning-end"))
             (.toBe "reasoning_end"))))
 
-    (it "contains exactly 8 mappings"
+    (it "contains exactly 10 mappings"
       (fn []
-        (-> (expect (count stream-event-types)) (.toBe 8))))))
+        (-> (expect (count stream-event-types)) (.toBe 10))))))
 
 ;; --- steer / follow-up queue functions ---
 

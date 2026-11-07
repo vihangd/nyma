@@ -10,6 +10,7 @@
             [agent.utils.credentials :as credentials]
             [agent.resources.loader :as loader]
             [agent.sessions.pi-mirror :as mirror]
+            [agent.utils.pi-shape :as shape]
             [test-util.fake-model-server :as fms]))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
@@ -112,7 +113,8 @@
         home (fms/temp-home! (:base-url srv))
         dir  (path/join home "store")]
     (try
-      ((:script! srv) {:text "first answer"} {:text "second answer"})
+      ((:script! srv) {:tool-call {:name "read" :args {:path "x"}}} {:text "first answer"}
+                      {:text "second answer"})
       (let [{:keys [exit lines]} (js-await (run-json home ["--session-dir" dir "say one"]))
             types (mapv #(.-type %) lines)]
         (-> (expect exit) (.toBe 0))
@@ -121,12 +123,21 @@
         (-> (expect (.-cwd (first lines))) (.toBe (fs/realpathSync home)))
         (doseq [t ["agent_start" "turn_start" "message_update" "turn_end" "agent_end" "agent_settled"]]
           (-> (expect (clj->js types)) (.toContain t)))
+        (let [sub-types (keep #(some-> % .-assistantMessageEvent .-type) lines)
+              ends      (filter #(and (= "message_end" (.-type %)) (= "assistant" (.. % -message -role))) lines)
+              tool-end  (first (filter #(= "tool_execution_end" (.-type %)) lines))]
+          (-> (expect (clj->js sub-types)) (.toContain "toolcall_delta"))
+          (-> (expect (.. (first lines) -type)) (.toBe "session"))
+          (-> (expect (.. (nth lines 3) -message -role)) (.toBe "system"))
+          (-> (expect (.. (last ends) -message -thinkingLevel)) (.toBe "off"))
+          (-> (expect (.. (last ends) -message -durationMs)) (.toBeGreaterThanOrEqual 0))
+          (-> (expect (.-durationMs tool-end)) (.toBeGreaterThanOrEqual 0)))
         (-> (expect (clj->js types)) (.not.toContain "response"))
         (-> (expect (clj->js (take 4 types)))
             (.toEqual #js ["session" "agent_start" "turn_start" "message_start"])))
       (let [{:keys [exit]} (js-await (run-json home ["--session-dir" dir "--continue" "say two"]))]
         (-> (expect exit) (.toBe 0))
-        (-> (expect (js/JSON.stringify (clj->js (fms/request-messages srv 1)))) (.toContain "first answer")))
+        (-> (expect (js/JSON.stringify (clj->js (fms/request-messages srv 2)))) (.toContain "first answer")))
       (finally
         ((:stop srv))
         (fs/rmSync home #js {:recursive true :force true})))))
@@ -189,8 +200,9 @@
         (-> (expect (.-id head)) (.toBe "mir-1"))
         (-> (expect (path/basename (path/dirname file)))
             (.toBe (mirror/cwd-dir (fs/realpathSync home))))
-        (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "assistant"]))
+        (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "assistant" "toolResult" "assistant"]))
         (-> (expect (js/JSON.stringify (.-content (.-message final)))) (.toContain "mirrored answer"))
+        (-> (expect (.-isError (.-message (nth lines 4)))) (.toBe true))
         (-> (expect (.-provider (.-message final))) (.toBe "faketest"))
         (-> (expect (.-model (.-message final))) (.toBe "m1"))
         (-> (expect (.-totalTokens (.-usage (.-message final)))) (.toBeGreaterThan 0))
@@ -218,6 +230,14 @@
             (-> (expect (:parentId r)) (.toBe "e1"))
             (-> (expect (:role (:message r))) (.toBe "toolResult"))
             (-> (expect (:toolCallId (:message r))) (.toBe "c1")))))
+    (it "prices usage, and sums it across a run's steps"
+        (fn []
+          (let [step #js {:usage #js {:inputTokens 1000000 :outputTokens 0}}
+                u    (shape/usage step "anthropic/claude-sonnet-5-5")
+                both (mirror/add-usage (mirror/add-usage nil u) u)]
+            (-> (expect (:total (:cost u))) (.toBeGreaterThan 0))
+            (-> (expect (:input both)) (.toBe 2000000))
+            (-> (expect (:total (:cost both))) (.toBe (* 2 (:total (:cost u))))))))
     (it "names folders as pi does"
         (fn [] (-> (expect (mirror/cwd-dir "/a/b:c")) (.toBe "--a-b-c--"))))
     (it "is not read as pi's file unless it is one"

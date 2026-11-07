@@ -103,7 +103,8 @@
              ;; The file's name, not its path: a consumer keys files by it
              ;; (ThinkRail's todo store does).
              :sessionId (or (shape/session-id file) name "session")
-             :sessionFile (or file "")
+             ;; With pi.sessions on, the file a pi client can read.
+             :sessionFile (or (pi-mirror/public-file file) "")
              :autoCompactionEnabled (auto-compaction? agent)
              :messageCount (count (:messages s))
              :pendingMessageCount (+ (count (some-> (:steer-queue agent) deref))
@@ -177,6 +178,7 @@
     ;; nyma's turn_start is per loop iteration, not per step
     (open-turn! st)
     (reset! (:msg st) (shape/assistant-message (model-meta agent)))
+    (reset! (:msg-start st) (js/Date.now))
     (write-event! {:type "message_start" :message @(:msg st)})))
 
 (defn- add-block!
@@ -187,17 +189,26 @@
     (reset! (:msg st) m)
     i))
 
+(defn- open-tool-call!
+  "The toolCall block for `id`, and its toolcall_start, unless it has one.
+   Returns its index."
+  [agent st id tool-name]
+  (or (some-> @(:msg st) (shape/tool-call-index id))
+      (let [i (add-block! agent st {:type "toolCall" :id (str id) :name (str tool-name) :arguments {}})]
+        (update! st {:type "toolcall_start" :contentIndex i :id (str id) :toolName (str tool-name)})
+        i)))
+
 (defn- add-tool-call!
-  "Add a toolCall block for `id` unless the message already has one. Both the
-   stream's tool-call part and tool_execution_start lead here: the AI SDK can
-   start running a tool before the loop has read its tool-call part."
+  "Finish the toolCall block for `id`, once. Both the stream's tool-call part and
+   tool_execution_start lead here: the AI SDK can start running a tool before
+   the loop has read its tool-call part."
   [agent st id tool-name args]
-  (when (and (seq (str id))
-             (nil? (some-> @(:msg st) (shape/tool-call-index id))))
-    (let [block {:type "toolCall" :id (str id) :name (str tool-name) :arguments (or args {})}
-          i     (add-block! agent st block)]
-      (update! st {:type "toolcall_start" :contentIndex i :id (str id) :toolName (str tool-name)})
-      (update! st {:type "toolcall_end" :contentIndex i :toolCall block}))))
+  (when (and (seq (str id)) (not (contains? @(:calls-done st) id)))
+    (let [i (open-tool-call! agent st id tool-name)]
+      (swap! (:calls-done st) conj id)
+      (swap! (:msg st) assoc-in [:content i :arguments] (or args {}))
+      (update! st {:type "toolcall_end" :contentIndex i
+                   :toolCall (get-in @(:msg st) [:content i])}))))
 
 (defn- record! [st m] (swap! (:run-msgs st) conj m))
 
@@ -216,6 +227,7 @@
       (reset! (:text-i st) nil)
       (reset! (:think-i st) nil)
       (reset! (:results st) [])
+      (reset! (:calls-done st) #{})
       (write-event! {:type "message_end" :message final})
       (record! st final)
       (doseq [r results]
@@ -337,6 +349,14 @@
 
          ["reasoning_end" (fn [_] (think-end!))]
 
+         ["tool_input_start"
+          (fn [data] (open-tool-call! agent st (.-id data) (.-toolName data)))]
+
+         ["tool_input_delta"
+          (fn [data]
+            (when-let [i (some-> @(:msg st) (shape/tool-call-index (.-id data)))]
+              (update! st {:type "toolcall_delta" :contentIndex i :delta (str (.-delta data))})))]
+
          ;; The stream's tool-call part. The middleware emits a tool_call of
          ;; its own (no toolCallId, also for script calls); only the stream's
          ;; is the model's.
@@ -388,7 +408,8 @@
                 (swap! (:results st) conj
                        (shape/tool-result-message {:id id :name (:toolName data)
                                                    :text text :details (:details data)
-                                                   :error? (:isError data)})))))]
+                                                   :error? (:isError data)
+                                                   :duration (:duration data)})))))]
 
          ["before_compact"
           (fn [data]
@@ -420,8 +441,13 @@
 
          ["turn_end"
           (fn [step]
-            (end-turn! agent st step {:stopReason (shape/stop-reason (and step (.-finishReason step)))
-                                      :usage (shape/usage step)}))]
+            (end-turn! agent st step
+                       (cond-> {:stopReason   (shape/stop-reason (and step (.-finishReason step)))
+                                :usage        (shape/usage step (pricing/model-cost-key (:config agent)))
+                                :thinkingLevel (or (some-> (:thinking-level agent) deref) "off")}
+                         @(:msg-start st) (assoc :durationMs (- (js/Date.now) @(:msg-start st)))
+                         (some-> step .-response .-id) (assoc :responseId (.. step -response -id))
+                         (some-> step .-rawFinishReason) (assoc :rawStopReason (.-rawFinishReason step)))))]
 
          ["agent_end"
           (fn [_]
@@ -477,6 +503,12 @@
                      (reset! (:streaming? st) true)
                      (write-event! {:type "agent_start"})
                      (open-turn! st))
+                   (when (and @(:running? st) (not @(:system-sent? st)))
+                     (reset! (:system-sent? st) true)
+                     (let [sys {:role "system" :timestamp (js/Date.now)
+                                :content [{:type "text" :text (str (:system-prompt (:config agent)))}]}]
+                       (write-event! {:type "message_start" :message sys})
+                       (write-event! {:type "message_end" :message sys})))
                    (let [pm (shape/->pi-message m)]
                      (write-event! {:type "message_start" :message pm})
                      (write-event! {:type "message_end" :message pm})
@@ -934,6 +966,11 @@
    :text-i        (atom nil)   ; its open text block
    :think-i       (atom nil)   ; its open thinking block
    :results       (atom [])    ; toolResult messages for it
+   :calls-done    (atom #{})   ; its toolCall ids whose arguments are complete
+   :msg-start     (atom nil)   ; when it opened
+   ;; pi leads a session with its system message. `--mode pi-rpc` frontends
+   ;; store what they get, and ThinkRail keeps its own system prompt.
+   :system-sent?  (atom true)
    :run-msgs      (atom [])    ; the run's messages, for agent_end
    :streaming?    (atom false)
    :running?      (atom false)
@@ -948,6 +985,7 @@
   "`--mode json`: pi's session header, then the RPC event stream for one run."
   [agent prompt]
   (let [st    (new-st)
+        _     (reset! (:system-sent? st) false)
         unsub (subscribe-events! agent st)
         sess  @(:session agent)
         file  (when sess ((:get-file-path sess)))]
@@ -964,8 +1002,9 @@
    `on-eof` runs after stdin closes; cli exits there, as pi's rpc mode does,
    so a frontend that dies does not leave the agent (and its MCP servers)
    running."
-  [agent & [{:keys [on-eof]}]]
+  [agent & [{:keys [on-eof send-system?]}]]
   (let [st         (new-st)
+        _          (when send-system? (reset! (:system-sent? st) false))
         unsub      (subscribe-events! agent st)]
     ;; Layered over the headless ui, like ACP's, so methods with no RPC form
     ;; (overlays, custom components) stay the no-ops they were.

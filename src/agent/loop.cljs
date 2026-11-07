@@ -23,6 +23,8 @@
    "reasoning-start" "reasoning_start"
    "reasoning-delta" "reasoning_delta"
    "reasoning-end"   "reasoning_end"
+   "tool-input-start" "tool_input_start"
+   "tool-input-delta" "tool_input_delta"
    "tool-call"       "tool_call"
    "tool-result"     "tool_result"
    ;; NOTE: "finish-step" and "finish" are deliberately unmapped. onStepFinish

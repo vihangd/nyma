@@ -682,7 +682,7 @@ Examples:
   (or (when-not (or (str/includes? s "/") (fs/existsSync s))
         (:path (first (filter #(str/includes? (npath/basename (:path %)) s)
                               (list-sessions dir)))))
-      s))
+      (pi-mirror/nyma-session s)))
 
 (defn ^:async resolve-session
   "Pick a session file and return its manager. Precedence:
@@ -1413,7 +1413,8 @@ Examples:
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
-          "pi-rpc"      (js-await (pi-rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
+          "pi-rpc"      (js-await (pi-rpc/start agent {:on-eof (fn [] (js/process.exit 0))
+                                                         :send-system? (= (:mode values) "rpc")}))
           ;; Agent Client Protocol: run inside Zed, JetBrains and other ACP
           ;; editors. Stdin EOF means the editor closed the agent.
           "acp"         (js-await (acp/start agent {:on-eof (fn [] (js/process.exit 0))})))
