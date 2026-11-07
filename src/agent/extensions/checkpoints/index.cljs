@@ -21,9 +21,9 @@
 
         session-file (fn [] (try (.getSessionFile api) (catch :default _ nil)))
         dir          (fn [] (shared/store-dir (js/process.cwd) (session-file)))
-        touch!       (fn [p]
-                       (when p
-                         (swap! touched* conj (path/resolve (str p)))
+        touch!       (fn [ps]
+                       (when (seq ps)
+                         (swap! touched* into (map #(path/resolve (str %)) ps))
                          (shared/save-touched! (dir) @touched*)))
 
         ;; Load the current session's saved points the first time they are
@@ -65,7 +65,7 @@
             (when-let [p (tool-metadata/tool-path (.-args event))]
               (when-let [st (get @pending* p)]
                 (shared/record-state! checkpoints* (dir) @turn* p st))
-              (touch! p)))
+              (touch! [p])))
           nil)
 
         ;; Files a shell command changed (bash_suite edit-diff), with their
@@ -73,7 +73,7 @@
         on-bash-files
         (fn [data]
           (ensure-loaded!)
-          (doseq [p (or (.-paths data) [])] (touch! p))
+          (touch! (.-paths data))
           (doseq [e (or (.-pre data) [])]
             (shared/record-state! checkpoints* (dir) @turn* (.-path e)
                                   (if (nil? (.-state e)) shared/absent (.-state e))))
