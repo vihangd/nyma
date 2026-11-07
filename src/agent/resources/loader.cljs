@@ -15,6 +15,11 @@
   (path/join (home/dir) ".nyma"))
 (def project-dir ".nyma")
 
+(defn pi-agent-dir
+  "pi's global directory: skills, prompts and extensions there load here too."
+  []
+  (or (.. js/process -env -PI_CODING_AGENT_DIR) (path/join (home/dir) ".pi" "agent")))
+
 ;; --append-system-prompt. Module-level, not passed through `discover`:
 ;; /reload rebuilds the system prompt from fresh resources, which would
 ;; silently drop a value handed in once at startup.
@@ -257,7 +262,8 @@ When multiple independent tool calls are needed, make them in parallel.
   [".codex/skills"
    ".cursor/skills"
    ".claude/skills"
-   ".agents/skills"])
+   ".agents/skills"
+   ".pi/skills"])
 
 (defn discover-all-skills
   "Walk every supported skill folder under home and project, merging
@@ -291,7 +297,7 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; `from-dir` is stateful, so these stay separate bindings.
         global-cv (->> cross-vendor-skill-roots
                        (mapv #(from-dir (resolve home-dir %) (str "global:" %) :global))
-                       (reduce merge {}))
+                       (reduce merge (or (from-dir (path/join (pi-agent-dir) "skills") "global:pi" :global) {})))
         global-nyma (or (from-dir (resolve home-dir ".nyma/skills") "global:.nyma/skills" :global) {})
         project-cv (->> cross-vendor-skill-roots
                         (mapv #(from-dir (resolve cwd %) (str "project:" %) :project))
@@ -346,8 +352,10 @@ When multiple independent tool calls are needed, make them in parallel.
                   {}
                   (merge
                    (or (discover-prompts (path/join home ".claude" "commands")) {})
+                   (or (discover-prompts (path/join (pi-agent-dir) "prompts")) {})
                    (or (discover-prompts (path/join (global-dir) "prompts")) {})
                    (or (discover-prompts (path/join cwd ".claude" "commands")) {})
+                   (or (discover-prompts (path/join cwd ".pi" "prompts")) {})
                    (or (discover-prompts (path/join project-dir "prompts")) {})))
 
         themes  (discover-themes [(path/join (global-dir) "themes")
@@ -439,7 +447,10 @@ When multiple independent tool calls are needed, make them in parallel.
      :extension-dirs
      (if (:no-extensions flags)
        []
-       (distinct-dirs (cond-> [(path/join (global-dir) "extensions")]
+       (distinct-dirs (cond-> [(path/join (pi-agent-dir) "extensions")
+                               (path/join (global-dir) "extensions")]
+                        (trust/allow-file? (path/join ".pi" "extensions"))
+                        (conj (path/join ".pi" "extensions"))
                         (trust/allow-file? (path/join project-dir "extensions"))
                         (conj (path/join project-dir "extensions")))))
 

@@ -8,6 +8,7 @@
             ["node:path" :as path]
             [agent.cli :refer [normalize-argv apply-tool-flags! find-session selected-provider]]
             [agent.utils.credentials :as credentials]
+            [agent.resources.loader :as loader]
             [test-util.fake-model-server :as fms]))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
@@ -126,6 +127,28 @@
       (finally
         ((:stop srv))
         (fs/rmSync home #js {:recursive true :force true})))))
+
+(describe "pi's directories"
+  (fn []
+    (it "skills load from .pi/skills and PI_CODING_AGENT_DIR"
+        (fn []
+          (let [d    (temp-home)
+                env  (.-env js/process)
+                prev (aget env "PI_CODING_AGENT_DIR")
+                skill! (fn [dir n]
+                         (fs/mkdirSync (path/join dir n) #js {:recursive true})
+                         (fs/writeFileSync (path/join dir n "SKILL.md")
+                                           (str "---\nname: " n "\ndescription: d\n---\nbody")))]
+            (aset env "PI_CODING_AGENT_DIR" (path/join d "agent"))
+            (try
+              (skill! (path/join d "proj" ".pi" "skills") "proj-skill")
+              (skill! (path/join d "agent" "skills") "agent-skill")
+              (let [found (loader/discover-all-skills (path/join d "nohome") (path/join d "proj"))]
+                (-> (expect (:scope (get found "proj-skill"))) (.toBe "project"))
+                (-> (expect (:scope (get found "agent-skill"))) (.toBe "global")))
+              (finally
+                (if prev (aset env "PI_CODING_AGENT_DIR" prev) (js-delete env "PI_CODING_AGENT_DIR"))
+                (fs/rmSync d #js {:recursive true :force true}))))))))
 
 (describe "--mode json"
   (fn [] (it "streams pi's events and resumes with --continue" test-json-stream 60000)))

@@ -141,7 +141,7 @@
     (set! (.-HOME (.-env js/process)) root)
     (js/process.chdir root)
     (try
-      (let [dirs (:extension-dirs (js-await (discover)))]
+      (let [dirs (filter #(.includes % ".nyma") (:extension-dirs (js-await (discover))))]
         (-> (expect (count dirs)) (.toBe 1)))
       (finally
         (js/process.chdir cwd)
@@ -157,7 +157,7 @@
     (set! (.-HOME (.-env js/process)) (path/join root "home"))
     (js/process.chdir (path/join root "repo"))
     (try
-      (let [dirs (:extension-dirs (js-await (discover)))]
+      (let [dirs (filter #(.includes % ".nyma") (:extension-dirs (js-await (discover))))]
         (-> (expect (count dirs)) (.toBe 2)))
       (finally
         (js/process.chdir cwd)

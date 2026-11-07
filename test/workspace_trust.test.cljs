@@ -28,6 +28,7 @@
   []
   (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-"))]
     (write! d ".nyma/extensions/evil.mjs" "export default () => {}")
+    (write! d ".pi/extensions/evil.mjs" "export default () => {}")
     (write! d ".mcp.json" {"mcpServers" {"db" {"command" "npx" "args" ["db-mcp"]}}})
     (write! d ".claude/settings.json" {"hooks" {"PreToolUse" [{"hooks" [{"type" "command" "command" "./x.sh"}]}]}})
     (write! d ".nyma/settings.json" {"theme"       "nord"
@@ -65,7 +66,7 @@
                 (fn []
                   (let [d    (hostile-project)
                         srcs (map :source (trust/sources d))]
-                    (doseq [want [".nyma/extensions" ".mcp.json db" ".claude/settings.json hooks.PreToolUse"
+                    (doseq [want [".nyma/extensions" ".pi/extensions" ".mcp.json db" ".claude/settings.json hooks.PreToolUse"
                                   ".nyma/settings.json verify.cmd" ".nyma/settings.json verify.critic"
                                   ".nyma/settings.json agent-state.command" ".nyma/settings.json lsp.typescript"
                                   ".nyma/settings.json agent-shell.agents.x" ".nyma/settings.json codemode.apis.x"]]
@@ -122,6 +123,8 @@
                     (in-dir d
                             (fn []
                               (trust/decide! :untrusted)
+                              (-> (expect (trust/allow-file? (path/join d ".pi" "extensions"))) (.toBe false))
+                              (-> (expect (trust/allow-file? ".pi/extensions/evil.mjs")) (.toBe false))
                               ;; MCP: no project servers
                               (-> (expect (count (mcp/scan-mcp-servers d (path/join d "nohome")))) (.toBe 0))
                               ;; hooks: no project source paths

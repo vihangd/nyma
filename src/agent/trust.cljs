@@ -33,7 +33,7 @@
    ".claude/settings.json" ".claude/settings.local.json"
    ".agents/hooks.json"])
 
-(def ^:private extensions-dir ".nyma/extensions")
+(def ^:private extensions-dirs [".nyma/extensions" ".pi/extensions"])
 
 (declare real)
 
@@ -136,11 +136,12 @@
     [] ; run from HOME, ./.nyma is the user's own global config
   (vec
    (concat
-    (let [dir   (path/join cwd extensions-dir)
-          files (code-files dir)]
-      (when (seq files)
-        [{:source extensions-dir :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))
-          :hash   (content-hash dir files)}]))
+    (for [rel extensions-dirs
+          :let [dir   (path/join cwd rel)
+                files (code-files dir)]
+          :when (seq files)]
+      {:source rel :detail (str (count files) " code file(s): " (str/join ", " (take 5 files)))
+       :hash   (content-hash dir files)})
     ;; code-mode saved scripts: squint a script can call by name
     (let [dir   (path/join cwd ".nyma" "scripts")
           files (when (fs/existsSync dir) (sort (filter #(.endsWith % ".cljs") (vec (fs/readdirSync dir)))))]
@@ -249,8 +250,7 @@
 (defn- gated-rel? [rel]
   (and rel
        (or (some #(= rel %) command-files)
-           (= rel extensions-dir)
-           (str/starts-with? rel (str extensions-dir "/")))))
+           (some #(or (= rel %) (str/starts-with? rel (str % "/"))) extensions-dirs))))
 
 (defn allow-file?
   "May nyma honour the project-controlled FILE at `abs`? Files outside cwd (the
