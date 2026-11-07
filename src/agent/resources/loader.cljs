@@ -330,7 +330,7 @@ When multiple independent tool calls are needed, make them in parallel.
    Optionally accepts an events bus to emit resources_discover for extensions,
    and `:context-files` (the setting) naming the files to read as AGENTS.md;
    the loader has no settings manager of its own, so the caller passes it."
-  [& [{:keys [events reason context-files max-skill-description skill-paths]}]]
+  [& [{:keys [events reason context-files max-skill-description]}]]
   (let [;; Skill discovery walks both nyma's own paths AND the cross-vendor
         ;; paths used by Claude Code, Cursor 2.4, Codex, and the proposed
         ;; agentskills.io standard. Project paths win over global; nyma's
@@ -381,7 +381,7 @@ When multiple independent tool calls are needed, make them in parallel.
 
         ;; Merge extension-contributed resources
         ;; `--extension` pi packages' skills, then what extensions contribute
-        ext-skill-paths  (concat skill-paths (get ext-resources "skillPaths"))
+        ext-skill-paths  (concat (:skill-paths flags) (get ext-resources "skillPaths"))
         ext-prompt-paths (get ext-resources "promptPaths")
         ext-theme-paths  (get ext-resources "themePaths")
 
@@ -453,6 +453,9 @@ When multiple independent tool calls are needed, make them in parallel.
                         (conj (path/join ".pi" "extensions"))
                         (trust/allow-file? (path/join project-dir "extensions"))
                         (conj (path/join project-dir "extensions")))))
+
+     ;; `--extension` files: here so /reload loads them again too.
+     :extension-files (:extension-files flags)
 
      ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them
      ;; off wholesale — it was the only thing the old dir-list branch did.

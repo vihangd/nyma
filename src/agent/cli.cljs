@@ -1009,9 +1009,10 @@ Examples:
                     :no-prompt-templates (:no-prompt-templates values)
                     :no-context-files    (:no-context-files values)
                     :no-extensions       (:no-extensions values)
+                    :skill-paths         (concat (:skill-dirs cli-ext) (:skill values))
+                    :extension-files     (:files cli-ext)
                     :system-prompt       (when-let [p (:system-prompt values)] (text-or-file p))})
         resources (-> (js-await (discover {:context-files (:context-files merged)
-                                           :skill-paths (concat (:skill-dirs cli-ext) (:skill values))
                                            :max-skill-description (:max-description-length (:skills merged))}))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
@@ -1196,7 +1197,7 @@ Examples:
       (.write js/process.stderr (str "nyma " version ": loading extensions…\r")))
     (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
                                                          (:builtin-extensions resources)
-                                                         (:files cli-ext)))
+                                                         (:extension-files resources)))
           extensions-atom   (atom loaded-extensions)
           ;; Dev: save-to-live for extensions on disk (opt-in). Builtins are
           ;; compiled in and need the restart `bun run dev` already does.

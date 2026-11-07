@@ -17,7 +17,8 @@
             [agent.builtin-extensions :refer [registry]]
             [agent.settings.manager :refer [create-settings-manager]]
             [agent.commands.resolver :refer [resolve-command]]
-            [agent.commands.builtins :refer [toggle-extension! handle-reload]]))
+            [agent.commands.builtins :refer [toggle-extension! handle-reload]]
+            [agent.resources.loader :as resources]))
 
 ;; subagent is the shipped extension that declares `dependsOn: ["model-roles"]`.
 (defn- ^:async disable-then-reload []
@@ -62,3 +63,23 @@
           (fn []
             (it "a dependent of the disabled extension is skipped with the reason and leaves no registrations"
                 disable-then-reload)))
+
+(defn ^:async test-reload-keeps-cli-files []
+  (let [tmp   (fs/mkdtempSync (path/join (os/tmpdir) "nyma-ext-cli-"))
+        f     (path/join tmp "cliguard.ts")
+        _     (fs/writeFileSync f "export default () => {};\n")
+        agent (create-agent {:model "test" :system-prompt "reload"})
+        api   (create-extension-api agent)
+        _     (set! (.-extension-api agent) api)
+        loaded (atom (js-await (discover-and-load [] api [] [f])))]
+    (resources/set-cli-overrides! {:extension-files [f]})
+    (try
+      (js-await (handle-reload agent {} loaded nil #js {:ui #js {:notify (fn [& _] nil)}}))
+      (-> (expect (some #(= (:namespace %) "cliguard") @loaded)) (.toBeTruthy))
+      (finally
+        (resources/set-cli-overrides! {})
+        (js-await (deactivate-all @loaded))
+        (fs/rmSync tmp #js {:recursive true :force true})))))
+
+(describe "/reload and --extension"
+          (fn [] (it "loads the file again: a guard must not vanish" test-reload-keeps-cli-files 20000)))

@@ -457,7 +457,8 @@
       (let [loaded (js-await (discover-and-load
                               (:extension-dirs new-resources)
                               (.-extension-api agent)
-                              (:builtin-extensions new-resources)))]
+                              (:builtin-extensions new-resources)
+                              (:extension-files new-resources)))]
         (reset! extensions-atom loaded)))
     ;; 6. Re-resolve CLI flags
     (when resolve-flags-fn
