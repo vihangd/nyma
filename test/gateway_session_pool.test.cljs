@@ -209,11 +209,11 @@
                                                (it "mark-seen! stores expiry in the future"
                                                    (fn []
                                                      (let [p   (pool/create-session-pool {:dedup-ttl-ms 100000})
-                                                           now (js/Date.now)]
+                                                           before (js/Date.now)]
                                                        (pool/mark-seen! p "evt-1")
                                                        (let [exp (get @(:dedup p) "evt-1")]
-                                                         (-> (expect (> exp now)) (.toBe true))
-                                                         (-> (expect (<= exp (+ now 100000))) (.toBe true))))))
+                                                         (-> (expect (>= exp (+ before 100000))) (.toBe true))
+                                                         (-> (expect (<= exp (+ (js/Date.now) 100000))) (.toBe true))))))
 
                                                (it "prune-dedup! removes expired entries"
                                                    (fn []
