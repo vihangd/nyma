@@ -513,6 +513,13 @@ exec nyma "$@"
 
 Zed and JetBrains users want `--mode acp` rather than pi-acp.
 
+Usage trackers and session browsers (ccusage, agentsview, tokscale, jcode, pilish's
+browser) read pi's session files directly. Set `{"pi": {"sessions": true}}` and nyma
+also writes each session in pi's format under `$PI_CODING_AGENT_SESSION_DIR`, else
+`$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`. It mixes into a real pi
+install's history, so it is off by default. nyma's own file stays the truth: a copy
+can trail it after a crash. `switch_session` on a copy opens the nyma session behind it.
+
 Accepted but ignored: `--no-themes`, `--theme`, `--use-theme`, `--no-mcp`, `--verbose`,
 `--tui-mode`, `--models`. `--no-extensions` skips extension directories but keeps
 nyma's compiled-in extensions. pi's `auth.json`, `models.json` and `settings.json` are

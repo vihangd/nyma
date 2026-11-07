@@ -17,6 +17,7 @@
             [agent.resources.skills :as skills]
             [agent.sessions.manager :refer [create-session-manager session->seed-messages attach-session-persistence! new-session-path]]
             [agent.sessions.partial :as session-partial]
+            [agent.sessions.pi-mirror :as pi-mirror]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.sessions.archive :as archive]
             [agent.sessions.storage :as storage]
@@ -1137,6 +1138,7 @@ Examples:
                   :sessionFile ((:get-file-path session))
                   :messageCount (count seeded)}))))
     (attach-session-persistence! agent session)
+    (when (:sessions (:pi merged)) (pi-mirror/attach! agent session))
 
     ;; Initial permission mode (modes-as-roles). Interactive defaults to
     ;; "default" (asks before write/shell/network — there's a UI to prompt).

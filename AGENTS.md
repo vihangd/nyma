@@ -81,6 +81,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/sessions/listing.cljs` | `agent.sessions.listing` | Scans `.jsonl` session files, returns sorted metadata. |
 | `src/agent/sessions/manager.cljs` | `agent.sessions.manager` | JSONL tree session storage. |
 | `src/agent/sessions/partial.cljs` | `agent.sessions.partial` | Keep the in-flight assistant response on disk while it streams. |
+| `src/agent/sessions/pi_mirror.cljs` | `agent.sessions.pi-mirror` | An opt-in copy of each session in pi's file format (`pi.sessions`). |
 | `src/agent/sessions/project.cljs` | `agent.sessions.project` | Which project does a session belong to? |
 | `src/agent/sessions/storage.cljs` | `agent.sessions.storage` | SQLite-backed session entry store with usage tracking. |
 | `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings. |

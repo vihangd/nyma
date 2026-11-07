@@ -26,6 +26,7 @@
             [agent.commands.share :as share]
             [agent.ui.editor-bash :as editor-bash]
             [agent.thinking :as thinking]
+            [agent.sessions.pi-mirror :as pi-mirror]
             [agent.tool-result-policy :as policy-result]
             [agent.ui.think-tag-parser :as think-tags]
             ["node:fs" :as fs]
@@ -846,7 +847,7 @@
 
         "switch_session"
         (if (and (fs/existsSync (str (.-sessionPath cmd)))
-                 (try (builtins/replay-session! agent (.-sessionPath cmd)) true
+                 (try (builtins/replay-session! agent (pi-mirror/nyma-session (.-sessionPath cmd))) true
                       (catch :default _e false)))
           (write-response! cmd {:cancelled false})
           (write-error! cmd "switch_session failed"))

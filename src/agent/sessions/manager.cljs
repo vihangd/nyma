@@ -141,6 +141,7 @@
         leaf-id       (atom nil)
         index         (atom {})  ;; id → {:idx, :parent-id, :role}
         session-name  (atom nil)
+        on-append     (atom nil)
         sqlite-store  (:sqlite-store opts)
         events        (:events opts)
         ;; Read through to the LIVE path. This used to capture the startup file
@@ -223,6 +224,7 @@
             (when sqlite-store
               ((:upsert-entry sqlite-store)
                (assoc entry :session-file (session-file))))
+            (when-let [f @on-append] (f entry))
             id))
 
         branch-fn
@@ -269,6 +271,7 @@
              ;; producer at all. build-context-fn whitelists conversation
              ;; roles, so this entry is inert for the model, compaction and
              ;; token counts.
+             :set-on-append    (fn [f] (reset! on-append f))
              :set-session-name (fn [n]
                                  (reset! session-name n)
                                  (append-fn {:role "session-name" :content (str n)})

@@ -9,6 +9,7 @@
             [agent.cli :refer [normalize-argv apply-tool-flags! find-session selected-provider]]
             [agent.utils.credentials :as credentials]
             [agent.resources.loader :as loader]
+            [agent.sessions.pi-mirror :as mirror]
             [test-util.fake-model-server :as fms]))
 
 (def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
@@ -149,6 +150,76 @@
               (finally
                 (if prev (aset env "PI_CODING_AGENT_DIR" prev) (js-delete env "PI_CODING_AGENT_DIR"))
                 (fs/rmSync d #js {:recursive true :force true}))))))))
+
+(defn- mirror-lines [dir]
+  (let [sub  (path/join dir (first (fs/readdirSync dir)))
+        file (path/join sub (first (fs/readdirSync sub)))]
+    {:file file
+     :lines (mapv #(js/JSON.parse %) (filter seq (.split (fs/readFileSync file "utf8") "\n")))}))
+
+(defn ^:async test-mirror []
+  (let [srv   (fms/start!)
+        home  (fms/temp-home! (:base-url srv))
+        store (path/join home "pi-sessions")
+        proc-env #js {:PI_CODING_AGENT_SESSION_DIR store}
+        cfg   (path/join home ".nyma" "settings.json")
+        prev  (js/JSON.parse (fs/readFileSync cfg "utf8"))]
+    (aset prev "pi" #js {:sessions true})
+    (fs/writeFileSync cfg (js/JSON.stringify prev))
+    (try
+      ((:script! srv) {:tool-call {:name "read" :args {:path "nope.txt"}}} {:text "mirrored answer"})
+      (let [proc (js/Bun.spawn (clj->js ["bun" cli "--print" "--mode" "json" "--provider" "faketest"
+                                         "--model" "m1" "--session-id" "mir-1" "-n" "titled" "go"])
+                               #js {:cwd home :stdin "pipe" :stdout "ignore" :stderr "ignore"
+                                    :env (js/Object.assign #js {} js/process.env proc-env
+                                                           #js {:HOME home :NYMA_NO_MODEL_DISCOVERY "1"})})]
+        (.end (.-stdin proc))
+        (js-await (.-exited proc)))
+      ;; The nyma file sits beside pi's per-cwd folder.
+      (let [nyma-file (path/join store "mir-1.jsonl")
+            _ (fs/renameSync nyma-file (path/join home "kept.jsonl"))
+            {:keys [file lines]} (mirror-lines store)
+            head  (first lines)
+            kinds (mapv #(or (some-> % .-message .-role) (.-type %)) (rest lines))
+            final (last (filter #(= "assistant" (some-> % .-message .-role)) lines))]
+        (-> (expect (.-type head)) (.toBe "session"))
+        (-> (expect (.-version head)) (.toBe 3))
+        (-> (expect (.-id head)) (.toBe "mir-1"))
+        (-> (expect (path/basename (path/dirname file)))
+            (.toBe (mirror/cwd-dir (fs/realpathSync home))))
+        (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "assistant"]))
+        (-> (expect (js/JSON.stringify (.-content (.-message final)))) (.toContain "mirrored answer"))
+        (-> (expect (.-provider (.-message final))) (.toBe "faketest"))
+        (-> (expect (.-model (.-message final))) (.toBe "m1"))
+        (-> (expect (.-totalTokens (.-usage (.-message final)))) (.toBeGreaterThan 0))
+        ;; parents chain: every entry names the one before it
+        (doseq [[a b] (partition 2 1 (rest lines))]
+          (-> (expect (.-parentId b)) (.toBe (.-id a))))
+        (fs/renameSync (path/join home "kept.jsonl") nyma-file)
+        (-> (expect (mirror/nyma-session file)) (.toBe nyma-file)))
+      (finally
+        ((:stop srv))
+        (fs/rmSync home #js {:recursive true :force true})))))
+
+(describe "pi session mirror"
+  (fn []
+    (it "writes pi's format, usage included" test-mirror 60000)
+    (it "a tool call becomes pi's assistant and toolResult pair"
+        (fn []
+          (let [[a r] (mirror/entry->lines {:role "tool_call" :id "e1" :timestamp 1000 :content "out"
+                                            :metadata {:tool-call-id "c1" :tool-name "read" :args {:path "x"}}}
+                                           "p0" {:provider "z"})]
+            (-> (expect (:parentId a)) (.toBe "p0"))
+            (-> (expect (:stopReason (:message a))) (.toBe "toolUse"))
+            (-> (expect (:provider (:message a))) (.toBe "z"))
+            (-> (expect (:name (first (:content (:message a))))) (.toBe "read"))
+            (-> (expect (:parentId r)) (.toBe "e1"))
+            (-> (expect (:role (:message r))) (.toBe "toolResult"))
+            (-> (expect (:toolCallId (:message r))) (.toBe "c1")))))
+    (it "names folders as pi does"
+        (fn [] (-> (expect (mirror/cwd-dir "/a/b:c")) (.toBe "--a-b-c--"))))
+    (it "is not read as pi's file unless it is one"
+        (fn [] (-> (expect (mirror/nyma-session "/no/such.jsonl")) (.toBe "/no/such.jsonl"))))))
 
 (describe "--mode json"
   (fn [] (it "streams pi's events and resumes with --continue" test-json-stream 60000)))
