@@ -831,18 +831,27 @@
    Reads the session lazily off agent-ref because the session is attached
    after the pipeline is constructed (cli.cljs)."
   [agent-ref]
-  {:name  :tool-persistence
-   :leave (fn [ctx]
-            (let [session   (some-> @agent-ref :session deref)
-                  file-path (when session ((:get-file-path session)))]
-              ;; Nested (script) calls are not persisted: their results are
-              ;; inputs the script consumed, and the script's own result is
-              ;; the entry. Persisting them replayed hundreds of KB on resume.
-              (when (and session file-path (not (:cancelled ctx)) (not (:nested? ctx)))
-                ((:append session)
-                 {:role     "tool_call"
-                  :content  (str (:result ctx))
-                  :metadata {:tool-name    (:tool-name ctx)
-                             :tool-call-id (:exec-id ctx)
-                             :args         (:args ctx)}})))
-            ctx)})
+  (let [persist!
+        (fn [ctx text error?]
+          (let [session   (some-> @agent-ref :session deref)
+                file-path (when session ((:get-file-path session)))]
+            ;; Nested (script) calls are not persisted: their results are
+            ;; inputs the script consumed, and the script's own result is
+            ;; the entry. Persisting them replayed hundreds of KB on resume.
+            (when (and session file-path (not (:cancelled ctx)) (not (:nested? ctx)))
+              ((:append session)
+               {:role     "tool_call"
+                :content  (str text)
+                :metadata (cond-> {:tool-name    (:tool-name ctx)
+                                   :tool-call-id (:exec-id ctx)
+                                   :args         (:args ctx)}
+                            error? (assoc :is-error true))}))))]
+    {:name  :tool-persistence
+     :leave (fn [ctx]
+              (persist! ctx (:result ctx) (:result-is-error ctx))
+              ctx)
+     ;; A failed call is history too: the model saw the failure and acted on it.
+     :error (fn [ctx]
+              (let [e (:error ctx)]
+                (persist! ctx (or (some-> e .-message) e "tool failed") true))
+              ctx)}))
