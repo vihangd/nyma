@@ -166,6 +166,8 @@
     (cond
       (or (get result "block") (get result "cancel"))
       (assoc ctx :cancelled true
+             ;; pi reports a hook's block as a failed tool
+             :result-is-error (boolean (get pi-res "block"))
              :cancel-reason (or (get result "reason") "Blocked by extension"))
 
       ;; Skip execution — return a canned result string without calling the tool.

@@ -269,6 +269,7 @@
             ends (filter #(= "tool_execution_end" (.-type %)) lines)]
         (-> (expect (fs/existsSync (path/join home "no.txt"))) (.toBe false))
         (-> (expect (js/JSON.stringify (.-result (first ends)))) (.toContain "guarded"))
+        (-> (expect (.-isError (first ends))) (.toBe true))
         ;; a guard that throws fails closed, as in pi
         (-> (expect (fs/existsSync (path/join home "boom.txt"))) (.toBe false))
         (-> (expect (js/JSON.stringify (.-result (second ends)))) (.toContain "blocking execution"))
