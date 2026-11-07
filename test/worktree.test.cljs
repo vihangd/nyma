@@ -72,6 +72,16 @@
                     (-> (expect (:commits (wt/finish! t "x"))) (.toBe 1))
                     (fs/rmSync d #js {:recursive true :force true}))))
 
+            (it "an idle run on a kept branch leaves the earlier work"
+                (fn []
+                  (let [d  (temp-repo)
+                        t1 (wt/create! d "kept")]
+                    (fs/writeFileSync (path/join (:path t1) "w.txt") "w")
+                    (wt/finish! t1 "first")
+                    (-> (expect (wt/finish! (wt/create! d "kept") "second")) (.toBeFalsy))
+                    (-> (expect (git d "show" "nyma/kept:w.txt")) (.toBe "w"))
+                    (fs/rmSync d #js {:recursive true :force true}))))
+
             (it "--worktree reuses a checkout; rm keeps an unmerged branch"
                 (fn []
                   (let [d  (temp-repo)

@@ -31,7 +31,7 @@
 
 (defn create!
   "New worktree `name` off HEAD, or on its branch if that outlived an earlier
-   checkout. Returns {:path :branch :base :root}.
+   checkout. Returns {:path :branch :base :root :kept?}.
    The worktrees dir ignores itself, so the user's .gitignore is untouched."
   [cwd name]
   (let [root (or (repo-root cwd) (throw (js/Error. "not inside a git repository")))
@@ -48,7 +48,7 @@
     (if (seq kept)
       (git root "worktree" "add" "-q" p br)
       (git root "worktree" "add" "-q" "-b" br p base))
-    {:path p :branch br :base base :root root}))
+    {:path p :branch br :base base :root root :kept? (boolean (seq kept))}))
 
 (defn open!
   "Worktree `name`, created off HEAD if it does not exist yet — so
@@ -97,8 +97,9 @@
   "Close worktree `wt`. Uncommitted changes are committed on its branch.
    Returns {:branch :stat :commits} when the branch moved past its base —
    the checkout is removed, the branch kept — or nil when nothing changed,
-   in which case branch and checkout are both gone."
-  [{:keys [path branch base root]} message]
+   in which case branch and checkout are both gone. A branch that was already
+   there holds earlier work, so it stays."
+  [{:keys [path branch base root kept?]} message]
   (when (seq (git path "status" "--porcelain"))
     (commit-all! path message))
   (let [head    (git path "rev-parse" "HEAD")
@@ -108,7 +109,7 @@
                    :commits (js/Number (git root "rev-list" "--count" (str base ".." branch)))
                    :stat    (git root "diff" "--stat" (str base ".." branch))})]
     (git root "worktree" "remove" "--force" path)
-    (when-not changed (git root "branch" "-D" branch))
+    (when-not (or changed kept?) (git root "branch" "-D" branch))
     result))
 
 (defn list-all

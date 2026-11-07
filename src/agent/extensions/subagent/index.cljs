@@ -278,7 +278,10 @@ intermediate tool calls, so put everything that matters in the summary.")
         model-id (or model-override (cfg-get cfg :model "model"))
         allowed  (cfg-get cfg :allowed-tools "allowed-tools")]
     (try
-      (let [tree (wt/create! (js/process.cwd) (str agent-name "-" (js/Date.now)))
+      (let [tree (wt/create! (js/process.cwd)
+                             ;; safe-name keeps 40 chars: the stamp must survive
+                             (str (subs (str agent-name) 0 (min 26 (count (str agent-name))))
+                                  "-" (js/Date.now)))
             argv (into (or command (self-command))   ;; :command — a test seam
                        (conj (worktree-args {:model   (if provider (str provider "/" model-id) model-id)
                                              :sys     (or (cfg-get cfg :system-prompt "system-prompt") default-subagent-prompt)
