@@ -191,3 +191,24 @@
 
 (describe "the absent sentinel"
           (fn [] (it "a file whose content is 'absent' is restored, not deleted" test-content-absent)))
+
+(describe "checkpoints: session change"
+          (fn []
+            (it "turn end does not save the old session's points in the new one's file"
+                (fn []
+                  (let [d  (fs/realpathSync (fs/mkdtempSync (path/join (os/tmpdir) "nyma-cpp-fin-")))
+                        s1 (path/join d "one.jsonl")
+                        s2 (path/join d "two.jsonl")
+                        sf (atom s1)
+                        m  (mock-api nil)
+                        finalize (fn [] ((get @(:handlers m) "turn_finalize") #js {} nil))]
+                    (aset (:api m) "getSessionFile" (fn [] @sf))
+                    (aset (:api m) "getLeafId" (fn [] "leaf"))
+                    (cpx/activate (:api m))
+                    (finalize)
+                    (reset! sf s2)
+                    (finalize)
+                    (-> (expect (count (shared/load-turn-entries (shared/store-dir (js/process.cwd) s2)))) (.toBe 1))
+                    (fs/rmSync (shared/store-dir (js/process.cwd) s1) #js {:recursive true :force true})
+                    (fs/rmSync (shared/store-dir (js/process.cwd) s2) #js {:recursive true :force true})
+                    (fs/rmSync d #js {:recursive true :force true}))))))

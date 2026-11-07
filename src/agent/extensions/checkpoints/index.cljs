@@ -81,6 +81,9 @@
 
         on-finalize
         (fn [_event _ctx]
+          ;; After /new or /resume nothing else may have loaded the new
+          ;; session's points yet, and the save below would overwrite them.
+          (ensure-loaded!)
           (reset! pending* {})   ;; denied/failed leftovers are dropped
           (when-let [leaf (try (.getLeafId api) (catch :default _ nil))]
             (swap! turn-entries* assoc (str @turn*) leaf)
