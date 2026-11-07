@@ -189,3 +189,12 @@
       (fn []
         (-> (expect (sg/grant-matches? (sg/grant-base "pytest -x") "pytest tests/")) (.toBe true))
         (-> (expect (sg/grant-matches? (sg/grant-base "git push origin") "git push --force")) (.toBe true))))))
+
+(describe "wrappers that run another command"
+          (fn []
+            (it "never get a grant, and an old grant covers nothing"
+                (fn []
+                  (doseq [c ["stdbuf -o0 ls" "setsid ls" "flock /tmp/l ls" "script -c ls" "ionice ls"
+                             "caffeinate ls" "busybox sh" "source ./x" ". ./x" "pipx run y" "vim x"]]
+                    (-> (expect (sg/grant-base c)) (.toBeFalsy)))
+                  (-> (expect (sg/grant-matches? "stdbuf" "stdbuf -o0 bash -c 'rm -rf ~/work'")) (.toBe false))))))

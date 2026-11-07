@@ -29,12 +29,20 @@
   "Commands whose arguments are themselves arbitrary code or another command:
    interpreters and wrappers. `bash *` after `bash -c 'ls'` also covered
    `bash -c 'rm -rf ~/work'`; `sudo *` after `sudo ls` covered any root
-   command. No grant can vouch for what they run, so they never get one."
+   command. No grant can vouch for what they run, so they never get one.
+   ponytail: a deny-list can only cover what it names, and a one-word grant
+   covers the tool's every flag (`tar --to-command`); verb-only grants if that
+   ever matters."
   #{"bash" "sh" "zsh" "fish" "dash" "ksh" "csh" "tcsh"
     "python" "python2" "python3" "pypy" "pypy3" "ipython" "node" "perl" "ruby" "php"
     "lua" "tclsh" "Rscript" "pwsh" "osascript" "awk" "gawk" "mawk" "nawk" "uvx"
     "sudo" "doas" "su" "env" "xargs" "find" "eval" "exec" "nohup" "timeout" "nice"
-    "time" "watch" "ssh" "command" "builtin"})
+    "time" "watch" "ssh" "command" "builtin"
+    "source" "." "stdbuf" "setsid" "flock" "script" "ionice" "taskset" "chrt"
+    "numactl" "caffeinate" "busybox" "toybox" "unbuffer" "rlwrap" "parallel"
+    "chroot" "unshare" "nsenter" "runuser" "pkexec" "fakeroot" "firejail"
+    "sandbox-exec" "strace" "ltrace" "gdb" "lldb" "expect" "tmux" "screen" "entr"
+    "pipx" "vi" "vim" "nvim" "emacs" "ed" "ex"})
 
 (def ^:private code-verbs
   "Subcommands that run code or a command passed as arguments, on tools otherwise
