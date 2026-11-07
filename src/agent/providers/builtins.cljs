@@ -17,7 +17,8 @@
    the failure message told the user to run `/login`."
   [provider]
   (let [v (aget js/process.env (get key-env provider))]
-    (if (seq (str (or v ""))) v (credentials/read-credential provider))))
+    (or (credentials/run-key provider)
+        (if (seq (str (or v ""))) v (credentials/read-credential provider)))))
 
 (defn- builtin-model [provider create]
   (fn [id]

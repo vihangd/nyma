@@ -24,9 +24,11 @@
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
             [agent.extensions :as ext :refer [create-extension-api]]
             [agent.extension-loader :as ext-loader :refer [discover-and-load deactivate-all]]
-            [agent.commands.builtins :refer [register-builtins]]
+            [agent.commands.builtins :as builtins :refer [register-builtins]]
             [agent.keybindings :refer [load-keybindings apply-keybindings rebuild-registry!]]
             [agent.providers.registry :as registry-utils]
+            [agent.utils.credentials :as credentials]
+            [agent.tools :refer [builtin-tools]]
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
             [agent.extensions.model-roles.policy :as perm-policy]
@@ -253,6 +255,44 @@
         (-> t (.split ",") vec))
       (:tools merged)))
 
+(defn apply-tool-flags!
+  "pi's tool flags, after extensions registered theirs. A tool registered later
+   still activates, as with `--tools`."
+  [registry values builtin-names]
+  (let [active (keys ((:get-active registry)))
+        globs  (map #(js/Bun.Glob. (str/trim %))
+                    (some-> (:exclude-tools values) (.split ",")))
+        drop?  (fn [t]
+                 (or (:no-tools values)
+                     (and (:no-builtin-tools values) (contains? builtin-names t))
+                     (some #(.match % t) globs)))]
+    (when (or (:no-tools values) (:no-builtin-tools values) (seq globs))
+      ((:set-active registry) (set (remove drop? active))))))
+
+(defn text-or-file
+  "pi's prompt flags take text or a path to it."
+  [s]
+  (if (and (fs/existsSync s) (.isFile (fs/statSync s)))
+    (fs/readFileSync s "utf8")
+    s))
+
+(defn selected-provider
+  "The provider `--model`/`--provider` name, before any registry exists."
+  [values merged]
+  (let [m (str (or (:model values) (:model merged) ""))]
+    (or (:provider values)
+        (when (str/includes? m "/") (first (registry-utils/split-model-spec m)))
+        (:provider merged)
+        "anthropic")))
+
+(defn- print-models!
+  "`provider model` per line, as pi's --list-models answers a script."
+  [agent search]
+  (doseq [m (builtins/current-models agent)
+          :let [line (str (:provider m) " " (:id m))]
+          :when (or (nil? search) (str/includes? line search))]
+    (js/console.log line)))
+
 (defn resolve-ext-flags
   "Resolve --ext-* CLI flags against registered extension flags.
 
@@ -335,12 +375,36 @@ Session:
                          named on the command line (saves ~3s per launch).
 
 Tools:
-      --tools <list>     Comma-separated allowlist of built-in tools.
+  -t, --tools <list>     Comma-separated allowlist of built-in tools.
                          Omit to enable all built-ins.
 
 Extensions:
       --ext-<name>[=v]   Set a flag registered by an extension. Boolean
                          flags accept --ext-foo or --ext-foo=false.
+
+pi compatibility (a client built for pi can spawn nyma with these):
+      --session-dir <dir>  Store and find sessions here. Also
+                           PI_CODING_AGENT_SESSION_DIR.
+      --session-id <id>    Open the session with this id, or create it.
+  -n, --name <name>        Name the session.
+      --api-key <key>      Key for the selected provider, this run only.
+      --system-prompt <text|path>
+                           Replace the default system prompt.
+      --list-models [text] List known models, optionally filtered, and exit.
+      --skill <path>       Load a skill directory. Repeatable.
+  -xt, --exclude-tools <list>
+                           Disable tools; `*` matches anything.
+  -nt, --no-tools          Start with every tool disabled.
+  -nbt, --no-builtin-tools Disable built-ins, keep extension tools.
+  -ne, --no-extensions     Skip extension directories. nyma's compiled-in
+                           extensions stay: they are its providers and tools.
+  -ns, --no-skills         Skip skill discovery.
+  -np, --no-prompt-templates
+                           Skip prompt template discovery.
+  -nc, --no-context-files  Skip AGENTS.md and CLAUDE.md.
+      --offline            No catalogue fetches. Also PI_OFFLINE=1.
+      --no-themes, --theme, --use-theme, --no-mcp, --verbose, --tui-mode,
+      --models             Accepted and ignored.
 
 Other:
       --debug            Debug logging on for this run (same as NYMA_DEBUG=1);
@@ -610,6 +674,15 @@ Examples:
       (let [ans (js-await (prompt-line "Number [blank = most recent]: "))]
         (:path (pick-session shown ans))))))
 
+(defn find-session
+  "`--session` takes a path or, as in pi, a full or partial session id: a bare
+   word that is no file names the newest file in `dir` containing it."
+  [dir s]
+  (or (when-not (or (str/includes? s "/") (fs/existsSync s))
+        (:path (first (filter #(str/includes? (npath/basename (:path %)) s)
+                              (list-sessions dir)))))
+      s))
+
 (defn ^:async resolve-session
   "Pick a session file and return its manager. Precedence:
    - --session <path>     → that path (always wins)
@@ -642,14 +715,24 @@ Examples:
                        (.write (.-stderr js/process)
                                "nyma: no sessions for this project — starting fresh\n")
                        (new-session-path sessions-dir))
+        ;; It becomes a file name: nothing with a path in it gets through.
+        _ (when-let [id (:session-id values)]
+            (when-not (re-find #"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$" id)
+              (.write (.-stderr js/process) (str "nyma: bad --session-id: " id "\n"))
+              (js/process.exit 2)))
+        fresh-path   (fn []
+                       (if-let [id (:session-id values)]
+                         (str sessions-dir "/" id ".jsonl")
+                         (new-session-path sessions-dir)))
         path
         (cond
-          (:session values)    (:session values)
+          (:session values)    (find-session sessions-dir (:session values))
           (:no-session values) nil
+          (and (:session-id values) (not (:fork values))) (fresh-path)
           one-shot?            nil
           (:fork values)
-          (let [src (:fork values)
-                dst (new-session-path sessions-dir)]
+          (let [src (find-session sessions-dir (:fork values))
+                dst (fresh-path)]
             (if (fs/existsSync src)
               (do (fs/mkdirSync sessions-dir #js {:recursive true})
                   (fs/copyFileSync src dst)
@@ -691,6 +774,7 @@ Examples:
       ;; transcript.
       (when (and path (not (fs/existsSync path)))
         ((:append session) {:role "session-meta" :metadata {:cwd (js/process.cwd)}}))
+      (when-let [n (:name values)] ((:set-session-name session) n))
       session)))
 
 (defn settings-arg
@@ -751,7 +835,7 @@ Examples:
        :resume       #js {:type "boolean" :short "r"}
        ;; Widen -r past the current project.
        :all          #js {:type "boolean"}
-       :tools        #js {:type "string"}
+       :tools        #js {:type "string" :short "t"}
        :thinking     #js {:type "string"}
        :session      #js {:type "string"}
        :fork         #js {:type "string"}
@@ -764,19 +848,58 @@ Examples:
        ;; Accepted for compat with the pi Emacs frontend's trust policy
        ;; (it always appends one of these). Declared so strict parseArgs
        ;; doesn't crash; pi-rpc keeps its ask-baseline regardless.
-       :approve      #js {:type "boolean"}
+       :approve      #js {:type "boolean" :short "a"}
        :no-approve   #js {:type "boolean"}
        ;; Trust this folder's project-defined commands for this run only.
        :trust        #js {:type "boolean"}
        ;; Headless controls: a step cap for this run, and extra system text.
        :max-steps    #js {:type "string"}
-       :append-system-prompt #js {:type "string"}
+       :append-system-prompt #js {:type "string" :multiple true}
        ;; pi's flag: load an extension file, or a pi package's extensions and
        ;; skills, for this run. Repeatable.
        :extension    #js {:type "string" :short "e" :multiple true}
        :settings     #js {:type "string"}
        ;; Run the whole session in a git worktree of this repo.
-       :worktree     #js {:type "string" :short "w"}})
+       :worktree     #js {:type "string" :short "w"}
+       ;; pi's flags, so a client built for pi can spawn nyma unchanged.
+       :session-dir  #js {:type "string"}
+       :session-id   #js {:type "string"}
+       :name         #js {:type "string" :short "n"}
+       :api-key      #js {:type "string"}
+       :system-prompt #js {:type "string"}
+       :list-models  #js {:type "boolean"}
+       :skill        #js {:type "string" :multiple true}
+       :exclude-tools #js {:type "string"}
+       :no-tools     #js {:type "boolean"}
+       :no-builtin-tools #js {:type "boolean"}
+       :no-extensions #js {:type "boolean"}
+       :no-skills    #js {:type "boolean"}
+       :no-prompt-templates #js {:type "boolean"}
+       :no-context-files #js {:type "boolean"}
+       :offline      #js {:type "boolean"}
+       ;; Accepted and ignored: nothing in nyma answers to them.
+       :no-themes    #js {:type "boolean"}
+       :theme        #js {:type "string" :multiple true}
+       :use-theme    #js {:type "string"}
+       :no-mcp       #js {:type "boolean"}
+       :verbose      #js {:type "boolean"}
+       :tui-mode     #js {:type "string"}
+       :models       #js {:type "string"}})
+
+(def pi-short-flags
+  "pi's multi-letter short flags. parseArgs reads `-ne` as `-n -e`."
+  {"-xt" "--exclude-tools" "-nt" "--no-tools" "-nbt" "--no-builtin-tools"
+   "-ne" "--no-extensions" "-ns" "--no-skills" "-np" "--no-prompt-templates"
+   "-nc" "--no-context-files" "-na" "--no-approve"})
+
+(defn normalize-argv
+  "argv with `--ext-*` dropped and pi's short flags spelled out, leaving
+   whatever follows `--` alone."
+  [argv]
+  (let [[flags tail] (split-with #(not= % "--") argv)]
+    (concat (map #(get pi-short-flags % %)
+                 (remove #(.startsWith % "--ext-") flags))
+            tail)))
 
 (defn parse-cli-args!
   "argv → {:values :positionals}, exiting 2 with one line on a bad flag.
@@ -788,8 +911,7 @@ Examples:
   []
   (try
     (parseArgs
-     #js {:args    (clj->js (remove #(.startsWith % "--ext-")
-                                    (.slice js/process.argv 2)))
+     #js {:args    (clj->js (normalize-argv (.slice js/process.argv 2)))
           :options cli-options
           :allowPositionals true})
     (catch :default e
@@ -867,10 +989,22 @@ Examples:
         ;; a typo.
         _         (when-let [w (inert-warning ((:user-settings settings)))]
                     (d/warn "settings" w))
-        sessions-dir (str (.. js/process -env -HOME) "/.nyma/sessions")
+        sessions-dir (or (:session-dir values)
+                         (.. js/process -env -PI_CODING_AGENT_SESSION_DIR)
+                         (str (.. js/process -env -HOME) "/.nyma/sessions"))
         cli-ext   (ext-loader/extension-targets (:extension values))
+        _         (when (or (:offline values) (.. js/process -env -PI_OFFLINE))
+                    (aset js/process.env "NYMA_NO_MODEL_DISCOVERY" "1"))
+        _         (when-let [k (:api-key values)]
+                    (credentials/set-run-key! (selected-provider values merged) k))
+        _         (loader/set-cli-overrides!
+                   {:no-skills           (:no-skills values)
+                    :no-prompt-templates (:no-prompt-templates values)
+                    :no-context-files    (:no-context-files values)
+                    :no-extensions       (:no-extensions values)
+                    :system-prompt       (when-let [p (:system-prompt values)] (text-or-file p))})
         resources (-> (js-await (discover {:context-files (:context-files merged)
-                                           :skill-paths (:skill-dirs cli-ext)
+                                           :skill-paths (concat (:skill-dirs cli-ext) (:skill values))
                                            :max-skill-description (:max-description-length (:skills merged))}))
                       (assoc :settings settings)
                       (assoc :sessions-dir sessions-dir))
@@ -901,7 +1035,8 @@ Examples:
                                     (str "nyma: --max-steps expects a positive integer, got " (pr-str raw) "\n"))
                             (js/process.exit 2))))
                     (or (:max-steps merged) 100))
-        _ (loader/set-cli-append! (:append-system-prompt values))
+        _ (loader/set-cli-append! (when-let [xs (:append-system-prompt values)]
+                                    (str/join "\n\n" (map text-or-file xs))))
         active-tools (resolve-tools values merged)
         ;; Create agent first, then resolve model via its provider registry
         agent (create-agent
@@ -1134,6 +1269,7 @@ Examples:
 
       ;; Resolve --ext-* CLI flags against registered extension flags
       (resolve-ext-flags agent)
+      (apply-tool-flags! (:tool-registry agent) values (set (keys builtin-tools)))
 
       ;; Register .nymaignore file access restrictions
       (file-access/register-access-check (:events agent) (js/process.cwd))
@@ -1228,6 +1364,10 @@ Examples:
                                 (when (seq (str file)) (str " · " file " — resume with nyma -c"))
                                 "\n")))
                  (catch :default _ nil)))))
+
+      (when (:list-models values)
+        (print-models! agent (first positionals))
+        (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
 
       ;; Dispatch to mode. Print/json resolve stdin here (not in the mode
       ;; module) so unit tests can call mode/start directly with nil and

@@ -38,6 +38,8 @@
    :create-model of their own) — without it the file is written and never read."
   [provider-name config]
   (or
+    ;; --api-key beats everything saved
+   (when-let [k (credentials/run-key provider-name)] {:key k :oauth? false})
     ;; Try OAuth credentials first
    (when-let [oauth-cfg (:oauth config)]
      (when-let [creds (oauth/load-credentials provider-name)]

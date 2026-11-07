@@ -75,14 +75,24 @@
                 {:ok parsed}
                 {:error (str "Refusing to write: " p " is not valid JSON")})))))
 
+;; `--api-key`: this run only, and only for the provider it was given for —
+;; roles and subagents on other providers must not send it to their endpoint.
+(defonce ^:private run-keys (atom {}))
+
+(defn set-run-key! [provider-name k]
+  (swap! run-keys assoc (str provider-name) k))
+
+(defn run-key [provider-name] (get @run-keys (str provider-name)))
+
 (defn read-credential
   "Saved key for `provider-name`, or nil.
 
    `fallback-names` are additional keys to try in order — e.g. claude-native
    reads the `anthropic` entry, since that's what `/login anthropic` writes."
   [provider-name & fallback-names]
-  (when-let [creds (read-all)]
-    (some (fn [k]
-            (let [v (when (seq (str k)) (aget creds (str k)))]
-              (when (and (string? v) (seq v)) v)))
-          (cons provider-name fallback-names))))
+  (or (run-key provider-name)
+      (when-let [creds (read-all)]
+        (some (fn [k]
+                (let [v (when (seq (str k)) (aget creds (str k)))]
+                  (when (and (string? v) (seq v)) v)))
+              (cons provider-name fallback-names)))))

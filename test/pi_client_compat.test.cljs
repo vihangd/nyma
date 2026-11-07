@@ -1,0 +1,91 @@
+(ns pi-client-compat.test
+  "A client built for pi spawns nyma with pi's argv and speaks pi's protocol.
+   The strict parser exits 2 on one flag it does not know, before any JSON, so
+   each client's real argv is held here."
+  (:require ["bun:test" :refer [describe it expect]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]
+            [agent.cli :refer [normalize-argv apply-tool-flags! find-session selected-provider]]
+            [agent.utils.credentials :as credentials]))
+
+(def ^:private cli (path/resolve (js/process.cwd) "dist" "agent" "cli.mjs"))
+
+(defn ^:async ask-state
+  "Spawn nyma with `argv`, ask get_state, close stdin. `{:exit :reply}`."
+  [argv home]
+  (let [proc (js/Bun.spawn (clj->js (concat ["bun" cli] argv))
+                           #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "pipe"
+                                :env (js/Object.assign #js {} js/process.env
+                                                       #js {:HOME home :ANTHROPIC_API_KEY "test"
+                                                            :NYMA_NO_MODEL_DISCOVERY "1"})})]
+    (.write (.-stdin proc) "{\"id\":\"s\",\"type\":\"get_state\"}\n")
+    (.flush (.-stdin proc))
+    (.end (.-stdin proc))
+    (let [out  (js-await (.text (js/Response. (.-stdout proc))))
+          exit (js-await (.-exited proc))]
+      {:exit  exit
+       :reply (some (fn [l] (let [o (try (js/JSON.parse l) (catch :default _ nil))]
+                              (when (and o (= "s" (.-id o))) o)))
+                    (.split out "\n"))})))
+
+(defn- temp-home [] (fs/mkdtempSync (path/join (os/tmpdir) "nyma-pi-compat-")))
+
+(defn ^:async test-session-flags []
+  (let [home (temp-home)
+        dir  (path/join home "store")
+        {:keys [exit reply]}
+        (js-await (ask-state ["--mode" "pi-rpc" "--session-dir" dir "--session-id" "abc-1" "-n" "named"
+                              "--no-themes" "--offline" "-ne" "-ns" "-np" "-nc"] home))]
+    (-> (expect exit) (.toBe 0))
+    (-> (expect (.-sessionFile (.-data reply))) (.toBe (path/join dir "abc-1.jsonl")))
+    (-> (expect (.-sessionId (.-data reply))) (.toBe "abc-1"))
+    (-> (expect (.-sessionName (.-data reply))) (.toBe "named"))
+    (fs/rmSync home #js {:recursive true :force true})))
+
+(defn ^:async test-bad-session-id []
+  (let [home (temp-home)
+        {:keys [exit]} (js-await (ask-state ["--mode" "pi-rpc" "--session-id" "../evil"] home))]
+    (-> (expect exit) (.toBe 2))
+    (fs/rmSync home #js {:recursive true :force true})))
+
+(describe "pi's flags"
+  (fn []
+    (it "spells out multi-letter shorts, and leaves what follows -- alone"
+        (fn []
+          (-> (expect (clj->js (vec (normalize-argv ["-ne" "--ext-x" "-nt" "--" "-ne"]))))
+              (.toEqual #js ["--no-extensions" "--no-tools" "--" "-ne"]))))
+
+    (it "exclude takes globs; no-builtin keeps extension tools"
+        (fn []
+          (let [active (atom #{"read" "bash" "mcp__a" "mine"})
+                reg    {:get-active (fn [] (into {} (map (fn [k] [k 1]) @active)))
+                        :set-active (fn [s] (reset! active s))}]
+            (apply-tool-flags! reg {:exclude-tools "mcp__*, bash"} #{"read" "bash"})
+            (-> (expect (vec (sort @active))) (.toEqual #js ["mine" "read"]))
+            (apply-tool-flags! reg {:no-builtin-tools true} #{"read" "bash"})
+            (-> (expect (vec @active)) (.toEqual #js ["mine"]))
+            (apply-tool-flags! reg {} #{})
+            (-> (expect (vec @active)) (.toEqual #js ["mine"]))
+            (apply-tool-flags! reg {:no-tools true} #{})
+            (-> (expect (count @active)) (.toBe 0)))))
+
+    (it "--session finds a partial id; a path stays a path"
+        (fn []
+          (let [d (temp-home)]
+            (fs/writeFileSync (path/join d "123-abcdef.jsonl") "")
+            (-> (expect (find-session d "abcd")) (.toBe (path/join d "123-abcdef.jsonl")))
+            (-> (expect (find-session d "/x/y.jsonl")) (.toBe "/x/y.jsonl"))
+            (-> (expect (find-session d "nomatch")) (.toBe "nomatch"))
+            (fs/rmSync d #js {:recursive true :force true}))))
+
+    (it "--api-key reaches only the selected provider"
+        (fn []
+          (-> (expect (selected-provider {:model "zai/glm"} {:provider "x"})) (.toBe "zai"))
+          (-> (expect (selected-provider {:provider "a" :model "zai/glm"} {})) (.toBe "a"))
+          (credentials/set-run-key! "only-this" "k")
+          (-> (expect (credentials/read-credential "only-this")) (.toBe "k"))
+          (-> (expect (credentials/run-key "another")) (.toBeUndefined))))
+
+    (it "session flags reach get_state" test-session-flags 30000)
+    (it "a session id with a path in it is refused" test-bad-session-id 30000)))

@@ -25,6 +25,15 @@
   [s]
   (reset! cli-append (when (and (string? s) (seq (str/trim s))) s)))
 
+;; pi's discovery flags, kept here for the same reason as `cli-append`.
+(defonce ^:private cli-overrides (atom {}))
+
+(defn set-cli-overrides!
+  "`{:no-skills :no-prompt-templates :no-context-files :no-extensions
+   :system-prompt}` for every discovery this process runs."
+  [m]
+  (reset! cli-overrides m))
+
 (defn- distinct-dirs
   "Drop directories that name the same folder twice. `project-dir` is the
    relative \".nyma\", so running nyma from the home directory makes the
@@ -323,7 +332,9 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; discovery precedence in agent_shell/features/mcp_discovery.cljs).
         cwd     (js/process.cwd)
         home    (home/dir)
-        skills  (discover-all-skills home cwd)
+        flags   @cli-overrides
+        context-files (if (:no-context-files flags) [] context-files)
+        skills  (if (:no-skills flags) {} (discover-all-skills home cwd))
 
         ;; Claude Code's `.claude/commands/*.md` are the same thing — a body
         ;; with $ARGUMENTS and optional description/argument-hint frontmatter —
@@ -331,11 +342,13 @@ When multiple independent tool calls are needed, make them in parallel.
         ;; Lowest → highest: global over Claude's global, project over global,
         ;; nyma's own dir winning a name clash at each level (same precedence as
         ;; skills and MCP discovery). Top-level files only.
-        prompts (merge
-                 (or (discover-prompts (path/join home ".claude" "commands")) {})
-                 (or (discover-prompts (path/join (global-dir) "prompts")) {})
-                 (or (discover-prompts (path/join cwd ".claude" "commands")) {})
-                 (or (discover-prompts (path/join project-dir "prompts")) {}))
+        prompts (if (:no-prompt-templates flags)
+                  {}
+                  (merge
+                   (or (discover-prompts (path/join home ".claude" "commands")) {})
+                   (or (discover-prompts (path/join (global-dir) "prompts")) {})
+                   (or (discover-prompts (path/join cwd ".claude" "commands")) {})
+                   (or (discover-prompts (path/join project-dir "prompts")) {})))
 
         themes  (discover-themes [(path/join (global-dir) "themes")
                                   (path/join project-dir "themes")])
@@ -411,7 +424,7 @@ When multiple independent tool calls are needed, make them in parallel.
                                                          desc-budget)]
                                                (str "- " sname (when (seq desc) (str ": " desc))))))
                                       (str/join "\n"))))]
-         (str (or system-md default-system-prompt)
+         (str (or (:system-prompt @cli-overrides) system-md default-system-prompt)
               env-block
               skills-block
               (when (seq agents-md) (str "\n\n" agents-md))
@@ -424,9 +437,11 @@ When multiple independent tool calls are needed, make them in parallel.
      ;; The project's own dir is code from the checked-out repo, imported at
      ;; startup — only for a trusted folder (agent.trust).
      :extension-dirs
-     (distinct-dirs (cond-> [(path/join (global-dir) "extensions")]
-                      (trust/allow-file? (path/join project-dir "extensions"))
-                      (conj (path/join project-dir "extensions"))))
+     (if (:no-extensions flags)
+       []
+       (distinct-dirs (cond-> [(path/join (global-dir) "extensions")]
+                        (trust/allow-file? (path/join project-dir "extensions"))
+                        (conj (path/join project-dir "extensions")))))
 
      ;; The statically compiled builtins. NYMA_NO_BUILTIN_EXT still turns them
      ;; off wholesale — it was the only thing the old dir-list branch did.
