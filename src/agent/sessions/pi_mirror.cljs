@@ -135,6 +135,7 @@
   (let [cur     (atom nil)    ; {:source :file :ids :held}
         pending (atom nil)    ; usage since the last assistant message
         failed? (atom false)
+        last-model (atom nil)
         model   (fn []
                   (let [m (.-model (:config agent))]
                     {:provider (str (or (aget (:config agent) "active-provider-name") ""))
@@ -178,10 +179,20 @@
                              (let [usage (when (= "assistant" (:role e)) @pending)
                                    extra (when (contains? #{"assistant" "tool_call"} (:role e))
                                            (cond-> (model) usage (assoc :usage usage)))
-                                   {:keys [lines ids]} (step! e (:ids @cur) extra)]
+                                   ;; overstory reads the model off these
+                                   change (when (and extra (not= (:model extra) @last-model))
+                                            (reset! last-model (:model extra))
+                                            {:type "model_change" :id (str (:id e) "m")
+                                             :parentId (or (get (:ids @cur) (:parent-id e)) nil)
+                                             :timestamp (iso (:timestamp e))
+                                             :provider (:provider extra) :modelId (:model extra)})
+                                   ids0  (cond-> (:ids @cur)
+                                           change (assoc (:parent-id e) (:id change)))
+                                   {:keys [lines ids]} (step! e ids0 extra)]
                                (when usage (reset! pending nil))
                                (swap! cur assoc :ids ids)
-                               (write! lines (= "user" (:role e))))
+                               (write! (if change (into [change] lines) lines)
+                                       (= "user" (:role e))))
                              (open! source))))
                        (catch :default err
                          (reset! failed? true)

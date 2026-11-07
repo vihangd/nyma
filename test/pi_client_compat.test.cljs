@@ -65,6 +65,7 @@
    "autocontext"  ["--mode" "rpc" "--model" "anthropic/claude-sonnet-5-5" "--no-session"]
    "openrig"      ["--mode" "rpc" "--session-dir" "store"]
    "cmux"         ["--mode" "rpc" "--session" "store/cmux.jsonl"]
+   "cmux fork"    ["--mode" "rpc" "--fork" "store/none.jsonl"]
    "Coffee-CLI"   ["--mode" "rpc" "--session-id" "coffee-1"]})
 
 (defn ^:async test-client-argv [argv]
@@ -202,9 +203,9 @@
           (-> (expect (.startsWith l "{\"type\":")) (.toBe true)))
         (-> (expect (path/basename (path/dirname file)))
             (.toBe (mirror/cwd-dir (fs/realpathSync home))))
-        (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "assistant" "toolResult" "assistant"]))
+        (-> (expect (clj->js kinds)) (.toEqual #js ["session_info" "user" "model_change" "assistant" "toolResult" "assistant"]))
         (-> (expect (js/JSON.stringify (.-content (.-message final)))) (.toContain "mirrored answer"))
-        (-> (expect (.-isError (.-message (nth lines 4)))) (.toBe true))
+        (-> (expect (.-isError (.-message (nth lines 5)))) (.toBe true))
         (-> (expect (.-provider (.-message final))) (.toBe "faketest"))
         (-> (expect (.-model (.-message final))) (.toBe "m1"))
         (-> (expect (.-totalTokens (.-usage (.-message final)))) (.toBeGreaterThan 0))

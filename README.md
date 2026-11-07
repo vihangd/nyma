@@ -512,6 +512,11 @@ exec nyma "$@"
 
 Zed and JetBrains users want `--mode acp` rather than pi-acp.
 
+pi extensions load from `.pi/extensions` (trusted folders), `~/.pi/agent/extensions`
+and `-e`, with `pi.exec`. Their `tool_call` hook can block or edit a call, and one
+that throws blocks it, as in pi. Overstory's guard API works, but overstory starts
+its agents in tmux and waits for pi's own TUI header, which nyma does not print.
+
 Usage trackers and session browsers (ccusage, agentsview, tokscale, jcode, pilish's
 browser) read pi's session files directly. Set `{"pi": {"sessions": true}}` and nyma
 also writes each session in pi's format under `$PI_CODING_AGENT_SESSION_DIR`, else
@@ -525,6 +530,10 @@ nyma's compiled-in extensions. pi's `auth.json`, `models.json` and `settings.jso
 not read: keys come from `/login` or the environment. Not implemented: `clone`,
 `get_entries`, `get_tree`, `auto_retry_*`, and `pi install`, `pi config`, `pi mcp`,
 `pi auth`.
+
+One order differs from pi: `tool_execution_start` comes before the assistant's
+`message_end`. nyma's tools start as soon as their call is parsed, while the message
+closes when the step ends and its usage is known.
 
 ### ACP Mode (Zed, JetBrains and other editors)
 
