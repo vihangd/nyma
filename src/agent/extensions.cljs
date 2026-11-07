@@ -141,13 +141,23 @@
          ;; #js {:ok bool :result any :error str :denied bool}; never rejects.
          ;; The parent's whole gate for a call that runs elsewhere (a subagent).
          ;; `source` labels the prompt. Resolves #js {:allowed bool :reason str}.
-         :checkPermission   (fn [tool args source]
+         :checkPermission   (fn [tool args source original-args]
                               (if-let [pipeline (:middleware agent)]
-                                (-> ((:check-permission pipeline) tool args source)
+                                (-> ((:check-permission pipeline) tool args source original-args)
                                     (.then (fn [ctx]
                                              #js {:allowed (not (:cancelled ctx))
                                                   :reason  (:cancel-reason ctx)})))
                                 (js/Promise.resolve #js {:allowed false :reason "No middleware pipeline"})))
+         ;; The parent's before_tool_call and tool_call hooks for that same
+         ;; call. Resolves what a handler of those would return.
+         :runToolHooks      (fn [tool args exec-id]
+                              (-> ((:check-hooks (:middleware agent)) tool args exec-id)
+                                  (.then (fn [ctx]
+                                           (cond
+                                             (:cancelled ctx) #js {:block true :reason (:cancel-reason ctx)}
+                                             (:skip? ctx)     #js {:skip true :result (:result ctx)}
+                                             (:original-args ctx) #js {:args (:args ctx)}
+                                             :else nil)))))
          :executeTool       (fn [name args & [opts]]
                               (let [t        (get ((:all (:tool-registry agent))) name)
                                     pipeline (:middleware agent)]

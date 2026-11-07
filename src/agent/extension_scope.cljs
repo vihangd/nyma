@@ -87,7 +87,8 @@
    :getState :state
    :dispatch :state
    :dispatchState :state
-   :checkPermission :tools})
+   :checkPermission :tools
+   :runToolHooks :tools})
 
 (def ungated-passthroughs
   "Read-only utilities every extension gets."

@@ -49,7 +49,10 @@
   (let [config              (shared/load-config)
         perm-config         (:permissions config)
         session-approvals   (atom {})
-        last-classification (atom nil)]
+        ;; By command: the one being asked about is not always the last one
+        ;; classified, with parallel calls or a subagent's.
+        ;; ponytail: one entry per distinct command, cleared on deactivate
+        classifications     (atom {})]
 
     ;; Listen for classification from security_analysis via inter-extension bus
     (when-let [events (.-events api)]
@@ -57,10 +60,10 @@
         (when (fn? on-fn)
           (on-fn "bash:classification"
                  (fn [data]
-                   (reset! last-classification
-                           {:level (.-level data)
-                            :reasons (vec (or (.-reasons data) []))
-                            :command (.-command data)}))))))
+                   (swap! classifications assoc (.-command data)
+                          {:level (.-level data)
+                           :reasons (vec (or (.-reasons data) []))
+                           :command (.-command data)}))))))
 
     ;; Permission check via shared permission_request event
     (.on api "permission_request"
@@ -68,7 +71,9 @@
            (when (and (:enabled perm-config) (= (str (.-tool data)) "bash"))
              (let [args     (.-args data)
                    cmd      (str (or (.-command args) (aget args "command") ""))
-                   classif  @last-classification
+                   ;; env_filter's rewrite comes after the classifier
+                   classif  (get @classifications
+                                 (or (some-> (.-originalArgs data) .-command) cmd))
                    decision (check-decision cmd classif perm-config session-approvals)]
                (case decision
                  :denied
@@ -97,4 +102,4 @@
     ;; Return deactivator
     (fn []
       (reset! session-approvals {})
-      (reset! last-classification nil))))
+      (reset! classifications {}))))

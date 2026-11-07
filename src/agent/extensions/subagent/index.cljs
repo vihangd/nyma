@@ -102,14 +102,20 @@ intermediate tool calls, so put everything that matters in the summary.")
       tools)))
 
 (defn- gate-child!
-  "Answer `child`'s permission_request with the parent's gate, so mode, policy,
-   denylist and grants all apply and a prompt names the child. A child's bus has
-   no subscribers, and no decision means allow: an api without the gate refuses."
+  "Answer `child`'s hooks and permission_request with the parent's, so guards,
+   mode, policy, denylist and grants all apply and a prompt names the child. A
+   child's bus has no subscribers, and no decision means allow: an api without
+   the gate refuses."
   [child api agent-name]
+  (when-let [hooks (aget api "runToolHooks")]
+    ((:on (:events child)) "before_tool_call"
+                           (fn [data]
+                             (-> (hooks (.-toolName data) (.-args data) (.-execId data))
+                                 (.catch (fn [e] #js {:block true :reason (str "Tool hook failed: " (.-message e))}))))))
   ((:on (:events child)) "permission_request"
                          (fn [data]
                            (if-let [check (aget api "checkPermission")]
-                             (-> (check (.-tool data) (.-args data) agent-name)
+                             (-> (check (.-tool data) (.-args data) agent-name (.-originalArgs data))
                                  (.then (fn [r] (if (.-allowed r)
                                                   #js {:decision "allow"}
                                                   #js {:decision "deny" :reason (.-reason r)}))))

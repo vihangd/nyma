@@ -594,6 +594,8 @@
                       ((:emit-collect events) "permission_request"
                                               #js {:tool     tool-name
                                                    :args     (clj->js args)
+                                                   ;; what a hook rewrote `args` from
+                                                   :originalArgs (clj->js (:original-args ctx))
                                                    :category (categorize-tool tool-name)
                                                    :path     (get args :path)}))
             decision (get result "decision")
@@ -766,13 +768,21 @@
                                     tool-execution-interceptor]))]
          (ic/execute full ctx)))
 
+     ;; The hooks alone, for the same child: .nymaignore, the destructive
+     ;; block, pi guards. Resolves the ctx, as the pipeline would see it.
+     :check-hooks
+     (fn [tool-name args exec-id]
+       (before-hook-compat-enter events {:tool-name tool-name :args args :exec-id exec-id
+                                         :cancelled false}))
+
      ;; The gate alone, for a tool that runs in a subagent. Its bus has no
      ;; subscribers, so without this "no decision" meant allow. `source` names
      ;; the child in the prompt. Resolves the ctx; :cancelled means refused.
      :check-permission
-     (fn [tool-name args source]
+     (fn [tool-name args source & [original-args]]
        (sync-epoch!)
        (let [ctx {:tool-name tool-name :args args :source source
+                  :original-args original-args
                   :preapproved #{} :session-allows session-allows
                   :cancelled false :events events
                   :agent (when agent-ref @agent-ref)}]

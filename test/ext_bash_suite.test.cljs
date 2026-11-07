@@ -903,3 +903,21 @@
         ;; Guard against over-blocking: `sudo ls` is not an escalation event.
         (let [r (security-analysis/classify-command "sudo ls /tmp" sec-defaults)]
           (-> (expect (security-analysis/should-block? r sec-defaults)) (.toBe false)))))))
+
+(describe "bash-suite/permissions: which command was classified"
+  (fn []
+    (it "decides on the command in hand, never the last one seen"
+        (fn []
+          (let [classified (atom nil)
+                decide     (atom nil)
+                api        #js {:events #js {:on (fn [_ f] (reset! classified f))}
+                                :on (fn [_ f _] (reset! decide f))}
+                ask        (fn [cmd & [original]]
+                             (.-decision (@decide #js {:tool "bash" :args #js {:command cmd}
+                                                       :originalArgs (when original #js {:command original})})))]
+            (permissions/activate api)
+            (@classified #js {:level "read-only" :reasons #js [] :command "ls"})
+            (-> (expect (ask "git push --force")) (.toBe "ask"))
+            (-> (expect (ask "ls")) (.toBe "allow"))
+            ;; env_filter rewrites after the classifier
+            (-> (expect (ask "unset X; ls" "ls")) (.toBe "allow")))))))

@@ -457,3 +457,35 @@
                              (it "the parent's abort stops a running child" test-abort-stops-child)
                              (it "an aborted fan-out starts nothing" test-aborted-never-starts)
                              (it "a background job is cancelled by id, without a follow-up" test-cancel-job)))
+
+(defn ^:async test-child-hooks []
+  (let [seen  (atom [])
+        asked (atom 0)
+        api   #js {:resolveModel (fn [_ _] (scripted tool-chunks text-chunks))
+                   :dispatchState (fn [_ _] nil)
+                   :checkPermission (fn [& _] (swap! asked inc) (js/Promise.resolve #js {:allowed true}))
+                   :runToolHooks (fn [tool _ _]
+                                   (swap! seen conj tool)
+                                   (js/Promise.resolve #js {:block true :reason "guarded"}))}]
+    (js-await (run-on nil {:api api}))
+    (-> (expect (vec @seen)) (.toEqual #js ["think"]))
+    (-> (expect @asked) (.toBe 0))))
+
+(defn ^:async test-run-tool-hooks []
+  (let [agent (create-agent {:model "test" :system-prompt "x"})
+        api   (create-extension-api agent)
+        off   (fn [_] #js {:args #js {:command "wrapped"}})]
+    ((:on (:events agent)) "before_tool_call" off)
+    (-> (expect (.. (js-await (.runToolHooks api "bash" #js {:command "ls"} "id")) -args -command))
+        (.toBe "wrapped"))
+    ((:off (:events agent)) "before_tool_call" off)
+    ;; a pi guard, which the child's calls used to skip
+    ((:on (:events agent)) "tool_call" (fn [_] #js {:block true :reason "no"}))
+    (let [r (js-await (.runToolHooks api "bash" #js {:command "ls"} "id"))]
+      (-> (expect (.-block r)) (.toBe true))
+      (-> (expect (.-reason r)) (.toBe "no")))))
+
+(describe "subagent:hooks"
+          (fn []
+            (it "a child's call goes through the parent's hooks first" test-child-hooks)
+            (it "runToolHooks answers as a before_tool_call handler would" test-run-tool-hooks)))
