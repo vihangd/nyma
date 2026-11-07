@@ -49,6 +49,52 @@
     (-> (expect exit) (.toBe 2))
     (fs/rmSync home #js {:recursive true :force true})))
 
+(def ^:private clients
+  "Each client's argv after the binary, from its source. Paths and models
+   stand in for what it would really pass."
+  {"pilish"       ["--mode" "rpc"]
+   "pi-acp"       ["--mode" "rpc" "--no-themes"]
+   "pi-vscode"    ["--mode" "rpc" "--no-session"]
+   "pi.nvim"      ["--mode" "rpc" "--model" "anthropic/claude-sonnet-5-5"]
+   "spynel"       ["--mode" "rpc" "--no-extensions" "--no-skills" "--no-prompt-templates"
+                   "--no-themes" "--no-session"]
+   "autocontext"  ["--mode" "rpc" "--model" "anthropic/claude-sonnet-5-5" "--no-session"]
+   "openrig"      ["--mode" "rpc" "--session-dir" "store"]
+   "cmux"         ["--mode" "rpc" "--session" "store/cmux.jsonl"]
+   "Coffee-CLI"   ["--mode" "rpc" "--session-id" "coffee-1"]})
+
+(defn ^:async test-client-argv [argv]
+  (let [home (temp-home)
+        {:keys [exit reply]} (js-await (ask-state argv home))]
+    (-> (expect exit) (.toBe 0))
+    (-> (expect (.-success reply)) (.toBe true))
+    (-> (expect (.-command reply)) (.toBe "get_state"))
+    (fs/rmSync home #js {:recursive true :force true})))
+
+(describe "a pi client's spawn"
+  (fn []
+    (doseq [[client argv] clients]
+      (it client #(test-client-argv argv) 30000))))
+
+(defn ^:async test-parse-error []
+  (let [home (temp-home)
+        proc (js/Bun.spawn #js ["bun" cli "--mode" "rpc"]
+                           #js {:cwd home :stdin "pipe" :stdout "pipe" :stderr "ignore"
+                                :env (js/Object.assign #js {} js/process.env
+                                                       #js {:HOME home :ANTHROPIC_API_KEY "test"
+                                                            :NYMA_NO_MODEL_DISCOVERY "1"})})]
+    (.write (.-stdin proc) "{not json\n")
+    (.flush (.-stdin proc))
+    (.end (.-stdin proc))
+    (let [out (js-await (.text (js/Response. (.-stdout proc))))
+          r   (js/JSON.parse (first (filter seq (.split out "\n"))))]
+      (-> (expect (.-command r)) (.toBe "parse"))
+      (-> (expect (.-success r)) (.toBe false)))
+    (fs/rmSync home #js {:recursive true :force true})))
+
+(describe "--mode rpc"
+  (fn [] (it "answers bad JSON on the wire" test-parse-error 30000)))
+
 (describe "pi's flags"
   (fn []
     (it "spells out multi-letter shorts, and leaves what follows -- alone"

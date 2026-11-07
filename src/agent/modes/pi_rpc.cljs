@@ -533,6 +533,10 @@
          :setWidget (fn [k lines _pos]
                       (tell! {:method "setWidget" :widgetKey (str k) :widgetLines (vec (or lines []))}))
          :clearWidget (fn [k] (tell! {:method "setWidget" :widgetKey (str k) :widgetLines nil}))
+         :setStatus (fn [k text]
+                      (tell! (cond-> {:method "setStatus" :statusKey (str k)}
+                               text (assoc :statusText (str text)))))
+         :setTitle (fn [title] (tell! {:method "setTitle" :title (str title)}))
          :setEditorValue (fn [v] (tell! {:method "set_editor_text" :text (str v)}))}))
 
 ;; ── command handlers ───────────────────────────────────────────
@@ -819,13 +823,16 @@
         (write-error! cmd "abort_bash is not supported")
 
         "set_thinking_level"
-        (do (reset! (:thinking-level agent) (or (.-level cmd) "off"))
-            (write-response! cmd))
+        (let [level (or (.-level cmd) "off")]
+          (reset! (:thinking-level agent) level)
+          (write-response! cmd)
+          (write-event! {:type "thinking_level_changed" :level level}))
 
         "cycle_thinking_level"
         (let [nl (next-thinking @(:thinking-level agent))]
           (reset! (:thinking-level agent) nl)
-          (write-response! cmd {:level nl}))
+          (write-response! cmd {:level nl})
+          (write-event! {:type "thinking_level_changed" :level nl}))
 
         ;; Both go through the same reseed the slash commands use: switching
         ;; the file alone left the old conversation in state, kept the old
@@ -907,7 +914,7 @@
       ;; no key throws, and ThinkRail timed out session.create on it).
       (if-let [cmd (try (js/JSON.parse line) (catch :default _ nil))]
         (write-error! cmd (or (.-message e) (str e)))
-        (js/console.error "[pi-rpc] handle-line error:" e)))))
+        (write-error! #js {:type "parse"} (str "Failed to parse command: " (.-message e)))))))
 
 ;; ── start ──────────────────────────────────────────────────────
 

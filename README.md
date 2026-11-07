@@ -420,7 +420,7 @@ Like print mode but outputs structured JSON.
 ### RPC Mode
 
 ```bash
-bun run start -- --mode rpc        # nyma's own minimal JSONL protocol
+bun run start -- --mode rpc        # pi's RPC protocol, tools run without asking
 bun run start -- --mode pi-rpc     # pi-compatible JSONL protocol
 ```
 

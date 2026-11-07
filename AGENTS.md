@@ -61,7 +61,6 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/modes/interactive.cljs` | `agent.modes.interactive` | Pi-tui based interactive mode. |
 | `src/agent/modes/pi_rpc.cljs` | `agent.modes.pi-rpc` | pi's JSONL-over-stdio RPC protocol (pi 1.2 `rpc-types`), so pi RPC clients drive nyma unchanged, the Emacs frontends (`pi-coding-agent.el… |
 | `src/agent/modes/print.cljs` | `agent.modes.print` | Print mode. |
-| `src/agent/modes/rpc.cljs` | `agent.modes.rpc` | JSONL stdio RPC mode. |
 | `src/agent/modes/sdk.cljs` | `agent.modes.sdk` | Programmatic SDK mode. |
 | `src/agent/multimodal.cljs` | `agent.multimodal` | Multimodal (image) tool results — let a tool return an image a vision-capable model can SEE. |
 | `src/agent/permissions.cljs` | `agent.permissions` | Extension capability system. |

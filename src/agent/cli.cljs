@@ -34,7 +34,6 @@
             [agent.extensions.model-roles.policy :as perm-policy]
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
-            [agent.modes.rpc :as rpc]
             [agent.modes.pi-rpc :as pi-rpc]
             [agent.modes.acp :as acp]))
 
@@ -324,8 +323,9 @@ Modes (default: interactive):
                          (message_update text, tool_execution_*, usage), then
                          the same result object as the last line. Every format
                          exits 1 when the run fails (is_error true).
-      --mode <mode>      Explicit mode: interactive | print | json | rpc |
-                         pi-rpc (JSONL protocol for the pi Emacs frontend) |
+      --mode <mode>      Explicit mode: interactive | print | json | rpc (pi's
+                         RPC protocol, tools run without asking) | pi-rpc
+                         (the same protocol, asking through the frontend) |
                          acp (Agent Client Protocol: run inside Zed, JetBrains
                          and other ACP editors).
       --approve, --no-approve
@@ -953,6 +953,9 @@ Examples:
         mode      (or (:mode values)
                       (when (:print values) "print")
                       "interactive")
+        ;; One protocol, two names: `rpc` is what pi's clients spawn, `pi-rpc`
+        ;; what nyma's frontends do. They differ only in the permission default.
+        mode      (if (= mode "rpc") "pi-rpc" mode)
 
         _ (when-let [msg (or (mode-error mode)
                              (output-format-error (:output-format values) mode))]
@@ -1137,7 +1140,9 @@ Examples:
     ;; Headless print/json/rpc have NO UI, so an "ask" would dead-end on a
     ;; deny; they default to "full-auto" (allow-all, preserving prior headless
     ;; behavior so orchestrators keep working). --permission-mode overrides.
-    (let [headless? (contains? #{"print" "json" "rpc"} mode)
+    ;; `--mode rpc` too: pi never asks, so its clients answer no dialog and the
+    ;; first write would wait forever. `--mode pi-rpc` frontends do answer.
+    (let [headless? (or (= (:mode values) "rpc") (contains? #{"print" "json"} mode))
           requested (:permission-mode values)
           pm        (perm-policy/resolve-initial-mode requested headless?)]
       ;; Warn on an invalid flag (resolve-initial-mode already fell back to the
@@ -1403,7 +1408,6 @@ Examples:
                           (js-await (finish-one-shot! agent extensions-atom shutdown-done?)))
           ;; EOF on stdin means the host is gone; without the exit the process
           ;; sat forever on an idle event loop (`nyma --mode rpc </dev/null`).
-          "rpc"         (js-await (rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
           "pi-rpc"      (js-await (pi-rpc/start agent {:on-eof (fn [] (js/process.exit 0))}))
           ;; Agent Client Protocol: run inside Zed, JetBrains and other ACP
           ;; editors. Stdin EOF means the editor closed the agent.
