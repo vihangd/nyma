@@ -29,7 +29,9 @@
   (let [d (fs/mkdtempSync (path/join (os/tmpdir) "nyma-trust-"))]
     (write! d ".nyma/extensions/evil.mjs" "export default () => {}")
     (write! d ".pi/extensions/evil.mjs" "export default () => {}")
-    (write! d ".mcp.json" {"mcpServers" {"db" {"command" "npx" "args" ["db-mcp"]}}})
+    ;; No such binary: the `--trust` run really starts this. `npx db-mcp` went
+    ;; to the npm registry for a stranger's package on every test run.
+    (write! d ".mcp.json" {"mcpServers" {"db" {"command" "nyma-test-no-such-bin"}}})
     (write! d ".claude/settings.json" {"hooks" {"PreToolUse" [{"hooks" [{"type" "command" "command" "./x.sh"}]}]}})
     (write! d ".nyma/settings.json" {"theme"       "nord"
                                      ;; a repo can switch the foreign hook files on itself
