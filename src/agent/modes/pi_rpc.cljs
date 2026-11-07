@@ -14,6 +14,7 @@
    stdout is the protocol channel — only JSONL goes there. Everything else
    (errors, debug) goes to stderr via js/console.error."
   (:require [agent.utils.content :as content]
+            [agent.utils.home :as home]
             [agent.utils.jsonl-stdin :refer [read-lines!]]
             [agent.sessions.manager :as sessions]
             [agent.loop :refer [run steer follow-up]]
@@ -659,8 +660,8 @@
      :cost (or (:total-cost s) 0)
      :costUnknown (boolean (:cost-unknown? s))}))
 
-(defn- new-session-path []
-  (sessions/new-session-path (str (.. js/process -env -HOME) "/.nyma/sessions")))
+(defn- new-session-path [agent]
+  (sessions/new-session-path (home/sessions-dir agent)))
 
 (defn- content->text
   "Flatten a nyma message :content (string or vector of parts) to plain text."
@@ -880,7 +881,7 @@
         ;; session's skill grants and tools alive, and re-appended those turns
         ;; into the new file on the next turn.
         "new_session"
-        (if (try (builtins/replay-session! agent (new-session-path)) true
+        (if (try (builtins/replay-session! agent (new-session-path agent)) true
                  (catch :default _e false))
           (write-response! cmd {:cancelled false})
           (write-error! cmd "new_session failed"))

@@ -4,6 +4,7 @@
             [agent.sessions.compaction :refer [compact settings->opts resolve-settings]]
             [agent.sessions.manager :as sessions]
             [agent.token-estimation :as te]
+            [agent.utils.home :as home]
             [agent.utils.pi-shape :as pi-shape]))
 
 (defn create-extension-context
@@ -75,7 +76,7 @@
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))
 
          ;; Session directory
-         :getSessionDirectory (fn [] (str (.. js/process -env -HOME) "/.nyma/sessions"))
+         :getSessionDirectory (fn [] (home/sessions-dir agent))
 
          ;; Token budget & model info
          :getTokenBudget     (fn []

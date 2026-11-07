@@ -7,6 +7,7 @@
             [agent.model-info :as model-info]
             [agent.sessions.compaction :refer [compact compaction-receipt settings->opts resolve-settings]]
             [agent.sessions.manager :refer [session->seed-messages new-session-path]]
+            [agent.utils.home :as home]
             [agent.ui.theme-catalog :as theme-catalog]
             [agent.ui.themes :refer [default-dark]]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row matching-sessions]]
@@ -1342,7 +1343,7 @@
           {:group       :session
            :description "Resume a previous session; `/resume <words>` finds sessions that mention them"
            :handler (fn [args ctx]
-                      (let [dir      (str (.. js/process -env -HOME) "/.nyma/sessions")
+                      (let [dir      (home/sessions-dir agent)
                             query    (str/trim (str/join " " (or args [])))
                             ;; A query searches EVERY project's sessions: what
                             ;; you remember is the conversation, not where it was.

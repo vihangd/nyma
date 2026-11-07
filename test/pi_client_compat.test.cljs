@@ -10,6 +10,7 @@
             [agent.utils.credentials :as credentials]
             [agent.resources.loader :as loader]
             [agent.sessions.pi-mirror :as mirror]
+            [agent.utils.home :as home]
             [agent.utils.pi-shape :as shape]
             [test-util.fake-model-server :as fms]))
 
@@ -342,3 +343,10 @@
 
     (it "session flags reach get_state" test-session-flags 30000)
     (it "a session id with a path in it is refused" test-bad-session-id 30000)))
+
+(describe "--session-dir"
+  (fn []
+    (it "is where later sessions go too"
+        (fn []
+          (-> (expect (home/sessions-dir {:config #js {"sessions-dir" "/d"}})) (.toBe "/d"))
+          (-> (expect (home/sessions-dir {:config #js {}})) (.toContain ".nyma/sessions"))))))

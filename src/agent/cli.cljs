@@ -1056,6 +1056,7 @@ Examples:
                 ;; then dropped before this.
                 :thinking      (or (:thinking values) (:thinking merged))
                 :settings      settings})
+        _ (aset (:config agent) "sessions-dir" sessions-dir)
         resolved (try
                    (resolve-model-via-registry (:provider-registry agent) values merged)
                    (catch :default _e nil))
