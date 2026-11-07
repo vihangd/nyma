@@ -6,6 +6,7 @@
             ["node:fs" :as fs]
             [agent.extension-scope :refer [create-scoped-api derive-namespace dispose-scope!]]
             [agent.permissions :refer [parse-capabilities]]
+            [clojure.string :as str]
             [agent.settings.manager :refer [manifest-defaults]]))
 
 (defn- cljs-extension?  [p] (or (.endsWith p ".cljs") (.endsWith p ".cljc")))
@@ -136,6 +137,21 @@
     (cljs-extension? file-path)  (js-await (load-squint-extension file-path))
     (ts-js-extension? file-path) (js-await (load-ts-extension file-path))
     :else (d/warn (str "Unknown extension type: " file-path))))
+
+(defn- pi-extension?
+  "A file in pi's directories, or named with `-e`. pi extensions have no manifest
+   and call `pi.exec` freely: overstory's guard does so first thing, and a guard
+   that throws guards nothing. Nothing is lost by granting it, since a repo's
+   copy loads only from a trusted folder and in-process code can spawn anyway."
+  [p cli?]
+  (let [agent-dir (.. js/process -env -PI_CODING_AGENT_DIR)]
+    (or cli?
+        (str/includes? (str "/" p) "/.pi/")
+        (and agent-dir (str/starts-with? (str p) agent-dir)))))
+
+(defn- capabilities-of [manifest ns-str p cli?]
+  (cond-> (parse-capabilities (when manifest (.-capabilities manifest)) ns-str)
+    (and (nil? manifest) (pi-extension? (str p) cli?)) (conj :exec)))
 
 (defn ^:async load-manifest
   "Load an optional extension.json manifest from the same directory."
@@ -274,7 +290,7 @@
                                    :deps      (when (and manifest (.-dependsOn manifest))
                                                 (vec (js/Array.from (.-dependsOn manifest))))})))]
     (doseq [f (or files [])]
-      (swap! scan-results conj {:path f :entry (path/basename f)
+      (swap! scan-results conj {:path f :entry (path/basename f) :cli? true
                                 :namespace (derive-namespace f) :manifest nil :deps nil}))
     (doseq [dir dirs]
       (when (js-await (-> (.stat fsp dir) (.then (constantly true)) (.catch (constantly false))))
@@ -341,7 +357,7 @@
       ;; Pass 3: Load in sorted order; skip anything whose dependency failed
       ;; (loading against a half-initialized dependency is worse than not
       ;; loading at all).
-      (doseq [{:keys [path entry namespace manifest deps module]} sorted]
+      (doseq [{:keys [path entry namespace manifest deps module cli?]} sorted]
         (if-let [bad (first (filter @failed (or deps [])))]
           (let [reason (if (contains? @last-disabled bad)
                          (str "depends on disabled " bad)
@@ -363,9 +379,7 @@
             (let [ext-fn (if module
                            (.-default module)
                            (js-await (load-extension path)))
-                  caps   (parse-capabilities
-                          (when manifest (.-capabilities manifest))
-                          namespace)
+                  caps   (capabilities-of manifest namespace path cli?)
                   scoped (create-scoped-api api namespace caps)
                   _      (reset! scoped-box scoped)]
               (when ext-fn
@@ -451,7 +465,7 @@
                      module                  (.-default module)
                      (cljs-extension? path)  (js-await (load-squint-extension path))
                      :else                   (.-default (js-await (js/import (str (path/resolve path) "?t=" (js/Date.now))))))
-            caps   (parse-capabilities (when manifest (.-capabilities manifest)) namespace)
+            caps   (capabilities-of manifest namespace path false)
             scoped (create-scoped-api api namespace caps)
             _      (reset! scoped-box scoped)
             result (when ext-fn (js-await (ext-fn scoped)))]

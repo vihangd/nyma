@@ -252,19 +252,25 @@
     (fs/mkdirSync (path/join home ".pi" "extensions") #js {:recursive true})
     (fs/writeFileSync (path/join home ".pi" "extensions" "guard.ts")
                       (str "export default function (pi) {"
-                           " pi.on('tool_call', (e) => {"
+                           " pi.on('tool_call', async (e) => {"
+                           "  pi.exec('no-such-binary-xyz', []).catch(() => {});"
+                           "  if (e.toolName === 'write' && e.input.path === 'boom.txt') throw new Error('kaput');"
                            "  if (e.toolName === 'write' && e.input.path === 'no.txt')"
                            "   return { block: true, reason: 'guarded' };"
                            "  if (e.toolName === 'write') e.input.path = 'moved.txt';"
                            " }); }"))
     (try
       ((:script! srv) {:tool-call {:name "write" :args {:path "no.txt" :content "x"}}}
+                      {:tool-call {:name "write" :args {:path "boom.txt" :content "x"}}}
                       {:tool-call {:name "write" :args {:path "yes.txt" :content "x"}}}
                       {:text "done"})
       (let [{:keys [lines]} (js-await (run-json home ["--no-session" "--trust" "go"]))
             ends (filter #(= "tool_execution_end" (.-type %)) lines)]
         (-> (expect (fs/existsSync (path/join home "no.txt"))) (.toBe false))
         (-> (expect (js/JSON.stringify (.-result (first ends)))) (.toContain "guarded"))
+        ;; a guard that throws fails closed, as in pi
+        (-> (expect (fs/existsSync (path/join home "boom.txt"))) (.toBe false))
+        (-> (expect (js/JSON.stringify (.-result (second ends)))) (.toContain "blocking execution"))
         (-> (expect (fs/existsSync (path/join home "yes.txt"))) (.toBe false))
         (-> (expect (fs/existsSync (path/join home "moved.txt"))) (.toBe true)))
       (finally

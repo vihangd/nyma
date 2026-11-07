@@ -271,20 +271,20 @@
                                 ((:remove pipeline) interceptor-name)))
 
        ;; ── Shell execution ─────────────────────────────────
-         :exec              (fn [cmd args]
+         ;; Async: a missing binary throws out of Bun.spawn, and pi's callers
+         ;; write `pi.exec(…).catch(…)`.
+         :exec              ^:async (fn [cmd args]
                               (let [cmd-args (into [cmd] (or args []))
                                     proc     (js/Bun.spawn (clj->js cmd-args)
                                                            #js {:cwd    (js/process.cwd)
                                                                 :stdout "pipe"
                                                                 :stderr "pipe"})]
-                                (.then (.-exited proc)
-                                       (fn [_]
-                                         (-> (js/Promise.all
-                                              #js [(.text (.-stdout proc))
-                                                   (.text (.-stderr proc))])
-                                             (.then (fn [results]
-                                                      #js {:stdout (aget results 0)
-                                                           :stderr (aget results 1)})))))))
+                                (js-await (.-exited proc))
+                                (let [results (js-await (js/Promise.all
+                                                         #js [(.text (.-stdout proc))
+                                                              (.text (.-stderr proc))]))]
+                                  #js {:stdout (aget results 0)
+                                       :stderr (aget results 1)})))
 
        ;; ── Long-lived process spawning ────────────────────
          :spawn             (fn [cmd args opts]

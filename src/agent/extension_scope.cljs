@@ -179,9 +179,19 @@
                       (let [m (.get handler-map event)]
                         (and m (.get m handler))))
         safe-on     (fn [event handler & [priority]]
-                      (let [safe-handler (fn [data ctx]
+                      (let [;; pi's rule: a guard that fails blocks. Swallowing the
+                            ;; error would run the very tool it was there to stop.
+                            blocked      (fn [e]
+                                           (when (= event "tool_call")
+                                             #js {:block  true
+                                                  :reason (str "Extension failed, blocking execution: "
+                                                               (or (some-> e .-message) e))}))
+                            safe-handler (fn [data ctx]
                                            (try
-                                             (handler data ctx)
+                                             (let [r (handler data ctx)]
+                                               (if (and (= event "tool_call") (instance? js/Promise r))
+                                                 (.catch r blocked)
+                                                 r))
                                              (catch :default e
                                                (swap! handler-errors update ns-str (fnil inc 0))
                                                (try
@@ -198,7 +208,7 @@
                                                                         (.-message e) " (details in /extensions)")
                                                                 "error"))))
                                                  (catch :default _ nil))
-                                               nil)))
+                                               (blocked e))))
                             m            (or (.get handler-map event)
                                              (let [nm (js/WeakMap.)] (.set handler-map event nm) nm))]
                         (.set m handler safe-handler)
