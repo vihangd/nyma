@@ -41,7 +41,7 @@ export HOME=$home PI_RUN_INTEGRATION=1 PI_INTEGRATION_BACKENDS=real
 #   first-user-persists: pi creates the file lazily; nyma creates it at start.
 #   name-persists-across-session-file: greps for pi's `session_info` entry.
 emacs "${load[@]}" -l pilish -l pilish-integration-test -l nyma-e2e-test \
-  --eval "(setq pilish-executable '(\"$nyma\") pilish-extra-args '(\"--mode\" \"pi-rpc\" \"--trust\"))" \
+  --eval "(setq pilish-executable '(\"$nyma\") pilish-extra-args '(\"--trust\"))" \
   --eval "(setq pilish-test-rpc-timeout 30)" \
   --eval "(ert-run-tests-batch-and-exit '(and (or \"/real\$\" \"^nyma-e2e/\") (not (or \"first-user-persists\" \"name-persists-across-session-file\"))))" \
   </dev/null

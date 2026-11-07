@@ -469,21 +469,20 @@ so the pair is always closed.
 
 #### Driving nyma from [pilish](https://github.com/dnouri/pilish) (Emacs)
 
-pilish builds its argv as `<executable> --mode rpc <extra-args>`, and a repeated
-`--mode` takes the last value, so no patch is needed on either side:
+pilish spawns `<executable> --mode rpc`, which runs tools without asking. To have
+Emacs ask first, add `--mode pi-rpc`; a repeated `--mode` takes the last value:
 
 ```elisp
 (setq pilish-executable '("/path/to/nyma"))
-(setq pilish-extra-args '("--mode" "pi-rpc"))
+(setq pilish-extra-args '("--mode" "pi-rpc"))   ; optional
 ```
 
 pilish probes `--version` and warns when it is below pi's own `0.85.0`. It is a
 warning, not a gate.
 
 Chat, streaming, tools, steering, abort, models and renaming work. pilish's session
-browser and `pilish-open-session-file` do not: they read pi's session files
-directly (`~/.pi/agent/sessions`, a `type: "session"` header), and nyma's are its
-own format under `~/.nyma/sessions`.
+browser and `pilish-open-session-file` read pi's session files directly, so they
+need the `pi.sessions` copy described under "Tools built for pi".
 
 `bun run test:pilish` runs pilish's own contract suite and a real chat buffer
 against `./nyma`. It needs Emacs 29.1+ and a C compiler, and it calls your default
