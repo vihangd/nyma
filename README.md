@@ -415,7 +415,8 @@ All three exit 1 when the run fails (`is_error: true`), and 2 on an unknown form
 bun run start -- --mode json "What files are in src/"
 ```
 
-Like print mode but outputs structured JSON.
+pi's JSON mode: a `type: "session"` header, then one event per line, the same
+events `--mode rpc` sends. The session is kept, so `--continue` resumes it.
 
 ### RPC Mode
 
@@ -487,6 +488,37 @@ own format under `~/.nyma/sessions`.
 `bun run test:pilish` runs pilish's own contract suite and a real chat buffer
 against `./nyma`. It needs Emacs 29.1+ and a C compiler, and it calls your default
 model, so it costs a few cents. pilish is pinned in the script.
+
+### Tools built for pi
+
+Most tools that drive pi spawn it, so they can spawn nyma. Point them at nyma if they
+have a setting for it (`PI_ACP_PI_COMMAND`, `pilish-executable`, `pi-vscode.path`,
+`pi-rpc-executable`, pi.nvim's `binary`). For the ones that hardcode `pi` (cmux, rho,
+overstory), or check its version (pi.el refuses below 0.84), put this on PATH as `pi`:
+
+```sh
+#!/bin/sh
+# 1.2.0 is the pi protocol level nyma speaks, not nyma's version.
+[ "$1" = --version ] && { echo 1.2.0; exit 0; }
+exec nyma "$@"
+```
+
+| Tools reach pi through | Examples | On nyma |
+|---|---|---|
+| `--mode rpc` | pilish, pi-acp, pi.nvim, pi-vscode, cmux, rho, autocontext, spynel, pi-mobile | Works. Tools run without asking; add `--permission-mode` to change that |
+| `--mode json` | sympheo | Works |
+| `--mode json`, installing pi itself | Harbor | Needs its own agent definition |
+| `.pi/` directories | overstory | `.pi/skills`, `.pi/prompts` load. `.pi/extensions` needs a trusted folder; a pi extension using more of pi's API than nyma adapts may not load |
+| SDK import | Vercel harness-pi, pi-web, PI-Desktop, pi-gui | No: they import pi's npm package |
+
+Zed and JetBrains users want `--mode acp` rather than pi-acp.
+
+Accepted but ignored: `--no-themes`, `--theme`, `--use-theme`, `--no-mcp`, `--verbose`,
+`--tui-mode`, `--models`. `--no-extensions` skips extension directories but keeps
+nyma's compiled-in extensions. pi's `auth.json`, `models.json` and `settings.json` are
+not read: keys come from `/login` or the environment. Not implemented: `clone`,
+`get_entries`, `get_tree`, `auto_retry_*`, and `pi install`, `pi config`, `pi mcp`,
+`pi auth`.
 
 ### ACP Mode (Zed, JetBrains and other editors)
 
