@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.sandbox :as sandbox]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
@@ -37,7 +38,9 @@
       (and (:auto-approve-safe perm-config)
            classification
            (let [lvl (str (:level classification))]
-             (or (= lvl "safe") (= lvl "read-only"))))
+             (or (= lvl "safe") (= lvl "read-only")
+                 ;; the OS sandbox holds what nobody listed, as in Codex
+                 (and (= lvl "unknown") (sandbox/active?)))))
       :approved
 
       ;; Default: needs approval (auto-approve for now)

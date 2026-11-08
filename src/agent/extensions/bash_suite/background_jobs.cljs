@@ -2,6 +2,7 @@
   (:require ["ai" :refer [tool]]
             ["zod" :as z]
             [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.sandbox :as sandbox]
             [clojure.string :as str]))
 
 ;; ── State ────────────────────────────────────────────────────
@@ -45,7 +46,7 @@
         stdout-buf   (atom [])
         stderr-buf   (atom [])
         exit-code    (atom nil)
-        proc         (js/Bun.spawn #js ["sh" "-c" cmd]
+        proc         (js/Bun.spawn (clj->js (sandbox/wrap ["sh" "-c" cmd]))
                        #js {:stdout "pipe" :stderr "pipe"})
         job          {:id id
                       :command (str cmd)

@@ -3,6 +3,7 @@
   (:require [agent.utils.data :as data]
             ["ai" :refer [tool]]
             [agent.schema :as schema]
+            [agent.utils.sandbox :as sandbox]
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.multimodal :as mm]
@@ -146,7 +147,7 @@
 (defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
   (let [limit-ms (or timeout 30000)
         started  (js/Date.now)
-        proc     (js/Bun.spawn #js ["sh" "-c" command]
+        proc     (js/Bun.spawn (clj->js (sandbox/wrap ["sh" "-c" command]))
                                #js {:timeout limit-ms
                                     :stdout  "pipe"
                                     :stderr  "pipe"})

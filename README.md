@@ -776,6 +776,12 @@ an MCP or extension tool is refused. A worktree child keeps its permission mode 
 an unlisted role there is not narrowed. `.nyma/agents/*.md` and project role tool lists are
 ignored until the folder is trusted.
 
+A worktree child's bash runs in an OS sandbox (`sandbox-exec` on macOS, `bwrap` on Linux): it
+can write only in its checkout, the repo's `.git` (not its hooks or config), temp dirs and package
+caches. Reads and network are not limited. Setting `sandbox.bash`: `"worktree"` (default),
+`"always"` (every session, confined to its cwd; unlisted commands then run without asking), or
+`"off"`. With neither tool installed, nyma warns once and runs bash unconfined.
+
 A role with `"model": "inherit"` or no model uses the parent's, and so does a built-in role whose
 provider is not the one you are on.
 
