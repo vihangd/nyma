@@ -13,7 +13,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             [agent.debug :as d]
-            [agent.utils.home :as home]))
+            [clojure.string :as str]))
 
 ;; The directory bash may write under, or nil for no sandbox.
 (defonce root (atom nil))
@@ -32,57 +32,80 @@
     (catch :default _ nil)))
 
 (defn writable
-  "Directories `dir`'s sandbox may write under, all resolved."
-  [dir]
-  (let [h (home/dir)]
-    (->> (concat [dir (git-common-dir dir) (os/tmpdir) "/tmp" "/private/var/folders"]
-                 (map #(path/join h %) [".cache" ".npm" ".bun/install/cache"
-                                        "Library/Caches" ".cargo/registry"]))
-         (keep #(when % (real %)))
-         distinct
-         vec)))
+  "Directories `dir`'s sandbox may write under, all resolved. No package
+   caches: the parent runs what lands there (npx, cargo build.rs) unconfined."
+  [dir git]
+  (->> [dir git (os/tmpdir) "/tmp" "/private/var/folders"]
+       (keep #(when % (real %)))
+       distinct
+       vec))
 
-(defn seatbelt-profile [dirs git]
+(defn- re-quote [s] (str/replace s #"[.*+?^${}()|\[\]\\]" #(str "\\" %)))
+
+(defn seatbelt-profile
+  "Writes denied everywhere but `dirs`; in the repo's .git (`git`), hooks and
+   config stay read-only, a submodule's too, since the parent runs them."
+  [dirs git]
   (str "(version 1)\n(allow default)\n(deny file-write*)\n"
        "(allow file-write* (literal \"/dev/null\") (regex #\"^/dev/(fd|tty|ptmx|ttys)\")"
        (apply str (map-indexed (fn [i _] (str " (subpath (param \"W" i "\"))")) dirs))
        ")\n"
        (when git
-         "(deny file-write* (subpath (string-append (param \"GIT\") \"/hooks\")) (literal (string-append (param \"GIT\") \"/config\")))\n")))
+         (str "(deny file-write* (regex #\"^" (re-quote git)
+              "(/modules/.+)?/(hooks(/|$)|config$)\"))\n"))))
 
-(defn- on-path? [bin]
-  (some? (js/Bun.which bin)))
+(defn- bwrap-ok?
+  "Can bwrap start here? Blocked user namespaces (Ubuntu 24.04, containers)
+   make it fail on every call."
+  []
+  (try (zero? (.-exitCode (js/Bun.spawnSync #js ["bwrap" "--ro-bind" "/" "/" "--dev" "/dev" "true"]
+                                            #js {:stdout "ignore" :stderr "ignore"})))
+       (catch :default _ false)))
 
-(defonce ^:private warned? (atom false))
+(defn- git-protected
+  "hooks and config of the repo and each submodule, as far as they exist."
+  [git]
+  (let [mods (path/join git "modules")]
+    (->> (cons git (when (fs/existsSync mods)
+                     (map #(path/join mods %) (vec (fs/readdirSync mods)))))
+         (mapcat #(vector (path/join % "hooks") (path/join % "config")))
+         (filter fs/existsSync))))
+
+(defn- prefix-for
+  "The argv prefix confining bash to `dir`, or nil when no sandbox can run."
+  [dir]
+  (let [git  (git-common-dir dir)
+        dirs (writable dir git)]
+    (cond
+      (and (= "darwin" js/process.platform) (some? (js/Bun.which "sandbox-exec")))
+      (-> ["sandbox-exec" "-p" (seatbelt-profile dirs git)]
+          (into (mapcat (fn [i p] ["-D" (str "W" i "=" p)]) (range) dirs)))
+
+      (and (some? (js/Bun.which "bwrap")) (bwrap-ok?))
+      ;; ponytail: submodules one level deep; nested ones are not protected
+      (-> ["bwrap" "--ro-bind" "/" "/" "--dev" "/dev" "--die-with-parent"]
+          (into (mapcat (fn [p] ["--bind" p p]) dirs))
+          (into (mapcat (fn [p] ["--ro-bind" p p]) (when git (git-protected git))))
+          (into ["--"])))))
+
+;; root → prefix (nil when unavailable): git and the probe run once, not per command
+(defonce ^:private prefixes (atom {}))
+
+(defn- prefix []
+  (when-let [dir (some-> @root real)]
+    (if (contains? @prefixes dir)
+      (get @prefixes dir)
+      (let [p (prefix-for dir)]
+        (when-not p
+          (d/warn "sandbox" (str "no usable sandbox-exec or bwrap: bash is not confined to " dir)))
+        (swap! prefixes assoc dir p)
+        p))))
 
 (defn wrap
   "`argv` to run under the sandbox, or unchanged when there is none. A missing
-   sandbox tool warns once rather than refusing bash outright."
+   sandbox warns once rather than refusing bash outright."
   [argv]
-  (if-let [dir (some-> @root real)]
-    (let [dirs (writable dir)
-          git  (git-common-dir dir)]
-      (cond
-        (and (= "darwin" js/process.platform) (on-path? "sandbox-exec"))
-        (-> ["sandbox-exec" "-p" (seatbelt-profile dirs (some? git))]
-            (into (mapcat (fn [i p] ["-D" (str "W" i "=" p)]) (range) dirs))
-            (into (when git ["-D" (str "GIT=" git)]))
-            (into argv))
-
-        (on-path? "bwrap")
-        (-> ["bwrap" "--ro-bind" "/" "/" "--dev" "/dev" "--proc" "/proc" "--die-with-parent"]
-            (into (mapcat (fn [p] ["--bind" p p]) dirs))
-            (into (when git (mapcat (fn [p] (when (real p) ["--ro-bind" p p]))
-                                    [(path/join git "hooks") (path/join git "config")])))
-            (into ["--"])
-            (into argv))
-
-        :else
-        (do (when-not @warned?
-              (reset! warned? true)
-              (d/warn "sandbox" (str "no sandbox-exec or bwrap: bash is not confined to " dir)))
-            argv)))
-    argv))
+  (if-let [p (prefix)] (into p argv) argv))
 
 (defn configure!
   "Pick the root from setting `sandbox.bash`: \"worktree\" (default) confines a
@@ -93,5 +116,3 @@
                  "off"    nil
                  "always" (or (.. js/process -env -NYMA_WRITE_ROOT) (js/process.cwd))
                  (.. js/process -env -NYMA_WRITE_ROOT))))
-
-(defn active? [] (some? @root))

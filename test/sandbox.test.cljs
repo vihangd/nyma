@@ -14,13 +14,17 @@
         root (path/join d "wt")]
     (fs/mkdirSync root)
     (js/Bun.spawnSync #js ["git" "init" "-q" root])
+    (fs/mkdirSync (path/join root ".git" "modules" "sub" "hooks") #js {:recursive true})
     (reset! sandbox/root root)
     (try
-      (js-await (bash-execute {:command (str "cd " root " && touch in; touch ../out; touch .git/hooks/x")}))
+      (js-await (bash-execute {:command (str "cd " root " && touch in; touch ../out; touch .git/hooks/x; touch .git/modules/sub/hooks/x; echo >> .git/modules/sub/config; touch .git/objects/ok")}))
       (-> (expect #js [(fs/existsSync (path/join root "in"))
                        (fs/existsSync (path/join d "out"))
-                       (fs/existsSync (path/join root ".git" "hooks" "x"))])
-          (.toEqual #js [true false false]))
+                       (fs/existsSync (path/join root ".git" "hooks" "x"))
+                       (fs/existsSync (path/join root ".git" "modules" "sub" "hooks" "x"))
+                       (fs/existsSync (path/join root ".git" "modules" "sub" "config"))
+                       (fs/existsSync (path/join root ".git" "objects" "ok"))])
+          (.toEqual #js [true false false false false true]))
       (finally
         (reset! sandbox/root nil)
         (fs/rmSync d #js {:recursive true :force true})))))
@@ -31,11 +35,12 @@
     (it.skip "needs sandbox-exec" (fn [])))
   (it "is off with no root" (fn []
     (-> (expect (clj->js (sandbox/wrap ["sh" "-c" "x"]))) (.toEqual #js ["sh" "-c" "x"]))))
-  (it "lets an unlisted command run only inside the sandbox"
+  (it "still asks for an unlisted command inside the sandbox"
       (fn []
         (let [cfg {:auto-approve-safe true}
               c   {:level "unknown"}]
-          (-> (expect (permissions/check-decision "frob" c cfg (atom {}))) (.toBe :needs-approval))
           (reset! sandbox/root "/")
-          (-> (expect (permissions/check-decision "frob" c cfg (atom {}))) (.toBe :approved))
-          (reset! sandbox/root nil))))))
+          (try
+            (-> (expect (permissions/check-decision "gh repo delete x" c cfg (atom {})))
+                (.toBe :needs-approval))
+            (finally (reset! sandbox/root nil))))))))

@@ -777,10 +777,12 @@ an unlisted role there is not narrowed. `.nyma/agents/*.md` and project role too
 ignored until the folder is trusted.
 
 A worktree child's bash runs in an OS sandbox (`sandbox-exec` on macOS, `bwrap` on Linux): it
-can write only in its checkout, the repo's `.git` (not its hooks or config), temp dirs and package
-caches. Reads and network are not limited. Setting `sandbox.bash`: `"worktree"` (default),
-`"always"` (every session, confined to its cwd; unlisted commands then run without asking), or
-`"off"`. With neither tool installed, nyma warns once and runs bash unconfined.
+can write only in its checkout, the repo's `.git` (not its or a submodule's hooks or config) and
+temp dirs; package caches are read-only, since the parent would run what lands there. Reads and
+network are not limited, so unlisted commands still ask. Setting `sandbox.bash` in
+`~/.nyma/settings.json` (a project's is ignored): `"worktree"` (default), `"always"` (every
+session, confined to its cwd), or `"off"`. Without a usable sandbox-exec or bwrap, nyma warns
+once and runs bash unconfined.
 
 A role with `"model": "inherit"` or no model uses the parent's, and so does a built-in role whose
 provider is not the one you are on.
@@ -819,7 +821,7 @@ so a `sed -i`, a formatter or an `npm install` is no longer invisible.
 A bash command in none of the classifier's tables asks. `bash-suite.permissions.judge`
 (`{"model": "jev-1.13.0", "threshold": 0.8, "timeout-ms": 1500}`, global settings only, with
 `TYPESAFE_API_KEY` set, or a `"typesafe"` key in `~/.nyma/credentials.json`) lets TypeSafe's Jev judge those: a `safe` verdict at or above the
-threshold runs it, anything else asks. **Each such command is sent to TypeSafe.**
+threshold runs it, and the allow holds for the session; anything else asks, and a failed call warns. **Each such command is sent to TypeSafe.**
 `mcp.max-description-length` (default 1200) caps each MCP tool description.
 
 `step-cap-report` (default `true`): when a run hits `max-steps`, spend one more

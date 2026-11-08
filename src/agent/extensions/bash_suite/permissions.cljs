@@ -1,7 +1,7 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
             [agent.utils.credentials :as creds]
-            [agent.utils.sandbox :as sandbox]
+            [agent.debug :as d]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
@@ -39,9 +39,9 @@
       (and (:auto-approve-safe perm-config)
            classification
            (let [lvl (str (:level classification))]
-             (or (= lvl "safe") (= lvl "read-only")
-                 ;; the OS sandbox holds what nobody listed, as in Codex
-                 (and (= lvl "unknown") (sandbox/active?)))))
+             ;; Not :unknown even when sandboxed: the sandbox holds local
+             ;; writes, not `gh repo delete`, `docker run -v ~:/h` or `open`.
+             (or (= lvl "safe") (= lvl "read-only"))))
       :approved
 
       ;; Default: needs approval (auto-approve for now)
@@ -77,8 +77,14 @@
                                                      :Content-Type "application/json"}
                                        :body (js/JSON.stringify (clj->js (judge-request cmd model)))
                                        :signal (js/AbortSignal.timeout (or timeout-ms 1500))}))]
-        (and (.-ok r) (judge-safe? (js-await (.json r)) threshold)))
-      (catch :default _ false))
+        (if (.-ok r)
+          (judge-safe? (js-await (.json r)) threshold)
+          (do (d/warn "bash-judge" (str "TypeSafe answered " (.-status r) "; asking instead"))
+              false)))
+      ;; a broken key or network must not pass for a `risky` verdict
+      (catch :default e
+        (d/warn "bash-judge" (str "TypeSafe unreachable (" (.-message e) "); asking instead"))
+        false))
     false))
 
 ;; ── Extension activation ─────────────────────────────────────
@@ -140,7 +146,8 @@
                      (.then (judge-allows? cmd (:judge perm-config))
                             (fn [ok]
                               (if ok
-                                (do (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                                (do (swap! session-approvals assoc cmd :approved)
+                                    (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
                                     #js {:decision "allow"})
                                 (ask))))
                      (ask)))))))
