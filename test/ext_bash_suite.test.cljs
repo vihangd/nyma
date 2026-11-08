@@ -926,13 +926,14 @@
   (let [lvl #(str (:level (security-analysis/classify-command % (:security-analysis shared/default-config))))]
     (it "asks for writes the command tables did not name"
         (fn []
-          (doseq [c ["find . -delete" "find . -name x -exec rm {} ;" "find *.txt -delete"
+          (doseq [c ["find . -delete" "find . -name x -exec rm {} ;" "find *.txt -delete" "ssh -o ProxyCommand=x h"
                      "env rm x" "awk 'BEGIN{system(\"x\")}'" "rm foo" "sort -o out in"
                      "rg --pre ./x foo" "xxd a b" "frobnicate --all"]]
             (-> (expect #js [c (contains? #{"safe" "read-only"} (lvl c))])
                 (.toEqual #js [c false])))))
     (it "still runs plain reads unasked"
         (fn []
-          (doseq [c ["find . -name x" "env" "rg foo src" "sort a" "ls *.md" "jq . f.json"]]
+          (doseq [c ["find . -name x" "env" "rg foo src" "sort a" "ls *.md" "jq . f.json"
+                     "rg foo *.cljs" "sort *.txt" "find src -name *.js"]]
             (-> (expect #js [c (contains? #{"safe" "read-only"} (lvl c))])
                 (.toEqual #js [c true]))))))))

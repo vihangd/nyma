@@ -262,19 +262,19 @@
 
 (defn- classify-token-group
   "Classify a group of tokens (a single subcommand) by its command name and
-   arguments. `glob?`: an unquoted glob was among them, which can expand to a
-   file named `-delete`. A command in no table is :unknown, never :safe:
-   `rm`-likes nobody listed must ask."
-  [tokens glob?]
+   arguments. A command in no table is :unknown, never :safe: `rm`-likes
+   nobody listed must ask.
+   ponytail: an unquoted glob is taken as written; one matching a file named
+   `-delete` slips past exec-flags. Expand globs here if that ever matters."
+  [tokens]
   (let [tokens   (strip-privilege-wrapper tokens)
         cmd-name (first tokens)
         args-str (str/join " " tokens)]
     (cond
       (nil? cmd-name) :safe
-      (shell-grant/exec-flag? tokens) :write
-      (and glob? (contains? (set (keys shell-grant/exec-flags)) cmd-name)) :write
-      (contains? read-only-commands cmd-name) :read-only
       (contains? network-commands cmd-name)   :network
+      (shell-grant/exec-flag? tokens) :write
+      (contains? read-only-commands cmd-name) :read-only
       (contains? write-commands cmd-name)     :write
       ;; `bash ./x.sh`, `nohup sh x`: what these run is not in the words here
       (shell-grant/code-runner? args-str)     :write
@@ -401,7 +401,7 @@
                     (doseq [token parsed]
                       (cond
                         (= "glob" (and (not (string? token)) (.-op token)))
-                        (swap! current conj [(.-pattern token)])
+                        (swap! current conj (.-pattern token))
                         (and (not (string? token)) (.-op token))
                         (do
                           (when (seq @current) (swap! groups conj @current))
@@ -409,11 +409,7 @@
                         :else (swap! current conj (str token))))
                     (when (seq @current) (swap! groups conj @current))
                   ;; Classify each group and take highest risk
-                    (let [group-levels (cond-> (map (fn [g]
-                                                      (classify-token-group
-                                                       (map #(if (vector? %) (first %) %) g)
-                                                       (some vector? g)))
-                                                    @groups)
+                    (let [group-levels (cond-> (map classify-token-group @groups)
                                          (writes-via-redirect? parsed) (conj :write))
                           max-level    (reduce higher-risk subshell-max group-levels)
                           final-level  (if (seq pipe-reasons) :destructive max-level)
