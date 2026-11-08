@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.credentials :as creds]
             [agent.utils.sandbox :as sandbox]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
@@ -48,7 +49,7 @@
 
 ;; ── Judge for unlisted commands ──────────────────────────────
 ;; Opt-in: `bash-suite.permissions.judge` in ~/.nyma/settings.json (never a
-;; project's) and TYPESAFE_API_KEY. The command is sent to TypeSafe. Only
+;; project's) and TYPESAFE_API_KEY or credentials.json "typesafe". The command is sent to TypeSafe. Only
 ;; turns an ask into an allow; any doubt, error or timeout still asks.
 
 (defn judge-request [cmd model]
@@ -68,7 +69,7 @@
 
 (defn ^:async judge-allows?
   [cmd {:keys [model threshold timeout-ms]}]
-  (if-let [key (.. js/process -env -TYPESAFE_API_KEY)]
+  (if-let [key (or (.. js/process -env -TYPESAFE_API_KEY) (creds/read-credential "typesafe"))]
     (try
       (let [r (js-await (js/fetch "https://api.typesafe.ai/v1/systemone"
                                   #js {:method "POST"

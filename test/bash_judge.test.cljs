@@ -1,7 +1,8 @@
 (ns bash-judge-test
   (:require ["bun:test" :refer [describe it expect]]
             [agent.extensions.bash-suite.permissions :as permissions]
-            [agent.extensions.bash-suite.shared :as shared]))
+            [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.credentials :as creds]))
 
 (defn- answer [p] #js {:answers #js {:risk #js {:type "choice" :probabilities #js {:safe p}}}})
 
@@ -22,7 +23,11 @@
     (-> (expect (js-await (with-fetch (reply 0.9) "k" allows?))) (.toBe true))
     (-> (expect (js-await (with-fetch (reply 0.5) "k" allows?))) (.toBe false))
     (-> (expect (js-await (with-fetch (fn [] (js/Promise.reject (js/Error. "down"))) "k" allows?))) (.toBe false))
-    (-> (expect (js-await (with-fetch (reply 0.99) nil allows?))) (.toBe false))))
+    (-> (expect (js-await (with-fetch (reply 0.99) nil allows?))) (.toBe false))
+    ;; a /login key stands in for the env var
+    (creds/set-run-key! "typesafe" "k")
+    (-> (expect (js-await (with-fetch (reply 0.9) nil allows?))) (.toBe true))
+    (creds/set-run-key! "typesafe" nil)))
 
 (describe "bash judge (Jev)" (fn []
   (it "approves only a confident safe verdict; errors and no key still ask" test-fail-closed)

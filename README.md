@@ -818,7 +818,7 @@ so a `sed -i`, a formatter or an `npm install` is no longer invisible.
 
 A bash command in none of the classifier's tables asks. `bash-suite.permissions.judge`
 (`{"model": "jev-1.13.0", "threshold": 0.8, "timeout-ms": 1500}`, global settings only, with
-`TYPESAFE_API_KEY` set) lets TypeSafe's Jev judge those: a `safe` verdict at or above the
+`TYPESAFE_API_KEY` set, or a `"typesafe"` key in `~/.nyma/credentials.json`) lets TypeSafe's Jev judge those: a `safe` verdict at or above the
 threshold runs it, anything else asks. **Each such command is sent to TypeSafe.**
 `mcp.max-description-length` (default 1200) caps each MCP tool description.
 
