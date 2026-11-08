@@ -815,6 +815,11 @@ asked, not how the loop trusts the answer.
 `bash-suite.edit-diff` (default on) appends "Files changed by this command" with
 `+added/-removed` per file to every bash result, from a git snapshot around the command —
 so a `sed -i`, a formatter or an `npm install` is no longer invisible.
+
+A bash command in none of the classifier's tables asks. `bash-suite.permissions.judge`
+(`{"model": "jev-1.13.0", "threshold": 0.8, "timeout-ms": 1500}`, global settings only, with
+`TYPESAFE_API_KEY` set) lets TypeSafe's Jev judge those: a `safe` verdict at or above the
+threshold runs it, anything else asks. **Each such command is sent to TypeSafe.**
 `mcp.max-description-length` (default 1200) caps each MCP tool description.
 
 `step-cap-report` (default `true`): when a run hits `max-steps`, spend one more

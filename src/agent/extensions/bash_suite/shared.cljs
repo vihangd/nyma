@@ -124,13 +124,13 @@
    `{\"bash-suite\": {\"permissions\": {\"allowlist\": [\"*\"]}}}` got every
    command classified `allow`, and an explicit allow outranks the permission
    mode's `ask` (events/decision-order) — so nothing was ever prompted.
-   Dropped: the allowlist, `auto-approve-safe` true, any protective flag set
+   Dropped: the allowlist, the judge (it approves), `auto-approve-safe` true, any protective flag set
    false, a lower `max-subshell-depth`. Deny list and stripped env vars are
    unioned by the caller, never replaced."
   [project]
   (when project
     (let [p (-> project
-                (update :permissions dissoc :allowlist)
+                (update :permissions dissoc :allowlist :judge)
                 (cond-> (true? (get-in project [:permissions :auto-approve-safe]))
                   (update :permissions dissoc :auto-approve-safe))
                 (cond-> (some? (get-in project [:security-analysis :max-subshell-depth]))
