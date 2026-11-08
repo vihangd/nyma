@@ -7,17 +7,21 @@
 ;; ── Command classification tables ────────────────────────────
 
 (def read-only-commands
+  ;; Not here: `awk` (system(), print > file), `xxd` (writes its 2nd file);
+  ;; `find`, `rg`, `sort`, `tree` only without their shell-grant/exec-flags.
   #{"ls" "cat" "head" "tail" "wc" "find" "grep" "rg" "ag" "ack"
     "file" "stat" "which" "type" "echo" "printf" "pwd" "date"
-    "env" "printenv" "tree" "df" "du" "ps" "uptime" "whoami"
+    "printenv" "tree" "df" "du" "ps" "uptime" "whoami"
     "hostname" "uname" "id" "groups" "locale" "lsof" "free"
     "top" "htop" "less" "more" "diff" "comm" "sort" "uniq"
-    "cut" "tr" "awk" "column" "basename" "dirname" "realpath"
-    "readlink" "sha256sum" "md5sum" "xxd" "hexdump" "strings"
-    "nm" "objdump" "test" "[" "true" "false"})
+    "cut" "tr" "column" "basename" "dirname" "realpath"
+    "readlink" "sha256sum" "md5sum" "hexdump" "strings"
+    "nm" "objdump" "test" "[" "true" "false"
+    "jq" "nl" "paste" "rev" "seq" "expr" "cmp" "tac"})
 
 (def write-commands
-  #{"cp" "mv" "mkdir" "touch" "chmod" "chown" "sed" "tee"
+  #{"cp" "mv" "mkdir" "touch" "chmod" "chown" "sed" "tee" "rm" "rmdir" "ln"
+    "awk" "gawk" "mawk" "nawk" "xxd" "dd" "truncate"
     "npm" "bun" "yarn" "pnpm" "pip" "pip3" "cargo" "go"
     "git" "make" "cmake" "rake" "gradle" "mvn" "ant"
     "python" "python3" "node" "ruby" "perl" "java" "javac"
@@ -162,9 +166,10 @@
   (case level
     :safe 0
     :read-only 1
-    :write 2
-    :network 3
-    :destructive 4
+    :unknown 2
+    :write 3
+    :network 4
+    :destructive 5
     0))
 
 (defn- higher-risk [a b]
@@ -256,19 +261,24 @@
           privilege-patterns))
 
 (defn- classify-token-group
-  "Classify a group of tokens (a single subcommand) by its command name and arguments."
-  [tokens]
+  "Classify a group of tokens (a single subcommand) by its command name and
+   arguments. `glob?`: an unquoted glob was among them, which can expand to a
+   file named `-delete`. A command in no table is :unknown, never :safe:
+   `rm`-likes nobody listed must ask."
+  [tokens glob?]
   (let [tokens   (strip-privilege-wrapper tokens)
         cmd-name (first tokens)
         args-str (str/join " " tokens)]
     (cond
       (nil? cmd-name) :safe
+      (shell-grant/exec-flag? tokens) :write
+      (and glob? (contains? (set (keys shell-grant/exec-flags)) cmd-name)) :write
       (contains? read-only-commands cmd-name) :read-only
       (contains? network-commands cmd-name)   :network
       (contains? write-commands cmd-name)     :write
       ;; `bash ./x.sh`, `nohup sh x`: what these run is not in the words here
       (shell-grant/code-runner? args-str)     :write
-      :else                                   :safe)))
+      :else                                   :unknown)))
 
 (defn- check-pipe-to-interpreter
   "Check if any subcommand pipes into an interpreter (curl|bash, etc.)."
@@ -387,15 +397,23 @@
                         groups  (atom [])
                         current (atom [])]
                   ;; Build subcommand groups — iterate JS array directly
+                  ;; A glob is a word, not a separator: `find *.x -delete` is one command
                     (doseq [token parsed]
-                      (if (and (not (string? token)) (.-op token))
+                      (cond
+                        (= "glob" (and (not (string? token)) (.-op token)))
+                        (swap! current conj [(.-pattern token)])
+                        (and (not (string? token)) (.-op token))
                         (do
                           (when (seq @current) (swap! groups conj @current))
                           (reset! current []))
-                        (swap! current conj (str token))))
+                        :else (swap! current conj (str token))))
                     (when (seq @current) (swap! groups conj @current))
                   ;; Classify each group and take highest risk
-                    (let [group-levels (cond-> (map classify-token-group @groups)
+                    (let [group-levels (cond-> (map (fn [g]
+                                                      (classify-token-group
+                                                       (map #(if (vector? %) (first %) %) g)
+                                                       (some vector? g)))
+                                                    @groups)
                                          (writes-via-redirect? parsed) (conj :write))
                           max-level    (reduce higher-risk subshell-max group-levels)
                           final-level  (if (seq pipe-reasons) :destructive max-level)

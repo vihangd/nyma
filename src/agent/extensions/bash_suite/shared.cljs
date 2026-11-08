@@ -9,7 +9,7 @@
 ;; ── Stats tracking ───────────────────────────────────────────
 (def suite-stats
   (atom {:security-analysis {:commands-analyzed 0 :blocked 0
-                             :classified {:safe 0 :read-only 0 :write 0
+                             :classified {:safe 0 :read-only 0 :unknown 0 :write 0
                                           :network 0 :destructive 0}}
          :permissions       {:auto-approved 0 :user-approved 0 :denied 0
                              :remembered 0}

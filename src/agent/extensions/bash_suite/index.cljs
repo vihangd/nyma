@@ -27,7 +27,7 @@ Commands are analyzed for safety. Destructive operations (rm -rf /, dd, fork bom
          "─────────────────────────────────────────\n"
          "Security Analysis:  " (:commands-analyzed sa) " commands analyzed, "
          (:blocked sa) " blocked\n"
-         "                    safe:" (:safe cl) " read-only:" (:read-only cl)
+         "                    safe:" (:safe cl) " read-only:" (:read-only cl) " unknown:" (:unknown cl)
          " write:" (:write cl) " network:" (:network cl)
          " destructive:" (:destructive cl) "\n"
          "Permissions:        " (:auto-approved pm) " auto-approved, "

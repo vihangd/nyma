@@ -921,3 +921,18 @@
             (-> (expect (ask "ls")) (.toBe "allow"))
             ;; env_filter rewrites after the classifier
             (-> (expect (ask "unset X; ls" "ls")) (.toBe "allow")))))))
+
+(describe "security-analysis: flags that write or exec" (fn []
+  (let [lvl #(str (:level (security-analysis/classify-command % (:security-analysis shared/default-config))))]
+    (it "asks for writes the command tables did not name"
+        (fn []
+          (doseq [c ["find . -delete" "find . -name x -exec rm {} ;" "find *.txt -delete"
+                     "env rm x" "awk 'BEGIN{system(\"x\")}'" "rm foo" "sort -o out in"
+                     "rg --pre ./x foo" "xxd a b" "frobnicate --all"]]
+            (-> (expect #js [c (contains? #{"safe" "read-only"} (lvl c))])
+                (.toEqual #js [c false])))))
+    (it "still runs plain reads unasked"
+        (fn []
+          (doseq [c ["find . -name x" "env" "rg foo src" "sort a" "ls *.md" "jq . f.json"]]
+            (-> (expect #js [c (contains? #{"safe" "read-only"} (lvl c))])
+                (.toEqual #js [c true]))))))))
