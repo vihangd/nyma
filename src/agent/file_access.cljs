@@ -39,12 +39,16 @@
       {:allowed true})))
 
 (defn- real-path
-  "`p` with symlinks resolved, as far up as it exists yet."
+  "`p` with symlinks resolved, as far up as it exists yet. A dangling link is
+   followed too: writing through `in-root/x -> ~/.zshrc-new` creates its target."
   [p]
-  (loop [d (path/resolve p) tail []]
-    (if (fs/existsSync d)
-      (apply path/join (fs/realpathSync d) tail)
-      (recur (path/dirname d) (into [(path/basename d)] tail)))))
+  (loop [d (path/resolve p) tail [] hops 0]
+    (cond
+      (fs/existsSync d) (apply path/join (fs/realpathSync d) tail)
+      (and (< hops 40)
+           (some-> (try (fs/lstatSync d) (catch :default _ nil)) .isSymbolicLink))
+      (recur (path/resolve (path/dirname d) (fs/readlinkSync d)) tail (inc hops))
+      :else (recur (path/dirname d) (into [(path/basename d)] tail) hops))))
 
 (defn outside-root?
   [root p]

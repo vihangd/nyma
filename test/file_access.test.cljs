@@ -59,4 +59,9 @@
                     (-> (expect (outside-root? root (path/join d "wt2" "a.txt"))) (.toBe true))
                     (-> (expect (outside-root? root (path/join root "out" "a.txt"))) (.toBe true))
                     (-> (expect (outside-root? root "/etc/x")) (.toBe true))
+                    ;; dangling: the write would create the target outside
+                    (fs/symlinkSync (path/join d "nope" "x") (path/join root "dang"))
+                    (-> (expect (outside-root? root (path/join root "dang"))) (.toBe true))
+                    (fs/symlinkSync "new-in" (path/join root "rel"))
+                    (-> (expect (outside-root? root (path/join root "rel"))) (.toBe false))
                     (fs/rmSync d #js {:recursive true :force true}))))))
