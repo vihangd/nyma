@@ -198,3 +198,12 @@
                              "caffeinate ls" "busybox sh" "source ./x" ". ./x" "pipx run y" "vim x"]]
                     (-> (expect (sg/grant-base c)) (.toBeFalsy)))
                   (-> (expect (sg/grant-matches? "stdbuf" "stdbuf -o0 bash -c 'rm -rf ~/work'")) (.toBe false))))))
+
+(describe "grants never cover a tool's exec flags" (fn []
+  (it "refuses the grant and the save"
+      (fn []
+        (-> (expect (sg/grant-matches? "tar" "tar --to-command='rm -rf ~' -xf a.tar")) (.toBe false))
+        (-> (expect (sg/grant-matches? "tar" "tar -I zstd -xf a.tar")) (.toBe false))
+        (-> (expect (sg/grant-matches? "rg" "rg --pre=./x foo")) (.toBe false))
+        (-> (expect (sg/grant-matches? "tar" "tar -xf a.tar")) (.toBe true))
+        (-> (expect (sg/grant-base "sort -o out in")) (.toBeUndefined))))))

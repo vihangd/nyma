@@ -54,6 +54,38 @@
     "dotnet run" "docker run" "docker exec" "docker compose"
     "kubectl exec" "kubectl run" "kubectl debug"})
 
+(def exec-flags
+  "Flags that make an otherwise plain tool write, or run a command it is
+   handed. A grant for the tool never covers them, and the classifier counts
+   them as writes: `tar *` must not cover `tar --to-command='rm -rf ~'`.
+   ponytail: matched per word (exact, `--flag=`, or a short flag with its value
+   attached); a cluster like `tar -xI…` hides `-I`. Parse clusters if that bites."
+  {"find" #{"-exec" "-execdir" "-ok" "-okdir" "-delete" "-fls" "-fprint" "-fprint0"
+            "-fprintf" "-files0-from"}
+   "rg"   #{"--pre" "--hostname-bin" "-z" "--search-zip"}
+   "sort" #{"-o" "--output" "--compress-program"}
+   "tree" #{"-o"}
+   "tar"  #{"--to-command" "--use-compress-program" "-I" "--checkpoint-action"
+            "--info-script" "--new-volume-script" "-F"}
+   "git"  #{"-c" "--config-env" "--upload-pack" "--receive-pack" "--exec"}
+   "ssh"  #{"-o" "-F"}
+   "rsync" #{"-e" "--rsh" "--rsync-path"}})
+
+(defn exec-flag?
+  "Does `c` (a string or its words) use one of its tool's `exec-flags`?"
+  [c]
+  (let [[w & args] (if (string? c) (str/split (str/trim c) #"\s+") (vec c))
+        flags      (get exec-flags (last (.split (str w) "/")))]
+    (boolean
+     (and flags
+          (some (fn [a]
+                  (let [a (str a)]
+                    (some #(or (= a %)
+                               (str/starts-with? a (str % "="))
+                               (and (= 2 (count %)) (str/starts-with? a %)))
+                          flags)))
+                args)))))
+
 (defn code-runner?
   "First word of `c` — by name or path (`/bin/sh`), and with any version suffix
    (`python3.12`) — is a code runner. So is an env-assignment prefix: it is not
@@ -74,7 +106,7 @@
    one, or a code runner — those never get an always-allow."
   [cmd]
   (let [c (str/trim (str cmd))]
-    (when (and (seq c) (simple-command? c) (not (code-runner? c)))
+    (when (and (seq c) (simple-command? c) (not (code-runner? c)) (not (exec-flag? c)))
       (let [[w sub] (str/split c #"\s+")]
         (cond
           (not (contains? subcommand-tools w)) w
@@ -91,7 +123,7 @@
         b (str base)]
     ;; A code runner is refused even against a grant saved before they were
     ;; excluded: the grant cannot know what it would be approving.
-    (boolean (and (seq b) (simple-command? c) (not (code-runner? c))
+    (boolean (and (seq b) (simple-command? c) (not (code-runner? c)) (not (exec-flag? c))
                   (or (= c b)
                       (and (not (contains? subcommand-tools b))
                            (str/starts-with? c (str b " "))))))))
