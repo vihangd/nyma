@@ -144,19 +144,20 @@
 (defn ^:async ask!
   "Probability of yes for each yes/no question in `questions`
    ({id {:instructions … :criteria {:true … :false …}}}) about `state`, as
-   {id p}; nil when `kind` is paused or Jev fails. Each p is logged, hashed,
-   under `kind`."
+   {id p}; nil when `kind` is paused or Jev fails, an answer with no usable
+   probability included. One log line per call, under `kind`."
   [{:keys [kind state questions cfg]}]
   (when-not (paused? kind)
-    (let [a (js-await (ask-jev state (into {} (map (fn [[id q]] [id (assoc q :type "noul")]) questions)) cfg))]
-      (failed! kind (some? a))
-      (when a
-        (into {} (keep (fn [id]
-                         (let [p (some-> (aget a id) .-noul)]
-                           (when (number? p)
-                             (log! {:kind kind :subject (subject-hash (str kind ":" id)) :p p})
-                             [id p])))
-                       (keys questions)))))))
+    (let [a  (js-await (ask-jev state (into {} (map (fn [[id q]] [id (assoc q :type "noul")]) questions)) cfg))
+          ps (when a
+               (into {} (keep (fn [id]
+                                (let [p (some-> (aget a id) .-noul)]
+                                  (when (number? p) [id p])))
+                              (keys questions))))]
+      (failed! kind (seq ps))
+      (when (seq ps)
+        (log! {:kind kind :ps (vec (vals ps))})
+        ps))))
 
 (defn ^:async decide!
   "Should this ask become an allow? `kind` names the gate (\"bash\", \"mcp\",
@@ -193,11 +194,12 @@
       (log! {:kind kind :subject h :answer (if allowed? "allow" "deny")}))))
 
 (defn report
-  "Agreement by probability band from the log's lines: how often the user
-   allowed what the judge sent them. A band where the user always allows is
+  "Agreement by probability band from the log's permission verdicts: how
+   often the user allowed what the judge sent them. Other kinds' lines
+   (skill, finalize, clarify) have no answer to agree with. A band where the user always allows is
    one the threshold could move into."
   [lines]
-  (let [verdicts (filter #(number? (:p %)) lines)
+  (let [verdicts (filter :verdict lines)
         answers  (into {} (map (juxt :subject :answer) (filter :answer lines)))
         band     (fn [p] (cond (>= p 0.9) "0.9-1" (>= p 0.7) "0.7-0.9" (>= p 0.5) "0.5-0.7" :else "0-0.5"))]
     (->> verdicts

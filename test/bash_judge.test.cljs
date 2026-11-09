@@ -75,8 +75,18 @@
                                                                        :questions {"a" {:instructions "A?"} "b" {:instructions "B?"}}}))))
                               (.toEqual #js {:a 0.8 :b 0}))
                           (-> (expect (.. @body -questions -a -type)) (.toBe "noul"))
-                          ;; p 0 is a band too, not dropped as falsy
-                          (-> (expect (reduce + (map :n (decide/report (decide/read-log))))) (.toBe 2)))))))
+                          ;; one line per call, and not in the permission report
+                          (-> (expect (count (decide/read-log))) (.toBe 1))
+                          (-> (expect (count (decide/report (decide/read-log)))) (.toBe 0)))))))
+
+(defn ^:async test-ask-unusable []
+  ;; a 200 with nothing usable is a failure: it must reach the breaker
+  (js-await
+   (with-home nil (fn [_ _] (js/Promise.resolve #js {:ok true :json (fn [] (js/Promise.resolve #js {:answers #js {:other 1}}))}))
+              ^:async (fn [_]
+                        (dotimes [_ 3]
+                          (-> (expect (js-await (decide/ask! {:kind "skill" :state "s" :cfg {} :questions {"a" {}}}))) (.toBeNil)))
+                        (-> (expect (decide/paused? "skill")) (.toBe true))))))
 
 (defn ^:async test-breaker-per-kind []
   (js-await
@@ -170,6 +180,7 @@
   (it "pauses after three errors in a row" test-breaker)
   (it "asks yes/no questions, several per call, answered by id" test-ask-noul)
   (it "pauses only the kind that failed" test-breaker-per-kind)
+  (it "counts an answer with no probability as a failure" test-ask-unusable)
   (it "logs hashed verdicts and answers, mode 600, and reports by band" test-log-and-report)
   (it "takes its settings from the user's file, never a project's"
       (fn []
