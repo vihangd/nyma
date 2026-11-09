@@ -6,6 +6,8 @@
             [agent.utils.sandbox :as sandbox]
             ["node:fs" :as fs]
             ["node:path" :as path]
+            ["node:dns" :as dns]
+            [clojure.string :as str]
             [agent.multimodal :as mm]
             [agent.tool-result-policy :as policy]
             [agent.utils.ansi :refer [truncate-text]]
@@ -478,12 +480,45 @@
     (str (subs s 0 max-len) "\n[truncated — " (count s) " total characters]")
     s))
 
+(defn blocked-address?
+  "An address web_fetch must not reach: private LAN, link-local (cloud
+   metadata at 169.254.169.254), carrier NAT, unspecified. A prompt-injected
+   fetch would read internal services into context.
+   ponytail: loopback is allowed, for local dev servers. The address is checked
+   before fetch resolves it again; DNS rebinding in between is not caught."
+  [ip]
+  (let [ip (str/lower-case (str ip))
+        v4 (or (second (re-find #"^::ffff:(\d+\.\d+\.\d+\.\d+)$" ip)) ip)]
+    (if-let [[_ a b] (re-find #"^(\d+)\.(\d+)\.\d+\.\d+$" v4)]
+      (let [a (js/parseInt a) b (js/parseInt b)]
+        (or (= a 0) (= a 10) (and (= a 172) (<= 16 b 31)) (and (= a 192) (= b 168))
+            (and (= a 169) (= b 254)) (and (= a 100) (<= 64 b 127))))
+      (boolean (or (= ip "::") (re-find #"^fe[89ab]" ip) (re-find #"^f[cd]" ip))))))
+
+(defn ^:async check-fetch-host!
+  "Throw when `url`'s host resolves to a blocked address."
+  [url]
+  (let [host  (str/replace (.-hostname (js/URL. url)) #"^\[|\]$" "")
+        addrs (js-await (.lookup (.-promises dns) host #js {:all true}))]
+    (when-let [bad (some #(when (blocked-address? (.-address %)) (.-address %)) addrs)]
+      (throw (js/Error. (str "Refused: " host " resolves to " bad
+                             ", a private or link-local address web_fetch may not reach"))))))
+
 (defn ^:async direct-fetch [url fmt max-len]
   (let [response (try
-                   (js-await
-                    (js/fetch url
-                              #js {:signal  (js/AbortSignal.timeout 15000)
-                                   :headers #js {"User-Agent" "Nyma/1.0"}}))
+                   ;; Redirects by hand: each hop's host is checked, or a public
+                   ;; URL could bounce the fetch to an internal one.
+                   (loop [u url hops 0]
+                     (js-await (check-fetch-host! u))
+                     (let [r (js-await
+                              (js/fetch u
+                                        #js {:signal   (js/AbortSignal.timeout 15000)
+                                             :redirect "manual"
+                                             :headers  #js {"User-Agent" "Nyma/1.0"}}))
+                           loc (.get (.-headers r) "location")]
+                       (if (and loc (<= 300 (.-status r) 399) (< hops 5))
+                         (recur (str (js/URL. loc u)) (inc hops))
+                         r)))
                    (catch :default e
                      (throw (js/Error. (str "Fetch failed: " (.-message e))))))]
     (when-not (.-ok response)
