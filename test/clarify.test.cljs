@@ -6,7 +6,7 @@
 (defn ^:async run
   "The before_agent_start result after `submitted` was typed, with Jev
    answering `p` and `judge` as the settings."
-  [judge p submitted & [starts]]
+  [judge p submitted & [starts start]]
   (let [handlers (atom {})
         api      #js {:on (fn [ev f] (swap! handlers assoc ev f)) :off (fn [_ _] nil)}
         orig     js/globalThis.fetch
@@ -24,7 +24,8 @@
       (when submitted ((get @handlers "input_submit") #js {:text submitted}))
       (let [rs (loop [n (or starts 1) acc []]
                  (if (zero? n) acc
-                     (recur (dec n) (conj acc (js-await ((get @handlers "before_agent_start") #js {}))))))]
+                     (recur (dec n) (conj acc (js-await ((get @handlers "before_agent_start")
+                                                                         (or start #js {:userMessage {:role "user" :content submitted}})))))))]
         {:results rs :calls @calls})
       (finally
         (set! js/globalThis.fetch orig)
@@ -42,9 +43,15 @@
       (-> (expect (mapv added? results)) (.toEqual #js [true false])))
     ;; not sure enough
     (-> (expect (added? (first (:results (js-await (run on 0.5 vague)))))) (.toBe false))
-    ;; off by default; a short reply and a command are never judged
-    (doseq [[cfg text] [[{:judge {}} vague] [on "yes do it"] [on "/review the whole repo now"] [on nil]]]
-      (-> (expect (:calls (js-await (run cfg 0.9 text)))) (.toBe 0)))))
+    ;; off by default; a short reply, a command and a `!` line are never judged
+    (doseq [[cfg text] [[{:judge {}} vague] [on "yes do it"] [on "/review the whole repo now"]
+                        [on "!git log --oneline -5"] [on nil]]]
+      (-> (expect (:calls (js-await (run cfg 0.9 text)))) (.toBe 0)))
+    ;; typed while a run streamed (a steer): the next run is a queued nudge,
+    ;; or another message, and gets nothing
+    (doseq [start [#js {:queued true :userMessage {:role "user" :content vague}}
+                   #js {:userMessage {:role "user" :content "Continue working, the task looks unfinished."}}]]
+      (-> (expect (added? (first (:results (js-await (run on 0.9 vague 1 start)))))) (.toBe false)))))
 
 (describe "clarify" (fn []
   (it "tells the model to ask on a typed, vague request only, when switched on" test-clarify)))

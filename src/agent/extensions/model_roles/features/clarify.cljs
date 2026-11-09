@@ -4,10 +4,13 @@
    tell a vague request from a clear one. Jev decides whether this one is
    vague; the model, told to ask, writes the questions.
 
-   Only for a message the user typed (`input_submit`, so the TUI): never a
-   follow-up, a nudge, a command or a reply of a few words. Opt-in with
+   Only for a message the user typed (`input_submit`, so the TUI) that then
+   starts a run: never a steer, a queued follow-up or nudge, a command, a
+   `!`/`$` line or a reply of a few words. Jev is asked at submit, so its
+   answer is ready by the time the run starts and costs no extra wait. Opt-in with
    `judge.clarify` true; `judge.clarify-threshold` (0.8) sets how sure."
   (:require [clojure.string :as str]
+            [agent.utils.content :as content]
             [agent.utils.decide :as decide]))
 
 (def nudge
@@ -26,20 +29,29 @@
         p   (get r "vague")]
     (and (number? p) (>= p (or (:clarify-threshold cfg) 0.8)))))
 
+(defn- eligible? [t]
+  (and (:clarify (decide/config))
+       (not (contains? #{"/" "!" "$"} (subs t 0 1)))
+       (>= (count (str/split t #"\s+")) 4)))
+
 (defn activate [api]
-  (let [fresh     (atom nil)
+  (let [;; {:text :verdict}: the last typed message and Jev's answer, pending
+        fresh     (atom nil)
         on-submit (fn [d]
                     (let [t (str/trim (str (.-text d)))]
-                      (reset! fresh (when (and (:clarify (decide/config))
-                                               (not (str/starts-with? t "/"))
-                                               (>= (count (str/split t #"\s+")) 4))
-                                      t)))
+                      (reset! fresh (when (and (seq t) (eligible? t))
+                                      {:text t :verdict (underspecified? t)})))
                     nil)
-        on-start  ^:async (fn [_]
-                            (when-let [t @fresh]
+        on-start  ^:async (fn [d]
+                            (let [f @fresh]
                               (reset! fresh nil)
-                              (when (js-await (underspecified? t))
-                                #js {"volatile-additions" #js [nudge]})))]
+                              ;; this run must be that message: a steer starts
+                              ;; none, and a queued run carries other text
+                              (when (and f (not (.-queued d))
+                                         (str/includes? (str (some-> d .-userMessage :content content/->text))
+                                                        (subs (:text f) 0 (min 40 (count (:text f))))))
+                                (when (js-await (:verdict f))
+                                  #js {"volatile-additions" #js [nudge]}))))]
     (.on api "input_submit" on-submit)
     (.on api "before_agent_start" on-start)
     (fn []
