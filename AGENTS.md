@@ -121,6 +121,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/content.cljs` | `agent.utils.content` | Message :content as text, for every reader that wants text. |
 | `src/agent/utils/credentials.cljs` | `agent.utils.credentials` | Read API keys saved by `/login <provider>`. |
 | `src/agent/utils/data.cljs` | `agent.utils.data` | Two things every namespace kept re-deriving: reading a config key whose spelling depends on who wrote it, and parsing JSON that may not b… |
+| `src/agent/utils/decide.cljs` | `agent.utils.decide` | A cheap judge for a permission ask nyma would otherwise put to the user: TypeSafe's Jev, asked one choice question, answering with probab… |
 | `src/agent/utils/error_class.cljs` | `agent.utils.error-class` | What KIND of provider failure is this? |
 | `src/agent/utils/event_json.cljs` | `agent.utils.event-json` | Pure mappers from the AI SDK StepResult nyma hands to `turn_end` into the plain shapes any JSONL consumer (pi-rpc, `-p --output-format st… |
 | `src/agent/utils/git_files.cljs` | `agent.utils.git-files` | Synchronous git shell-outs shared by core and extensions. |

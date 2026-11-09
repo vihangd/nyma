@@ -1,61 +1,82 @@
 (ns bash-judge-test
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.extensions.bash-suite.permissions :as permissions]
-            [agent.extensions.bash-suite.shared :as shared]
-            [agent.utils.credentials :as creds]
             ["node:fs" :as fs]
             ["node:os" :as os]
-            ["node:path" :as path]))
+            ["node:path" :as path]
+            [agent.extensions.bash-suite.permissions :as permissions]
+            [agent.extensions.bash-suite.shared :as shared]
+            [agent.utils.decide :as decide]))
 
-(defn- answer [p] #js {:answers #js {:risk #js {:type "choice" :probabilities #js {:safe p}}}})
+(defn- reply [p]
+  (fn [_ opts]
+    (js/Promise.resolve
+     #js {:ok true :json (fn [] (js/Promise.resolve #js {:answers #js {:q #js {:probabilities #js {:allow p}}}}))
+          :body (.-body opts)})))
 
-(defn ^:async with-fetch [f env body]
-  (let [orig js/globalThis.fetch
-        key  (.. js/process -env -TYPESAFE_API_KEY)]
-    (set! js/globalThis.fetch f)
-    (if env (aset (.-env js/process) "TYPESAFE_API_KEY" env) (js-delete (.-env js/process) "TYPESAFE_API_KEY"))
-    (try (js-await (body))
-         (finally (set! js/globalThis.fetch orig)
-                  (if key (aset (.-env js/process) "TYPESAFE_API_KEY" key)
-                      (js-delete (.-env js/process) "TYPESAFE_API_KEY"))))))
-
-(defn- reply [p] (fn [_ _] (js/Promise.resolve #js {:ok true :json (fn [] (js/Promise.resolve (answer p)))})))
-
-(defn ^:async test-fail-closed []
-  (let [allows? #(permissions/judge-allows? "frob" {:threshold 0.8})]
-    (-> (expect (js-await (with-fetch (reply 0.9) "k" allows?))) (.toBe true))
-    (-> (expect (js-await (with-fetch (reply 0.5) "k" allows?))) (.toBe false))
-    (-> (expect (js-await (with-fetch (fn [] (js/Promise.reject (js/Error. "down"))) "k" allows?))) (.toBe false))
-    (-> (expect (js-await (with-fetch (reply 0.99) nil allows?))) (.toBe false))
-    ;; a /login key stands in for the env var
-    (creds/set-run-key! "typesafe" "k")
-    (-> (expect (js-await (with-fetch (reply 0.9) nil allows?))) (.toBe true))
-    (creds/set-run-key! "typesafe" nil)))
-
-(defn ^:async test-remembers []
+(defn ^:async with-home
+  "Run `body` with HOME at a fresh dir holding `settings`, a key, and `fetch`."
+  [settings fetch body]
   (let [h     (fs/mkdtempSync (path/join (os/tmpdir) "nyma-judge-"))
         home  (.. js/process -env -HOME)
-        calls (atom 0)
-        decide (atom nil)]
+        key   (.. js/process -env -TYPESAFE_API_KEY)
+        orig  js/globalThis.fetch]
     (fs/mkdirSync (path/join h ".nyma"))
-    (fs/writeFileSync (path/join h ".nyma" "settings.json")
-                      (js/JSON.stringify #js {"bash-suite" #js {:permissions #js {:judge #js {:threshold 0.8}}}}))
+    (when settings (fs/writeFileSync (path/join h ".nyma" "settings.json") (js/JSON.stringify (clj->js settings))))
     (aset (.-env js/process) "HOME" h)
-    (try
-      (permissions/activate #js {:events #js {:on (fn [_ f] (f #js {:level "unknown" :reasons #js [] :command "frob"}))}
-                                 :on (fn [_ f _] (reset! decide f))})
-      (let [fetch (fn [_ _] (swap! calls inc) ((reply 0.9) nil nil))]
-        (js-await (with-fetch fetch "k" (fn [] (@decide #js {:tool "bash" :args #js {:command "frob"}}))))
-        (let [second (js-await (with-fetch fetch "k" (fn [] (js/Promise.resolve (@decide #js {:tool "bash" :args #js {:command "frob"}})))))]
-          (-> (expect #js [(.-decision second) @calls]) (.toEqual #js ["allow" 1]))))
-      (finally
-        (aset (.-env js/process) "HOME" home)
-        (fs/rmSync h #js {:recursive true :force true})))))
+    (aset (.-env js/process) "TYPESAFE_API_KEY" "k")
+    (set! js/globalThis.fetch fetch)
+    (decide/reset-session!)
+    (try (js-await (body h))
+         (finally
+           (set! js/globalThis.fetch orig)
+           (aset (.-env js/process) "HOME" home)
+           (if key (aset (.-env js/process) "TYPESAFE_API_KEY" key) (js-delete (.-env js/process) "TYPESAFE_API_KEY"))
+           (decide/reset-session!)
+           (fs/rmSync h #js {:recursive true :force true})))))
 
-(describe "bash judge (Jev)" (fn []
-  (it "asks TypeSafe once per command" test-remembers)
-  (it "approves only a confident safe verdict; errors and no key still ask" test-fail-closed)
-  (it "is never taken from a project's settings"
+(defn- args [subject] {:kind "bash" :subject subject :allow "allow" :cfg {} :options permissions/judge-options :state "s"})
+
+(defn ^:async test-threshold []
+  (js-await (with-home nil (reply 0.95) ^:async (fn [_] (-> (expect (js-await (decide/decide! (args "a")))) (.toBe true)))))
+  ;; 0.85 cleared the old 0.8; the default is now 0.9
+  (js-await (with-home nil (reply 0.85) ^:async (fn [_] (-> (expect (js-await (decide/decide! (args "a")))) (.toBe false)))))
+  (js-await (with-home nil (fn [] (js/Promise.reject (js/Error. "down")))
+                       ^:async (fn [_] (-> (expect (js-await (decide/decide! (args "a")))) (.toBe false))))))
+
+(defn ^:async test-allow-last []
+  (let [body (atom nil)]
+    (js-await (with-home nil (fn [u o] (reset! body (.-body o)) ((reply 0.1) u o))
+                         ^:async (fn [_] (js-await (decide/decide! (args "a"))))))
+    (-> (expect (last (js/Object.keys (.. (js/JSON.parse @body) -questions -q -criteria)))) (.toBe "allow"))))
+
+(defn ^:async test-breaker []
+  (js-await
+   (with-home nil (fn [] (js/Promise.reject (js/Error. "down")))
+              ^:async (fn [_]
+                        (dotimes [_ 3] (js-await (decide/decide! (args "a"))))
+                        (-> (expect (decide/paused?)) (.toBe true))))))
+
+(defn ^:async test-log-and-report []
+  (js-await
+   (with-home nil (reply 0.6)
+              ^:async (fn [h]
+                        (js-await (decide/decide! (args "git frob")))
+                        (decide/answered! "git frob" true)
+                        (decide/answered! "never judged" false)
+                        (let [p     (path/join h ".nyma" "decisions.jsonl")
+                              lines (decide/read-log)]
+                          (-> (expect (bit-and (.-mode (fs/statSync p)) 511)) (.toBe 384))
+                          (-> (expect (.includes (fs/readFileSync p "utf8") "git frob")) (.toBe false))
+                          (-> (expect (count lines)) (.toBe 2))
+                          (-> (expect (clj->js (decide/report lines)))
+                              (.toEqual (clj->js [{:kind "bash" :band "0.5-0.7" :n 1 :auto 0 :answered 1 :user-allowed 1}]))))))))
+
+(describe "permission judge (Jev)" (fn []
+  (it "allows only at 0.9 or above; errors ask" test-threshold)
+  (it "offers the allow option last" test-allow-last)
+  (it "pauses after three errors in a row" test-breaker)
+  (it "logs hashed verdicts and answers, mode 600, and reports by band" test-log-and-report)
+  (it "takes its settings from the user's file, never a project's"
       (fn []
         (-> (expect (get-in (shared/tighten-only {:permissions {:judge {:threshold 0}}}) [:permissions :judge]))
             (.toBeUndefined))))))

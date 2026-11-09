@@ -826,11 +826,14 @@ asked, not how the loop trusts the answer.
 `+added/-removed` per file to every bash result, from a git snapshot around the command —
 so a `sed -i`, a formatter or an `npm install` is no longer invisible.
 
-A bash command in none of the classifier's tables asks. `bash-suite.permissions.judge`
-(`{"model": "jev-1.13.0", "threshold": 0.8, "timeout-ms": 1500}`, global settings only, with
-`TYPESAFE_API_KEY` set, or a `"typesafe"` key in `~/.nyma/credentials.json`) lets TypeSafe's Jev judge those: a `safe` verdict at or above the
-threshold runs it, and the allow holds for the session; anything else asks, and a failed call warns. **Each such command is sent to TypeSafe.**
-`mcp.max-description-length` (default 1200) caps each MCP tool description.
+A bash command in none of the classifier's tables asks. With `judge` set in `~/.nyma/settings.json`
+(`{"model": "jev-1.13.0", "threshold": 0.9, "timeout-ms": 1500}`; a project's is ignored) and
+`TYPESAFE_API_KEY` set or a `"typesafe"` key in `~/.nyma/credentials.json`, TypeSafe's Jev judges
+those asks first: it sees your latest message and the command, never tool output, and an allow at
+or above the threshold runs it, remembered for the session; anything else asks, and a failed call
+warns. It pauses for the session after 3 errors in a row or 20 asks it did not avert. Each verdict
+and your answer to it go to `~/.nyma/decisions.jsonl` (hashed, mode 600); `/decisions` compares them
+by probability band. **What it judges is sent to TypeSafe.**
 
 `step-cap-report` (default `true`): when a run hits `max-steps`, spend one more
 tool-less call asking the model to report what it found or changed, instead of

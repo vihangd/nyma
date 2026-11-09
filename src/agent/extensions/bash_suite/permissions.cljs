@@ -1,7 +1,7 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
-            [agent.utils.credentials :as creds]
-            [agent.debug :as d]
+            [agent.utils.content :as content]
+            [agent.utils.decide :as decide]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
@@ -48,44 +48,22 @@
       :else :needs-approval)))
 
 ;; ── Judge for unlisted commands ──────────────────────────────
-;; Opt-in: `bash-suite.permissions.judge` in ~/.nyma/settings.json (never a
-;; project's) and TYPESAFE_API_KEY or credentials.json "typesafe". The command is sent to TypeSafe. Only
-;; turns an ask into an allow; any doubt, error or timeout still asks.
+;; See agent.utils.decide: opt-in, global settings only, ask → allow only.
 
-(defn judge-request [cmd model]
-  {:model (or model "jev-1.13.0")
-   :state (str "Shell command a coding agent wants to run in the user's project:\n" cmd)
-   :questions {:risk {:type "choice"
-                      :instructions "How risky is running this command unattended?"
-                      :criteria {:safe "Only reads, builds or tests; changes nothing outside build output"
-                                 :risky "Changes or deletes files, state or settings, or reaches the network"
-                                 :destructive "Can destroy data, leak secrets or take over the machine"}}}})
+(def judge-options
+  [["destructive" "Can destroy data, leak secrets or credentials, or take over the machine"]
+   ["risky" "Changes or deletes files, state or settings outside build output, or reaches the network"]
+   ["allow" "Only reads, builds or tests; changes nothing outside build output"]])
 
-(defn judge-safe?
-  "Is a Jev response a `safe` verdict at or above `threshold`?"
-  [resp threshold]
-  (let [p (some-> resp .-answers .-risk .-probabilities .-safe)]
-    (and (number? p) (>= p (or threshold 0.8)))))
+(defn judge-state
+  "What Jev sees: the user's request and the command. Never tool output."
+  [cmd user-msg]
+  (str "The user asked the coding agent:\n" (subs (str user-msg) 0 (min 2000 (count (str user-msg))))
+       "\n\nThe agent wants to run this shell command in the user's project:\n" cmd))
 
-(defn ^:async judge-allows?
-  [cmd {:keys [model threshold timeout-ms]}]
-  (if-let [key (or (.. js/process -env -TYPESAFE_API_KEY) (creds/read-credential "typesafe"))]
-    (try
-      (let [r (js-await (js/fetch "https://api.typesafe.ai/v1/systemone"
-                                  #js {:method "POST"
-                                       :headers #js {:Authorization (str "Bearer " key)
-                                                     :Content-Type "application/json"}
-                                       :body (js/JSON.stringify (clj->js (judge-request cmd model)))
-                                       :signal (js/AbortSignal.timeout (or timeout-ms 1500))}))]
-        (if (.-ok r)
-          (judge-safe? (js-await (.json r)) threshold)
-          (do (d/warn "bash-judge" (str "TypeSafe answered " (.-status r) "; asking instead"))
-              false)))
-      ;; a broken key or network must not pass for a `risky` verdict
-      (catch :default e
-        (d/warn "bash-judge" (str "TypeSafe unreachable (" (.-message e) "); asking instead"))
-        false))
-    false))
+(defn- last-user-text [api]
+  (let [msgs (when-let [g (.-getState api)] (:messages (g)))]
+    (some->> (reverse (vec msgs)) (filter #(= "user" (:role %))) first :content content/->text)))
 
 ;; ── Extension activation ─────────────────────────────────────
 
@@ -142,8 +120,11 @@
                  (let [ask (fn []
                              (swap! shared/suite-stats update-in [:permissions :needs-approval] (fnil inc 0))
                              #js {:decision "ask"})]
-                   (if (and (:judge perm-config) (= "unknown" (str (:level classif))))
-                     (.then (judge-allows? cmd (:judge perm-config))
+                   (if-let [jcfg (and (= "unknown" (str (:level classif))) (decide/config))]
+                     (.then (decide/decide! {:kind "bash" :allow "allow" :cfg jcfg
+                                             :subject (or (some-> (.-originalArgs data) .-command) cmd)
+                                             :options judge-options
+                                             :state (judge-state cmd (last-user-text api))})
                             (fn [ok]
                               (if ok
                                 (do (swap! session-approvals assoc cmd :approved)

@@ -1,6 +1,7 @@
 (ns agent.commands.builtins
   "Built-in slash command implementations (/help, /model, /clear, /skill, /skills, /resume, /export, etc.)."
   (:require [agent.pricing :as pricing]
+            [agent.utils.decide :as decide]
             [agent.utils.content :as content]
             ["node:path" :as path]
             [agent.utils.data :as data]
@@ -1157,6 +1158,25 @@
                               (-> (eval-expr! form)
                                   (.then (fn [v] (notify ctx (str "=> " (format-eval-value v)) "info")))
                                   (.catch (fn [e] (notify ctx (str "eval error: " (.-message e)) "error"))))))))}
+
+          "decisions"
+          {:description "How the permission judge's verdicts compare with your answers, by probability band"
+           :handler (fn [_args ctx]
+                      (let [rows (decide/report (decide/read-log))]
+                        (notify ctx
+                                (if (empty? rows)
+                                  (str "No judge verdicts logged yet (" (decide/log-path) ")")
+                                  (str "Judge verdicts (" (decide/log-path) ")\n"
+                                       "kind       band      seen  auto-allowed  asked→answered  you allowed\n"
+                                       (str/join "\n"
+                                                 (map (fn [{:keys [kind band n auto answered user-allowed]}]
+                                                        (str (.padEnd (str kind) 11) (.padEnd band 10)
+                                                             (.padEnd (str n) 6) (.padEnd (str auto) 14)
+                                                             (.padEnd (str answered) 16) user-allowed))
+                                                      rows))
+                                       "\n\nA band where you allow everything you are asked is one the"
+                                       " threshold could cover; any deny there says it should not."))
+                                "info")))}
 
           "replay"
           {:description "Dev: show the event-sourced store's log tail; /replay <n> for the last n events (default 20)"

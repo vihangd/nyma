@@ -9,6 +9,7 @@
             [agent.debug :as d]
             [agent.utils.shell-grant :as shell-grant]
             [agent.utils.sandbox :as sandbox]
+            [agent.utils.decide :as decide]
             [clojure.string :as str]))
 
 (defn normalize-tool-result
@@ -537,7 +538,10 @@
                            (clj->js (cond-> ["Allow once"]
                                       (not once?) (conj "Allow for this session")
                                       always      (conj always)
-                                      true        (conj "Deny")))))]
+                                      true        (conj "Deny")))))
+          ;; beside the judge's verdict, if it sent this ask here
+          _      (decide/answered! (decide/subject-of tool-name (or (:original-args ctx) (:args ctx)))
+                                   (boolean (and choice (.startsWith choice "Allow"))))]
       (cond
         ;; only "Allow once" is offered; any other Allow is still this once
         (and choice once? (.startsWith choice "Allow")) ctx
