@@ -630,9 +630,17 @@
   []
   (boolean (tinyfish-key)))
 
+(defn- refused? [e] (str/starts-with? (str (.-message e)) "Refused:"))
+
 (defn ^:async web-fetch-execute [{:keys [url format max_length provider]}]
   ;; Validate URL
   (try (js/URL. url) (catch :default _ (throw (js/Error. (str "Invalid URL: " url)))))
+  ;; A URL web_fetch may not reach is not handed to a third-party fetcher
+  ;; either: it would carry the path and query of a metadata or file URL out.
+  ;; Only a refusal stops here; a lookup failure may still be a site the
+  ;; fallbacks can reach.
+  (try (js-await (check-fetch-host! url))
+       (catch :default e (when (refused? e) (throw e))))
   (let [max-len (or max_length 20000)
         fmt     (or format "markdown")
         prov    (or provider "auto")]

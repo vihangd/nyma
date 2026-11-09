@@ -22,7 +22,23 @@
       (-> (expect (str (js-await (refused (str "http://127.0.0.1:" (.-port srv) "/"))))) (.toMatch #"http\(s\) URLs only"))
       (finally (.stop srv true)))))
 
+(defn ^:async test-no-fallback []
+  ;; a refusal is final: the URL never reaches jina or tinyfish
+  (let [orig  js/globalThis.fetch
+        calls (atom [])]
+    (set! js/globalThis.fetch (fn [u _] (swap! calls conj (str u)) (js/Promise.resolve (js/Response. "x"))))
+    (try
+      (doseq [[url prov] [["http://169.254.169.254/latest/meta-data/iam" "auto"]
+                          ["file:///Users/x/.ssh/id_rsa" "auto"]
+                          ["http://10.0.0.1/admin" "jina"]]]
+        (let [err (try (js-await (tools/web-fetch-execute {:url url :provider prov})) nil
+                       (catch :default e (.-message e)))]
+          (-> (expect (str err)) (.toMatch #"^Refused"))))
+      (-> (expect (count @calls)) (.toBe 0))
+      (finally (set! js/globalThis.fetch orig)))))
+
 (describe "web_fetch address guard" (fn []
+  (it "sends a refused URL to no fallback provider" test-no-fallback)
   (it "takes only http(s), on every hop, and sees IPv4 inside IPv6" test-schemes)
   (it "refuses private, link-local and carrier-NAT addresses; allows loopback and public"
       (fn []
