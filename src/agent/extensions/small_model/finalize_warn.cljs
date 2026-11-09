@@ -15,8 +15,14 @@
    turns (stream-filter-aborted etc.) are skipped — finishReason is not \"stop\".
 
    On a hit, inject one capped follow-up nudge; reset on a clean tool-call turn.
+   With the judge configured, a first regex hit is put to Jev before the
+   nudge: the regex cannot tell \"Should I also add X?\" after finished work
+   from a stop halfway. It sees the user's request and the final text, and
+   the nudge goes out at p 0.8 or above, or when Jev cannot answer.
+
    Off by default; opt-in via :finalize-warn {:enabled true}."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.utils.decide :as decide]))
 
 ;; Strong signals only (per the SOTA failure modes): the model asks the user
 ;; whether to proceed, or states an explicit pending step. Deliberately NOT
@@ -54,6 +60,20 @@
   []
   [(nudge-msg 1) (nudge-msg 2)])
 
+(defn- tail [s n] (let [s (str s)] (subs s (max 0 (- (count s) n)))))
+
+(defn ^:async unfinished?
+  "Does Jev agree the agent stopped with work it could still do? True on
+   no answer: the regex already said so."
+  [request text]
+  (let [r (js-await
+           (decide/ask! {:kind "finalize" :cfg (decide/config)
+                         :state (str "The user asked a coding agent:\n" (decide/visible (subs (str request) 0 (min 700 (count (str request)))) false)
+                                     "\n\nThe agent then stopped with this message:\n" (decide/visible (tail text 800) false))
+                         :questions {"stopped" {:instructions "Did the agent stop while work remains that it could do itself, rather than finishing, reporting what it did, or asking something only the user can answer?"}}}))
+        p (get r "stopped")]
+    (if (number? p) (>= p 0.8) true)))
+
 ;; ── Activation ───────────────────────────────────────────────────
 
 (defn activate
@@ -62,6 +82,13 @@
   (let [fw         (:finalize-warn config)
         max-nudges (or (:max-nudges fw) 2)
         nudges     (atom 0)
+        ;; Jev's verdict on this turn, settled at turn_finalize: a follow-up
+        ;; sent after the drain would wait for the user's next message.
+        judged     (atom nil)
+        nudge!     (fn []
+                     (swap! nudges inc)
+                     (.sendUserMessage api (nudge-msg @nudges)
+                                       #js {:deliverAs "followUp"}))
         handler
         (fn [data _ctx]
           (let [fr   (.-finishReason data)
@@ -70,10 +97,20 @@
               ;; Premature stop → nudge, capped. (At the cap we neither nudge
               ;; nor reset — backoff until a clean turn re-arms below.)
               (when (< @nudges max-nudges)
-                (swap! nudges inc)
-                (.sendUserMessage api (nudge-msg @nudges)
-                                  #js {:deliverAs "followUp"}))
+                ;; Only the first: after a nudge the latest user message is
+                ;; ours, not the request Jev should weigh the stop against.
+                (if (and (decide/config) (zero? @nudges))
+                  (reset! judged (unfinished? (decide/user-request (:messages (.getState api))) text))
+                  (nudge!)))
               ;; Any non-premature turn (acted, or finished cleanly) → re-arm.
-              (reset! nudges 0))))]
+              (reset! nudges 0))))
+        on-final
+        ^:async (fn [_ _]
+                  (when-let [p @judged]
+                    (reset! judged nil)
+                    (when (js-await p) (nudge!))))]
     (.on api "agent_end" handler)
-    (fn [] (.off api "agent_end" handler))))
+    (.on api "turn_finalize" on-final)
+    (fn []
+      (.off api "agent_end" handler)
+      (.off api "turn_finalize" on-final))))

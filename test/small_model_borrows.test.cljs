@@ -5,7 +5,8 @@
             ["node:os" :as os]
             [agent.extensions.small-model.knowledge-inject :as ki]
             [agent.extensions.small-model.finalize-warn :as fw]
-            [agent.extensions.small-model.profiles :as profiles]))
+            [agent.extensions.small-model.profiles :as profiles]
+            [agent.utils.decide :as decide]))
 
 ;; ── knowledge-inject: scorer + selection ─────────────────────────
 
@@ -115,9 +116,43 @@
   (let [handlers (atom {}) sent (atom [])]
     {:obj #js {:on              (fn [ev h] (swap! handlers assoc ev h))
                :off             (fn [_ _] nil)
-               :sendUserMessage (fn [msg _opts] (swap! sent conj msg))}
+               :sendUserMessage (fn [msg _opts] (swap! sent conj msg))
+               :getState        (fn [] {:messages [{:role "user" :content "add a --json flag"}]})}
      :handlers handlers
      :sent sent}))
+
+(defn ^:async judged-nudges
+  "Nudges sent for one premature turn when Jev answers `p` (nil: it fails)."
+  [p]
+  (let [fa   (fake-api)
+        orig js/globalThis.fetch
+        key  (.. js/process -env -TYPESAFE_API_KEY)]
+    (aset (.-env js/process) "TYPESAFE_API_KEY" "k")
+    (set! js/globalThis.fetch
+          (fn [_ _]
+            (if p
+              (js/Promise.resolve #js {:ok true :json (fn [] (js/Promise.resolve #js {:answers #js {:stopped #js {:type "noul" :noul p}}}))})
+              (js/Promise.reject (js/Error. "down")))))
+    (decide/configure! {:judge {}})
+    (decide/reset-session!)
+    (try
+      (fw/activate (:obj fa) {:finalize-warn {:max-nudges 2}} (atom {}))
+      ((get @(:handlers fa) "agent_end") #js {:finishReason "stop" :text "Done. Should I also add a --yaml flag?"} nil)
+      ;; nothing yet: the verdict is settled at the turn boundary
+      (-> (expect (count @(:sent fa))) (.toBe 0))
+      (js-await ((get @(:handlers fa) "turn_finalize") #js {} nil))
+      (count @(:sent fa))
+      (finally
+        (set! js/globalThis.fetch orig)
+        (if key (aset (.-env js/process) "TYPESAFE_API_KEY" key) (js-delete (.-env js/process) "TYPESAFE_API_KEY"))
+        (decide/configure! nil)
+        (decide/reset-session!)))))
+
+(defn ^:async test-judged-nudge []
+  (-> (expect (js-await (judged-nudges 0.1))) (.toBe 0))
+  (-> (expect (js-await (judged-nudges 0.9))) (.toBe 1))
+  ;; Jev down: the regex decides, as before
+  (-> (expect (js-await (judged-nudges nil))) (.toBe 1)))
 
 (describe "finalize-warn handler" (fn []
 
@@ -133,6 +168,8 @@
                                             (h clean nil)
                                             (h premature nil)
                                             (-> (expect (count @(:sent fa))) (.toBe 3)))))
+
+                                    (it "with the judge, nudges at turn_finalize only when Jev agrees" test-judged-nudge)
 
                                     (it "does not nudge a clean turn"
                                         (fn []
