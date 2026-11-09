@@ -635,12 +635,16 @@
 
           ;; Leaving the sandbox always asks, full-auto included, and only
           ;; for this once. A worktree child has no one to ask.
-          (and (= tool-name "bash") (true? (get args :unsandboxed)) @sandbox/root)
+          ;; Any truthy flag asks; only the approval token, which no tool
+          ;; argument can carry, makes bash leave (tools/bash-execute).
+          (and (= tool-name "bash") (get args :unsandboxed) @sandbox/root)
           (if (.. js/process -env -NYMA_WRITE_ROOT)
             (assoc ctx :cancelled true
                    :cancel-reason "A worktree subagent cannot run outside the sandbox; report what you need to the parent.")
-            (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) "bash (unsandboxed)"
-                                   "Runs OUTSIDE the sandbox: no limits on writes, reads or network")))
+            (let [c (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) "bash (unsandboxed)"
+                                           "Runs OUTSIDE the sandbox: no limits on writes, reads or network"))]
+              (cond-> c
+                (not (:cancelled c)) (assoc-in [:args :unsandboxed] sandbox/escape-approved))))
 
           ;; An active skill that declared the tool in `allowed-tools` has
           ;; already answered the question for the user — but only the ask.

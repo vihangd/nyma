@@ -118,6 +118,9 @@
     (try
       ;; full-auto's allow does not cover leaving the sandbox; no UI → denied
       (-> (expect (:cancelled (js-await (gate true)))) (.toBe true))
+      ;; any truthy flag asks, not just `true`
+      (-> (expect (:cancelled (js-await (gate 1)))) (.toBe true))
+      (-> (expect (:cancelled (js-await (gate "true")))) (.toBe true))
       (-> (expect (boolean (:cancelled (js-await (gate false))))) (.toBe false))
       (aset (.-env js/process) "NYMA_WRITE_ROOT" "/x")
       (-> (expect (:cancel-reason (js-await (gate true)))) (.toMatch #"worktree subagent"))
@@ -129,3 +132,28 @@
 
 (describe "sandbox escalation" (fn []
   (it "asks to leave the sandbox even when allowed, never for a child" test-escalation)))
+
+(defn ^:async test-only-token-escapes []
+  (let [d (fs/realpathSync (fs/mkdtempSync (path/join (os/homedir) ".nyma-sbx-")))]
+    (try
+      (js-await
+       (in-child d {}
+                 ^:async
+                 (fn []
+                   ;; a child: even the token does not escape
+                   (js-await (bash-execute {:command (str "touch " d "/../nyma-esc-a") :unsandboxed sandbox/escape-approved})))))
+      (aset (.-env js/process) "NYMA_WRITE_ROOT" d)
+      (js-await (sandbox/configure! {:bash "always"}))
+      (js-delete (.-env js/process) "NYMA_WRITE_ROOT")
+      ;; a forged flag stays sandboxed
+      (js-await (bash-execute {:command (str "touch " d "/../nyma-esc-b") :unsandboxed true}))
+      (-> (expect #js [(fs/existsSync (path/join d ".." "nyma-esc-a")) (fs/existsSync (path/join d ".." "nyma-esc-b"))])
+          (.toEqual #js [false false]))
+      (finally
+        (js-await (sandbox/configure! {:bash "off"}))
+        (fs/rmSync (path/join d ".." "nyma-esc-a") #js {:force true})
+        (fs/rmSync (path/join d ".." "nyma-esc-b") #js {:force true})
+        (fs/rmSync d #js {:recursive true :force true})))))
+
+(describe "sandbox escape token" (fn []
+  (when mac? (it "only the gate's token leaves the sandbox, and never in a child" test-only-token-escapes 30000))))

@@ -23,6 +23,10 @@
 (defonce root (atom nil))
 ;; Promise of true once srt is up for `root`, false when it cannot be.
 (defonce ^:private ready (atom nil))
+;; What the permission gate puts in bash's `unsandboxed` once the user said
+;; yes. An object: no model- or script-supplied argument can be identical to it.
+(defonce escape-approved #js {:approved true})
+
 ;; Whether bash is confined right now, for the status line.
 (defonce on? (atom false))
 

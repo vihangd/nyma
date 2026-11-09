@@ -150,7 +150,8 @@
   (let [limit-ms (or timeout 30000)
         started  (js/Date.now)
         ;; the permission gate asked for this; a worktree child never gets it
-        {:keys [argv env sandboxed?]} (if (and unsandboxed (not (.. js/process -env -NYMA_WRITE_ROOT)))
+        {:keys [argv env sandboxed?]} (if (and (identical? unsandboxed sandbox/escape-approved)
+                                               (not (.. js/process -env -NYMA_WRITE_ROOT)))
                                         {:argv ["sh" "-c" command]}
                                         (js-await (sandbox/wrap command)))
         proc     (js/Bun.spawn (clj->js argv)
