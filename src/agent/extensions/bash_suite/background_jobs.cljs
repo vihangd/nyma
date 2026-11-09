@@ -209,16 +209,23 @@
                           (if (and (matches-bg-pattern? cmd (:auto-detect-patterns bg-cfg))
                                    (< running (:max-concurrent bg-cfg)))
                             ;; Start background job
-                            (.then (sandbox/wrap cmd)
-                                   (fn [w]
-                                     (let [job (start-background-job cmd w bg-cfg)]
-                                       (aset ctx "cancelled" true)
-                                       (aset ctx "cancel-reason"
-                                             (str "Started background job #" (:id job) ": `"
-                                                  (:command job) "`\n"
-                                                  "Use list_jobs to see status, job_output to get output, "
-                                                  "kill_job to stop."))
-                                       ctx)))
+                            ;; Swap the executor, not the gates: starting it here
+                            ;; ran the command before the denylist, the hooks and
+                            ;; the permission ask, all of which come later in the
+                            ;; chain. The job starts where bash would have run,
+                            ;; with the args those gates settled on.
+                            (do (aset ctx "tool"
+                                      #js {:execute
+                                           (fn [args _]
+                                             (let [c (str (:command args))]
+                                               (.then (sandbox/wrap c)
+                                                      (fn [w]
+                                                        (let [job (start-background-job c w bg-cfg)]
+                                                          (str "Started background job #" (:id job) ": `"
+                                                               (:command job) "`\n"
+                                                               "Use list_jobs to see status, job_output to get output, "
+                                                               "kill_job to stop."))))))})
+                                ctx)
                             ctx))
                         ctx)))})
 
