@@ -27,6 +27,7 @@
     (aset (.-env js/process) "HOME" h)
     (aset (.-env js/process) "TYPESAFE_API_KEY" "k")
     (set! js/globalThis.fetch fetch)
+    (decide/configure! settings)
     (decide/reset-session!)
     (try (js-await (body h))
          (finally
@@ -34,6 +35,7 @@
            (aset (.-env js/process) "HOME" home)
            (if key (aset (.-env js/process) "TYPESAFE_API_KEY" key) (js-delete (.-env js/process) "TYPESAFE_API_KEY"))
            (decide/reset-session!)
+           (decide/configure! nil)
            (fs/rmSync h #js {:recursive true :force true})))))
 
 (defn- args [subject] {:kind "bash" :subject subject :allow "allow" :cfg {} :options permissions/judge-options :state "s"})
@@ -81,15 +83,35 @@
                               _      ((:on events) "permission_request" (fn [_] #js {:decision "ask"}))
                               gate   #(permission-check-enter events nil {:tool-name % :args {:q "x"}})]
                           ;; no UI: an ask the judge does not answer is denied
-                          {:mcp  (boolean (:cancelled (js-await (gate "notes__search"))))
-                           :bash (boolean (:cancelled (js-await (gate "bash"))))})))))
+                          {:mcp      (boolean (:cancelled (js-await (gate "mcp__notes__search"))))
+                           :subagent (boolean (:cancelled (js-await (gate "subagent"))))
+                           :bash     (boolean (:cancelled (js-await (gate "bash"))))})))))
 
 (defn ^:async test-mcp-judge []
-  (-> (expect (clj->js (js-await (test-gate 0.95)))) (.toEqual #js {:mcp false :bash true}))
-  (-> (expect (clj->js (js-await (test-gate 0.5)))) (.toEqual #js {:mcp true :bash true})))
+  ;; only MCP tools and web_fetch: not subagent, not bash (bash-suite judges it)
+  (-> (expect (clj->js (js-await (test-gate 0.95)))) (.toEqual #js {:mcp false :subagent true :bash true}))
+  (-> (expect (clj->js (js-await (test-gate 0.5)))) (.toEqual #js {:mcp true :subagent true :bash true})))
+
+(defn ^:async test-bash-handler []
+  (let [bodies (atom [])
+        fetch  (fn [u o] (swap! bodies conj (.-body o)) ((reply 0.95) u o))]
+    (js-await
+     (with-home {:judge {}} fetch
+                ^:async (fn [_]
+                          (let [decide-fn (atom nil)
+                                api #js {:events #js {:on (fn [_ f] (f #js {:level "unknown" :reasons #js [] :command "frob"}))}
+                                         :on (fn [_ f _] (reset! decide-fn f))}
+                                ask #(@decide-fn #js {:tool "bash" :args #js {:command "frob"} :userRequest "please frob"})]
+                            (permissions/activate api)
+                            (-> (expect (.-decision (js-await (ask)))) (.toBe "allow"))
+                            ;; judged again, not remembered: the request may differ next time
+                            (js-await (ask))
+                            (-> (expect (count @bodies)) (.toBe 2))
+                            (-> (expect (.includes (first @bodies) "please frob")) (.toBe true))))))))
 
 (describe "permission judge (Jev)" (fn []
-  (it "answers an MCP ask when confident; bash is not judged at the gate" test-mcp-judge)
+  (it "answers an MCP ask when confident; subagent and bash are not judged at the gate" test-mcp-judge)
+  (it "judges bash from the request in the payload, every time" test-bash-handler)
   (it "allows only at 0.9 or above; errors ask" test-threshold)
   (it "offers the allow option last" test-allow-last)
   (it "pauses after three errors in a row" test-breaker)

@@ -33,6 +33,7 @@
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
             [agent.utils.sandbox :as sandbox]
+            [agent.utils.decide :as decide]
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.extensions.model-roles.policy :as perm-policy]
             ["./modes/interactive.mjs" :as interactive]
@@ -1290,6 +1291,10 @@ Examples:
       (when-let [root (.. js/process -env -NYMA_WRITE_ROOT)]
         (file-access/register-write-root (:events agent) root))
       ;; the user's file only: a cloned repo must not turn its own sandbox off
+      (decide/configure! ((:user-settings settings) :global))
+      ;; the judge's breaker and pending verdicts are per session
+      ((:on (:events agent)) "session_start" (fn [_] (decide/reset-session!)))
+      ((:on (:events agent)) "session_switch" (fn [_] (decide/reset-session!)))
       (sandbox/configure!
        (:sandbox ((:user-settings settings) :global))
        {:ask (fn [host]

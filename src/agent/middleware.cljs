@@ -10,7 +10,6 @@
             [agent.utils.shell-grant :as shell-grant]
             [agent.utils.sandbox :as sandbox]
             [agent.utils.decide :as decide]
-            [agent.utils.content :as content]
             [clojure.string :as str]))
 
 (defn normalize-tool-result
@@ -580,17 +579,18 @@
   [ctx tool-name args]
   (let [cfg (decide/config)]
     (boolean
-     (when (and cfg (contains? #{"other" "network"} (categorize-tool tool-name)))
-       (let [user (some->> (:messages (agent-state (:agent ctx))) vec reverse
-                           (filter #(= "user" (:role %))) first :content content/->text)
-             call (js/JSON.stringify (clj->js (or (:original-args ctx) args)))]
+     ;; Named, not by category: "other" also holds subagent and any extension
+     ;; tool that edits and says nothing about itself.
+     (when (and cfg (or (= tool-name "web_fetch") (str/starts-with? (str tool-name) "mcp__")))
+       (let [call (js/JSON.stringify (clj->js (or (:original-args ctx) args)))]
          (js-await
           (decide/decide! {:kind (if (= tool-name "web_fetch") "web_fetch" "mcp")
                            :subject (decide/subject-of tool-name (or (:original-args ctx) args))
                            :allow "allow" :cfg cfg :options judge-options
-                           :state (str "The user asked the coding agent:\n" (subs (str user) 0 (min 2000 (count (str user))))
-                                       "\n\nThe agent wants to call the tool `" tool-name "` with:\n"
-                                       (subs call 0 (min 4000 (count call))))})))))))
+                           :state (decide/judge-state
+                                   (decide/user-request (:messages (agent-state (:agent ctx))))
+                                   (str "call the tool `" tool-name "` with:\n"
+                                        (subs call 0 (min 4000 (count call)))))})))))))
 
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
@@ -625,6 +625,9 @@
                                                    :args     (clj->js args)
                                                    ;; what a hook rewrote `args` from
                                                    :originalArgs (clj->js (:original-args ctx))
+                                                   ;; for a judge: what the user asked, never tool output
+                                                   :userRequest (when (decide/config)
+                                                                  (decide/user-request (:messages (agent-state (:agent ctx)))))
                                                    :category (categorize-tool tool-name)
                                                    :path     (get args :path)}))
             decision (get result "decision")

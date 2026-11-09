@@ -1,6 +1,5 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
-            [agent.utils.content :as content]
             [agent.utils.decide :as decide]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
@@ -54,16 +53,6 @@
   [["destructive" "Can destroy data, leak secrets or credentials, or take over the machine"]
    ["risky" "Changes or deletes files, state or settings outside build output, or reaches the network"]
    ["allow" "Only reads, builds or tests; changes nothing outside build output"]])
-
-(defn judge-state
-  "What Jev sees: the user's request and the command. Never tool output."
-  [cmd user-msg]
-  (str "The user asked the coding agent:\n" (subs (str user-msg) 0 (min 2000 (count (str user-msg))))
-       "\n\nThe agent wants to run this shell command in the user's project:\n" cmd))
-
-(defn- last-user-text [api]
-  (let [msgs (when-let [g (.-getState api)] (:messages (g)))]
-    (some->> (reverse (vec msgs)) (filter #(= "user" (:role %))) first :content content/->text)))
 
 ;; ── Extension activation ─────────────────────────────────────
 
@@ -124,11 +113,13 @@
                      (.then (decide/decide! {:kind "bash" :allow "allow" :cfg jcfg
                                              :subject (or (some-> (.-originalArgs data) .-command) cmd)
                                              :options judge-options
-                                             :state (judge-state cmd (last-user-text api))})
+                                             :state (decide/judge-state (str (.-userRequest data))
+                                                                        (str "run this shell command in the user's project:\n" cmd))})
                             (fn [ok]
+                              ;; Not remembered: the verdict was for this request,
+                              ;; and the same command under another must be judged again.
                               (if ok
-                                (do (swap! session-approvals assoc cmd :approved)
-                                    (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
+                                (do (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
                                     #js {:decision "allow"})
                                 (ask))))
                      (ask)))))))

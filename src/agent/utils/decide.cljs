@@ -18,20 +18,35 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             [agent.debug :as d]
+            [agent.utils.content :as content]
             [agent.utils.credentials :as creds]
             [agent.utils.home :as home]))
 
 (defn log-path [] (path/join (home/dir) ".nyma" "decisions.jsonl"))
 
-(defn config
-  "The user's `judge` settings, or nil when it is off. The global file only:
-   a cloned repo must not switch on what approves its own commands.
+;; The user's `judge` settings, or nil when it is off; set once by cli.
+(defonce ^:private judge-cfg (atom nil))
+
+(defn configure!
+  "Take the judge settings from the user's GLOBAL settings map: a cloned repo
+   must not switch on what approves its own commands.
    `bash-suite.permissions.judge`, where it first lived, still counts."
-  []
-  (try
-    (let [s (js/JSON.parse (fs/readFileSync (path/join (home/dir) ".nyma" "settings.json") "utf8"))]
-      (or (aget s "judge") (some-> (aget s "bash-suite") (aget "permissions") (aget "judge"))))
-    (catch :default _ nil)))
+  [global]
+  (reset! judge-cfg (or (:judge global) (get-in global [:bash-suite :permissions :judge]))))
+
+(defn config [] @judge-cfg)
+
+(defn user-request
+  "The text of the latest user message in `messages`, cut to 2000 characters:
+   all the judge is told of what the user wants."
+  [messages]
+  (let [t (some->> messages vec reverse (filter #(= "user" (:role %))) first :content content/->text)]
+    (subs (str t) 0 (min 2000 (count (str t))))))
+
+(defn judge-state
+  "What Jev sees: the request and the proposed action, never tool output."
+  [request action]
+  (str "The user asked the coding agent:\n" request "\n\nThe agent wants to " action))
 
 (defn subject-of
   "What identifies one call across its verdict and the user's answer."
