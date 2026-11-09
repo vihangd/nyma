@@ -149,6 +149,8 @@
   (let [data #js {:name     (:tool-name ctx)
                   :toolName (:tool-name ctx)
                   :args     (clj->js (:args ctx))
+                  ;; what the model asked for, when a middleware rewrote it
+                  :originalArgs (some-> (:original-args ctx) clj->js)
                   :execId   (:exec-id ctx)}
         result (js-await ((:emit-collect events) "before_tool_call" data))
         ;; After, so it sees args a handler above rewrote. Its own copy: pi's
@@ -183,8 +185,10 @@
       ;; args are kept for the permission prompt: bash_suite prefixes every
       ;; command with `unset LD_PRELOAD …`, and the prompt truncated to that
       ;; wrapper before the user's own command appeared.
+      ;; The FIRST args seen: a middleware rewrite earlier in the chain
+      ;; (cwd-manager's `cd`) has already set it.
       (get result "args")
-      (assoc ctx :args (get result "args") :original-args (:args ctx))
+      (assoc ctx :args (get result "args") :original-args (or (:original-args ctx) (:args ctx)))
 
       :else ctx)))
 

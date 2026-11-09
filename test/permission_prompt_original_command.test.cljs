@@ -38,4 +38,17 @@
                         out  (js-await (resolve-ask nil ctx ui "bash" nil))]
                     (-> (expect (:cancelled out)) (.toBeFalsy))
                     (-> (expect @seen) (.toContain "touch perm-one.txt"))
-                    (-> (expect @seen) (.not.toContain "LD_PRELOAD")))))))
+                    (-> (expect @seen) (.not.toContain "LD_PRELOAD")))))
+
+            (it "a middleware rewrite earlier in the chain (cwd-manager's cd) stays the original"
+                (^:async fn []
+                  (let [seen (atom nil)
+                        events (rewriting-events)
+                        _   ((:on events) "before_tool_call" (fn [d] (reset! seen (some-> d .-originalArgs .-command)) nil) 200)
+                        ctx (js-await (before-hook-compat-enter events
+                                                                {:tool-name "bash"
+                                                                 :args {:command "cd '/x' && ls"}
+                                                                 :original-args {:command "ls"}}))]
+                    (-> (expect (:command (:original-args ctx))) (.toBe "ls"))
+                    ;; handlers see it too: the classifier keys by it
+                    (-> (expect @seen) (.toBe "ls")))))))

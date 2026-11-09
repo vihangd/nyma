@@ -24,7 +24,7 @@ for (const c of cases) {
   const isBash = c.kind === "bash";
   const cfg = { model, "timeout-ms": 8000,
     threshold: isBash ? 0.9 : mw.judge_threshold({}, c.tool, c.args) };
-  const action = isBash ? `run this shell command in the user's project:\n${c.command}`
+  const action = isBash ? `run this shell command in the user's project, working directory ${process.cwd()}:\n${c.command}`
                         : `call the tool \`${c.tool}\` with:\n${JSON.stringify(c.args)}`;
   const ok = await decide.decide_BANG_({ kind: c.kind, subject: action, allow: "allow", cfg,
     options: isBash ? bash.judge_options : mw.judge_options,

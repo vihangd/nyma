@@ -88,10 +88,13 @@
                                   ;; request — it then imitated the prefix and we
                                   ;; prefixed the imitation, up to 25 deep in
                                   ;; real sessions. See shared/with-arg.
-                                                (assoc ctx :args
-                                                       (shared/with-arg
-                                                         args "command"
-                                                         (str "cd " (quote-path cwd) " && " cmd)))))
+                                                (assoc ctx
+                                                       :args (shared/with-arg
+                                                               args "command"
+                                                               (str "cd " (quote-path cwd) " && " cmd))
+                                                       ;; what the model asked for, for the
+                                                       ;; prompt and the judge
+                                                       :original-args (or (:original-args ctx) args))))
                               ;; Invalid cwd — reset
                                             (do
                                               (reset! tracked-cwd nil)

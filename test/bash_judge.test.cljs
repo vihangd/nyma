@@ -137,13 +137,18 @@
                           (let [decide-fn (atom nil)
                                 api #js {:events #js {:on (fn [_ f] (f #js {:level "unknown" :reasons #js [] :command "frob"}))}
                                          :on (fn [_ f _] (reset! decide-fn f))}
-                                ask #(@decide-fn #js {:tool "bash" :args #js {:command "frob"} :userRequest "please frob"})]
+                                ;; what runs carries our own prefixes; the judge reads the model's command
+                                ask #(@decide-fn #js {:tool "bash" :userRequest "please frob"
+                                                      :args #js {:command "unset LD_PRELOAD 2>/dev/null ; cd '/x' && frob"}
+                                                      :originalArgs #js {:command "frob"}})]
                             (permissions/activate api)
                             (-> (expect (.-decision (js-await (ask)))) (.toBe "allow"))
                             ;; judged again, not remembered: the request may differ next time
                             (js-await (ask))
                             (-> (expect (count @bodies)) (.toBe 2))
-                            (-> (expect (.includes (first @bodies) "please frob")) (.toBe true))))))))
+                            (-> (expect (.includes (first @bodies) "please frob")) (.toBe true))
+                            (-> (expect (.includes (first @bodies) "LD_PRELOAD")) (.toBe false))
+                            (-> (expect (.includes (first @bodies) "cd '/x'")) (.toBe false))))))))
 
 (describe "what the judge reads" (fn []
   (it "shows hidden characters and, in a command or URL, every non-ASCII one"

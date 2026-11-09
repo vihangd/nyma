@@ -455,7 +455,9 @@
                (when-let [events (.-events api)]
                  (let [emit-fn (.-emit events)]
                    (when (fn? emit-fn)
-                     (emit-fn "bash:classification" (clj->js result)))))
+                     ;; keyed by the model's command, as permissions looks it up
+                     (emit-fn "bash:classification"
+                              (clj->js (assoc result :command (or (some-> (.-originalArgs data) .-command) cmd)))))))
             ;; Update stats
                (swap! shared/suite-stats update :security-analysis
                       (fn [s] (-> s

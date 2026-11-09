@@ -1,5 +1,6 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
+            [agent.extensions.bash-suite.cwd-manager :as cwd-manager]
             [agent.utils.decide :as decide]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
@@ -114,7 +115,14 @@
                                              :subject (or (some-> (.-originalArgs data) .-command) cmd)
                                              :options judge-options
                                              :state (decide/judge-state (str (.-userRequest data))
-                                                                        (str "run this shell command in the user's project:\n" cmd)
+                                                                        (str "run this shell command in the user's project, working directory "
+                                                                             (or @cwd-manager/tracked-cwd (js/process.cwd)) ":\n"
+                                                                             ;; the model's command, with the directory beside
+                                                                             ;; it (as Codex's reviewer gets it): our own
+                                                                             ;; `unset …` and `cd` prefixes read as an attack.
+                                                                             ;; They are added by trusted code only, so what
+                                                                             ;; runs is what was judged plus them.
+                                                                             (or (some-> (.-originalArgs data) .-command) cmd))
                                                                         true)})
                             (fn [ok]
                               ;; Not remembered: the verdict was for this request,
