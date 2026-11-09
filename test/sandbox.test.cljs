@@ -47,6 +47,7 @@
                                       {:command (str "cd " root " && touch in; touch ../out; touch .git/hooks/x;"
                                                      " touch .git/modules/sub/hooks/x; echo >> .git/modules/sub/config;"
                                                      " touch .git/objects/ok; mkdir -p .nyma && touch .nyma/s;"
+                                                     " touch /tmp/nyma-sbx-tmp-ok && echo tmp-ok;"
                                                      " cat " secret "; osascript -e 'tell application \"Finder\" to get name';"
                                                      " echo key=$ANTHROPIC_API_KEY;"
                                                      " curl -sS -m 5 https://example.com/ -o /dev/null")}))]
@@ -54,8 +55,9 @@
                                       (e? ".git/modules/sub/hooks/x") (e? ".git/modules/sub/config")
                                       (e? ".git/objects/ok") (e? ".nyma/s")
                                       (.includes (str r) "s3cret")
-                                      (.includes (str r) "key=sk-test")])
-                         (.toEqual #js [true false false false false true false false false]))
+                                      (.includes (str r) "key=sk-test")
+                                      (.includes (str r) "tmp-ok")])
+                         (.toEqual #js [true false false false false true false false false true]))
                      ;; no network for a child: the proxy refuses the host
                      (-> (expect (str r)) (.toMatch #"403|CONNECT|not permitted|resolve"))))))
       (finally

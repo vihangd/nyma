@@ -78,7 +78,9 @@
                                                registry-hosts)
                                              (when-not child? (:allow-hosts cfg))))
                 :deniedDomains  []}
-   :filesystem {:allowWrite (vec (keep identity (concat [dir git (real (os/tmpdir))]
+   :filesystem {:allowWrite (vec (keep identity (concat [dir git (real (os/tmpdir))
+                                                        ;; scripts write /tmp, not $TMPDIR; srt wants it resolved
+                                                        (real "/tmp")]
                                                        ;; installs need them; a child's would be run
                                                        ;; later by its unconfined parent, so not there
                                                        (when-not child? (keep real (map #(path/join (home/dir) %) cache-dirs))))))
