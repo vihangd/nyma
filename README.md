@@ -827,13 +827,24 @@ asked, not how the loop trusts the answer.
 so a `sed -i`, a formatter or an `npm install` is no longer invisible.
 
 A bash command in none of the classifier's tables asks. With `judge` set in `~/.nyma/settings.json`
-(`{"model": "jev-1.13.0", "threshold": 0.9, "timeout-ms": 1500}`; a project's is ignored) and
+(`{"threshold": 0.9, "timeout-ms": 1500}`; a project's is ignored; `model` defaults to `jev-1.14.0`) and
 `TYPESAFE_API_KEY` set or a `"typesafe"` key in `~/.nyma/credentials.json`, TypeSafe's Jev judges
-those asks first: it sees your latest message and the command, never tool output, and an allow at
-or above the threshold runs it, remembered for the session; anything else asks, and a failed call
-warns. It pauses for the session after 3 errors in a row or 20 asks it did not avert. Each verdict
-and your answer to it go to `~/.nyma/decisions.jsonl` (hashed, mode 600); `/decisions` compares them
-by probability band. **What it judges is sent to TypeSafe.**
+those asks first, and MCP and `web_fetch` asks too: it sees your latest message and the call, never
+tool output, with hidden and (in commands and URLs) non-ASCII characters spelled out. An allow at or
+above the threshold runs it, judged again next time; a call that writes or sends (an MCP tool named
+like one, a URL with a query) needs `threshold-risky` (0.97); anything else asks, and a failed call
+warns. Each use pauses for the session after 3 errors in a row; the permission judge also after 20
+asks it did not avert. `bun run eval:judge` measures it against 25 attack and control cases.
+
+The same judge, once configured, also:
+- picks which skill bodies a prompt needs, one yes/no per described global skill, at
+  `skill-threshold` (0.7); `"skills": false` leaves it to trigger phrases;
+- confirms a `small-model.finalize-warn` hit before nudging (at 0.8);
+- with `"clarify": true`, tells the model to ask first when a request you typed is too vague to
+  start on (`clarify-threshold`, 0.8).
+
+Each verdict, and your answer to a permission one, go to `~/.nyma/decisions.jsonl` (hashed, mode
+600); `/decisions` compares them by probability band. **What it judges is sent to TypeSafe.**
 
 `step-cap-report` (default `true`): when a run hits `max-steps`, spend one more
 tool-less call asking the model to report what it found or changed, instead of

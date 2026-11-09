@@ -11,7 +11,8 @@
             [agent.extensions.model-roles.features.escalate :as escalate]
             [agent.extensions.model-roles.features.progress :as progress]
             [agent.extensions.model-roles.features.commit :as commit]
-            [agent.extensions.model-roles.features.review :as review]))
+            [agent.extensions.model-roles.features.review :as review]
+            [agent.extensions.model-roles.features.clarify :as clarify]))
 
 ;; Permission MODES are roles too (modes-as-roles): a role may carry a :policy
 ;; mapping a tool CATEGORY (exec|write|read|network — from categorize-tool, the
@@ -279,6 +280,7 @@
   (let [plan-deactivate (atom nil)
         esc-deactivate  (atom nil)
         progress-deactivate (atom nil)
+        clarify-deactivate (atom nil)
         seg-deactivate  (atom nil)
 
         ;; THE role switch. /role, the cycle shortcut and the `role_change`
@@ -592,6 +594,9 @@
     ;; What a capped run has to show for another block of steps.
     (reset! progress-deactivate (progress/activate api))
 
+    ;; A vague request: tell the model to ask first (judge.clarify).
+    (reset! clarify-deactivate (clarify/activate api))
+
     ;; Status-line segments: the model role (plain) + the permission mode
     ;; (color-coded), shown together — replaces the core inline [role].
     (reset! seg-deactivate
@@ -615,4 +620,5 @@
       (when @plan-deactivate (@plan-deactivate))
       (when @esc-deactivate (@esc-deactivate))
       (when @progress-deactivate (@progress-deactivate))
+      (when @clarify-deactivate (@clarify-deactivate))
       (when @seg-deactivate (@seg-deactivate)))))
