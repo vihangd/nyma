@@ -679,7 +679,7 @@
   "Names of skills to activate this turn: trigger matches on `prompt` plus
    path-scoped skills matching any of `touched` paths. Hidden skills
    (`disable-model-invocation`) never auto-activate. `picks`, when given, are
-   the judge's choices, best first, and replace the trigger matches. Pure."
+   the judge's choices, best first, ahead of the trigger matches. Pure."
   [skills prompt touched & [active picks]]
   (let [visible (remove (fn [[_ s]] (:disable-model-invocation s)) skills)
         ;; A project skill may auto-inject on a PATH match: that means you are
@@ -689,9 +689,11 @@
         ;; so a cloned repo could otherwise put its own instructions in front
         ;; of the model on every turn without you or the model choosing it.
         triggerable (remove (fn [[_ s]] (project-skill? s)) visible)
-        trig    (if picks
-                  (filterv #(contains? (set (map first triggerable)) %) picks)
-                  (sort (matching-triggers (into {} triggerable) prompt)))
+        names   (set (map first triggerable))
+        ;; the judge's picks first, then the author's trigger phrases: a
+        ;; phrase the user typed still loads its skill whatever Jev scored
+        trig    (distinct (concat (filter #(contains? names %) picks)
+                                  (sort (matching-triggers (into {} triggerable) prompt))))
         by-trig (set trig)
         by-path (set (keep (fn [[n s]]
                              (when (and (seq (:paths s))
@@ -824,8 +826,10 @@
                      (release-orphaned-tools! agent)
                      (let [active (:active-skills @(:state agent))
                            prompt (prompt-text (.-userMessage d))
-                           names  (auto-activated skills prompt @touched active
-                                                  (js-await (judged-skills skills prompt)))]
+                           ;; not for a queued follow-up or nudge: its text is
+                           ;; ours, and each one would cost a call
+                           picks  (when-not (.-queued d) (js-await (judged-skills skills prompt)))
+                           names  (auto-activated skills prompt @touched active picks)]
                        (when-let [block (activation-block skills names)]
                          (doseq [n names] (count-activation! n :auto))
                          #js {"volatile-additions" #js [block]})))]

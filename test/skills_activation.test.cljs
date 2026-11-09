@@ -68,12 +68,14 @@
         (-> (expect (sk/activation-block skills ["deploy"])) (.toContain "DEPLOY BODY"))
         (-> (expect (sk/activation-block skills [])) (.toBeNil))))
 
-  (it "the judge's picks replace trigger matches, best first; path matches still lead"
+  (it "the judge's picks lead the trigger matches, best first; path matches lead both"
       (fn []
         (-> (expect (sk/auto-activated skills "please ship it" #{"src/x.cljs"} nil ["plain" "deploy"]))
             (.toEqual (clj->js ["cljs" "plain" "deploy"])))
-        ;; picked nothing: triggers do not come back
-        (-> (expect (sk/auto-activated skills "ship it" #{} nil [])) (.toEqual (clj->js [])))
+        ;; picked AND triggered: once
+        (-> (expect (sk/auto-activated skills "ship it" #{} nil ["deploy"])) (.toEqual (clj->js ["deploy"])))
+        ;; picked nothing: a trigger phrase the user typed still loads its skill
+        (-> (expect (sk/auto-activated skills "ship it" #{} nil [])) (.toEqual (clj->js ["deploy"])))
         ;; never a hidden skill, whatever was picked
         (-> (expect (sk/auto-activated skills "x" #{} nil ["hidden"])) (.toEqual (clj->js [])))))
 

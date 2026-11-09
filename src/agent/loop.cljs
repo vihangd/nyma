@@ -339,6 +339,7 @@
             ;; only ever apply to the nudge that carried it, never to another
             ;; queued follow-up or to the user's next prompt.
             final-report? (boolean (:final-report (:turn-opts @state)))
+            queued?       (boolean (:queued (:turn-opts @state)))
             _ (when (:turn-opts @state) (swap! state dissoc :turn-opts))
             raw-tools (if final-report? {} (js-await (get-active-tools-filtered agent)))
             tools     (if middleware
@@ -352,6 +353,7 @@
             before-result (js-await
                            (emit-collect "before_agent_start"
                                          #js {:userMessage  (last messages)
+                                              :queued       queued?
                                               :systemPrompt (:system-prompt config)
                                               :systemPromptOptions #js {:sections pi-sections}}))
 
@@ -1167,7 +1169,9 @@
                 (swap! (:follow-queue agent) #(vec (rest %)))
                 ;; Per-turn options ride the message, not the transcript: the
                 ;; loop top reads and clears them before anything else runs.
-                (when-let [t (:turn next)] (swap! state assoc :turn-opts t))
+                ;; :queued tells before_agent_start this run is no new message
+                ;; from the user, so per-prompt work (the skill judge) can skip it.
+                (swap! state assoc :turn-opts (assoc (or (:turn next) {}) :queued true))
                 (if-let [store (:store agent)]
                   ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
                   (swap! state update :messages conj {:role "user" :content (:content next)}))
