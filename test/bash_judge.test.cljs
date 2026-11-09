@@ -5,7 +5,9 @@
             ["node:path" :as path]
             [agent.extensions.bash-suite.permissions :as permissions]
             [agent.extensions.bash-suite.shared :as shared]
-            [agent.utils.decide :as decide]))
+            [agent.utils.decide :as decide]
+            [agent.events :refer [create-event-bus]]
+            [agent.middleware :refer [permission-check-enter]]))
 
 (defn- reply [p]
   (fn [_ opts]
@@ -71,7 +73,23 @@
                           (-> (expect (clj->js (decide/report lines)))
                               (.toEqual (clj->js [{:kind "bash" :band "0.5-0.7" :n 1 :auto 0 :answered 1 :user-allowed 1}]))))))))
 
+(defn ^:async test-gate [p]
+  (js-await
+   (with-home {:judge {:threshold 0.9}} (reply p)
+              ^:async (fn [_]
+                        (let [events (create-event-bus)
+                              _      ((:on events) "permission_request" (fn [_] #js {:decision "ask"}))
+                              gate   #(permission-check-enter events nil {:tool-name % :args {:q "x"}})]
+                          ;; no UI: an ask the judge does not answer is denied
+                          {:mcp  (boolean (:cancelled (js-await (gate "notes__search"))))
+                           :bash (boolean (:cancelled (js-await (gate "bash"))))})))))
+
+(defn ^:async test-mcp-judge []
+  (-> (expect (clj->js (js-await (test-gate 0.95)))) (.toEqual #js {:mcp false :bash true}))
+  (-> (expect (clj->js (js-await (test-gate 0.5)))) (.toEqual #js {:mcp true :bash true})))
+
 (describe "permission judge (Jev)" (fn []
+  (it "answers an MCP ask when confident; bash is not judged at the gate" test-mcp-judge)
   (it "allows only at 0.9 or above; errors ask" test-threshold)
   (it "offers the allow option last" test-allow-last)
   (it "pauses after three errors in a row" test-breaker)

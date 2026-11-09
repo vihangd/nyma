@@ -10,6 +10,7 @@
             [agent.utils.shell-grant :as shell-grant]
             [agent.utils.sandbox :as sandbox]
             [agent.utils.decide :as decide]
+            [agent.utils.content :as content]
             [clojure.string :as str]))
 
 (defn normalize-tool-result
@@ -568,6 +569,29 @@
         (assoc ctx :cancelled true
                :cancel-reason (or reason "Permission denied"))))))
 
+(def judge-options
+  [["destructive" "Deletes or overwrites data, sends secrets or private data out, spends money, or changes accounts or permissions"]
+   ["risky" "Changes state somewhere (creates, edits, sends, posts) or reaches a site the user did not ask about"]
+   ["allow" "Only reads or looks up what the user's request needs"]])
+
+(defn ^:async judge-allows?
+  "Does the judge turn this MCP or web_fetch ask into an allow? It sees the
+   user's latest message and the call, never a tool's output."
+  [ctx tool-name args]
+  (let [cfg (decide/config)]
+    (boolean
+     (when (and cfg (contains? #{"other" "network"} (categorize-tool tool-name)))
+       (let [user (some->> (:messages (agent-state (:agent ctx))) vec reverse
+                           (filter #(= "user" (:role %))) first :content content/->text)
+             call (js/JSON.stringify (clj->js (or (:original-args ctx) args)))]
+         (js-await
+          (decide/decide! {:kind (if (= tool-name "web_fetch") "web_fetch" "mcp")
+                           :subject (decide/subject-of tool-name (or (:original-args ctx) args))
+                           :allow "allow" :cfg cfg :options judge-options
+                           :state (str "The user asked the coding agent:\n" (subs (str user) 0 (min 2000 (count (str user))))
+                                       "\n\nThe agent wants to call the tool `" tool-name "` with:\n"
+                                       (subs call 0 (min 4000 (count call))))})))))))
+
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
    Handlers return {decision: 'allow'|'ask'|'deny'|'allow_always_project',
@@ -638,6 +662,8 @@
                      (and settings (:bash-allowed? settings)
                           ((:bash-allowed? settings) (get args :command)))))
             ctx
+            ;; MCP and web_fetch asks: the judge may answer first (agent.utils.decide)
+            (js-await (judge-allows? ctx tool-name args)) ctx
             :else (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason)))
 
           (= decision "allow_always_project")
