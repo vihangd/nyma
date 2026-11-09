@@ -5,7 +5,7 @@
    vague; the model, told to ask, writes the questions.
 
    Only for a message the user typed (`input_submit`, so the TUI) that then
-   starts a run: never a steer, a queued follow-up or nudge, a command, a
+   starts a run: never a steer, a nudge an extension sent, a command, a
    `!`/`$` line or a reply of a few words. Jev is asked at submit, so its
    answer is ready by the time the run starts and costs no extra wait. Opt-in with
    `judge.clarify` true; `judge.clarify-threshold` (0.8) sets how sure."
@@ -46,8 +46,8 @@
                             (let [f @fresh]
                               (reset! fresh nil)
                               ;; this run must be that message: a steer starts
-                              ;; none, and a queued run carries other text
-                              (when (and f (not (.-queued d))
+                              ;; none, and a nudge's run carries other text
+                              (when (and f (not (.-synthetic d))
                                          (str/includes? (str (some-> d .-userMessage :content content/->text))
                                                         (subs (:text f) 0 (min 40 (count (:text f))))))
                                 (when (js-await (:verdict f))

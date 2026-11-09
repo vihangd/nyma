@@ -49,7 +49,7 @@
       (-> (expect (:calls (js-await (run cfg 0.9 text)))) (.toBe 0)))
     ;; typed while a run streamed (a steer): the next run is a queued nudge,
     ;; or another message, and gets nothing
-    (doseq [start [#js {:queued true :userMessage {:role "user" :content vague}}
+    (doseq [start [#js {:synthetic true :userMessage {:role "user" :content vague}}
                    #js {:userMessage {:role "user" :content "Continue working, the task looks unfinished."}}]]
       (-> (expect (added? (first (:results (js-await (run on 0.9 vague 1 start)))))) (.toBe false)))))
 

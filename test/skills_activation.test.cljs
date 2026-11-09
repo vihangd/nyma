@@ -68,10 +68,13 @@
         (-> (expect (sk/activation-block skills ["deploy"])) (.toContain "DEPLOY BODY"))
         (-> (expect (sk/activation-block skills [])) (.toBeNil))))
 
-  (it "the judge's picks lead the trigger matches, best first; path matches lead both"
+  (it "trigger matches lead the judge's picks; path matches lead both"
       (fn []
         (-> (expect (sk/auto-activated skills "please ship it" #{"src/x.cljs"} nil ["plain" "deploy"]))
-            (.toEqual (clj->js ["cljs" "plain" "deploy"])))
+            (.toEqual (clj->js ["cljs" "deploy" "plain"])))
+        ;; three picks cannot crowd out a phrase the user typed
+        (-> (expect (sk/auto-activated (assoc skills "a" {} "b" {} "c" {}) "ship it" #{} nil ["a" "b" "c"]))
+            (.toEqual (clj->js ["deploy" "a" "b"])))
         ;; picked AND triggered: once
         (-> (expect (sk/auto-activated skills "ship it" #{} nil ["deploy"])) (.toEqual (clj->js ["deploy"])))
         ;; picked nothing: a trigger phrase the user typed still loads its skill

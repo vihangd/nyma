@@ -242,7 +242,10 @@
                                                 " | stack: " (.-stack (js/Error.))))
                                 (case deliver-as
                                   "steer"    (steer agent {:role "user" :content text})
-                                  "followUp" (follow-up agent {:role "user" :content text}))))
+                                  ;; :synthetic: an extension wrote it, not the user, so
+                                  ;; per-prompt work (skill judge, clarify) skips its run
+                                  "followUp" (follow-up agent {:role "user" :content text
+                                                               :turn {:synthetic true}}))))
 
        ;; ── State access ────────────────────────────────────
        ;; Extensions read from agent state, push events back through the

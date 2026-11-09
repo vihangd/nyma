@@ -339,7 +339,7 @@
             ;; only ever apply to the nudge that carried it, never to another
             ;; queued follow-up or to the user's next prompt.
             final-report? (boolean (:final-report (:turn-opts @state)))
-            queued?       (boolean (:queued (:turn-opts @state)))
+            synthetic?    (boolean (:synthetic (:turn-opts @state)))
             _ (when (:turn-opts @state) (swap! state dissoc :turn-opts))
             raw-tools (if final-report? {} (js-await (get-active-tools-filtered agent)))
             tools     (if middleware
@@ -353,7 +353,8 @@
             before-result (js-await
                            (emit-collect "before_agent_start"
                                          #js {:userMessage  (last messages)
-                                              :queued       queued?
+                                              ;; nyma's own message (a nudge), not the user's
+                                              :synthetic    synthetic?
                                               :systemPrompt (:system-prompt config)
                                               :systemPromptOptions #js {:sections pi-sections}}))
 
@@ -1097,7 +1098,7 @@
                   (swap! st assoc :step-extensions (:max-extensions config))
                   (follow-up agent {:role "user"
                                     :content (repeat-stop-nudge (stall/digest-text @pass-digest))
-                                    :turn {:final-report true}}))
+                                    :turn {:final-report true :synthetic true}}))
 
                 (when (and step-capped? (not (:stop-run @st)))
                   (dbg/warn (str "[loop] step limit reached (" (:max-steps config) ") — the model was still working"))
@@ -1110,7 +1111,7 @@
                                       "what it has; send a message to continue, or raise `max-steps`."))
                         (follow-up agent {:role "user" :content (step-cap-nudge (:max-steps config)
                                                                                 (stall/digest-text @pass-digest))
-                                          :turn {:final-report true}}))
+                                          :turn {:final-report true :synthetic true}}))
                     (notify! (str "Step limit reached (" (:max-steps config)
                                   ") with work still in progress. Send a message to continue, "
                                   "or raise `max-steps` in settings."))))
@@ -1169,9 +1170,7 @@
                 (swap! (:follow-queue agent) #(vec (rest %)))
                 ;; Per-turn options ride the message, not the transcript: the
                 ;; loop top reads and clears them before anything else runs.
-                ;; :queued tells before_agent_start this run is no new message
-                ;; from the user, so per-prompt work (the skill judge) can skip it.
-                (swap! state assoc :turn-opts (assoc (or (:turn next) {}) :queued true))
+                (when-let [t (:turn next)] (swap! state assoc :turn-opts t))
                 (if-let [store (:store agent)]
                   ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
                   (swap! state update :messages conj {:role "user" :content (:content next)}))
