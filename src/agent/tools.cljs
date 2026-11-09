@@ -147,10 +147,12 @@
 (defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
   (let [limit-ms (or timeout 30000)
         started  (js/Date.now)
-        proc     (js/Bun.spawn (clj->js (sandbox/wrap ["sh" "-c" command]))
-                               #js {:timeout limit-ms
-                                    :stdout  "pipe"
-                                    :stderr  "pipe"})
+        {:keys [argv env]} (js-await (sandbox/wrap command))
+        proc     (js/Bun.spawn (clj->js argv)
+                               (cond-> #js {:timeout limit-ms
+                                            :stdout  "pipe"
+                                            :stderr  "pipe"}
+                                 env (doto (aset "env" env))))
         signal   (when ext-ctx (aget ext-ctx "abortSignal"))
         on-abort (fn [] (.kill proc))
         _        (when signal

@@ -40,14 +40,15 @@
 
 (defn- start-background-job
   "Spawn a command in the background. Returns job info map."
-  [cmd config]
+  [cmd {:keys [argv env]} config]
   (let [id           (swap! next-job-id inc)
         max-lines    (:output-buffer-lines config)
         stdout-buf   (atom [])
         stderr-buf   (atom [])
         exit-code    (atom nil)
-        proc         (js/Bun.spawn (clj->js (sandbox/wrap ["sh" "-c" cmd]))
-                       #js {:stdout "pipe" :stderr "pipe"})
+        proc         (js/Bun.spawn (clj->js argv)
+                       (cond-> #js {:stdout "pipe" :stderr "pipe"}
+                         env (doto (aset "env" env))))
         job          {:id id
                       :command (str cmd)
                       :process proc
@@ -208,14 +209,16 @@
                           (if (and (matches-bg-pattern? cmd (:auto-detect-patterns bg-cfg))
                                    (< running (:max-concurrent bg-cfg)))
                             ;; Start background job
-                            (let [job (start-background-job cmd bg-cfg)]
-                              (aset ctx "cancelled" true)
-                              (aset ctx "cancel-reason"
-                                (str "Started background job #" (:id job) ": `"
-                                     (:command job) "`\n"
-                                     "Use list_jobs to see status, job_output to get output, "
-                                     "kill_job to stop."))
-                              ctx)
+                            (.then (sandbox/wrap cmd)
+                                   (fn [w]
+                                     (let [job (start-background-job cmd w bg-cfg)]
+                                       (aset ctx "cancelled" true)
+                                       (aset ctx "cancel-reason"
+                                             (str "Started background job #" (:id job) ": `"
+                                                  (:command job) "`\n"
+                                                  "Use list_jobs to see status, job_output to get output, "
+                                                  "kill_job to stop."))
+                                       ctx)))
                             ctx))
                         ctx)))})
 

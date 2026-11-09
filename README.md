@@ -776,13 +776,15 @@ an MCP or extension tool is refused. A worktree child keeps its permission mode 
 an unlisted role there is not narrowed. `.nyma/agents/*.md` and project role tool lists are
 ignored until the folder is trusted.
 
-A worktree child's bash runs in an OS sandbox (`sandbox-exec` on macOS, `bwrap` on Linux): it
-can write only in its checkout, the repo's `.git` (not its or a submodule's hooks or config) and
-temp dirs; package caches are read-only, since the parent would run what lands there. Reads and
-network are not limited, so unlisted commands still ask. Setting `sandbox.bash` in
-`~/.nyma/settings.json` (a project's is ignored): `"worktree"` (default), `"always"` (every
-session, confined to its cwd), or `"off"`. Without a usable sandbox-exec or bwrap, nyma warns
-once and runs bash unconfined.
+A worktree child's bash runs in an OS sandbox ([sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime):
+Seatbelt on macOS, bubblewrap on Linux). It can write only in its checkout, the repo's `.git` (not
+its or a submodule's hooks, config or info) and temp; not `.nyma/`, `.envrc`, shell rc files or
+`.vscode`. It cannot read `~/.ssh`, `~/.aws`, `~/.nyma/credentials.json` and other credential files,
+and has no network (`sandbox.child-network: "registries"` allows package registries). Settings in
+`~/.nyma/settings.json` only: `sandbox.bash` `"worktree"` (default), `"always"` (every session,
+confined to its cwd, registries allowed) or `"off"`; `sandbox.deny-read` and `sandbox.allow-hosts`
+extend the lists. Unlisted commands still ask. On Linux it needs `bwrap` and `socat`; where the
+sandbox cannot start, nyma warns once and runs bash unconfined.
 
 A role with `"model": "inherit"` or no model uses the parent's, and so does a built-in role whose
 provider is not the one you are on.

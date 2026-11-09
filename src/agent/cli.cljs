@@ -1289,7 +1289,7 @@ Examples:
       (when-let [root (.. js/process -env -NYMA_WRITE_ROOT)]
         (file-access/register-write-root (:events agent) root))
       ;; the user's file only: a cloned repo must not turn its own sandbox off
-      (sandbox/configure! (get-in ((:user-settings settings) :global) [:sandbox :bash]))
+      (sandbox/configure! (:sandbox ((:user-settings settings) :global)))
 
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)

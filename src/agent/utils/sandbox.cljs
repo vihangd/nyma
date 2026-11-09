@@ -1,22 +1,41 @@
 (ns agent.utils.sandbox
-  "Bash that can only write where it is meant to.
+  "Bash that can only write where it is meant to, read no secrets, and reach
+   only the hosts it is allowed.
 
-   A worktree child's edit tools are confined to its checkout, but its bash
-   could still write ~/.zshrc. The OS does the confining here, as Codex and
-   Claude Code do: Seatbelt (`sandbox-exec`) on macOS, bubblewrap on Linux.
-   Writes are allowed under the root, the temp dirs and package caches; git's
-   hooks and config stay read-only so a child cannot plant code for the parent.
-   Reads and network are left alone: builds need registries.
-   ponytail: hand-rolled profile; @anthropic-ai/sandbox-runtime if network
-   proxying or Windows is ever wanted."
+   Backed by Anthropic's sandbox-runtime (srt): Seatbelt on macOS, bubblewrap
+   plus seccomp on Linux, and a host-side proxy that is the only way out to the
+   network. Hand-rolling that is where other agents got their CVEs; srt carries
+   the fixes, the deny-by-default macOS profile (no `open`, Apple Events or
+   launchd), and the protected-file list (.git/hooks, .git/config, shell rc,
+   .vscode, .mcp.json) relative to the command's cwd.
+
+   On top of srt's list: nyma's own config, which the parent would run, the
+   repo's shared .git when it is not under the root (a worktree's), and the
+   credential files a prompt-injected command would read."
   (:require ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            [agent.debug :as d]
-            [clojure.string :as str]))
+            ["@anthropic-ai/sandbox-runtime" :refer [SandboxManager]]
+            [agent.debug :as d]))
 
 ;; The directory bash may write under, or nil for no sandbox.
 (defonce root (atom nil))
+;; Promise of true once srt is up for `root`, false when it cannot be.
+(defonce ^:private ready (atom nil))
+
+(def registry-hosts
+  "Where builds fetch from. A worktree child gets none of them unless
+   `sandbox.child-network` is \"registries\"."
+  ["registry.npmjs.org" "registry.yarnpkg.com" "pypi.org" "files.pythonhosted.org"
+   "crates.io" "static.crates.io" "index.crates.io" "proxy.golang.org" "sum.golang.org"
+   "rubygems.org" "repo.maven.apache.org" "github.com" "codeload.github.com"
+   "objects.githubusercontent.com" "raw.githubusercontent.com" "gitlab.com"])
+
+(def secret-paths
+  "Read-denied: what an injected `curl -d @…` would send."
+  ["~/.ssh" "~/.aws" "~/.config/gcloud" "~/.config/gh" "~/.azure" "~/.kube"
+   "~/.docker/config.json" "~/.netrc" "~/.npmrc" "~/.pypirc" "~/.git-credentials"
+   "~/.nyma/credentials.json" "~/.nyma/settings.json" "~/Library/Keychains"])
 
 (defn- real [p]
   (try (fs/realpathSync p) (catch :default _ nil)))
@@ -31,88 +50,60 @@
         (real (.trim (.toString (.-stdout r))))))
     (catch :default _ nil)))
 
-(defn writable
-  "Directories `dir`'s sandbox may write under, all resolved. No package
-   caches: the parent runs what lands there (npx, cargo build.rs) unconfined."
-  [dir git]
-  (->> [dir git (os/tmpdir) "/tmp" "/private/var/folders"]
-       (keep #(when % (real %)))
-       distinct
-       vec))
-
-(defn- re-quote [s] (str/replace s #"[.*+?^${}()|\[\]\\]" #(str "\\" %)))
-
-(defn seatbelt-profile
-  "Writes denied everywhere but `dirs`; in the repo's .git (`git`), hooks and
-   config stay read-only, a submodule's too, since the parent runs them."
-  [dirs git]
-  (str "(version 1)\n(allow default)\n(deny file-write*)\n"
-       "(allow file-write* (literal \"/dev/null\") (regex #\"^/dev/(fd|tty|ptmx|ttys)\")"
-       (apply str (map-indexed (fn [i _] (str " (subpath (param \"W" i "\"))")) dirs))
-       ")\n"
-       (when git
-         (str "(deny file-write* (regex #\"^" (re-quote git)
-              "(/modules/.+)?/(hooks(/|$)|config$)\"))\n"))))
-
-(defn- bwrap-ok?
-  "Can bwrap start here? Blocked user namespaces (Ubuntu 24.04, containers)
-   make it fail on every call."
-  []
-  (try (zero? (.-exitCode (js/Bun.spawnSync #js ["bwrap" "--ro-bind" "/" "/" "--dev" "/dev" "true"]
-                                            #js {:stdout "ignore" :stderr "ignore"})))
-       (catch :default _ false)))
-
 (defn- git-protected
-  "hooks and config of the repo and each submodule, as far as they exist."
+  "hooks, config and info of the repo and each submodule: the parent runs them."
   [git]
   (let [mods (path/join git "modules")]
     (->> (cons git (when (fs/existsSync mods)
                      (map #(path/join mods %) (vec (fs/readdirSync mods)))))
-         (mapcat #(vector (path/join % "hooks") (path/join % "config")))
-         (filter fs/existsSync))))
+         (mapcat #(map (fn [f] (path/join % f)) ["hooks" "config" "info"])))))
 
-(defn- prefix-for
-  "The argv prefix confining bash to `dir`, or nil when no sandbox can run."
-  [dir]
-  (let [git  (git-common-dir dir)
-        dirs (writable dir git)]
-    (cond
-      (and (= "darwin" js/process.platform) (some? (js/Bun.which "sandbox-exec")))
-      (-> ["sandbox-exec" "-p" (seatbelt-profile dirs git)]
-          (into (mapcat (fn [i p] ["-D" (str "W" i "=" p)]) (range) dirs)))
+(defn policy
+  "srt config for bash confined to `dir`. `cfg` is the user's `sandbox`
+   settings; `child?` a worktree child, which gets no network by default."
+  [dir git child? cfg]
+  {:network    {:allowedDomains (vec (concat (when (or (not child?) (= "registries" (:child-network cfg)))
+                                               registry-hosts)
+                                             (when-not child? (:allow-hosts cfg))))
+                :deniedDomains  []}
+   :filesystem {:allowWrite (vec (keep identity [dir git (real (os/tmpdir))]))
+                :denyWrite  (vec (concat [(path/join dir ".nyma") (path/join dir ".envrc")]
+                                         (when git (git-protected git))))
+                :denyRead   (vec (concat secret-paths (:deny-read cfg)))}})
 
-      (and (some? (js/Bun.which "bwrap")) (bwrap-ok?))
-      ;; ponytail: submodules one level deep; nested ones are not protected
-      (-> ["bwrap" "--ro-bind" "/" "/" "--dev" "/dev" "--die-with-parent"]
-          (into (mapcat (fn [p] ["--bind" p p]) dirs))
-          (into (mapcat (fn [p] ["--ro-bind" p p]) (when git (git-protected git))))
-          (into ["--"])))))
-
-;; root → prefix (nil when unavailable): git and the probe run once, not per command
-(defonce ^:private prefixes (atom {}))
-
-(defn- prefix []
-  (when-let [dir (some-> @root real)]
-    (if (contains? @prefixes dir)
-      (get @prefixes dir)
-      (let [p (prefix-for dir)]
-        (when-not p
-          (d/warn "sandbox" (str "no usable sandbox-exec or bwrap: bash is not confined to " dir)))
-        (swap! prefixes assoc dir p)
-        p))))
-
-(defn wrap
-  "`argv` to run under the sandbox, or unchanged when there is none. A missing
-   sandbox warns once rather than refusing bash outright."
-  [argv]
-  (if-let [p (prefix)] (into p argv) argv))
+(defn- ^:async start!
+  [dir child? cfg]
+  (try
+    (when-not (.isSupportedPlatform SandboxManager)
+      (throw (js/Error. "this platform is not supported")))
+    (when-let [errs (seq (.-errors (.checkDependencies SandboxManager)))]
+      (throw (js/Error. (first errs))))
+    (js-await (.reset SandboxManager))
+    (js-await (.initialize SandboxManager (clj->js (policy dir (git-common-dir dir) child? cfg))))
+    true
+    (catch :default e
+      (d/warn "sandbox" (str "bash is not confined to " dir ": " (.-message e)))
+      false)))
 
 (defn configure!
-  "Pick the root from setting `sandbox.bash`: \"worktree\" (default) confines a
-   worktree child to its checkout, \"always\" any session to its cwd, \"off\"
-   nothing."
-  [mode]
-  (reset! root (case (str (or mode "worktree"))
-                 "off"    nil
-                 "always" (or (.. js/process -env -NYMA_WRITE_ROOT) (js/process.cwd))
-                 (.. js/process -env -NYMA_WRITE_ROOT))))
+  "Pick the root from the user's `sandbox` settings: `bash` \"worktree\"
+   (default) confines a worktree child to its checkout, \"always\" any session
+   to its cwd, \"off\" nothing. Returns the readiness promise."
+  [cfg]
+  (let [child (.. js/process -env -NYMA_WRITE_ROOT)
+        dir   (some-> (case (str (or (:bash cfg) "worktree"))
+                        "off"    nil
+                        "always" (or child (js/process.cwd))
+                        child)
+                      real)]
+    (reset! root dir)
+    (reset! ready (if dir (start! dir (some? child) cfg) (js/Promise.resolve false)))))
+
+(defn ^:async wrap
+  "`{:argv :env}` to run `command` under the sandbox, or plain `sh -c` when
+   there is none. `:env` is nil when unchanged."
+  [command]
+  (if (and @ready (js-await @ready))
+    (let [r (js-await (.wrapWithSandboxArgv SandboxManager command))]
+      {:argv (vec (.-argv r)) :env (.-env r)})
+    {:argv ["sh" "-c" command] :env nil}))

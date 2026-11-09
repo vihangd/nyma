@@ -9,32 +9,59 @@
 
 (def mac? (and (= "darwin" js/process.platform) (some? (js/Bun.which "sandbox-exec"))))
 
+(defn ^:async in-child
+  "Run `f` with a worktree child's sandbox on `root`, then turn it off."
+  [root cfg f]
+  (let [prev (.. js/process -env -NYMA_WRITE_ROOT)]
+    (aset (.-env js/process) "NYMA_WRITE_ROOT" root)
+    (try
+      (js-await (sandbox/configure! cfg))
+      (js-await (f))
+      (finally
+        (if prev (aset (.-env js/process) "NYMA_WRITE_ROOT" prev)
+            (js-delete (.-env js/process) "NYMA_WRITE_ROOT"))
+        (js-await (sandbox/configure! {:bash "off"}))))))
+
 (defn ^:async test-confines []
-  (let [d    (fs/realpathSync (fs/mkdtempSync (path/join (os/homedir) ".nyma-sbx-")))
-        root (path/join d "wt")]
+  ;; under HOME, not tmp: tmp is writable from the sandbox
+  (let [d      (fs/realpathSync (fs/mkdtempSync (path/join (os/homedir) ".nyma-sbx-")))
+        root   (path/join d "wt")
+        secret (path/join d "secret")
+        e?     #(fs/existsSync (path/join root %))]
     (fs/mkdirSync root)
+    (fs/writeFileSync secret "s3cret")
     (js/Bun.spawnSync #js ["git" "init" "-q" root])
     (fs/mkdirSync (path/join root ".git" "modules" "sub" "hooks") #js {:recursive true})
-    (reset! sandbox/root root)
     (try
-      (js-await (bash-execute {:command (str "cd " root " && touch in; touch ../out; touch .git/hooks/x; touch .git/modules/sub/hooks/x; echo >> .git/modules/sub/config; touch .git/objects/ok")}))
-      (-> (expect #js [(fs/existsSync (path/join root "in"))
-                       (fs/existsSync (path/join d "out"))
-                       (fs/existsSync (path/join root ".git" "hooks" "x"))
-                       (fs/existsSync (path/join root ".git" "modules" "sub" "hooks" "x"))
-                       (fs/existsSync (path/join root ".git" "modules" "sub" "config"))
-                       (fs/existsSync (path/join root ".git" "objects" "ok"))])
-          (.toEqual #js [true false false false false true]))
+      (js-await
+       (in-child root {:deny-read [secret]}
+                 ^:async
+                 (fn []
+                   (let [r (js-await (bash-execute
+                                      {:command (str "cd " root " && touch in; touch ../out; touch .git/hooks/x;"
+                                                     " touch .git/modules/sub/hooks/x; echo >> .git/modules/sub/config;"
+                                                     " touch .git/objects/ok; mkdir -p .nyma && touch .nyma/s;"
+                                                     " cat " secret "; osascript -e 'tell application \"Finder\" to get name';"
+                                                     " curl -sS -m 5 https://example.com/ -o /dev/null")}))]
+                     (-> (expect #js [(e? "in") (fs/existsSync (path/join d "out")) (e? ".git/hooks/x")
+                                      (e? ".git/modules/sub/hooks/x") (e? ".git/modules/sub/config")
+                                      (e? ".git/objects/ok") (e? ".nyma/s")
+                                      (.includes (str r) "s3cret")])
+                         (.toEqual #js [true false false false false true false false]))
+                     ;; no network for a child: the proxy refuses the host
+                     (-> (expect (str r)) (.toMatch #"403|CONNECT|not permitted|resolve"))))))
       (finally
-        (reset! sandbox/root nil)
         (fs/rmSync d #js {:recursive true :force true})))))
 
 (describe "sandbox" (fn []
   (if mac?
-    (it "lets bash write only under its root, never into git hooks" test-confines)
+    (it "confines writes, secret reads, Apple Events and network" test-confines 30000)
     (it.skip "needs sandbox-exec" (fn [])))
-  (it "is off with no root" (fn []
-    (-> (expect (clj->js (sandbox/wrap ["sh" "-c" "x"]))) (.toEqual #js ["sh" "-c" "x"]))))
+  (it "is plain sh with no root"
+      ^:async (fn []
+                (js-await (sandbox/configure! {:bash "off"}))
+                (-> (expect (clj->js (js-await (sandbox/wrap "x"))))
+                    (.toEqual (clj->js {:argv ["sh" "-c" "x"] :env nil})))))
   (it "still asks for an unlisted command inside the sandbox"
       (fn []
         (let [cfg {:auto-approve-safe true}

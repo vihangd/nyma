@@ -134,7 +134,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/utils/pi_shape.cljs` | `agent.utils.pi-shape` | nyma messages in the shapes pi's `AgentMessage` uses (pi-agent-core 1.2): user, assistant with `[text \| thinking \| toolCall]` blocks, and… |
 | `src/agent/utils/reasoning_request.cljs` | `agent.utils.reasoning-request` | Translate nyma's thinking level into each provider's REQUEST dialect. |
 | `src/agent/utils/reasoning_stream.cljs` | `agent.utils.reasoning-stream` | Shared SSE stream rewriter for OpenAI-compatible providers that emit chain-of-thought through provider-specific delta fields the AI SDK d… |
-| `src/agent/utils/sandbox.cljs` | `agent.utils.sandbox` | Bash that can only write where it is meant to. |
+| `src/agent/utils/sandbox.cljs` | `agent.utils.sandbox` | Bash that can only write where it is meant to, read no secrets, and reach only the hosts it is allowed. |
 | `src/agent/utils/shell_grant.cljs` | `agent.utils.shell-grant` | What one shell command is, and what an "Allow always" for it covers. |
 | `src/agent/utils/spill_file.cljs` | `agent.utils.spill-file` | Writing model-visible content to disk, safely. |
 | `src/agent/utils/stall.cljs` | `agent.utils.stall` | Is a run repeating itself? |
