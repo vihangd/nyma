@@ -147,7 +147,7 @@
 (defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
   (let [limit-ms (or timeout 30000)
         started  (js/Date.now)
-        {:keys [argv env]} (js-await (sandbox/wrap command))
+        {:keys [argv env sandboxed?]} (js-await (sandbox/wrap command))
         proc     (js/Bun.spawn (clj->js argv)
                                (cond-> #js {:timeout limit-ms
                                             :stdout  "pipe"
@@ -185,7 +185,8 @@
         ;; waiting for a process that is not ours.
         _        ((:stop-in! stop) 300)
         stdout   (js-await out-p)
-        stderr   (js-await err-p)
+        stderr   (cond-> (js-await err-p)
+                   (and sandboxed? (not (zero? code))) (->> (sandbox/annotate command)))
         aborted? (boolean (and signal (.-aborted signal)))
         timed-out? (and (not aborted?) (>= elapsed limit-ms))]
     (when signal (.removeEventListener signal "abort" on-abort))

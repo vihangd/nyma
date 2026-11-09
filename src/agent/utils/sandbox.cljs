@@ -99,11 +99,36 @@
     (reset! root dir)
     (reset! ready (if dir (start! dir (some? child) cfg) (js/Promise.resolve false)))))
 
+(def ^:private secret-env
+  #"(?i)(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIALS?)$|^(AWS_|ANTHROPIC_|OPENAI_|SSH_AUTH_SOCK$|GH_TOKEN$|GITHUB_TOKEN$|TYPESAFE_)")
+
+(defn scrub-env
+  "`env` without what a sandboxed command has no business holding: nyma's own
+   provider keys among them. srt's proxy variables stay."
+  [env]
+  (let [out #js {}]
+    (doseq [k (js/Object.keys env)]
+      (when-not (re-find secret-env k) (aset out k (aget env k))))
+    out))
+
 (defn ^:async wrap
   "`{:argv :env}` to run `command` under the sandbox, or plain `sh -c` when
    there is none. `:env` is nil when unchanged."
   [command]
   (if (and @ready (js-await @ready))
     (let [r (js-await (.wrapWithSandboxArgv SandboxManager command))]
-      {:argv (vec (.-argv r)) :env (.-env r)})
+      {:argv (vec (.-argv r)) :env (scrub-env (.-env r)) :sandboxed? true})
     {:argv ["sh" "-c" command] :env nil}))
+
+(defn annotate
+  "`stderr` with the sandbox's denials for `command` appended, so the model
+   learns which path or host was refused instead of retrying blind."
+  [command stderr]
+  (let [s (try (.annotateStderrWithSandboxFailures SandboxManager command stderr)
+               (catch :default _ stderr))]
+    ;; srt names network denials; file ones only reach its log monitor late
+    (cond-> s
+      (.includes (str stderr) "Operation not permitted")
+      (str "\n<sandbox>bash writes only under " @root " and temp, cannot read credential files,"
+           " and cannot write .nyma/, .envrc, shell rc files or git hooks/config. Do not retry"
+           " the same path; ask the user if it is needed.</sandbox>"))))
