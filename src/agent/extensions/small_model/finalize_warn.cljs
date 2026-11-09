@@ -15,7 +15,7 @@
    turns (stream-filter-aborted etc.) are skipped — finishReason is not \"stop\".
 
    On a hit, inject one capped follow-up nudge; reset on a clean tool-call turn.
-   With the judge configured, a first regex hit is put to Jev before the
+   With `judge.finalize` true, a first regex hit is put to Jev before the
    nudge: the regex cannot tell \"Should I also add X?\" after finished work
    from a stop halfway. It sees the user's request and the final text, and
    the nudge goes out at p 0.8 or above, or when Jev cannot answer.
@@ -99,7 +99,7 @@
               (when (< @nudges max-nudges)
                 ;; Only the first: after a nudge the latest user message is
                 ;; ours, not the request Jev should weigh the stop against.
-                (if (and (decide/config) (zero? @nudges))
+                (if (and (true? (:finalize (decide/config))) (zero? @nudges))
                   (reset! judged (unfinished? (decide/user-request (:messages (.getState api))) text))
                   (nudge!)))
               ;; Any non-premature turn (acted, or finished cleanly) → re-arm.

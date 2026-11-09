@@ -836,11 +836,12 @@ like one, a URL with a query) needs `threshold-risky` (0.97); anything else asks
 warns. Each use pauses for the session after 3 errors in a row; the permission judge also after 20
 asks it did not avert. `bun run eval:judge` measures it against 25 attack and control cases.
 
-The same judge, once configured, also:
-- picks which skill bodies a prompt needs, one yes/no per described global skill, at
-  `skill-threshold` (0.7); `"skills": false` leaves it to trigger phrases;
-- confirms a `small-model.finalize-warn` hit before nudging (at 0.8);
-- with `"clarify": true`, tells the model to ask first when a request you typed is too vague to
+The same judge can do more, each opt-in in the same `judge` block, since each sends more to
+TypeSafe:
+- `"skills": true` — picks which skill bodies a prompt needs, one yes/no per described global
+  skill, at `skill-threshold` (0.7), after any trigger phrase you typed; about 300 ms per prompt;
+- `"finalize": true` — confirms a `small-model.finalize-warn` hit before nudging (at 0.8);
+- `"clarify": true` — tells the model to ask first when a request you typed is too vague to
   start on (`clarify-threshold`, 0.8).
 
 Each verdict, and your answer to a permission one, go to `~/.nyma/decisions.jsonl` (hashed, mode

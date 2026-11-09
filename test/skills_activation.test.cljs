@@ -24,7 +24,7 @@
             (if answer
               (js/Promise.resolve #js {:ok true :json (fn [] (js/Promise.resolve #js {:answers answer}))})
               (js/Promise.reject (js/Error. "down")))))
-    (decide/configure! {:judge {}})
+    (decide/configure! {:judge {:skills true}})
     (decide/reset-session!)
     (try (js-await (body sent))
          (finally
@@ -47,7 +47,13 @@
                          (-> (expect (clj->js (js-await (sk/judged-skills described "write a test")))) (.toEqual #js ["tdd"]))
                          (-> (expect (.sort (js/Object.keys (.-questions @sent)))) (.toEqual #js ["pdf" "tdd"])))))
   (js-await
-   (with-judge nil ^:async (fn [_] (-> (expect (js-await (sk/judged-skills described "write a test"))) (.toBeNil))))))
+   (with-judge nil ^:async (fn [_] (-> (expect (js-await (sk/judged-skills described "write a test"))) (.toBeNil)))))
+  ;; a judge set up for permissions only sends no prompt
+  (js-await
+   (with-judge #js {} ^:async (fn [sent]
+                                (decide/configure! {:judge {}})
+                                (-> (expect (js-await (sk/judged-skills described "write a test"))) (.toBeNil))
+                                (-> (expect @sent) (.toBeNil))))))
 
 (describe "skills:auto-activation" (fn []
   (it "a trigger phrase in the prompt activates the skill, case-insensitively"

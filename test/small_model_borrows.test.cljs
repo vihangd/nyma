@@ -133,7 +133,7 @@
             (if p
               (js/Promise.resolve #js {:ok true :json (fn [] (js/Promise.resolve #js {:answers #js {:stopped #js {:type "noul" :noul p}}}))})
               (js/Promise.reject (js/Error. "down")))))
-    (decide/configure! {:judge {}})
+    (decide/configure! {:judge {:finalize true}})
     (decide/reset-session!)
     (try
       (fw/activate (:obj fa) {:finalize-warn {:max-nudges 2}} (atom {}))

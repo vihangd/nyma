@@ -739,11 +739,11 @@
 
 (defn ^:async judged-skills
   "The skills Jev says would help with `prompt`, best first; nil when the
-   judge is off (`judge.skills` false too) or failed, so triggers decide.
+   judge is off (it needs `judge.skills` true) or failed, so triggers decide.
    One call, one yes/no question per candidate; it sees the prompt only."
   [skills prompt]
   (let [cfg   (decide/config)
-        cands (when (and cfg (not (false? (:skills cfg))) (not (str/blank? prompt)))
+        cands (when (and (true? (:skills cfg)) (not (str/blank? prompt)))
                 (judge-candidates skills prompt))]
     (when (seq cands)
       (when-let [ps (js-await
