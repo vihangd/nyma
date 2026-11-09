@@ -79,9 +79,12 @@
                                       :reason (or (.-reason r) (:reason r)
                                                   "Denied by pipeline")})
                                    {:allow? true})))  ;; nil return = allow
+                         ;; A check that crashes has not approved anything: an
+                         ;; auth or approval gate fails closed.
                          (catch (fn [e]
                                   (js/console.error "[gateway] Pipeline check error:" e)
-                                  {:allow? true}))))))) ;; check errors default to allow
+                                  {:allow? false
+                                   :reason (str "Check failed: " (or (.-message e) e))}))))))) 
         (js/Promise.resolve {:allow? true})
         @checks))}))
 

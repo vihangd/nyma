@@ -1,7 +1,7 @@
 (ns gateway-pipelines.test
   "Unit tests for gateway.pipelines — auth/approval pipeline composition.
    Verifies registration-order execution, first-deny short-circuit,
-   nil-returns-allow, and error-defaults-allow behaviour."
+   nil-returns-allow, and a check that throws denying."
   (:require ["bun:test" :refer [describe it expect]]
             [gateway.pipelines :as pipelines]))
 
@@ -92,13 +92,14 @@
     (let [r (js-await ((:run! pl) {}))]
       (-> (expect (:allow? r)) (.toBe true)))))
 
-(defn ^:async test-check-that-throws-defaults-to-allow []
+(defn ^:async test-check-that-throws-denies []
   (let [pl (pipelines/create-pipeline)]
     ((:add! pl) (fn [_] (throw (js/Error. "boom"))))
     ((:add! pl) (fn [_] #js {:allow? true}))
-    ;; Error in one check should not prevent subsequent checks
+    ;; a crashed auth or approval check approved nothing
     (let [r (js-await ((:run! pl) {}))]
-      (-> (expect (:allow? r)) (.toBe true)))))
+      (-> (expect (:allow? r)) (.toBe false))
+      (-> (expect (:reason r)) (.toMatch #"boom")))))
 
 (defn ^:async test-async-check-promise []
   (let [pl (pipelines/create-pipeline)]
@@ -136,8 +137,8 @@
                                                                 test-first-deny-wins-and-short-circuits)
                                                             (it "nil return is treated as allow"
                                                                 test-nil-return-is-allow)
-                                                            (it "check that throws defaults to allow (does not deny the request)"
-                                                                test-check-that-throws-defaults-to-allow)
+                                                            (it "check that throws denies the request"
+                                                                test-check-that-throws-denies)
                                                             (it "awaits async check returning a Promise"
                                                                 test-async-check-promise)
                                                             (it "passes request as a JS object to the check fn"
