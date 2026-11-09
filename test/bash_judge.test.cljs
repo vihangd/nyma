@@ -58,7 +58,33 @@
    (with-home nil (fn [] (js/Promise.reject (js/Error. "down")))
               ^:async (fn [_]
                         (dotimes [_ 3] (js-await (decide/decide! (args "a"))))
-                        (-> (expect (decide/paused?)) (.toBe true))))))
+                        (-> (expect (decide/paused? "bash")) (.toBe true))))))
+
+(defn ^:async test-ask-noul []
+  (let [body (atom nil)
+        fetch (fn [_ o]
+                (reset! body (js/JSON.parse (.-body o)))
+                (js/Promise.resolve
+                 #js {:ok true :json (fn [] (js/Promise.resolve
+                                             #js {:answers #js {:a #js {:type "noul" :noul 0.8}
+                                                                :b #js {:type "noul" :noul 0}}}))}))]
+    (js-await
+     (with-home nil fetch
+                ^:async (fn [_]
+                          (-> (expect (clj->js (js-await (decide/ask! {:kind "skill" :state "s" :cfg {}
+                                                                       :questions {"a" {:instructions "A?"} "b" {:instructions "B?"}}}))))
+                              (.toEqual #js {:a 0.8 :b 0}))
+                          (-> (expect (.. @body -questions -a -type)) (.toBe "noul"))
+                          ;; p 0 is a band too, not dropped as falsy
+                          (-> (expect (reduce + (map :n (decide/report (decide/read-log))))) (.toBe 2)))))))
+
+(defn ^:async test-breaker-per-kind []
+  (js-await
+   (with-home nil (fn [] (js/Promise.reject (js/Error. "down")))
+              ^:async (fn [_]
+                        (dotimes [_ 3] (js-await (decide/ask! {:kind "skill" :state "s" :cfg {} :questions {"a" {}}})))
+                        (-> (expect (decide/paused? "skill")) (.toBe true))
+                        (-> (expect (decide/paused? "bash")) (.toBe false))))))
 
 (defn ^:async test-log-and-report []
   (js-await
@@ -115,6 +141,8 @@
   (it "allows only at 0.9 or above; errors ask" test-threshold)
   (it "offers the allow option last" test-allow-last)
   (it "pauses after three errors in a row" test-breaker)
+  (it "asks yes/no questions, several per call, answered by id" test-ask-noul)
+  (it "pauses only the kind that failed" test-breaker-per-kind)
   (it "logs hashed verdicts and answers, mode 600, and reports by band" test-log-and-report)
   (it "takes its settings from the user's file, never a project's"
       (fn []
