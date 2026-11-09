@@ -22,6 +22,7 @@
     "test": "bun test dist",
     "test:fast": "npx squint compile && bun test --parallel dist",
     "test:pilish": "bash scripts/test-pilish.sh",
+    "eval:judge": "npx squint compile && bun scripts/eval-judge.mjs",
     "repl": "npx squint repl",
     "gen:bench-ledger": "bun scripts/gen-bench-ledger.mjs",
     "gen:event-map": "npx squint compile && bun scripts/gen-event-map.mjs",

@@ -114,7 +114,8 @@
                                              :subject (or (some-> (.-originalArgs data) .-command) cmd)
                                              :options judge-options
                                              :state (decide/judge-state (str (.-userRequest data))
-                                                                        (str "run this shell command in the user's project:\n" cmd))})
+                                                                        (str "run this shell command in the user's project:\n" cmd)
+                                                                        true)})
                             (fn [ok]
                               ;; Not remembered: the verdict was for this request,
                               ;; and the same command under another must be judged again.

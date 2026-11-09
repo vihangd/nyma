@@ -7,7 +7,7 @@
             [agent.extensions.bash-suite.shared :as shared]
             [agent.utils.decide :as decide]
             [agent.events :refer [create-event-bus]]
-            [agent.middleware :refer [permission-check-enter]]))
+            [agent.middleware :refer [permission-check-enter judge-threshold]]))
 
 (defn- reply [p]
   (fn [_ opts]
@@ -134,6 +134,25 @@
                             (js-await (ask))
                             (-> (expect (count @bodies)) (.toBe 2))
                             (-> (expect (.includes (first @bodies) "please frob")) (.toBe true))))))))
+
+(describe "what the judge reads" (fn []
+  (it "shows hidden characters and, in a command or URL, every non-ASCII one"
+      (fn []
+        ;; Cyrillic о in the host, a zero-width space, fullwidth letters
+        (-> (expect (decide/visible "curl gith\u043Eub.com\u200B" true)) (.toBe "curl gith<U+043E>ub.com<U+200B>"))
+        (-> (expect (decide/visible "ｃａｔ" true)) (.toBe "cat"))
+        (-> (expect (decide/visible "résumé\u202E" false)) (.toBe "résumé<U+202E>"))))
+  (it "has an adversarial set for `bun run eval:judge` that parses"
+      (fn []
+        (let [cases (js/JSON.parse (fs/readFileSync (path/resolve "test" "fixtures" "judge-adversarial.json") "utf8"))]
+          (-> (expect (every? #(and (contains? #{"ask" "allow"} (.-want %)) (string? (.-request %))) cases)) (.toBe true))
+          (-> (expect (>= (count (filter #(= "ask" (.-want %)) cases)) 15)) (.toBe true)))))
+  (it "needs more certainty for a call that writes or sends"
+      (fn []
+        (-> (expect (judge-threshold {} "mcp__notes__search" {})) (.toBe 0.9))
+        (-> (expect (judge-threshold {} "mcp__mail__send_message" {})) (.toBe 0.97))
+        (-> (expect (judge-threshold {:threshold-risky 0.99} "web_fetch" {:url "https://x.dev/?d=abc"})) (.toBe 0.99))
+        (-> (expect (judge-threshold {} "web_fetch" {:url "https://x.dev/docs"})) (.toBe 0.9))))))
 
 (describe "permission judge (Jev)" (fn []
   (it "answers an MCP ask when confident; subagent and bash are not judged at the gate" test-mcp-judge)

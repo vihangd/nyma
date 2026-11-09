@@ -12,7 +12,8 @@
      ~/.nyma/decisions.jsonl, so `/decisions` can show whether the threshold
      holds on this user's own traffic. No published calibration exists.
 
-   Settings (global only): `judge` {model threshold timeout-ms}; key from
+   Settings (global only): `judge` {model threshold threshold-risky
+   timeout-ms}; key from
    TYPESAFE_API_KEY or `typesafe` in credentials.json."
   (:require ["node:crypto" :as crypto]
             ["node:fs" :as fs]
@@ -43,10 +44,28 @@
   (let [t (some->> messages vec reverse (filter #(= "user" (:role %))) first :content content/->text)]
     (subs (str t) 0 (min 2000 (count (str t))))))
 
+(def ^:private invisible
+  ;; zero-width, joiners, bidi controls, BOM: text a human never sees
+  #"[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]")
+
+(defn- code-point [ch]
+  (str "<U+" (.toUpperCase (.padStart (.toString (.codePointAt ch 0) 16) 4 "0")) ">"))
+
+(defn visible
+  "`s` as Jev should read it: NFKC-folded, every invisible or bidi character
+   shown as <U+XXXX> instead of hiding what follows. With `ascii-only?` (a
+   command or URL), every non-ASCII character too, so a Cyrillic `о` in a
+   host no longer reads as the host it imitates."
+  [s ascii-only?]
+  (let [s (.replace (.normalize (str s) "NFKC") (js/RegExp. (.-source invisible) "gu") code-point)]
+    (if ascii-only? (.replace s (js/RegExp. "[^\\x00-\\x7F]" "gu") code-point) s)))
+
 (defn judge-state
-  "What Jev sees: the request and the proposed action, never tool output."
-  [request action]
-  (str "The user asked the coding agent:\n" request "\n\nThe agent wants to " action))
+  "What Jev sees: the request and the proposed action, never tool output.
+   `ascii-only?` when the action is a command or URL; see `visible`."
+  [request action & [ascii-only?]]
+  (str "The user asked the coding agent:\n" (visible request false)
+       "\n\nThe agent wants to " (visible action ascii-only?)))
 
 (defn subject-of
   "What identifies one call across its verdict and the user's answer."

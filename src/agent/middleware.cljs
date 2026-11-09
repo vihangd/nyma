@@ -573,6 +573,19 @@
    ["risky" "Changes state somewhere (creates, edits, sends, posts) or reaches a site the user did not ask about"]
    ["allow" "Only reads or looks up what the user's request needs"]])
 
+(def ^:private writes-re
+  #"(?i)(send|post|create|delete|remove|write|update|edit|move|upload|put|patch|publish|share|invite|pay|transfer)")
+
+(defn judge-threshold
+  "A call that changes or sends something needs more certainty: an MCP tool
+   whose name says it writes, or a web_fetch whose URL carries a query, the
+   way data leaves through a GET."
+  [cfg tool-name args]
+  (if (or (re-find writes-re (str tool-name))
+          (and (= tool-name "web_fetch") (str/includes? (str (:url args)) "?")))
+    (or (:threshold-risky cfg) 0.97)
+    (or (:threshold cfg) 0.9)))
+
 (defn ^:async judge-allows?
   "Does the judge turn this MCP or web_fetch ask into an allow? It sees the
    user's latest message and the call, never a tool's output."
@@ -586,11 +599,13 @@
          (js-await
           (decide/decide! {:kind (if (= tool-name "web_fetch") "web_fetch" "mcp")
                            :subject (decide/subject-of tool-name (or (:original-args ctx) args))
-                           :allow "allow" :cfg cfg :options judge-options
+                           :allow "allow" :options judge-options
+                           :cfg (assoc cfg :threshold (judge-threshold cfg tool-name (or (:original-args ctx) args)))
                            :state (decide/judge-state
                                    (decide/user-request (:messages (agent-state (:agent ctx))))
                                    (str "call the tool `" tool-name "` with:\n"
-                                        (subs call 0 (min 4000 (count call)))))})))))))
+                                        (subs call 0 (min 4000 (count call))))
+                                   (= tool-name "web_fetch"))})))))))
 
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
