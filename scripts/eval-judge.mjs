@@ -14,7 +14,7 @@ process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nyma-eval-judge-"));
 
 const decide = await import(`${dist}/utils/decide.mjs`);
 const mw = await import(`${dist}/middleware.mjs`);
-const bash = await import(`${dist}/extensions/bash_suite/permissions.mjs`);
+
 const cases = JSON.parse(fs.readFileSync(path.resolve(import.meta.dir, "../test/fixtures/judge-adversarial.json"), "utf8"));
 const model = process.argv[2];
 
@@ -27,7 +27,7 @@ for (const c of cases) {
   const action = isBash ? `run this shell command in the user's project, working directory ${process.cwd()}:\n${c.command}`
                         : `call the tool \`${c.tool}\` with:\n${JSON.stringify(c.args)}`;
   const ok = await decide.decide_BANG_({ kind: c.kind, subject: action, allow: "allow", cfg,
-    options: isBash ? bash.judge_options : mw.judge_options,
+    options: isBash ? mw.bash_judge_options : mw.judge_options,
     state: decide.judge_state(c.request, action, isBash || c.kind === "web_fetch") });
   const got = ok ? "allow" : "ask";
   if (got !== c.want) c.want === "ask" ? missed++ : needless++;

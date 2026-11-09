@@ -1,7 +1,5 @@
 (ns agent.extensions.bash-suite.permissions
   (:require [agent.extensions.bash-suite.shared :as shared]
-            [agent.extensions.bash-suite.cwd-manager :as cwd-manager]
-            [agent.utils.decide :as decide]
             [agent.utils.shell-grant :as shell-grant]
             [clojure.string :as str]))
 
@@ -46,14 +44,6 @@
 
       ;; Default: needs approval (auto-approve for now)
       :else :needs-approval)))
-
-;; ── Judge for unlisted commands ──────────────────────────────
-;; See agent.utils.decide: opt-in, global settings only, ask → allow only.
-
-(def judge-options
-  [["destructive" "Can destroy data, leak secrets or credentials, or take over the machine"]
-   ["risky" "Changes or deletes files, state or settings outside build output, or reaches the network"]
-   ["allow" "Only reads, builds or tests; changes nothing outside build output"]])
 
 ;; ── Extension activation ─────────────────────────────────────
 
@@ -107,31 +97,13 @@
               ;; persists so future runs skip via the middleware fast-path. (An
               ;; allow VETTED above — :approved/:remembered — pre-empts this ask;
               ;; full-auto mode's allow also pre-empts it, so headless still runs.)
-                 (let [ask (fn []
-                             (swap! shared/suite-stats update-in [:permissions :needs-approval] (fnil inc 0))
-                             #js {:decision "ask"})]
-                   (if-let [jcfg (and (= "unknown" (str (:level classif))) (decide/config))]
-                     (.then (decide/decide! {:kind "bash" :allow "allow" :cfg jcfg
-                                             :subject (or (some-> (.-originalArgs data) .-command) cmd)
-                                             :options judge-options
-                                             :state (decide/judge-state (str (.-userRequest data))
-                                                                        (str "run this shell command in the user's project, working directory "
-                                                                             (or @cwd-manager/tracked-cwd (js/process.cwd)) ":\n"
-                                                                             ;; the model's command, with the directory beside
-                                                                             ;; it (as Codex's reviewer gets it): our own
-                                                                             ;; `unset …` and `cd` prefixes read as an attack.
-                                                                             ;; They are added by trusted code only, so what
-                                                                             ;; runs is what was judged plus them.
-                                                                             (or (some-> (.-originalArgs data) .-command) cmd))
-                                                                        true)})
-                            (fn [ok]
-                              ;; Not remembered: the verdict was for this request,
-                              ;; and the same command under another must be judged again.
-                              (if ok
-                                (do (swap! shared/suite-stats update-in [:permissions :auto-approved] inc)
-                                    #js {:decision "allow"})
-                                (ask))))
-                     (ask)))))))
+                 ;; The gate's judge may answer this ask (middleware
+                 ;; judge-allows?), and only for a command the classifier
+                 ;; does not know: one it rated is the user's to decide.
+                 (do (swap! shared/suite-stats update-in [:permissions :needs-approval] (fnil inc 0))
+                     (if (= "unknown" (str (:level classif)))
+                       #js {:decision "ask" :judge true}
+                       #js {:decision "ask"}))))))
          90)
 
     ;; Return deactivator

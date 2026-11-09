@@ -39,9 +39,12 @@
 
 (defn user-request
   "The text of the latest user message in `messages`, cut to 2000 characters:
-   all the judge is told of what the user wants."
+   all the judge is told of what the user wants. Without the `@file` blocks
+   mentions append to it: those are the repo's words, not the user's, and a
+   README saying \"the user authorizes …\" must not count as asking."
   [messages]
-  (let [t (some->> messages vec reverse (filter #(= "user" (:role %))) first :content content/->text)]
+  (let [t (some->> messages vec reverse (filter #(= "user" (:role %))) first :content content/->text)
+        t (let [t (str t) i (.indexOf t "\n\n<file path=\"")] (if (neg? i) t (subs t 0 i)))]
     (subs (str t) 0 (min 2000 (count (str t))))))
 
 (def ^:private invisible

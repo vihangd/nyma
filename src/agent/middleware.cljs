@@ -507,6 +507,38 @@
    writes and bash included, unasked."
   #{"bash" "codemode__script" "bash (unsandboxed)"})
 
+(def ^:private harness-prefix-re
+  ;; bash-suite's own rewrites, in the order they stack: env_filter's
+  ;; `unset … ;`, then cwd-manager's `cd '<dir>' &&`
+  #"^(?:unset [A-Za-z0-9_ ]+ 2>/dev/null ; )?(?:cd '((?:[^']|'\\'')*)' && )?")
+
+(defn- json= [a b] (= (js/JSON.stringify (clj->js a)) (js/JSON.stringify (clj->js b))))
+
+(defn judged-args
+  "The args the user and the judge are shown. The model's own when nothing
+   but bash-suite's prefixes changed them since; otherwise what will run, so
+   a hook that rewrote the call cannot have the old one approved in its place."
+  [ctx]
+  (let [orig (:original-args ctx)
+        args (:args ctx)]
+    (if (or (nil? orig)
+            (json= orig args)
+            (and (= "bash" (:tool-name ctx))
+                 (json= (assoc orig :command "") (assoc args :command ""))
+                 (= (str (get orig :command))
+                    (.replace (str (get args :command)) harness-prefix-re ""))))
+      (or orig args)
+      args)))
+
+(defn run-dir
+  "Where this bash call runs: the directory cwd-manager put it in, else this
+   process's own, unless the call is a subagent's, whose directory the
+   parent does not know."
+  [ctx]
+  (if-let [d (aget (.exec harness-prefix-re (str (get (:args ctx) :command))) 1)]
+    (str/replace d "'\\''" "'")
+    (when-not (:source ctx) (js/process.cwd))))
+
 (defn ^:async resolve-ask
   "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
    this session / Allow always (this tool, this project) / Deny. With no
@@ -519,7 +551,7 @@
                                           "' but no interactive approval is available")))
     (let [prompt (str (when-let [s (:source ctx)] (str "Subagent " s " asks:\n"))
                       (permission-prompt-text tool-name (categorize-tool tool-name)
-                                              (or (:original-args ctx) (:args ctx)) reason))
+                                              (judged-args ctx) reason))
           ;; The run is now blocked on the user. Announced so desktop_notify
           ;; can say so: a turn stuck on an unseen prompt was the classic
           ;; "came back to nothing".
@@ -530,7 +562,7 @@
           ;; future command in the project. A compound command gets no
           ;; always-option at all.
           bash?  (= tool-name "bash")
-          base   (when bash? (shell-grant/grant-base (get (or (:original-args ctx) (:args ctx)) :command)))
+          base   (when bash? (shell-grant/grant-base (get (judged-args ctx) :command)))
           once?  (and (contains? no-whole-tool-grant tool-name) (not bash?))
           always (cond
                    once?       nil
@@ -544,7 +576,7 @@
                                       always      (conj always)
                                       true        (conj "Deny")))))
           ;; beside the judge's verdict, if it sent this ask here
-          _      (decide/answered! (decide/subject-of tool-name (or (:original-args ctx) (:args ctx)))
+          _      (decide/answered! (decide/subject-of tool-name (judged-args ctx))
                                    (boolean (and choice (.startsWith choice "Allow"))))]
       (cond
         ;; only "Allow once" is offered; any other Allow is still this once
@@ -595,26 +627,43 @@
       (max plain (or (:threshold-risky cfg) 0.97))
       plain)))
 
+(def bash-judge-options
+  [["destructive" "Can destroy data, leak secrets or credentials, or take over the machine"]
+   ["risky" "Changes or deletes files, state or settings outside build output, or reaches the network"]
+   ["allow" "Only reads, builds or tests; changes nothing outside build output"]])
+
 (defn ^:async judge-allows?
-  "Does the judge turn this MCP or web_fetch ask into an allow? It sees the
-   user's latest message and the call, never a tool's output."
-  [ctx tool-name args]
-  (let [cfg (decide/config)]
+  "Does the judge turn this ask into an allow? MCP and web_fetch asks, and a
+   bash ask bash-suite marked `judge` (a command its classifier does not
+   know). Only in the ask branch: when a mode or a grant already decides,
+   nothing is sent. It sees the user's latest message and the call as
+   `judged-args` gives it, never a tool's output."
+  [ctx tool-name judge-bash?]
+  (let [cfg  (decide/config)
+        bash? (= tool-name "bash")
+        args (judged-args ctx)]
     (boolean
      ;; Named, not by category: "other" also holds subagent and any extension
      ;; tool that edits and says nothing about itself.
-     (when (and cfg (or (= tool-name "web_fetch") (str/starts-with? (str tool-name) "mcp__")))
-       (let [call (js/JSON.stringify (clj->js (or (:original-args ctx) args)))]
+     (when (and cfg (or (= tool-name "web_fetch") (str/starts-with? (str tool-name) "mcp__")
+                        (and bash? judge-bash?)))
+       (let [call (if bash? (str (get args :command)) (js/JSON.stringify (clj->js args)))
+             call (subs call 0 (min 4000 (count call)))
+             dir  (when bash? (run-dir ctx))]
          (js-await
-          (decide/decide! {:kind (if (= tool-name "web_fetch") "web_fetch" "mcp")
-                           :subject (decide/subject-of tool-name (or (:original-args ctx) args))
-                           :allow "allow" :options judge-options
-                           :cfg (assoc cfg :threshold (judge-threshold cfg tool-name (or (:original-args ctx) args)))
+          (decide/decide! {:kind (cond bash? "bash" (= tool-name "web_fetch") "web_fetch" :else "mcp")
+                           :subject (decide/subject-of tool-name args)
+                           :allow "allow"
+                           :options (if bash? bash-judge-options judge-options)
+                           :cfg (assoc cfg :threshold (if bash? (or (:threshold cfg) 0.9)
+                                                          (judge-threshold cfg tool-name args)))
                            :state (decide/judge-state
                                    (decide/user-request (:messages (agent-state (:agent ctx))))
-                                   (str "call the tool `" tool-name "` with:\n"
-                                        (subs call 0 (min 4000 (count call))))
-                                   (= tool-name "web_fetch"))})))))))
+                                   (if bash?
+                                     (str "run this shell command in the user's project"
+                                          (when dir (str ", working directory " dir)) ":\n" call)
+                                     (str "call the tool `" tool-name "` with:\n" call))
+                                   (or bash? (= tool-name "web_fetch")))})))))))
 
 (defn ^:async permission-check-enter
   "Check permission_request before tool execution.
@@ -649,9 +698,6 @@
                                                    :args     (clj->js args)
                                                    ;; what a hook rewrote `args` from
                                                    :originalArgs (clj->js (:original-args ctx))
-                                                   ;; for a judge: what the user asked, never tool output
-                                                   :userRequest (when (decide/config)
-                                                                  (decide/user-request (:messages (agent-state (:agent ctx)))))
                                                    :category (categorize-tool tool-name)
                                                    :path     (get args :path)}))
             decision (get result "decision")
@@ -693,8 +739,9 @@
                      (and settings (:bash-allowed? settings)
                           ((:bash-allowed? settings) (get args :command)))))
             ctx
-            ;; MCP and web_fetch asks: the judge may answer first (agent.utils.decide)
-            (js-await (judge-allows? ctx tool-name args)) ctx
+            ;; MCP, web_fetch and unknown-bash asks: the judge may answer
+            ;; first (agent.utils.decide), only now that nothing else has
+            (js-await (judge-allows? ctx tool-name (get result "judge"))) ctx
             :else (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) tool-name reason)))
 
           (= decision "allow_always_project")
