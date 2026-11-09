@@ -10,12 +10,27 @@
         (-> (expect (str err)) (.toMatch #"Refused: 10\.0\.0\.1")))
       (finally (.stop srv true)))))
 
+(defn ^:async refused [url]
+  (try (js-await (tools/direct-fetch url "text" 100)) nil
+       (catch :default e (.-message e))))
+
+(defn ^:async test-schemes []
+  (-> (expect (str (js-await (refused "file:///etc/hosts")))) (.toMatch #"http\(s\) URLs only"))
+  (-> (expect (str (js-await (refused "http://[::ffff:169.254.169.254]/latest")))) (.toMatch #"Refused"))
+  (let [srv (js/Bun.serve #js {:port 0 :fetch (fn [_] (js/Response. nil #js {:status 302 :headers #js {:location "file:///etc/hosts"}}))})]
+    (try
+      (-> (expect (str (js-await (refused (str "http://127.0.0.1:" (.-port srv) "/"))))) (.toMatch #"http\(s\) URLs only"))
+      (finally (.stop srv true)))))
+
 (describe "web_fetch address guard" (fn []
+  (it "takes only http(s), on every hop, and sees IPv4 inside IPv6" test-schemes)
   (it "refuses private, link-local and carrier-NAT addresses; allows loopback and public"
       (fn []
         (doseq [[ip blocked] [["10.1.2.3" true] ["172.31.0.1" true] ["172.32.0.1" false] ["192.168.0.9" true]
                               ["169.254.169.254" true] ["100.64.0.1" true] ["0.0.0.0" true]
                               ["::ffff:192.168.1.1" true] ["fe80::1" true] ["fd12::1" true]
+                              ["::ffff:a9fe:a9fe" true] ["64:ff9b::a9fe:a9fe" true] ["64:ff9b::10.0.0.1" true]
+                              ["::ffff:808:808" false] ["64:ff9b::8.8.8.8" false]
                               ["127.0.0.1" false] ["::1" false] ["8.8.8.8" false] ["2606:4700::1" false]]]
           (-> (expect #js [ip (tools/blocked-address? ip)]) (.toEqual #js [ip blocked])))))
   (it "checks every redirect hop" test-redirect)))

@@ -488,7 +488,15 @@
    before fetch resolves it again; DNS rebinding in between is not caught."
   [ip]
   (let [ip (str/lower-case (str ip))
-        v4 (or (second (re-find #"^::ffff:(\d+\.\d+\.\d+\.\d+)$" ip)) ip)]
+        ;; IPv4 inside IPv6 (mapped ::ffff:, NAT64 64:ff9b::, compatible ::),
+        ;; dotted or in the hex form URL parsing normalises it to
+        [_ _ emb] (re-find #"^(::ffff:|64:ff9b::|::)([0-9a-f.:]+)$" ip)
+        v4 (cond
+             (and emb (re-find #"^\d+\.\d+\.\d+\.\d+$" emb)) emb
+             (and emb (re-find #"^[0-9a-f]{1,4}:[0-9a-f]{1,4}$" emb))
+             (let [[h l] (map #(js/parseInt % 16) (str/split emb #":"))]
+               (str (bit-shift-right h 8) "." (bit-and h 255) "." (bit-shift-right l 8) "." (bit-and l 255)))
+             :else ip)]
     (if-let [[_ a b] (re-find #"^(\d+)\.(\d+)\.\d+\.\d+$" v4)]
       (let [a (js/parseInt a) b (js/parseInt b)]
         (or (= a 0) (= a 10) (and (= a 172) (<= 16 b 31)) (and (= a 192) (= b 168))
@@ -496,9 +504,13 @@
       (boolean (or (= ip "::") (re-find #"^fe[89ab]" ip) (re-find #"^f[cd]" ip))))))
 
 (defn ^:async check-fetch-host!
-  "Throw when `url`'s host resolves to a blocked address."
+  "Throw unless `url` is http(s) to a host that resolves to no blocked
+   address. Bun's fetch reads file:// (an empty host resolves to nothing)."
   [url]
-  (let [host  (str/replace (.-hostname (js/URL. url)) #"^\[|\]$" "")
+  (let [u     (js/URL. url)
+        _     (when-not (contains? #{"http:" "https:"} (.-protocol u))
+                (throw (js/Error. (str "Refused: web_fetch takes http(s) URLs only, not " (.-protocol u)))))
+        host  (str/replace (.-hostname u) #"^\[|\]$" "")
         addrs (js-await (.lookup (.-promises dns) host #js {:all true}))]
     (when-let [bad (some #(when (blocked-address? (.-address %)) (.-address %)) addrs)]
       (throw (js/Error. (str "Refused: " host " resolves to " bad
