@@ -50,7 +50,8 @@
             [agent.token-estimation :refer [estimate-tokens]]
             [agent.utils.template-args :as template-args]
             [agent.extension-loader :refer [load-extension]]
-            [agent.extensions :refer [create-extension-api]]))
+            [agent.extensions :refer [create-extension-api]]
+            [agent.utils.decide :as decide]))
 
 ;;; ─── Frontmatter parsing ───────────────────────────────────────
 
@@ -677,8 +678,9 @@
 (defn auto-activated
   "Names of skills to activate this turn: trigger matches on `prompt` plus
    path-scoped skills matching any of `touched` paths. Hidden skills
-   (`disable-model-invocation`) never auto-activate. Pure."
-  [skills prompt touched & [active]]
+   (`disable-model-invocation`) never auto-activate. `picks`, when given, are
+   the judge's choices, best first, and replace the trigger matches. Pure."
+  [skills prompt touched & [active picks]]
   (let [visible (remove (fn [[_ s]] (:disable-model-invocation s)) skills)
         ;; A project skill may auto-inject on a PATH match: that means you are
         ;; working in a file it claims, which is the case auto-activation was
@@ -687,7 +689,10 @@
         ;; so a cloned repo could otherwise put its own instructions in front
         ;; of the model on every turn without you or the model choosing it.
         triggerable (remove (fn [[_ s]] (project-skill? s)) visible)
-        by-trig (set (matching-triggers (into {} triggerable) prompt))
+        trig    (if picks
+                  (filterv #(contains? (set (map first triggerable)) %) picks)
+                  (sort (matching-triggers (into {} triggerable) prompt)))
+        by-trig (set trig)
         by-path (set (keep (fn [[n s]]
                              (when (and (seq (:paths s))
                                         (some #(path-matches-skill? s %) touched))
@@ -700,10 +705,57 @@
         ;; claims" is a stronger signal than a phrase in the prompt, and a plain
         ;; alphabetical cap could drop it for an earlier-sorting trigger match.
         ordered (concat (sort (remove drop? by-path))
-                        (sort (remove drop? (remove by-path by-trig))))]
+                        (remove drop? (remove by-path trig)))]
     ;; Cap the per-turn total. Bodies land after the cache boundary, so every
     ;; one of them is re-sent on every turn it matches.
     (vec (take max-auto-activated ordered))))
+
+(def max-judged
+  "How many skills one judge call weighs. Past this, a shortlist: Jev's
+   accuracy falls as its input grows."
+  60)
+
+(defn- words [s]
+  (set (or (.match (str/lower-case (str s)) (js/RegExp. "[a-z0-9]{4,}" "g")) [])))
+
+(defn judge-candidates
+  "Skills the judge may pick for `prompt`: visible, not a project's (a cloned
+   repo must not choose its own instructions), described. Over `max-judged`,
+   the trigger matches and then those sharing most words with the prompt."
+  [skills prompt]
+  (let [cands (remove (fn [[_ s]] (or (:disable-model-invocation s) (project-skill? s)
+                                      (str/blank? (str (:description s)))))
+                      skills)]
+    (if (<= (count cands) max-judged)
+      (vec cands)
+      (let [ws   (words prompt)
+            trig (set (matching-triggers (into {} cands) prompt))
+            rank (fn [[n s]] (+ (if (contains? trig n) 1000 0)
+                                (count (filter #(contains? ws %) (words (:description s))))))]
+        (vec (take max-judged (sort-by #(- (rank %)) cands)))))))
+
+(defn ^:async judged-skills
+  "The skills Jev says would help with `prompt`, best first; nil when the
+   judge is off (`judge.skills` false too) or failed, so triggers decide.
+   One call, one yes/no question per candidate; it sees the prompt only."
+  [skills prompt]
+  (let [cfg   (decide/config)
+        cands (when (and cfg (not (false? (:skills cfg))) (not (str/blank? prompt)))
+                (judge-candidates skills prompt))]
+    (when (seq cands)
+      (when-let [ps (js-await
+                     (decide/ask! {:kind "skill" :cfg cfg
+                                   :state (str "The user asked a coding agent:\n"
+                                               (decide/visible (subs prompt 0 (min 2000 (count prompt))) false))
+                                   :questions (into {} (map (fn [[n s]]
+                                                              [n {:instructions (str "Would the instructions of the skill \"" n "\" ("
+                                                                                     (budget-description (str (:description s)) 300)
+                                                                                     ") help the agent with this request?")}])
+                                                            cands))}))]
+        (->> ps
+             (filter (fn [[_ p]] (>= p (or (:skill-threshold cfg) 0.7))))
+             (sort-by (fn [[_ p]] (- p)))
+             (mapv first))))))
 
 (defn activation-block
   "The prompt text for auto-activated skill bodies, or nil."
@@ -762,7 +814,7 @@
                                           (if (> (count ps) max-touched-paths)
                                             (subvec ps (- (count ps) max-touched-paths))
                                             ps))))))
-          on-start (fn [d]
+          on-start ^:async (fn [d]
                      ;; Once per turn, drop tools whose skill is gone. Any path
                      ;; that clears or replaces the message list — compaction,
                      ;; context pruning, a spec-loop reset — can end a skill
@@ -771,8 +823,9 @@
                      ;; of one map lookup when there is nothing to do.
                      (release-orphaned-tools! agent)
                      (let [active (:active-skills @(:state agent))
-                           names  (auto-activated skills (prompt-text (.-userMessage d))
-                                                  @touched active)]
+                           prompt (prompt-text (.-userMessage d))
+                           names  (auto-activated skills prompt @touched active
+                                                  (js-await (judged-skills skills prompt)))]
                        (when-let [block (activation-block skills names)]
                          (doseq [n names] (count-activation! n :auto))
                          #js {"volatile-additions" #js [block]})))]
