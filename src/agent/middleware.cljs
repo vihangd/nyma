@@ -8,6 +8,7 @@
             [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.debug :as d]
             [agent.utils.shell-grant :as shell-grant]
+            [agent.utils.sandbox :as sandbox]
             [clojure.string :as str]))
 
 (defn normalize-tool-result
@@ -499,7 +500,7 @@
    script, which is arbitrary code that preapproves every tool it names — one
    session grant on a read-only script would have run every later script,
    writes and bash included, unasked."
-  #{"bash" "codemode__script"})
+  #{"bash" "codemode__script" "bash (unsandboxed)"})
 
 (defn ^:async resolve-ask
   "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
@@ -603,6 +604,15 @@
         (cond
           (= decision "deny")
           (assoc ctx :cancelled true :cancel-reason (or reason "Permission denied"))
+
+          ;; Leaving the sandbox always asks, full-auto included, and only
+          ;; for this once. A worktree child has no one to ask.
+          (and (= tool-name "bash") (true? (get args :unsandboxed)) @sandbox/root)
+          (if (.. js/process -env -NYMA_WRITE_ROOT)
+            (assoc ctx :cancelled true
+                   :cancel-reason "A worktree subagent cannot run outside the sandbox; report what you need to the parent.")
+            (js-await (resolve-ask settings ctx (agent-ui (:agent ctx)) "bash (unsandboxed)"
+                                   "Runs OUTSIDE the sandbox: no limits on writes, reads or network")))
 
           ;; An active skill that declared the tool in `allowed-tools` has
           ;; already answered the question for the user — but only the ask.

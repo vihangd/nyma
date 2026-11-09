@@ -33,6 +33,7 @@
             [agent.providers.oauth :as oauth]
             [agent.file-access :as file-access]
             [agent.utils.sandbox :as sandbox]
+            [agent.utils.ui :refer [ui-prompt-ready?]]
             [agent.extensions.model-roles.policy :as perm-policy]
             ["./modes/interactive.mjs" :as interactive]
             [agent.modes.print :as print-mode]
@@ -1289,7 +1290,19 @@ Examples:
       (when-let [root (.. js/process -env -NYMA_WRITE_ROOT)]
         (file-access/register-write-root (:events agent) root))
       ;; the user's file only: a cloned repo must not turn its own sandbox off
-      (sandbox/configure! (:sandbox ((:user-settings settings) :global)))
+      (sandbox/configure!
+       (:sandbox ((:user-settings settings) :global))
+       {:ask (fn [host]
+               (let [ui (some-> (.-extension-api agent) .-ui)]
+                 (if (or (= "full-auto" (str (:permission-mode @(:state agent))))
+                         (not (ui-prompt-ready? ui)))
+                   (js/Promise.resolve nil)
+                   (.select ui (str "Sandboxed bash wants to reach " host)
+                            (clj->js sandbox/host-choices)))))
+        :save-host! (fn [host]
+                      (let [sb (or (:sandbox ((:user-settings settings) :global)) {})]
+                        ((:save-global settings)
+                         {:sandbox (assoc sb :allow-hosts (vec (distinct (conj (vec (:allow-hosts sb)) host))))})))})
 
       ;; Register built-in commands with reload support
       (register-builtins agent session resources extensions-atom resolve-ext-flags)

@@ -144,10 +144,13 @@
                                     :replace_all [:boolean {:optional true :doc "Replace all occurrences instead of requiring a unique match"}]})
         :execute edit-execute}))
 
-(defn ^:async bash-execute [{:keys [command timeout]} & [ext-ctx]]
+(defn ^:async bash-execute [{:keys [command timeout unsandboxed]} & [ext-ctx]]
   (let [limit-ms (or timeout 30000)
         started  (js/Date.now)
-        {:keys [argv env sandboxed?]} (js-await (sandbox/wrap command))
+        ;; the permission gate asked for this; a worktree child never gets it
+        {:keys [argv env sandboxed?]} (if (and unsandboxed (not (.. js/process -env -NYMA_WRITE_ROOT)))
+                                        {:argv ["sh" "-c" command]}
+                                        (js-await (sandbox/wrap command)))
         proc     (js/Bun.spawn (clj->js argv)
                                (cond-> #js {:timeout limit-ms
                                             :stdout  "pipe"
@@ -240,7 +243,8 @@
    #js {:description "Run a shell command. Use only for build, test, git, and install commands. For file operations use the dedicated read/write/edit/ls/glob/grep tools instead."
         :inputSchema  (schema/->zod {
                                     :command [:string]
-                                    :timeout [:number {:optional true :doc "Timeout in ms, default 30000"}]})
+                                    :timeout [:number {:optional true :doc "Timeout in ms, default 30000"}]
+                                    :unsandboxed [:boolean {:optional true :doc "Run outside the sandbox. Only after a command failed on a sandbox denial and is needed; always asks the user"}]})
         :execute bash-tool-execute}))
 
 ;;; ─── think ─────────────────────────────────────────────────

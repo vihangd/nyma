@@ -783,7 +783,11 @@ its or a submodule's hooks, config or info) and temp; not `.nyma/`, `.envrc`, sh
 and has no network (`sandbox.child-network: "registries"` allows package registries). Settings in
 `~/.nyma/settings.json` only: `sandbox.bash` `"worktree"` (default), `"always"` (every session,
 confined to its cwd, registries allowed) or `"off"`; `sandbox.deny-read` and `sandbox.allow-hosts`
-extend the lists. Unlisted commands still ask. On Linux it needs `bwrap` and `socat`; where the
+extend the lists. Unlisted commands still ask. In a sandboxed main session, a host on no list
+prompts: once, this session, or always (saved to `sandbox.allow-hosts`); full-auto and headless
+runs refuse it, naming the host. bash's `unsandboxed: true` runs a command outside the sandbox
+after a prompt, every time, full-auto included; a worktree child never can. A hosted ACP agent's
+terminal runs in the same sandbox. On Linux it needs `bwrap` and `socat`; where the
 sandbox cannot start, nyma warns once and runs bash unconfined.
 
 A role with `"model": "inherit"` or no model uses the parent's, and so does a built-in role whose

@@ -71,15 +71,40 @@
                                          (when git (git-protected git))))
                 :denyRead   (vec (concat secret-paths (:deny-read cfg)))}})
 
+(def host-choices ["Allow once" "Allow for this session" "Allow always (every project)" "Deny"])
+
+(defn host-asker
+  "srt's callback for a host no list decides. `ask` shows `host-choices` and
+   resolves to one (nil: no one to ask); `save!` records an always. A child,
+   and a session with no one to ask, is refused with the host named."
+  [child? ask save!]
+  (let [session (atom #{})
+        deny    (fn [reason] (if (.-askCallbackDenyReason SandboxManager) #js {:allow false :reason reason} false))]
+    ^:async
+    (fn [params]
+      (let [host (str (.-host params))]
+        (cond
+          (contains? @session host) true
+          (or child? (nil? ask))
+          (deny (str host " is not on the sandbox's allow list; ask the user to add it to sandbox.allow-hosts"))
+          :else
+          (let [c (str (js-await (ask host)))]
+            (cond
+              (= c (nth host-choices 0)) true
+              (= c (nth host-choices 1)) (do (swap! session conj host) true)
+              (= c (nth host-choices 2)) (do (swap! session conj host) (when save! (save! host)) true)
+              :else (deny (str "the user did not allow " host)))))))))
+
 (defn- ^:async start!
-  [dir child? cfg]
+  [dir child? cfg opts]
   (try
     (when-not (.isSupportedPlatform SandboxManager)
       (throw (js/Error. "this platform is not supported")))
     (when-let [errs (seq (.-errors (.checkDependencies SandboxManager)))]
       (throw (js/Error. (first errs))))
     (js-await (.reset SandboxManager))
-    (js-await (.initialize SandboxManager (clj->js (policy dir (git-common-dir dir) child? cfg))))
+    (js-await (.initialize SandboxManager (clj->js (policy dir (git-common-dir dir) child? cfg))
+                           (host-asker child? (:ask opts) (:save-host! opts))))
     true
     (catch :default e
       (d/warn "sandbox" (str "bash is not confined to " dir ": " (.-message e)))
@@ -88,8 +113,9 @@
 (defn configure!
   "Pick the root from the user's `sandbox` settings: `bash` \"worktree\"
    (default) confines a worktree child to its checkout, \"always\" any session
-   to its cwd, \"off\" nothing. Returns the readiness promise."
-  [cfg]
+   to its cwd, \"off\" nothing. `opts`: `:ask` and `:save-host!`, see
+   `host-asker`. Returns the readiness promise."
+  [cfg & [opts]]
   (let [child (.. js/process -env -NYMA_WRITE_ROOT)
         dir   (some-> (case (str (or (:bash cfg) "worktree"))
                         "off"    nil
@@ -97,7 +123,7 @@
                         child)
                       real)]
     (reset! root dir)
-    (reset! ready (if dir (start! dir (some? child) cfg) (js/Promise.resolve false)))))
+    (reset! ready (if dir (start! dir (some? child) cfg opts) (js/Promise.resolve false)))))
 
 (def ^:private secret-env
   #"(?i)(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIALS?)$|^(AWS_|ANTHROPIC_|OPENAI_|SSH_AUTH_SOCK$|GH_TOKEN$|GITHUB_TOKEN$|TYPESAFE_)")

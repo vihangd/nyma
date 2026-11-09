@@ -5,7 +5,9 @@
             ["node:path" :as path]
             [agent.tools :refer [bash-execute]]
             [agent.utils.sandbox :as sandbox]
-            [agent.extensions.bash-suite.permissions :as permissions]))
+            [agent.extensions.bash-suite.permissions :as permissions]
+            [agent.events :refer [create-event-bus]]
+            [agent.middleware :refer [permission-check-enter]]))
 
 (def mac? (and (= "darwin" js/process.platform) (some? (js/Bun.which "sandbox-exec"))))
 
@@ -84,3 +86,46 @@
         (-> (expect (js/Object.keys (sandbox/scrub-env #js {:ANTHROPIC_API_KEY "a" :FOO_TOKEN "b" :SSH_AUTH_SOCK "s"
                                                             :GH_TOKEN "g" :PATH "/bin" :HTTPS_PROXY "p" :HOME "/h"})))
             (.toEqual #js ["PATH" "HTTPS_PROXY" "HOME"]))))))
+
+(defn ^:async test-host-asker []
+  (let [asked (atom 0) saved (atom nil)
+        ask   (fn [c] (fn [_] (swap! asked inc) (js/Promise.resolve c)))
+        q     #js {:host "example.org" :port 443}]
+    ;; a child is never asked
+    (-> (expect (js-await ((sandbox/host-asker true (ask "Allow once") nil) q))) (.not.toBe true))
+    (-> (expect @asked) (.toBe 0))
+    ;; no one to ask: refused
+    (-> (expect (js-await ((sandbox/host-asker false nil nil) q))) (.not.toBe true))
+    (-> (expect (js-await ((sandbox/host-asker false (ask nil) nil) q))) (.not.toBe true))
+    ;; session: asked once
+    (let [f (sandbox/host-asker false (ask "Allow for this session") nil)]
+      (reset! asked 0)
+      (js-await (f q))
+      (-> (expect (js-await (f q))) (.toBe true))
+      (-> (expect @asked) (.toBe 1)))
+    ;; always: saved
+    (js-await ((sandbox/host-asker false (ask "Allow always (every project)") #(reset! saved %)) q))
+    (-> (expect @saved) (.toBe "example.org"))))
+
+(describe "sandbox host prompt" (fn []
+  (it "asks the user once per session, never for a child, and saves an always" test-host-asker)))
+
+(defn ^:async test-escalation []
+  (let [events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {:decision "allow"}))
+        gate   #(permission-check-enter events nil {:tool-name "bash" :args {:command "make" :unsandboxed %}})]
+    (reset! sandbox/root "/")
+    (try
+      ;; full-auto's allow does not cover leaving the sandbox; no UI → denied
+      (-> (expect (:cancelled (js-await (gate true)))) (.toBe true))
+      (-> (expect (boolean (:cancelled (js-await (gate false))))) (.toBe false))
+      (aset (.-env js/process) "NYMA_WRITE_ROOT" "/x")
+      (-> (expect (:cancel-reason (js-await (gate true)))) (.toMatch #"worktree subagent"))
+      (finally
+        (js-delete (.-env js/process) "NYMA_WRITE_ROOT")
+        (reset! sandbox/root nil)))
+    ;; no sandbox: nothing to leave
+    (-> (expect (boolean (:cancelled (js-await (gate true))))) (.toBe false))))
+
+(describe "sandbox escalation" (fn []
+  (it "asks to leave the sandbox even when allowed, never for a child" test-escalation)))

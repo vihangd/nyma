@@ -3,7 +3,9 @@
    Handles: permission, fs, terminal operations."
   (:require [agent.extensions.agent-shell.acp.client :as client]
             [agent.extensions.agent-shell.shared :as shared]
+            [agent.utils.sandbox :as sandbox]
             [clojure.string :as str]
+            ["shell-quote" :as shell-quote]
             ["node:fs" :as fs]
             ["node:path" :as path]))
 
@@ -95,8 +97,9 @@
 
 ;;; ─── Terminal handlers ─────────────────────────────────────
 
-(defn handle-terminal-create
-  "Spawn a subprocess for the agent's terminal/create request."
+(defn ^:async handle-terminal-create
+  "Spawn a subprocess for the agent's terminal/create request: the hosted
+   agent's command, so it runs in nyma's bash sandbox when one is on."
   [conn parsed]
   (let [params       (.-params parsed)
         command      (.-command params)
@@ -105,11 +108,13 @@
         project-root (:project-root conn)
         tid          (str "t-" (js/Date.now) "-" (js/Math.round (* (js/Math.random) 10000)))
         cmd-args     (into [command] args)
-        proc         (js/Bun.spawn (clj->js cmd-args)
-                                   #js {:cwd   (or cwd project-root (js/process.cwd))
-                                        :stdout "pipe"
-                                        :stderr "pipe"
-                                        :stdin  "pipe"})
+        {:keys [argv env]} (js-await (sandbox/wrap (.quote shell-quote (clj->js cmd-args))))
+        proc         (js/Bun.spawn (clj->js argv)
+                                   (cond-> #js {:cwd   (or cwd project-root (js/process.cwd))
+                                                :stdout "pipe"
+                                                :stderr "pipe"
+                                                :stdin  "pipe"}
+                                     env (doto (aset "env" env))))
         output       (atom "")
         decoder      (js/TextDecoder.)]
     ;; Collect stdout + stderr
