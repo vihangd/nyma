@@ -609,21 +609,34 @@
    ["risky" "Changes state somewhere (creates, edits, sends, posts) or reaches a site the user did not ask about"]
    ["allow" "Only reads or looks up what the user's request needs"]])
 
-(def ^:private writes-re
-  #"(?i)(send|post|create|delete|remove|write|update|edit|move|upload|put|patch|publish|share|invite|pay|transfer|merge|push|commit|exec|run|add|set|assign|comment|reply|react|insert|drop|archive|close|approve|submit|order|buy|grant|revoke|rename|label|schedule|forward|import|sync)")
+(def ^:private reads-re
+  #"(?i)(get|list|search|read|fetch|query|find|describe|view|show|lookup|count|status|info|stat)")
 
-(def ^:private carries-data-re
-  ;; a query or fragment, or a long opaque path segment: where a GET hides data
-  #"[?#]|/[A-Za-z0-9+=_%-]{32,}")
+(def ^:private writes-re
+  #"(?i)(send|post|create|delete|remove|write|update|edit|move|upload|put|patch|publish|share|invite|pay|transfer|merge|push|commit|exec|run|add|set|assign|comment|reply|react|insert|drop|archive|close|approve|submit|order|buy|grant|revoke|rename|label|schedule|forward|import|sync|save|modify|change|store|mkdir|rm|kill|deploy|cancel|trigger|invoke|start|stop|restart|destroy|purge|reset|apply|install|enable|disable|link|attach|mark|copy|clone|fork|subscribe|block)")
+
+(defn- carries-data?
+  "Could this URL be carrying data out? A query or fragment, a long path, or a
+   path segment or host label long enough to hold an encoded secret."
+  [url]
+  (let [u (try (js/URL. (str url)) (catch :default _ nil))]
+    (or (nil? u)
+        (seq (.-search u)) (seq (.-hash u))
+        (> (count (.-pathname u)) 100)
+        (some #(and (>= (count %) 16) (re-find #"[0-9A-Z]" %))
+              (concat (.split (.-pathname u) "/") (.split (.-hostname u) "."))))))
 
 (defn judge-threshold
-  "A call that changes or sends something needs more certainty: an MCP tool
-   whose name says it writes, or a web_fetch whose URL could carry data out.
-   Never below the plain threshold, so tightening that tightens this too."
+  "A call that may change or send something needs more certainty: an MCP
+   tool unless its name reads as a read and not a write (unknown names count
+   as writes), or a web_fetch whose URL could carry data out. Never below
+   the plain threshold, so tightening that tightens this too."
   [cfg tool-name args]
-  (let [plain (or (:threshold cfg) 0.9)]
-    (if (or (re-find writes-re (str tool-name))
-            (and (= tool-name "web_fetch") (re-find carries-data-re (str (:url args)))))
+  (let [plain (or (:threshold cfg) 0.9)
+        n     (str tool-name)]
+    (if (if (= n "web_fetch")
+          (carries-data? (:url args))
+          (or (re-find writes-re n) (not (re-find reads-re n))))
       (max plain (or (:threshold-risky cfg) 0.97))
       plain)))
 

