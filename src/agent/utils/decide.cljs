@@ -52,13 +52,15 @@
   (str "<U+" (.toUpperCase (.padStart (.toString (.codePointAt ch 0) 16) 4 "0")) ">"))
 
 (defn visible
-  "`s` as Jev should read it: NFKC-folded, every invisible or bidi character
-   shown as <U+XXXX> instead of hiding what follows. With `ascii-only?` (a
-   command or URL), every non-ASCII character too, so a Cyrillic `о` in a
-   host no longer reads as the host it imitates."
+  "`s` as Jev should read it. With `ascii-only?` (a command or URL), every
+   non-ASCII character spelled out as <U+XXXX>, BEFORE any folding: a
+   fullwidth `～` must not reach Jev as the `~` it imitates, nor a Cyrillic
+   `о` as a Latin one. Otherwise NFKC-folded, with invisible and bidi
+   characters spelled out instead of hiding what follows."
   [s ascii-only?]
-  (let [s (.replace (.normalize (str s) "NFKC") (js/RegExp. (.-source invisible) "gu") code-point)]
-    (if ascii-only? (.replace s (js/RegExp. "[^\\x00-\\x7F]" "gu") code-point) s)))
+  (if ascii-only?
+    (.replace (str s) (js/RegExp. "[^\\x00-\\x7F]" "gu") code-point)
+    (.replace (.normalize (str s) "NFKC") (js/RegExp. (.-source invisible) "gu") code-point)))
 
 (defn judge-state
   "What Jev sees: the request and the proposed action, never tool output.

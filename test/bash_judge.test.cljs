@@ -140,7 +140,9 @@
       (fn []
         ;; Cyrillic о in the host, a zero-width space, fullwidth letters
         (-> (expect (decide/visible "curl gith\u043Eub.com\u200B" true)) (.toBe "curl gith<U+043E>ub.com<U+200B>"))
-        (-> (expect (decide/visible "ｃａｔ" true)) (.toBe "cat"))
+        ;; not folded first: fullwidth stays visibly foreign
+        (-> (expect (decide/visible "cat ～/.ssh" true)) (.toBe "cat <U+FF5E>/.ssh"))
+        (-> (expect (decide/visible "ｃａｔ" false)) (.toBe "cat"))
         (-> (expect (decide/visible "résumé\u202E" false)) (.toBe "résumé<U+202E>"))))
   (it "has an adversarial set for `bun run eval:judge` that parses"
       (fn []
@@ -152,7 +154,13 @@
         (-> (expect (judge-threshold {} "mcp__notes__search" {})) (.toBe 0.9))
         (-> (expect (judge-threshold {} "mcp__mail__send_message" {})) (.toBe 0.97))
         (-> (expect (judge-threshold {:threshold-risky 0.99} "web_fetch" {:url "https://x.dev/?d=abc"})) (.toBe 0.99))
-        (-> (expect (judge-threshold {} "web_fetch" {:url "https://x.dev/docs"})) (.toBe 0.9))))))
+        (-> (expect (judge-threshold {} "web_fetch" {:url "https://x.dev/docs"})) (.toBe 0.9))
+        ;; a secret in the path, and verbs beyond the first list
+        (-> (expect (judge-threshold {} "web_fetch" {:url "https://x.dev/c2VjcmV0LWtleS1nb2VzLWhlcmUtYWJjZGVm"})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "mcp__github__merge_pull_request" {})) (.toBe 0.97))
+        (-> (expect (judge-threshold {} "mcp__db__execute_query" {})) (.toBe 0.97))
+        ;; tightening the plain threshold never leaves writes easier
+        (-> (expect (judge-threshold {:threshold 0.99} "mcp__mail__send_message" {})) (.toBe 0.99))))))
 
 (describe "permission judge (Jev)" (fn []
   (it "answers an MCP ask when confident; subagent and bash are not judged at the gate" test-mcp-judge)

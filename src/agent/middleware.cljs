@@ -574,17 +574,22 @@
    ["allow" "Only reads or looks up what the user's request needs"]])
 
 (def ^:private writes-re
-  #"(?i)(send|post|create|delete|remove|write|update|edit|move|upload|put|patch|publish|share|invite|pay|transfer)")
+  #"(?i)(send|post|create|delete|remove|write|update|edit|move|upload|put|patch|publish|share|invite|pay|transfer|merge|push|commit|exec|run|add|set|assign|comment|reply|react|insert|drop|archive|close|approve|submit|order|buy|grant|revoke|rename|label|schedule|forward|import|sync)")
+
+(def ^:private carries-data-re
+  ;; a query or fragment, or a long opaque path segment: where a GET hides data
+  #"[?#]|/[A-Za-z0-9+=_%-]{32,}")
 
 (defn judge-threshold
   "A call that changes or sends something needs more certainty: an MCP tool
-   whose name says it writes, or a web_fetch whose URL carries a query, the
-   way data leaves through a GET."
+   whose name says it writes, or a web_fetch whose URL could carry data out.
+   Never below the plain threshold, so tightening that tightens this too."
   [cfg tool-name args]
-  (if (or (re-find writes-re (str tool-name))
-          (and (= tool-name "web_fetch") (str/includes? (str (:url args)) "?")))
-    (or (:threshold-risky cfg) 0.97)
-    (or (:threshold cfg) 0.9)))
+  (let [plain (or (:threshold cfg) 0.9)]
+    (if (or (re-find writes-re (str tool-name))
+            (and (= tool-name "web_fetch") (re-find carries-data-re (str (:url args)))))
+      (max plain (or (:threshold-risky cfg) 0.97))
+      plain)))
 
 (defn ^:async judge-allows?
   "Does the judge turn this MCP or web_fetch ask into an allow? It sees the
