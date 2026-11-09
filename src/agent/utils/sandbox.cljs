@@ -165,6 +165,14 @@
       {:argv (vec (.-argv r)) :env (scrub-env (.-env r)) :sandboxed? true})
     {:argv ["sh" "-c" command] :env nil}))
 
+(defn ^:async wrap-call
+  "`wrap` for a bash call's args: plain `sh -c` only when the permission gate
+   put its approval token in `unsandboxed`, and never in a worktree child."
+  [command unsandboxed]
+  (if (and (identical? unsandboxed escape-approved) (not (.. js/process -env -NYMA_WRITE_ROOT)))
+    {:argv ["sh" "-c" command] :env nil}
+    (js-await (wrap command))))
+
 (defn annotate
   "`stderr` with the sandbox's denials for `command` appended, so the model
    learns which path or host was refused instead of retrying blind."

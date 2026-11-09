@@ -149,6 +149,9 @@
       (js-delete (.-env js/process) "NYMA_WRITE_ROOT")
       ;; a forged flag stays sandboxed
       (js-await (bash-execute {:command (str "touch " d "/../nyma-esc-b") :unsandboxed true}))
+      ;; what background jobs spawn with too: only the token is plain sh
+      (-> (expect (clj->js (:argv (js-await (sandbox/wrap-call "true" sandbox/escape-approved))))) (.toEqual #js ["sh" "-c" "true"]))
+      (-> (expect (:sandboxed? (js-await (sandbox/wrap-call "true" true)))) (.toBe true))
       (-> (expect #js [(fs/existsSync (path/join d ".." "nyma-esc-a")) (fs/existsSync (path/join d ".." "nyma-esc-b"))])
           (.toEqual #js [false false]))
       (finally

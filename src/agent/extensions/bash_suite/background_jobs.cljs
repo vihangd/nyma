@@ -90,7 +90,8 @@
     (.then (.-exited proc)
       (fn [code]
         (reset! exit-code code)
-        (reset! (:status job) :exited)
+        ;; a kill already said why it ended
+        (swap! (:status job) #(if (= % :killed) % :exited))
         (swap! shared/suite-stats update-in [:background-jobs :jobs-completed] inc)))
 
     ;; Register the job
@@ -218,9 +219,16 @@
                                       #js {:execute
                                            (fn [args _]
                                              (let [c (str (:command args))]
-                                               (.then (sandbox/wrap c)
+                                               ;; as bash would: out of the sandbox only
+                                               ;; on the gate's approval
+                                               (.then (sandbox/wrap-call c (:unsandboxed args))
                                                       (fn [w]
                                                         (let [job (start-background-job c w bg-cfg)]
+                                                          ;; a timeout the model asked for still holds
+                                                          (when-let [t (:timeout args)]
+                                                            (js/setTimeout #(when (= @(:status job) :running)
+                                                                              (kill-job! (:id job)))
+                                                                           t))
                                                           (str "Started background job #" (:id job) ": `"
                                                                (:command job) "`\n"
                                                                "Use list_jobs to see status, job_output to get output, "
