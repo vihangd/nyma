@@ -776,14 +776,16 @@ an MCP or extension tool is refused. A worktree child keeps its permission mode 
 an unlisted role there is not narrowed. `.nyma/agents/*.md` and project role tool lists are
 ignored until the folder is trusted.
 
-A worktree child's bash runs in an OS sandbox ([sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime):
-Seatbelt on macOS, bubblewrap on Linux). It can write only in its checkout, the repo's `.git` (not
-its or a submodule's hooks, config or info) and temp; not `.nyma/`, `.envrc`, shell rc files or
-`.vscode`. It cannot read `~/.ssh`, `~/.aws`, `~/.nyma/credentials.json` and other credential files,
-and has no network (`sandbox.child-network: "registries"` allows package registries). Settings in
-`~/.nyma/settings.json` only: `sandbox.bash` `"worktree"` (default), `"always"` (every session,
-confined to its cwd, registries allowed) or `"off"`; `sandbox.deny-read` and `sandbox.allow-hosts`
-extend the lists. Unlisted commands still ask. In a sandboxed main session, a host on no list
+bash runs in an OS sandbox ([sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime):
+Seatbelt on macOS, bubblewrap on Linux), the main session included. It can write only in the
+project (a worktree child: its checkout), the repo's `.git` (not its or a submodule's hooks, config
+or info), temp, and, in the main session, package caches; not `.nyma/`, `.envrc`, shell rc files or
+`.vscode`. It cannot read `~/.ssh`, `~/.aws`, `~/.nyma/credentials.json` and other credential
+files, and API keys are removed from its environment. Network goes through a proxy that allows
+package registries and github/gitlab; a worktree child gets none (`sandbox.child-network:
+"registries"` allows them). The status line shows `UNSANDBOXED` when bash is not confined.
+Settings in `~/.nyma/settings.json` only: `sandbox.bash` `"always"` (default), `"worktree"`
+(only worktree children) or `"off"`; `sandbox.deny-read` and `sandbox.allow-hosts` extend the lists. Unlisted commands still ask. In a sandboxed main session, a host on no list
 prompts: once, this session, or always (saved to `sandbox.allow-hosts`); full-auto and headless
 runs refuse it, naming the host. bash's `unsandboxed: true` runs a command outside the sandbox
 after a prompt, every time, full-auto included; a worktree child never can. A hosted ACP agent's

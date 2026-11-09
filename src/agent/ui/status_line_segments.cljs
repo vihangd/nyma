@@ -18,6 +18,7 @@
    All segments should degrade gracefully when their data is missing —
    return {:visible? false} rather than rendering empty noise."
   (:require [agent.pricing :as pricing]
+            [agent.utils.sandbox :as sandbox]
             [agent.utils.home :as home]
              ["node:path" :as path]
             ["node:os" :as os]))
@@ -406,6 +407,12 @@
 
 ;;; ─── Install built-ins ──────────────────────────────────
 
+(defn- sandbox-seg [{:keys [theme]}]
+  ;; Only the exception shows: confined is the default and not news.
+  (if @sandbox/on?
+    (hidden)
+    (visible "UNSANDBOXED" (get-in theme [:colors :warning] "#e0af68"))))
+
 (def builtin-segments
   [["model"         :agent    model-seg]
    ["role"          :agent    role-seg]
@@ -428,7 +435,8 @@
    ["cache-write"   :usage    cache-write-seg]
    ["cache-hit"     :usage    cache-hit-seg]
    ["activity"      :agent    activity-seg]
-   ["compact-in"    :usage    compact-in-seg]])
+   ["compact-in"    :usage    compact-in-seg]
+   ["sandbox"       :workspace sandbox-seg]])
 
 ;; Activity segment auto-appends so users see the spinner + verb
 ;; without having to edit their preset. Position :left places it
@@ -447,7 +455,8 @@
    "context-pct" :right
    "cache-hit"   :right
    "subagents"   :right
-   "time-spent"  :right})
+   "time-spent"  :right
+   "sandbox"     :right})
 
 (defn builtin-ids
   "Every built-in segment id — the set `settings.status-line` may name."

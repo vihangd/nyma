@@ -16,12 +16,15 @@
             ["node:os" :as os]
             ["node:path" :as path]
             ["@anthropic-ai/sandbox-runtime" :refer [SandboxManager]]
-            [agent.debug :as d]))
+            [agent.debug :as d]
+            [agent.utils.home :as home]))
 
 ;; The directory bash may write under, or nil for no sandbox.
 (defonce root (atom nil))
 ;; Promise of true once srt is up for `root`, false when it cannot be.
 (defonce ^:private ready (atom nil))
+;; Whether bash is confined right now, for the status line.
+(defonce on? (atom false))
 
 (def registry-hosts
   "Where builds fetch from. A worktree child gets none of them unless
@@ -30,6 +33,11 @@
    "crates.io" "static.crates.io" "index.crates.io" "proxy.golang.org" "sum.golang.org"
    "rubygems.org" "repo.maven.apache.org" "github.com" "codeload.github.com"
    "objects.githubusercontent.com" "raw.githubusercontent.com" "gitlab.com"])
+
+(def cache-dirs
+  "Package caches under HOME the main session's installs write."
+  [".npm" ".bun/install/cache" ".cache" "Library/Caches" ".cargo/registry" ".cargo/git"
+   "go/pkg/mod" ".gradle/caches" ".m2/repository" ".pnpm-store" "Library/pnpm"])
 
 (def secret-paths
   "Read-denied: what an injected `curl -d @…` would send."
@@ -66,7 +74,10 @@
                                                registry-hosts)
                                              (when-not child? (:allow-hosts cfg))))
                 :deniedDomains  []}
-   :filesystem {:allowWrite (vec (keep identity [dir git (real (os/tmpdir))]))
+   :filesystem {:allowWrite (vec (keep identity (concat [dir git (real (os/tmpdir))]
+                                                       ;; installs need them; a child's would be run
+                                                       ;; later by its unconfined parent, so not there
+                                                       (when-not child? (keep real (map #(path/join (home/dir) %) cache-dirs))))))
                 :denyWrite  (vec (concat [(path/join dir ".nyma") (path/join dir ".envrc")]
                                          (when git (git-protected git))))
                 :denyRead   (vec (concat secret-paths (:deny-read cfg)))}})
@@ -111,19 +122,21 @@
       false)))
 
 (defn configure!
-  "Pick the root from the user's `sandbox` settings: `bash` \"worktree\"
-   (default) confines a worktree child to its checkout, \"always\" any session
-   to its cwd, \"off\" nothing. `opts`: `:ask` and `:save-host!`, see
+  "Pick the root from the user's `sandbox` settings: `bash` \"always\"
+   (default) confines any session to its cwd and a worktree child to its
+   checkout, \"worktree\" only the child, \"off\" nothing. `opts`: `:ask` and `:save-host!`, see
    `host-asker`. Returns the readiness promise."
   [cfg & [opts]]
   (let [child (.. js/process -env -NYMA_WRITE_ROOT)
-        dir   (some-> (case (str (or (:bash cfg) "worktree"))
+        dir   (some-> (case (str (or (:bash cfg) "always"))
                         "off"    nil
                         "always" (or child (js/process.cwd))
                         child)
                       real)]
     (reset! root dir)
-    (reset! ready (if dir (start! dir (some? child) cfg opts) (js/Promise.resolve false)))))
+    (reset! on? false)
+    (reset! ready (-> (if dir (start! dir (some? child) cfg opts) (js/Promise.resolve false))
+                      (.then (fn [ok] (reset! on? ok) ok))))))
 
 (def ^:private secret-env
   #"(?i)(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIALS?)$|^(AWS_|ANTHROPIC_|OPENAI_|SSH_AUTH_SOCK$|GH_TOKEN$|GITHUB_TOKEN$|TYPESAFE_)")
