@@ -88,7 +88,8 @@
    ["Deny" "reject_once"]])
 
 (defn- option-kind [label]
-  (or (some (fn [[prefix k]] (when (str/starts-with? (str label) prefix) k)) option-kinds) "allow_once"))
+  (or (when (str/ends-with? (str label) "for this session") "allow_always") ; "Allow <site> for this session"
+      (some (fn [[prefix k]] (when (str/starts-with? (str label) prefix) k)) option-kinds) "allow_once"))
 
 (defn- modes [agent]
   {:currentModeId (or (:permission-mode @(:state agent)) "default")
