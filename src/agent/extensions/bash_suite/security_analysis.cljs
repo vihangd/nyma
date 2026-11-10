@@ -141,6 +141,19 @@
                          (groups here-b 1)
                          (groups heredoc 3))))))
 
+(def ^:private data-heredoc
+  ;; `cat`/`tee` given a QUOTED-delimiter heredoc (no expansion, so no `$(…)`)
+  ;; and no pipe or chain on its line: the body is file content, not commands.
+  #"(^|\n|;|&&)([ \t]*(?:cat|tee)\b[^\n|;&`$<(]*<<-?[ \t]*(['\"])([A-Za-z_][A-Za-z0-9_]*)\3[^\n|;&`$(]*\n)[\s\S]*?\n([ \t]*\4[ \t]*)(?=\n|$)")
+
+(defn strip-data-heredocs
+  "`cmd` with the bodies of heredocs that only write a file removed, so text
+   like `su -c` in a document being written is not scanned as a command. A
+   body that reaches an interpreter keeps its scan. Pure."
+  [cmd]
+  (.replace (str cmd) (js/RegExp. (.-source data-heredoc) "g")
+            (fn [_ pre line _q _d end] (str pre line end))))
+
 ;; ── Obfuscation detection ────────────────────────────────────
 
 (def obfuscation-patterns
@@ -342,20 +355,21 @@
    Checks (in order): line-separator injection, redirect policy, destructive patterns,
    obfuscation, subshell recursion, then shell-quote structural analysis."
   [cmd config]
-  (let [cmd-str   (str cmd)
+  (let [command   (str cmd)
+        cmd-str   (strip-data-heredocs command)
         max-depth (or (:max-subshell-depth config) 4)]
     ;; (a) Line-separator injection — U+2028/U+2029/U+0085 bypass scanners
     (cond
-      (has-line-separator-injection? cmd-str)
+      (has-line-separator-injection? command)
       {:level   :destructive
        :reasons ["line-separator injection (U+2028/U+2029/U+0085)"]
-       :command cmd-str}
+       :command command}
 
       ;; (b) Redirect policy (opt-in via :block-redirects true)
       (and (:block-redirects config) (has-redirect? cmd-str))
       {:level   :destructive
        :reasons ["redirect blocked by policy"]
-       :command cmd-str}
+       :command command}
 
       :else
       ;; Check destructive patterns first (regex-based, no parsing needed)
@@ -378,15 +392,15 @@
                                                  (filter #(= (:level %) :destructive)
                                                          subshell-results)))]
         (if (seq destructive-reasons)
-          {:level :destructive :reasons destructive-reasons :command cmd-str}
+          {:level :destructive :reasons destructive-reasons :command command}
           (if (seq obfuscation-reasons)
-            {:level :destructive :reasons obfuscation-reasons :command cmd-str}
+            {:level :destructive :reasons obfuscation-reasons :command command}
             (if (seq privilege-reasons)
-              {:level :destructive :reasons privilege-reasons :command cmd-str}
+              {:level :destructive :reasons privilege-reasons :command command}
               (if (= subshell-max :destructive)
                 {:level   :destructive
                  :reasons (or (seq subshell-reasons) ["destructive command in subshell"])
-                 :command cmd-str}
+                 :command command}
               ;; Parse with shell-quote for structural analysis
                 (try
                   (let [parsed (.parse shell-quote cmd-str)
@@ -419,12 +433,12 @@
                       {:level   final-level
                        :reasons (if (seq all-reasons) all-reasons
                                     [(str "classified as " (str final-level))])
-                       :command cmd-str}))
+                       :command command}))
                   (catch :default _e
                   ;; Fail-closed: unparseable commands treated as destructive
                     {:level   :destructive
                      :reasons ["unparseable command (fail-closed)"]
-                     :command cmd-str}))))))))))
+                     :command command}))))))))))
 
 (defn should-block?
   "Determine if a classified command should be blocked based on config."

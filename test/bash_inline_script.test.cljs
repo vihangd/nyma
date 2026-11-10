@@ -120,3 +120,22 @@
             (it "grep -c after a shell is still a count"
                 (fn []
                   (-> (expect (level "cat x | grep -c 'rm -rf /'")) (.toBe :read-only))))))
+
+(describe "a heredoc that only writes a file"
+          (fn []
+            (it "is content: `su -c` in a document being written is not run"
+                (fn []
+                  ;; from a session: a guide appended with cat was blocked as destructive
+                  (doseq [c ["cat >> GUIDE.md << 'EOF'\n## Root\nadb shell su -c id\nrm -rf /data\nEOF"
+                             "tee notes.md <<\"X\"\nsudo bash\nX"
+                             "cd '/p' && cat > a.md <<-'END'\n\tsu -c id\nEND\necho done"]]
+                    (-> (expect #js [c (level c)]) (.not.toEqual #js [c :destructive])))))
+
+            (it "still scans what can run: unquoted, piped, or after the body"
+                (fn []
+                  (doseq [c ["cat > a.md <<EOF\n$(rm -rf /)\nEOF"
+                             "cat <<'EOF' | sh\nrm -rf /\nEOF"
+                             "cat <<'EOF' > >(sh)\nrm -rf /\nEOF"
+                             "cat > a <<'EOF'\nhi\nEOF\nrm -rf /"
+                             "bash <<'EOF'\nrm -rf /\nEOF"]]
+                    (-> (expect #js [c (level c)]) (.toEqual #js [c :destructive])))))))
