@@ -517,8 +517,11 @@
 (defn- refused? [e] (str/starts-with? (str (.-message e)) "Refused:"))
 
 (defn ^:async direct-fetch
-  "`same-origin?`: a redirect to another scheme, host or port is refused, for a
-   fetch the user allowed by site (middleware `fetch-granted?`)."
+  "A redirect to another host is not followed: the result names the target,
+   so fetching it is a new call the permission gate sees (Claude Code's
+   WebFetch does the same). Approving one URL approved wherever it pointed.
+   `same-origin?`, for a fetch the user allowed by site (middleware
+   `fetch-granted?`): another scheme or port counts as another host too."
   [url fmt max-len & [same-origin?]]
   (let [response (try
                    ;; Redirects by hand: each hop's host is checked, or a public
@@ -532,27 +535,34 @@
                                              :headers  #js {"User-Agent" "Nyma/1.0"}}))
                            loc (.get (.-headers r) "location")]
                        (if (and loc (<= 300 (.-status r) 399) (< hops 5))
-                         (let [next (js/URL. loc u)]
-                           (when (and same-origin? (not= (.-origin next) (.-origin (js/URL. url))))
-                             (throw (js/Error. (str "Refused: " url " redirects to " (.-origin next)
-                                                    ", off the site allowed for this session"))))
-                           (recur (str next) (inc hops)))
+                         (let [next (js/URL. loc u)
+                               from (js/URL. u)]
+                           (js-await (check-fetch-host! (str next)))
+                           (if (or (not= (.-hostname next) (.-hostname from))
+                                   (and same-origin? (not= (.-origin next) (.-origin from))))
+                             (str "Redirected, not followed: " u " redirects to " next
+                                  " (from the server's Location header, not verified)."
+                                  " To read it, call web_fetch again with that URL.")
+                             (recur (str next) (inc hops))))
                          r)))
                    (catch :default e
                      ;; a refusal stays one, so no fallback provider gets the URL
                      (throw (if (refused? e) e (js/Error. (str "Fetch failed: " (.-message e)))))))]
-    (when-not (.-ok response)
-      (throw (js/Error. (str "HTTP error: " (.-status response) " " (.-statusText response)))))
-    (let [content-type (or (.get (.-headers response) "content-type") "")]
-      (when-not (or (.includes content-type "text/") (.includes content-type "application/json"))
-        (throw (js/Error. (str "Cannot extract text from content-type: " content-type))))
-      (let [body (js-await (.text response))
-            result (cond
-                     (= fmt "html") body
-                     (not (.includes content-type "text/html")) body
-                     (= fmt "markdown") (js-await (html-util/html->markdown body))
-                     :else (html-util/html->text body))]
-        (truncate-result result max-len)))))
+    (if (string? response)
+      response
+      (do
+        (when-not (.-ok response)
+          (throw (js/Error. (str "HTTP error: " (.-status response) " " (.-statusText response)))))
+        (let [content-type (or (.get (.-headers response) "content-type") "")]
+          (when-not (or (.includes content-type "text/") (.includes content-type "application/json"))
+            (throw (js/Error. (str "Cannot extract text from content-type: " content-type))))
+          (let [body (js-await (.text response))
+                result (cond
+                         (= fmt "html") body
+                         (not (.includes content-type "text/html")) body
+                         (= fmt "markdown") (js-await (html-util/html->markdown body))
+                         :else (html-util/html->text body))]
+            (truncate-result result max-len)))))))
 
 (defn ^:async jina-fetch [url fmt max-len]
   (let [api-key    (resolve-jina-key)

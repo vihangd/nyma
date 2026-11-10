@@ -52,10 +52,16 @@
     (try
       (-> (expect (js-await (tools/direct-fetch (str base "/stay") "text" 100 true))) (.toBe "here"))
       (-> (expect (js-await (tools/direct-fetch (str base "/off") "text" 100))) (.toBe "other"))
-      (let [err (try (js-await (tools/web-fetch-execute {:url (str base "/off") :same-origin true
-                                                         :provider "auto"}))
-                     (catch :default e (.-message e)))]
-        (-> (expect (str err)) (.toMatch #"^Refused: .*off the site allowed")))
+      ;; off the allowed site: handed back to the model, so the target is a new,
+      ;; gated call; auto mode does not pass it to a fallback provider
+      (-> (expect (js-await (tools/web-fetch-execute {:url (str base "/off") :same-origin true :provider "auto"})))
+          (.toMatch #"^Redirected, not followed: .* redirects to http://127\.0\.0\.1:\d+/x"))
+      ;; another host is handed back on any fetch
+      (let [loc (js/Bun.serve #js {:port 0 :fetch (fn [_] (js/Response. nil #js {:status 301 :headers #js {:location (str "http://localhost:" (.-port other) "/x")}}))})]
+        (try
+          (-> (expect (js-await (tools/direct-fetch (str "http://127.0.0.1:" (.-port loc) "/") "text" 100)))
+              (.toMatch #"^Redirected, not followed"))
+          (finally (.stop loc true))))
       (finally (.stop srv true) (.stop other true)))))
 
 (describe "web_fetch address guard" (fn []
@@ -71,4 +77,4 @@
                               ["127.0.0.1" false] ["::1" false] ["8.8.8.8" false] ["2606:4700::1" false]]]
           (-> (expect #js [ip (tools/blocked-address? ip)]) (.toEqual #js [ip blocked])))))
   (it "checks every redirect hop" test-redirect)
-  (it "keeps a fetch allowed by site on that site" test-same-origin)))
+  (it "hands a redirect to another host, or off an allowed site, back to the model" test-same-origin)))
