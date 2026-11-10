@@ -37,6 +37,27 @@
       (-> (expect (count @calls)) (.toBe 0))
       (finally (set! js/globalThis.fetch orig)))))
 
+(defn ^:async test-same-origin []
+  ;; a fetch allowed by site may not be bounced to another one, and no
+  ;; fallback provider gets it instead
+  (let [other (js/Bun.serve #js {:port 0 :fetch (fn [_] (js/Response. "other" #js {:headers #js {"content-type" "text/plain"}}))})
+        srv   (js/Bun.serve #js {:port 0 :fetch (fn [r] (if (.endsWith (.-url r) "/in")
+                                                          (js/Response. "here" #js {:headers #js {"content-type" "text/plain"}})
+                                                          (js/Response. nil #js {:status 302 :headers #js {:location (if (.endsWith (.-url r) "/off")
+                                                                                                                     (str "http://127.0.0.1:" (.-port other) "/x")
+                                                                                                                     "/in")}})))})
+        base  (str "http://127.0.0.1:" (.-port srv))
+        orig  js/globalThis.fetch
+        calls (atom 0)]
+    (try
+      (-> (expect (js-await (tools/direct-fetch (str base "/stay") "text" 100 true))) (.toBe "here"))
+      (-> (expect (js-await (tools/direct-fetch (str base "/off") "text" 100))) (.toBe "other"))
+      (let [err (try (js-await (tools/web-fetch-execute {:url (str base "/off") :same-origin true
+                                                         :provider "auto"}))
+                     (catch :default e (.-message e)))]
+        (-> (expect (str err)) (.toMatch #"^Refused: .*off the site allowed")))
+      (finally (.stop srv true) (.stop other true)))))
+
 (describe "web_fetch address guard" (fn []
   (it "sends a refused URL to no fallback provider" test-no-fallback)
   (it "takes only http(s), on every hop, and sees IPv4 inside IPv6" test-schemes)
@@ -49,4 +70,5 @@
                               ["::ffff:808:808" false] ["64:ff9b::8.8.8.8" false]
                               ["127.0.0.1" false] ["::1" false] ["8.8.8.8" false] ["2606:4700::1" false]]]
           (-> (expect #js [ip (tools/blocked-address? ip)]) (.toEqual #js [ip blocked])))))
-  (it "checks every redirect hop" test-redirect)))
+  (it "checks every redirect hop" test-redirect)
+  (it "keeps a fetch allowed by site on that site" test-same-origin)))

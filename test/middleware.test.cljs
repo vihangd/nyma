@@ -806,25 +806,30 @@
 (defn ^:async test-web-fetch-host-for-session []
   ;; from a session: thirteen fetches of a few sites, each asked and allowed
   (reset-session-allows!)
-  (let [seen   (atom nil)
-        opts   (atom nil)
-        ui     #js {:available true
-                    :select (fn [q o] (reset! seen q) (reset! opts (vec o))
-                              (js/Promise.resolve "Allow xdaforums.com for this session"))}
-        fetch  (fn [u] {:tool-name "web_fetch" :args {:url u} :cancelled false})
-        ctx    (js-await (resolve-ask nil (fetch "https://xdaforums.com/t/a.1/page-84") ui "web_fetch" nil))
-        events (create-event-bus)
-        _      ((:on events) "permission_request" (fn [_] #js {"decision" "ask"}))
-        gate   #(permission-check-enter events nil (fetch %))]
-    (-> (expect (:cancelled ctx)) (.toBeFalsy))
-    (-> (expect (clj->js @opts)) (.toContain "Allow xdaforums.com for this session"))
-    (-> (expect (session-allowed? "web_fetch")) (.toBe false))
-    ;; same site, another page: no prompt (no UI here, so a prompt would deny)
-    (-> (expect (:cancelled (js-await (gate "https://xdaforums.com/t/b.2/page-1")))) (.toBeFalsy))
-    ;; another site, or a subdomain, still asks
-    (-> (expect (:cancelled (js-await (gate "https://evil.test/?d=x")))) (.toBe true))
-    (-> (expect (:cancelled (js-await (gate "https://x.xdaforums.com/")))) (.toBe true))
-    (reset-session-allows!)))
+  (try
+    (let [opts   (atom nil)
+          ui     #js {:available true
+                      :select (fn [_q o] (reset! opts (vec o))
+                                (js/Promise.resolve "Allow https://xdaforums.com for this session"))}
+          fetch  (fn [u] {:tool-name "web_fetch" :args {:url u} :cancelled false})
+          ctx    (js-await (resolve-ask nil (fetch "https://xdaforums.com/t/a.1/page-84") ui "web_fetch" nil))
+          events (create-event-bus)
+          _      ((:on events) "permission_request" (fn [_] #js {"decision" "ask"}))
+          gate   #(permission-check-enter events nil (fetch %))]
+      (-> (expect (:cancelled ctx)) (.toBeFalsy))
+      (-> (expect (clj->js @opts)) (.toContain "Allow https://xdaforums.com for this session"))
+      (-> (expect (session-allowed? "web_fetch")) (.toBe false))
+      ;; same site, another page: no prompt (no UI here, so a prompt would deny),
+      ;; and the fetch may not be redirected off it
+      (let [c (js-await (gate "https://xdaforums.com/t/b.2/page-1"))]
+        (-> (expect (:cancelled c)) (.toBeFalsy))
+        (-> (expect (get-in c [:args :same-origin])) (.toBe true)))
+      ;; another site, port, scheme or subdomain, or a URL that can carry data, still asks
+      (doseq [u ["https://evil.test/" "https://xdaforums.com:8443/" "http://xdaforums.com/"
+                 "https://x.xdaforums.com/" "https://xdaforums.com/search?q=secret"
+                 "https://xdaforums.com/a#secret"]]
+        (-> (expect #js [u (:cancelled (js-await (gate u)))]) (.toEqual #js [u true]))))
+    (finally (reset-session-allows!))))
 
 (defn ^:async test-ask-for-session-skips-next-prompt []
   (reset-session-allows!)

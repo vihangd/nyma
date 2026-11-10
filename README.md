@@ -835,8 +835,10 @@ above the threshold runs it, judged again next time; a call that writes or sends
 like one, a URL with a query) needs `threshold-risky` (0.97); anything else asks, and a failed call
 warns. Each use pauses for the session after 3 errors in a row; the permission judge also after 20
 asks it did not avert. `bun run eval:judge` measures it against 25 attack and control cases.
-A `web_fetch` prompt also offers `Allow <host> for this session`: later fetches from that exact host
-(not its subdomains) skip both the judge and the prompt until nyma exits.
+A `web_fetch` prompt also offers `Allow <site> for this session`, the site being scheme, host and port
+(`https://xdaforums.com`): later fetches of that site with no query or fragment skip both the judge and
+the prompt until the session ends (`/new`, `/resume` or a switch ends it too). A direct fetch on that
+allowance refuses a redirect to another site; Jina and Tinyfish follow redirects on their side.
 
 The same judge can do more, each opt-in in the same `judge` block, since each sends more to
 TypeSafe:

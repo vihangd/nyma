@@ -514,7 +514,12 @@
       (throw (js/Error. (str "Refused: " host " resolves to " bad
                              ", a private or link-local address web_fetch may not reach"))))))
 
-(defn ^:async direct-fetch [url fmt max-len]
+(defn- refused? [e] (str/starts-with? (str (.-message e)) "Refused:"))
+
+(defn ^:async direct-fetch
+  "`same-origin?`: a redirect to another scheme, host or port is refused, for a
+   fetch the user allowed by site (middleware `fetch-granted?`)."
+  [url fmt max-len & [same-origin?]]
   (let [response (try
                    ;; Redirects by hand: each hop's host is checked, or a public
                    ;; URL could bounce the fetch to an internal one.
@@ -527,10 +532,15 @@
                                              :headers  #js {"User-Agent" "Nyma/1.0"}}))
                            loc (.get (.-headers r) "location")]
                        (if (and loc (<= 300 (.-status r) 399) (< hops 5))
-                         (recur (str (js/URL. loc u)) (inc hops))
+                         (let [next (js/URL. loc u)]
+                           (when (and same-origin? (not= (.-origin next) (.-origin (js/URL. url))))
+                             (throw (js/Error. (str "Refused: " url " redirects to " (.-origin next)
+                                                    ", off the site allowed for this session"))))
+                           (recur (str next) (inc hops)))
                          r)))
                    (catch :default e
-                     (throw (js/Error. (str "Fetch failed: " (.-message e))))))]
+                     ;; a refusal stays one, so no fallback provider gets the URL
+                     (throw (if (refused? e) e (js/Error. (str "Fetch failed: " (.-message e)))))))]
     (when-not (.-ok response)
       (throw (js/Error. (str "HTTP error: " (.-status response) " " (.-statusText response)))))
     (let [content-type (or (.get (.-headers response) "content-type") "")]
@@ -627,9 +637,7 @@
   []
   (boolean (tinyfish-key)))
 
-(defn- refused? [e] (str/starts-with? (str (.-message e)) "Refused:"))
-
-(defn ^:async web-fetch-execute [{:keys [url format max_length provider]}]
+(defn ^:async web-fetch-execute [{:keys [url format max_length provider same-origin]}]
   ;; Validate URL
   (try (js/URL. url) (catch :default _ (throw (js/Error. (str "Invalid URL: " url)))))
   ;; A URL web_fetch may not reach is not handed to a third-party fetcher
@@ -642,7 +650,10 @@
         fmt     (or format "markdown")
         prov    (or provider "auto")]
     (case prov
-      "direct"   (js-await (direct-fetch url fmt max-len))
+      "direct"   (js-await (direct-fetch url fmt max-len same-origin))
+      ;; ponytail: jina and tinyfish follow redirects on their side, so a
+      ;; same-origin grant cannot hold there; the grant needs a URL with no
+      ;; query, which leaves only a path-based open redirect on the site.
       "jina"     (js-await (jina-fetch url fmt max-len))
       "tinyfish" (js-await (tinyfish-fetch url fmt max-len))
       ;; auto: direct → tinyfish (if key) → jina. Tinyfish slots
@@ -652,9 +663,11 @@
       ;; skipped entirely when no key is set — no point burning
       ;; latency on a request that would throw "missing key".
       (try
-        (js-await (direct-fetch url fmt max-len))
+        (js-await (direct-fetch url fmt max-len same-origin))
         (catch :default e1
-          (if (has-tinyfish-key?)
+          (cond
+            (refused? e1) (throw e1)
+            (has-tinyfish-key?)
             (try
               (js-await (tinyfish-fetch url fmt max-len))
               (catch :default e2
@@ -666,6 +679,7 @@
                                  "  direct:   " (or (.-message e1) (str e1)) "\n"
                                  "  tinyfish: " (or (.-message e2) (str e2)) "\n"
                                  "  jina:     " (or (.-message e3) (str e3)))))))))
+            :else
             (try
               (js-await (jina-fetch url fmt max-len))
               (catch :default e3

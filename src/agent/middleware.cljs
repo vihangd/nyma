@@ -539,10 +539,24 @@
     (str/replace d "'\\''" "'")
     (when-not (:source ctx) (js/process.cwd))))
 
-(defn- fetch-host
-  "The host a web_fetch call reaches, or nil."
+(defn- parse-url [u] (try (js/URL. (str u)) (catch :default _ nil)))
+
+(defn fetch-grant-key
+  "The session grant a web_fetch call would need: `web_fetch:<origin>`, so
+   scheme and port count (allowing a dev server on localhost:3000 is not
+   Docker on :2375), or nil."
   [args]
-  (some-> (try (js/URL. (str (arg-get args :url))) (catch :default _ nil)) .-hostname not-empty))
+  (when-let [u (parse-url (arg-get args :url))]
+    (when (contains? #{"http:" "https:"} (.-protocol u))
+      (str "web_fetch:" (.-origin u)))))
+
+(defn- fetch-granted?
+  "Does a session grant answer this web_fetch? Not for a query or fragment:
+   those can carry data out, and stay with the judge."
+  [allows args]
+  (let [u (parse-url (arg-get args :url))]
+    (boolean (and u (empty? (.-search u)) (empty? (.-hash u))
+                  (contains? allows (fetch-grant-key args))))))
 
 (defn ^:async resolve-ask
   "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
@@ -554,9 +568,10 @@
     (assoc ctx :cancelled true
            :cancel-reason (or reason (str "Permission required for '" tool-name
                                           "' but no interactive approval is available")))
-    (let [prompt (str (when-let [s (:source ctx)] (str "Subagent " s " asks:\n"))
+    (let [ja     (judged-args ctx)
+          prompt (str (when-let [s (:source ctx)] (str "Subagent " s " asks:\n"))
                       (permission-prompt-text tool-name (categorize-tool tool-name)
-                                              (judged-args ctx) reason))
+                                              ja reason))
           ;; The run is now blocked on the user. Announced so desktop_notify
           ;; can say so: a turn stuck on an unseen prompt was the classic
           ;; "came back to nothing".
@@ -567,11 +582,11 @@
           ;; future command in the project. A compound command gets no
           ;; always-option at all.
           bash?  (= tool-name "bash")
-          base   (when bash? (shell-grant/grant-base (get (judged-args ctx) :command)))
+          base   (when bash? (shell-grant/grant-base (get ja :command)))
           once?  (and (contains? no-whole-tool-grant tool-name) (not bash?))
           ;; research fetches many pages from a few sites: one answer per site
-          host   (when (= tool-name "web_fetch") (fetch-host (judged-args ctx)))
-          host-c (when host (str "Allow " host " for this session"))
+          grant  (when (= tool-name "web_fetch") (fetch-grant-key ja))
+          host-c (when grant (str "Allow " (subs grant 10) " for this session"))
           always (cond
                    once?       nil
                    (not bash?) "Allow always (this tool, this project)"
@@ -585,14 +600,14 @@
                                       always      (conj always)
                                       true        (conj "Deny")))))
           ;; beside the judge's verdict, if it sent this ask here
-          _      (decide/answered! (decide/subject-of tool-name (judged-args ctx))
+          _      (decide/answered! (decide/subject-of tool-name ja)
                                    (boolean (and choice (.startsWith choice "Allow"))))]
       (cond
         ;; only "Allow once" is offered; any other Allow is still this once
         (and choice once? (.startsWith choice "Allow")) ctx
 
         (and host-c (= choice host-c))
-        (do (swap! (allows-of ctx) conj (str "web_fetch:" host)) ctx)
+        (do (swap! (allows-of ctx) conj grant) ctx)
 
         (and choice (.startsWith choice "Allow always") bash?)
         (do (when (and settings (:append-bash-allow! settings)) ((:append-bash-allow! settings) base)) ctx)
@@ -631,7 +646,7 @@
   "Could this URL be carrying data out? A query or fragment, a long path, or a
    path segment or host label long enough to hold an encoded secret."
   [url]
-  (let [u (try (js/URL. (str url)) (catch :default _ nil))]
+  (let [u (parse-url url)]
     (or (nil? u)
         (seq (.-search u)) (seq (.-hash u))
         (> (count (.-pathname u)) 100)
@@ -765,9 +780,9 @@
                           ((:bash-allowed? settings) (get args :command)))))
             ctx
             ;; a site the user allowed for this session
-            (and (= tool-name "web_fetch")
-                 (contains? @(allows-of ctx) (str "web_fetch:" (fetch-host (judged-args ctx)))))
-            ctx
+            ;; and only on it: a redirect off it is refused (tools/direct-fetch)
+            (and (= tool-name "web_fetch") (fetch-granted? @(allows-of ctx) (judged-args ctx)))
+            (assoc-in ctx [:args :same-origin] true)
             ;; MCP, web_fetch and unknown-bash asks: the judge may answer
             ;; first (agent.utils.decide), only now that nothing else has
             (js-await (judge-allows? ctx tool-name (get result "judge"))) ctx
