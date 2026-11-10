@@ -6,7 +6,7 @@
                                       before-hook-compat wrap-tools-with-middleware
                                       normalize-tool-result tool-persistence-interceptor
                                       resolve-ask permission-check-enter
-                                      permission-prompt-text session-allowed? reset-session-allows!]]
+                                      permission-prompt-text session-allowed? reset-session-allows! tool-result-leave]]
             [agent.events :refer [create-event-bus]]
             [agent.tool-registry :refer [create-registry]]
             [agent.state :refer [create-agent-store]]
@@ -795,7 +795,8 @@
             (it "gate: deny beats allow regardless of order" test-gate-precedence-deny-beats-allow)
             (it "gate: explicit allow pre-empts policy ask" test-gate-precedence-allow-preempts-ask)
             (it "gate: ask reaches the real agent→extension-api→ui→select chain" test-gate-ask-reaches-real-agent-ui)
-            (it "web_fetch: allowing a site for the session answers its later asks" test-web-fetch-host-for-session)))
+            (it "web_fetch: allowing a site for the session answers its later asks" test-web-fetch-host-for-session)
+            (it "web_fetch: a URL the user typed or a search returned runs unasked" test-web-fetch-found-urls)))
 
 ;; ── The prompt says what is being approved ──
 
@@ -829,6 +830,26 @@
                  "https://x.xdaforums.com/" "https://xdaforums.com/search?q=secret"
                  "https://xdaforums.com/a#secret"]]
         (-> (expect #js [u (:cancelled (js-await (gate u)))]) (.toEqual #js [u true]))))
+    (finally (reset-session-allows!))))
+
+(defn ^:async test-web-fetch-found-urls []
+  ;; a URL the user typed, or a search returned, cannot carry session data out
+  (reset-session-allows!)
+  (try
+    (let [events (create-event-bus)
+          _      ((:on events) "permission_request" (fn [_] #js {"decision" "ask"}))
+          agent  {:state (atom {:messages [{:role "user" :content "read https://example.org/guide, then search"}]})}
+          gate   (fn [u] (permission-check-enter events nil {:tool-name "web_fetch" :args {:url u} :agent agent :cancelled false}))
+          _      (js-await (tool-result-leave events {:tool-name "web_search"
+                                                      :result "1. [Unlock](https://xdaforums.com/t/x.1/page-2)\n   https://github.com/a/b"}))]
+      (doseq [[u asks] [["https://example.org/guide" false]
+                        ["https://xdaforums.com/t/x.1/page-2" false]
+                        ["https://github.com/a/b" false]
+                        ;; not as found: a prefix, an added query, another page
+                        ["https://example.org/guide?d=secret" true]
+                        ["https://example.org/" true]
+                        ["https://github.com/a/b/c" true]]]
+        (-> (expect #js [u (boolean (:cancelled (js-await (gate u))))]) (.toEqual #js [u asks]))))
     (finally (reset-session-allows!))))
 
 (defn ^:async test-ask-for-session-skips-next-prompt []

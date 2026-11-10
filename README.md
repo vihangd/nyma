@@ -838,7 +838,10 @@ asks it did not avert. `bun run eval:judge` measures it against 25 attack and co
 A `web_fetch` prompt also offers `Allow <site> for this session`, the site being scheme, host and port
 (`https://xdaforums.com`): later fetches of that site with no query or fragment skip both the judge and
 the prompt until the session ends (`/new`, `/resume` or a switch ends it too). A direct fetch on that
-allowance refuses a redirect to another site; Jina and Tinyfish follow redirects on their side.
+allowance hands a redirect off that site back to the model; Jina and Tinyfish follow redirects on
+their side. A URL exactly as your latest message or a `web_search` result gave it runs with no judge
+or prompt: it existed before the session, so it cannot carry anything out of it. Any direct fetch
+hands a redirect to another host back to the model, so the target is a new call the gate sees.
 
 The same judge can do more, each opt-in in the same `judge` block, since each sends more to
 TypeSafe:

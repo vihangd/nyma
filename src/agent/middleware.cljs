@@ -210,7 +210,10 @@
                         :result    (:result ctx)
                         :details   (:result-details ctx)
                         :isError   (:result-is-error ctx)}
-          collected (js-await ((:emit-collect events) "tool_result" (clj->js result-event)))]
+          collected (js-await ((:emit-collect events) "tool_result" (clj->js result-event)))
+          ;; what a search returned may be fetched as is (found-url?)
+          _         (when (and (= "web_search" (:tool-name ctx)) (not (:result-is-error ctx)))
+                      (swap! (allows-of ctx) into (map #(str "url:" %) (urls-in (:result ctx)))))]
       (if-let [modified-result (get collected "result")]
         (assoc ctx :result (if (string? modified-result)
                              modified-result
@@ -550,6 +553,22 @@
     (when (contains? #{"http:" "https:"} (.-protocol u))
       (str "web_fetch:" (.-origin u)))))
 
+(defn- urls-in
+  "The http(s) URLs written out in `text`, without trailing punctuation."
+  [text]
+  (map #(str/replace % #"[.,;:!?]+$" "")
+       (re-seq #"https?://[^\s<>\"'`)\]]+" (str text))))
+
+(defn- found-url?
+  "Was this exact URL already there before the session could put data in it:
+   in the user's latest request, or as a web_search returned it? Such a URL
+   carries nothing out (OpenAI's URL-exfiltration paper allows only these),
+   so no judge or prompt is needed. Its redirects still bounce to the model."
+  [ctx args]
+  (let [url (str (arg-get args :url))]
+    (boolean (or (contains? @(allows-of ctx) (str "url:" url))
+                 (some #{url} (urls-in (decide/user-request (:messages (agent-state (:agent ctx))))))))))
+
 (defn- fetch-granted?
   "Does a session grant answer this web_fetch? Not for a query or fragment:
    those can carry data out, and stay with the judge."
@@ -783,6 +802,7 @@
             ;; and only on it: a redirect off it is refused (tools/direct-fetch)
             (and (= tool-name "web_fetch") (fetch-granted? @(allows-of ctx) (judged-args ctx)))
             (assoc-in ctx [:args :same-origin] true)
+            (and (= tool-name "web_fetch") (found-url? ctx (judged-args ctx))) ctx
             ;; MCP, web_fetch and unknown-bash asks: the judge may answer
             ;; first (agent.utils.decide), only now that nothing else has
             (js-await (judge-allows? ctx tool-name (get result "judge"))) ctx
