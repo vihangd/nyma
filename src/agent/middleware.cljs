@@ -539,6 +539,11 @@
     (str/replace d "'\\''" "'")
     (when-not (:source ctx) (js/process.cwd))))
 
+(defn- fetch-host
+  "The host a web_fetch call reaches, or nil."
+  [args]
+  (some-> (try (js/URL. (str (arg-get args :url))) (catch :default _ nil)) .-hostname not-empty))
+
 (defn ^:async resolve-ask
   "An 'ask' decision: prompt the user ONCE. Choices: Allow once / Allow for
    this session / Allow always (this tool, this project) / Deny. With no
@@ -564,6 +569,9 @@
           bash?  (= tool-name "bash")
           base   (when bash? (shell-grant/grant-base (get (judged-args ctx) :command)))
           once?  (and (contains? no-whole-tool-grant tool-name) (not bash?))
+          ;; research fetches many pages from a few sites: one answer per site
+          host   (when (= tool-name "web_fetch") (fetch-host (judged-args ctx)))
+          host-c (when host (str "Allow " host " for this session"))
           always (cond
                    once?       nil
                    (not bash?) "Allow always (this tool, this project)"
@@ -572,6 +580,7 @@
           choice (js-await
                   (.select ui prompt
                            (clj->js (cond-> ["Allow once"]
+                                      host-c      (conj host-c)
                                       (not once?) (conj "Allow for this session")
                                       always      (conj always)
                                       true        (conj "Deny")))))
@@ -581,6 +590,9 @@
       (cond
         ;; only "Allow once" is offered; any other Allow is still this once
         (and choice once? (.startsWith choice "Allow")) ctx
+
+        (and host-c (= choice host-c))
+        (do (swap! (allows-of ctx) conj (str "web_fetch:" host)) ctx)
 
         (and choice (.startsWith choice "Allow always") bash?)
         (do (when (and settings (:append-bash-allow! settings)) ((:append-bash-allow! settings) base)) ctx)
@@ -751,6 +763,10 @@
                      (and settings ((:tool-allowed? settings) "bash"))
                      (and settings (:bash-allowed? settings)
                           ((:bash-allowed? settings) (get args :command)))))
+            ctx
+            ;; a site the user allowed for this session
+            (and (= tool-name "web_fetch")
+                 (contains? @(allows-of ctx) (str "web_fetch:" (fetch-host (judged-args ctx)))))
             ctx
             ;; MCP, web_fetch and unknown-bash asks: the judge may answer
             ;; first (agent.utils.decide), only now that nothing else has

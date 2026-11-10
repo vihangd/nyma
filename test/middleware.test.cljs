@@ -794,13 +794,37 @@
             (it "gate: handler 'ask' + no UI denies" test-gate-ask-no-ui-denies)
             (it "gate: deny beats allow regardless of order" test-gate-precedence-deny-beats-allow)
             (it "gate: explicit allow pre-empts policy ask" test-gate-precedence-allow-preempts-ask)
-            (it "gate: ask reaches the real agent→extension-api→ui→select chain" test-gate-ask-reaches-real-agent-ui)))
+            (it "gate: ask reaches the real agent→extension-api→ui→select chain" test-gate-ask-reaches-real-agent-ui)
+            (it "web_fetch: allowing a site for the session answers its later asks" test-web-fetch-host-for-session)))
 
 ;; ── The prompt says what is being approved ──
 
 (defn- ask-ui [choice seen]
   #js {:available true
        :select    (fn [q _opts] (reset! seen q) (js/Promise.resolve choice))})
+
+(defn ^:async test-web-fetch-host-for-session []
+  ;; from a session: thirteen fetches of a few sites, each asked and allowed
+  (reset-session-allows!)
+  (let [seen   (atom nil)
+        opts   (atom nil)
+        ui     #js {:available true
+                    :select (fn [q o] (reset! seen q) (reset! opts (vec o))
+                              (js/Promise.resolve "Allow xdaforums.com for this session"))}
+        fetch  (fn [u] {:tool-name "web_fetch" :args {:url u} :cancelled false})
+        ctx    (js-await (resolve-ask nil (fetch "https://xdaforums.com/t/a.1/page-84") ui "web_fetch" nil))
+        events (create-event-bus)
+        _      ((:on events) "permission_request" (fn [_] #js {"decision" "ask"}))
+        gate   #(permission-check-enter events nil (fetch %))]
+    (-> (expect (:cancelled ctx)) (.toBeFalsy))
+    (-> (expect (clj->js @opts)) (.toContain "Allow xdaforums.com for this session"))
+    (-> (expect (session-allowed? "web_fetch")) (.toBe false))
+    ;; same site, another page: no prompt (no UI here, so a prompt would deny)
+    (-> (expect (:cancelled (js-await (gate "https://xdaforums.com/t/b.2/page-1")))) (.toBeFalsy))
+    ;; another site, or a subdomain, still asks
+    (-> (expect (:cancelled (js-await (gate "https://evil.test/?d=x")))) (.toBe true))
+    (-> (expect (:cancelled (js-await (gate "https://x.xdaforums.com/")))) (.toBe true))
+    (reset-session-allows!)))
 
 (defn ^:async test-ask-for-session-skips-next-prompt []
   (reset-session-allows!)
