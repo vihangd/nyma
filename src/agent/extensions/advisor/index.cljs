@@ -106,17 +106,18 @@ plain text; the executor will read it on its next turn.")
                  (case role
                    "user"        {:role "user"      :content (content/->text content)}
                    "assistant"   {:role "assistant" :content (content/->text content)}
-                   "tool_call"   {:role "assistant"
-                                  :content (str "[tool call: " (:tool-name m)
-                                                " "
-                                                (when (:args m)
-                                                  (try (js/JSON.stringify (clj->js (:args m)))
-                                                       (catch :default _ "")))
-                                                "]")}
-                   "tool_result" {:role "user"
-                                  :content (str "[tool result: "
-                                                (.slice (content/->text content) 0 4000) "]")}
+                   ;; name and args are in :metadata; :content is the result
+                   "tool_call"   (let [md (or (:metadata m) {})]
+                                   [{:role "assistant"
+                                     :content (str "[tool call: " (:tool-name md) " "
+                                                   (try (js/JSON.stringify (clj->js (or (:args md) {})))
+                                                        (catch :default _ ""))
+                                                   "]")}
+                                    {:role "user"
+                                     :content (str "[tool result: "
+                                                   (.slice (content/->text content) 0 4000) "]")}])
                    nil))))
+       (mapcat #(if (vector? %) % [%]))
        vec))
 
 (def no-advice-prefix
@@ -233,7 +234,12 @@ plain text; the executor will read it on its next turn.")
               ;; anywhere the session's totals are reported — including
               ;; `-p --output-format json`, which is what the benchmark parses.
               (record-usage! api chosen model (.-usage result))
-              (if warn (str warn text) text))
+              (cond
+                ;; an empty answer read as advice that says nothing
+                (str/blank? text) (str no-advice-prefix "no advice returned (finish reason: "
+                                       (or (some-> (.-finishReason result) str) "unknown") ").")
+                warn (str warn text)
+                :else text))
             (catch :default e
               (str "Advisor: call failed — "
                    (or (.-message e) (str e))))))))))

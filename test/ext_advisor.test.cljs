@@ -44,11 +44,12 @@
 
 (defn test-format-transcript-summarizes-tools []
   (let [out (adv/format-transcript-for-advisor
-             [{:role "tool_call" :tool-name "read" :args {:path "x.cljs"}}
-              {:role "tool_result" :content "file contents..."}])]
+             [{:role "tool_call" :content "file contents..."
+               :metadata {:tool-name "read" :args {:path "x.cljs"}}}])]
     (-> (expect (count out)) (.toBe 2))
     (-> (expect (.includes (:content (first out)) "[tool call: read")) (.toBe true))
-    (-> (expect (.includes (:content (last out)) "[tool result:")) (.toBe true))))
+    (-> (expect (.includes (:content (first out)) "x.cljs")) (.toBe true))
+    (-> (expect (.includes (:content (last out)) "[tool result: file contents")) (.toBe true))))
 
 (defn test-format-transcript-drops-unknown-roles []
   (let [out (adv/format-transcript-for-advisor
@@ -120,6 +121,15 @@
                                      {}))]
     (-> (expect (.includes result "refused")) (.toBe true))
     (-> (expect (.includes result "200000")) (.toBe true))))
+
+(defn ^:async test-consult-empty-answer []
+  ;; seen live: two consults came back "" and the executor read them as advice
+  (let [api    (make-fake-api {:messages [{:role "user" :content "review it"}]})
+        gen    (fn [_cfg] (js/Promise.resolve #js {:text "" :finishReason "length"}))
+        result (js-await (adv/consult-advisor api {:roles {:advisor {:provider "x" :model "y"}}}
+                                              {:gen-fn gen}))]
+    (-> (expect (adv/no-advice? result)) (.toBe true))
+    (-> (expect result) (.toContain "length"))))
 
 (defn ^:async test-consult-success-roundtrip []
   (let [api    (make-fake-api {:messages [{:role "user"      :content "make a plan"}
@@ -204,6 +214,7 @@
           (fn []
             (it "returns helpful message for empty transcript"
                 test-consult-empty-transcript)
+            (it "says so when the advisor answers nothing" test-consult-empty-answer)
             (it "refuses when transcript exceeds 200K-token hard cap"
                 test-consult-hard-cap-refusal)
             (it "returns the advisor model's text on success"
