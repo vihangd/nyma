@@ -59,37 +59,43 @@
    and would otherwise never hear anything outside a repo."
   [{:keys [fetch on-change]}]
   (let [last-val (atom ::none)
-        stopped  (atom false)]
+        stopped  (atom false)
+        failed   (fn [e]
+                   (d/debug "repo-poller" (str "fetch failed: " (or (.-message e) (str e))))
+                   nil)
+        settle!  (fn [next]
+                   (let [prev @last-val]
+                     ;; nil means "not a repo" or a failed shell-out. Either way
+                     ;; there is nothing to poll for, so stop rather than spawn two
+                     ;; processes every interval for the life of the session.
+                     (if (nil? next)
+                       (do (reset! stopped true)
+                           ;; Report nil unless nil was already reported. Including
+                           ;; on the FIRST poll: the caller sets non-git facts (the
+                           ;; `path` segment) from this callback, so staying silent
+                           ;; outside a repo hid a segment that has nothing to do
+                           ;; with git. Reporting once also clears a stale branch if
+                           ;; the repo goes away mid-session.
+                           (when (not= prev nil)
+                             (reset! last-val nil)
+                             (when on-change (on-change nil)))
+                           nil)
+                       (do
+                         (when (or (= prev ::none) (changed? prev next))
+                           (when on-change (on-change (state->bar next))))
+                         (reset! last-val next)
+                         next))))]
     {:value (fn [] (let [v @last-val] (when-not (= v ::none) v)))
      :stop! (fn [] (reset! stopped true) nil)
+     ;; `fetch` may answer with a promise (`git-files/repo-state-async`); the
+     ;; poll then settles when it does, and nothing waits on it. A plain value
+     ;; settles on the spot, so a test can step the poller without timers.
      :poll! (fn []
               (when-not @stopped
-                (let [next (try (fetch)
-                                (catch :default e
-                                  (d/debug "repo-poller"
-                                           (str "fetch failed: " (or (.-message e) (str e))))
-                                  nil))
-                      prev @last-val]
-                  ;; nil means "not a repo" or a failed shell-out. Either way
-                  ;; there is nothing to poll for, so stop rather than spawn two
-                  ;; processes every interval for the life of the session.
-                  (if (nil? next)
-                    (do (reset! stopped true)
-                        ;; Report nil unless nil was already reported. Including
-                        ;; on the FIRST poll: the caller sets non-git facts (the
-                        ;; `path` segment) from this callback, so staying silent
-                        ;; outside a repo hid a segment that has nothing to do
-                        ;; with git. Reporting once also clears a stale branch if
-                        ;; the repo goes away mid-session.
-                        (when (not= prev nil)
-                          (reset! last-val nil)
-                          (when on-change (on-change nil)))
-                        nil)
-                    (do
-                      (when (or (= prev ::none) (changed? prev next))
-                        (when on-change (on-change (state->bar next))))
-                      (reset! last-val next)
-                      next)))))}))
+                (let [next (try (fetch) (catch :default e (failed e)))]
+                  (if (and (some? next) (fn? (.-then next)))
+                    (.then next settle! (fn [e] (settle! (failed e))))
+                    (settle! next)))))}))
 
 (defn start!
   "Poll on an interval. Returns a stop fn.

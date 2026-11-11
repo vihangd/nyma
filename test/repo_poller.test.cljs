@@ -169,3 +169,20 @@
       (fn []
         (let [stop (rp/start! {:fetch (fn [] clean) :on-change (fn [_]) :interval-ms 999999})]
           (-> (expect (stop)) (.toBeNil))))))) 
+
+(describe "repo-poller: a fetch that answers with a promise" (fn []
+  (it "settles when the promise does, and stops on a nil answer"
+      ^:async (fn []
+                (let [seen (atom [])
+                      p    (rp/make-poller {:fetch (fn [] (js/Promise.resolve clean))
+                                         :on-change #(swap! seen conj %)})]
+                  (js-await ((:poll! p)))
+                  (js-await ((:poll! p)))
+                  (-> (expect (count @seen)) (.toBe 1))
+                  (-> (expect (:git-branch (first @seen))) (.toBe "main")))
+                (let [seen (atom [])
+                      p    (rp/make-poller {:fetch (fn [] (js/Promise.reject (js/Error. "x")))
+                                         :on-change #(swap! seen conj %)})]
+                  (js-await ((:poll! p)))
+                  (-> (expect @seen) (.toEqual #js [nil]))
+                  (-> (expect ((:poll! p))) (.toBeNil)))))))

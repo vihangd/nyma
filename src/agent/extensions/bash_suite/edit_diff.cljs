@@ -21,41 +21,57 @@
             [agent.utils.git-files :as git]
             [clojure.string :as str]))
 
+;; cwd → repo root (or nil). A directory's repo does not move during a
+;; session, and the two rev-parse calls per snapshot — four per bash call —
+;; cost 0.1–0.2 s of frozen UI each on this repo, measured.
+;; ponytail: never invalidated; `git init` mid-session shows up after a restart
+(defonce ^:private roots (atom {}))
+
 (defn repo-root
   "The working tree's top level for `cwd`, or nil outside a repo. Porcelain
    paths are ROOT-relative, so every stat and pathspec below is resolved
    against this, not against wherever nyma was started."
   [cwd]
-  (when (git/in-git-repo? cwd)
-    (let [top (git/run-git "rev-parse --show-toplevel" cwd)]
-      (when (seq top) top))))
+  (let [k (or cwd (js/process.cwd))]
+    (if (contains? @roots k)
+      (get @roots k)
+      (let [top (git/run-git "rev-parse --show-toplevel" cwd)
+            root (when (seq top) top)]
+        (swap! roots assoc k root)
+        root))))
 
-(defn- status-lines
-  "`{path status}` from `git status --porcelain`, or nil outside a repo."
-  [cwd]
-  (let [out (git/run-git "status --porcelain --untracked-files=all" cwd)]
-    (when (git/in-git-repo? cwd)
-      ;; Not by column: run-git trims the output, so the first line loses
-      ;; the leading space of a ` M` status. Status = first 1-2 char token,
-      ;; path = the rest.
-      (->> (str/split-lines out)
-           (keep (fn [l]
-                   (when-let [[_ st p] (re-find #"^\s*(\S{1,2})\s+(.+)$" l)]
-                     [p st])))
-           (into {})))))
+(defn- parse-status
+  "`{path status}` from `git status --porcelain` output. Not by column: the
+   output is trimmed, so the first line loses the leading space of a ` M`
+   status. Status = first 1-2 char token, path = the rest."
+  [out]
+  (->> (str/split-lines (str out))
+       (keep (fn [l]
+               (when-let [[_ st p] (re-find #"^\s*(\S{1,2})\s+(.+)$" l)]
+                 [p st])))
+       (into {})))
 
 (defn- mtime [cwd p]
   (try (.-mtimeMs (fs/statSync (if cwd (str cwd "/" p) p)))
        (catch :default _ nil)))
 
+(defn- snapshot-of [root st]
+  {:root   root
+   :status st
+   :mtimes (into {} (map (fn [[p _]] [p (mtime root p)]) st))})
+
 (defn snapshot
   "`{:root :status {path st} :mtimes {path ms}}` for the dirty set, or nil."
   [cwd]
   (when-let [root (repo-root cwd)]
-    (when-let [st (status-lines root)]
-      {:root   root
-       :status st
-       :mtimes (into {} (map (fn [[p _]] [p (mtime root p)]) st))})))
+    (snapshot-of root (parse-status (git/run-git "status --porcelain --untracked-files=all" root)))))
+
+(defn ^:async snapshot-async
+  "`snapshot` for the middleware: the status call is a child the UI does not
+   wait on. It ran twice per bash command, 0.2–0.4 s each here."
+  [cwd]
+  (when-let [root (repo-root cwd)]
+    (snapshot-of root (parse-status (js-await (git/run-git-async ["status" "--porcelain" "--untracked-files=all"] root))))))
 
 (defn changed-paths
   "Paths whose status or mtime differ between two snapshots. Pure."
@@ -182,17 +198,17 @@
         befores (atom {})]
     (.addMiddleware api
                     #js {:name  "bash-suite/edit-diff"
-                         :enter (fn [ctx]
+                         :enter (^:async fn [ctx]
                                   (when (and enabled (shared/is-bash-tool? (aget ctx "tool-name")))
-                                    (when-let [snap (snapshot nil)]
+                                    (when-let [snap (js-await (snapshot-async nil))]
                                       (swap! befores assoc (str (aget ctx "exec-id")) snap)))
                                   ctx)
-                         :leave (fn [ctx]
+                         :leave (^:async fn [ctx]
                                   (let [id     (str (aget ctx "exec-id"))
                                         before (get @befores id)]
                                     (when before
                                       (swap! befores dissoc id)
-                                      (let [after (snapshot nil)]
+                                      (let [after (js-await (snapshot-async nil))]
                                         (when-let [s (summary nil before after)]
                                           (aset ctx "result" (with-summary (.-result ctx) s)))
                                         ;; Tell other extensions which files a shell

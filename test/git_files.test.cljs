@@ -7,7 +7,7 @@
             ["node:os" :as os]
             ["node:path" :as path]
             ["node:child_process" :as cp]
-            [agent.utils.git-files :refer [list-files in-git-repo? run-git]]))
+            [agent.utils.git-files :refer [list-files in-git-repo? run-git run-git-async repo-state repo-state-async]]))
 
 (def ^:private tmp (fs/mkdtempSync (path/join (os/tmpdir) "nyma-git-files-")))
 (def ^:private repo (path/join tmp "repo"))
@@ -50,3 +50,13 @@
             (it "a failing git command yields \"\" instead of throwing"
                 (fn []
                   (-> (expect (run-git "no-such-subcommand" repo)) (.toBe ""))))))
+
+(describe "utils/git-files async"
+          (fn []
+            (it "repo-state-async answers the same map as repo-state, and nil outside a repo"
+                ^:async (fn []
+                          (-> (expect (clj->js (js-await (repo-state-async repo))))
+                              (.toEqual (clj->js (repo-state repo))))
+                          (-> (expect (js-await (repo-state-async plain))) (.toBeNil))
+                          ;; a failing command is "" like run-git, not a throw
+                          (-> (expect (js-await (run-git-async ["no-such-subcommand"] repo))) (.toBe ""))))))

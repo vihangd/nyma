@@ -63,7 +63,9 @@
   (it "stops at a bound however many files a command touched"
       (fn []
         (let [dir (git-repo!)]
-          (-> (expect (count (pre-of dir (mapv #(str "f" %) (range 500))))) (.toBe 200)))))))
+          ;; 200 git spawns: 5–6 s on a laptop, over bun's default 5 s
+          (-> (expect (count (pre-of dir (mapv #(str "f" %) (range 500))))) (.toBe 200))))
+      20000)))
 
 (describe "bash-suite:edit-diff" (fn []
                                    (afterEach (fn [] (doseq [d @dirs] (fs/rmSync d #js {:recursive true :force true})) (reset! dirs []) nil))
@@ -122,3 +124,13 @@
                                          (let [plain (fs/mkdtempSync (path/join (os/tmpdir) "nyma-norepo-"))]
                                            (swap! dirs conj plain)
                                            (-> (expect (ed/snapshot plain)) (.toBeNil)))))))
+
+(describe "bash-suite:edit-diff async snapshot" (fn []
+  (it "snapshot-async is snapshot without the blocking call"
+      ^:async (fn []
+                (let [dir (git-repo!)]
+                  (swap! dirs conj dir)
+                  (fs/writeFileSync (path/join dir "a.txt") "changed\n")
+                  (-> (expect (clj->js (js-await (ed/snapshot-async dir))))
+                      (.toEqual (clj->js (ed/snapshot dir))))
+                  (-> (expect (js-await (ed/snapshot-async (os/tmpdir)))) (.toBeNil)))))))

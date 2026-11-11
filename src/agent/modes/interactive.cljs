@@ -643,15 +643,15 @@
         (try
           (let [r (h args #js {:ui             (when-let [ext (.-extension-api agent)] (.-ui ext))
                      ;; Aborted by Escape while the command runs.
-                     :signal         (when-let [c (:abort-controller agent)] (.-signal @c))
-                     :agent          agent
-                     :flags          (clj->js (:flags parsed))
-                     :positional     (clj->js (:positional parsed))
-                     :set-messages   update-messages!
-                     :append-message (fn [msg]
-                                       (update-messages!
-                                        (fn [prev]
-                                          (conj (vec prev) (assoc msg :id (new-id))))))})]
+                               :signal         (when-let [c (:abort-controller agent)] (.-signal @c))
+                               :agent          agent
+                               :flags          (clj->js (:flags parsed))
+                               :positional     (clj->js (:positional parsed))
+                               :set-messages   update-messages!
+                               :append-message (fn [msg]
+                                                 (update-messages!
+                                                  (fn [prev]
+                                                    (conj (vec prev) (assoc msg :id (new-id))))))})]
             (if (instance? js/Promise r) (.catch r fail) r))
           (catch :default e (fail e))))
       ;; Was a bare `when-let`: an unrecognised command did nothing at all,
@@ -1238,15 +1238,15 @@
                       (if-not @streaming
                         (on-submit t)
                         (do
-                      (.addToHistory editor t)
-                      (follow-up agent {:role "user" :content t})
-                      (.setText editor "")
+                          (.addToHistory editor t)
+                          (follow-up agent {:role "user" :content t})
+                          (.setText editor "")
                       ;; Marked, and marked differently from a steer's `↩`:
                       ;; the two go to different queues and arrive at
                       ;; different times, so a transcript that showed them
                       ;; identically would be lying about the order of events.
-                      (add-user-msg! (str t "  ⏳ queued"))
-                      (.requestRender tui))))))}))
+                          (add-user-msg! (str t "  ⏳ queued"))
+                          (.requestRender tui))))))}))
 
       ;; Registered shortcuts — extensions' `registerShortcut` and every
       ;; keybindings.json binding. Both landed in `(:shortcuts agent)` and
@@ -1326,7 +1326,9 @@
                   (repo-poller/start!
                    {:enabled? (not (false? (:poll-git cfg)))
                     :interval-ms (:poll-git-interval-ms cfg)
-                    :fetch    (fn [] (git-files/repo-state cwd))
+                    ;; async: the sync one holds the event loop 0.1–0.5 s per
+                    ;; poll, and polls land mid-stream
+                    :fetch    (fn [] (git-files/repo-state-async cwd))
                     :on-change (fn [bar-keys]
                                  ;; nil means the repo went away (or was never
                                  ;; one). setState MERGES, so passing {} would

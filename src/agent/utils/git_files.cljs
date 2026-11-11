@@ -128,6 +128,14 @@
         (when-not (or (js/isNaN a) (js/isNaN b))
           {:ahead a :behind b})))))
 
+(defn- state-from
+  "`repo-state`'s map from the three outputs. Pure."
+  [branch status-out ab-out]
+  (merge {:branch (when-not (or (str/blank? branch) (= "HEAD" branch)) branch)
+          :detached? (= "HEAD" branch)}
+         (parse-porcelain status-out)
+         (or (parse-ahead-behind ab-out) {})))
+
 (defn repo-state
   "A snapshot of the repo at `cwd`, or nil when this is not a repo.
 
@@ -136,12 +144,43 @@
    \"HEAD\" and naming that as a branch would be a lie."
   [cwd]
   (when (in-git-repo? cwd)
-    (let [branch (run-git "rev-parse --abbrev-ref HEAD" cwd)
-          ;; run-git-raw, NOT run-git: the leading space of a ` M` first line is
-          ;; the worktree column and trimming it reports the change as staged.
-          status (parse-porcelain (run-git-raw "status --porcelain=v1 --untracked-files=all" cwd))
-          ab     (parse-ahead-behind (run-git "rev-list --left-right --count @{upstream}...HEAD" cwd))]
-      (merge {:branch (when-not (or (str/blank? branch) (= "HEAD" branch)) branch)
-              :detached? (= "HEAD" branch)}
-             status
-             (or ab {})))))
+    ;; run-git-raw, NOT run-git, for the status: the leading space of a ` M`
+    ;; first line is the worktree column and trimming it reports the change
+    ;; as staged.
+    (state-from (run-git "rev-parse --abbrev-ref HEAD" cwd)
+                (run-git-raw "status --porcelain=v1 --untracked-files=all" cwd)
+                (run-git "rev-list --left-right --count @{upstream}...HEAD" cwd))))
+
+;; ── The same, without blocking ────────────────────────────────────
+;;
+;; execSync holds the event loop for the whole git call: 0.1–0.5 s on this
+;; repo, measured, and the status poller runs it every 5 s while a reply
+;; streams at 10 Hz. Anything that runs while the user is watching goes
+;; through these.
+
+(defn ^:async run-git-async
+  "`git <args>` in `cwd` as a child the event loop does not wait on. Trimmed
+   stdout, or with only the trailing newline cut when `raw?`; \"\" on a
+   non-zero exit or any failure, like `run-git`."
+  [args cwd & [raw?]]
+  (try
+    (let [p   (js/Bun.spawn (clj->js (into ["git"] args))
+                            #js {:cwd (or cwd js/undefined)
+                                 ;; stderr dropped for the reason run-git gives
+                                 :stdin "ignore" :stdout "pipe" :stderr "ignore"})
+          out (js-await (js/Bun.readableStreamToText (.-stdout p)))
+          code (js-await (.-exited p))]
+      (cond
+        (not (zero? code)) ""
+        raw?               (str/replace out #"\n+$" "")
+        :else              (str/trim out)))
+    (catch :default _ "")))
+
+(defn ^:async repo-state-async
+  "`repo-state` for a poller: the same map, with no blocking call."
+  [cwd]
+  (when (= "true" (js-await (run-git-async ["rev-parse" "--is-inside-work-tree"] cwd)))
+    (let [branch (js-await (run-git-async ["rev-parse" "--abbrev-ref" "HEAD"] cwd))
+          status (js-await (run-git-async ["status" "--porcelain=v1" "--untracked-files=all"] cwd true))
+          ab     (js-await (run-git-async ["rev-list" "--left-right" "--count" "@{upstream}...HEAD"] cwd))]
+      (state-from branch status ab))))
