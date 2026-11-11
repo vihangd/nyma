@@ -134,3 +134,40 @@
     (fn []
       (let [result (mb/incremental-render nil nil {})]
         (-> (expect (:rendered result)) (.toBe "")))))))
+
+;;; ─── streaming: lex only the tail ───────────────────────────────
+
+(def ^:private streamed-doc
+  (str "# Title\n\nFirst paragraph with `code` and **bold**.\n\n"
+       "- one\n- two\n  continued\n- three\n\n"
+       "```clojure\n(defn f [x]\n  (inc x))\n```\n\n"
+       "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+       "> quoted\n> more\n\nSetext\n======\n\nlast paragraph, no newline"))
+
+(describe "incremental-render while streaming" (fn []
+  (it "renders every prefix exactly as a fresh full render does, lexing only the tail"
+      (fn []
+        (let [cache (atom nil)
+              hits  (atom 0)]
+          (doseq [n (range 1 (inc (count streamed-doc)) 3)]
+            (let [content (subs streamed-doc 0 n)
+                  fresh   (mb/incremental-render content nil {} 60)
+                  next    (mb/incremental-render content @cache {} 60)]
+              (when (and (:stable-prefix @cache) (seq (:stable-prefix @cache))) (swap! hits inc))
+              (-> (expect (:rendered next)) (.toBe (:rendered fresh)))
+              (-> (expect (clj->js (mapv :raw (:blocks next)))) (.toEqual (clj->js (mapv :raw (:blocks fresh)))))
+              (reset! cache next)))
+          ;; the tail path was taken for most chunks, not just once
+          (-> (expect (> @hits 40)) (.toBe true)))))
+
+  (it "falls back to a full lex when the content no longer starts with the cached prefix"
+      (fn []
+        (let [c1 (mb/incremental-render "# A\n\nfoo\n\nbar" nil {} 60)
+              c2 (mb/incremental-render "# B\n\nfoo\n\nbar" c1 {} 60)]
+          (-> (expect (:rendered c2)) (.toBe (:rendered (mb/incremental-render "# B\n\nfoo\n\nbar" nil {} 60)))))))
+
+  (it "a width change is a full miss"
+      (fn []
+        (let [c1 (mb/incremental-render "foo\n\nbar" nil {} 60)
+              c2 (mb/incremental-render "foo\n\nbar baz" c1 {} 40)]
+          (-> (expect (:columns c2)) (.toBe 40)))))))

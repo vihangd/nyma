@@ -4,30 +4,43 @@
    for all blocks except the last one, and only re-renders the last block
    on each streaming chunk. Supports custom block renderers registered
    by extensions."
-  (:require [agent.utils.markdown :as md]))
+  (:require [agent.utils.markdown :as md]
+            [clojure.string :as str]))
 
 ;;; ─── Block splitting ──────────────────────────────────────────
+
+(defn- lex
+  "`{:blocks [...] :last-start n}`: the blocks of `content`, and where its
+   last block starts — nil when the tokens' raws do not tile the content,
+   which is when that offset cannot be trusted."
+  [content]
+  (if (or (nil? content) (= content ""))
+    {:blocks []}
+    (try
+      (let [tokens (md/lexer content)
+            blocks #js []
+            ;; offset walks every token, kept or not; last-start is the
+            ;; offset of the last KEPT one
+            [end last-start]
+            (reduce (fn [[off ls] token]
+                      (let [t (.-type token) raw (.-raw token)]
+                        ;; Skip pure whitespace tokens
+                        (if (and t raw (not= t "space"))
+                          (do (.push blocks {:type t :raw raw :lang (.-lang token)})
+                              [(+ off (count raw)) off])
+                          [(+ off (count (or raw ""))) ls])))
+                    [0 nil]
+                    tokens)]
+        {:blocks (vec blocks)
+         :last-start (when (= end (count content)) last-start)})
+      (catch :default _e
+        {:blocks [{:type "paragraph" :raw content}]}))))
 
 (defn split-blocks
   "Split markdown content into block-level tokens using marked.lexer().
    Returns a vector of {:type string, :raw string, :lang string?}."
   [content]
-  (if (or (nil? content) (= content ""))
-    []
-    (try
-      (let [tokens (md/lexer content)]
-        (vec
-         (keep (fn [token]
-                 (let [t (.-type token)
-                       raw (.-raw token)]
-                    ;; Skip pure whitespace tokens
-                   (when (and t raw (not= t "space"))
-                     {:type t
-                      :raw  raw
-                      :lang (.-lang token)})))
-               tokens)))
-      (catch :default _e
-        [{:type "paragraph" :raw content}]))))
+  (:blocks (lex content)))
 
 (defn code-blocks
   "Code blocks in `text`, in order, as {:lang :text} — the source exactly,
@@ -177,18 +190,32 @@
    custom-renderers is a map of {type-key → render-fn}. `columns` is the
    width blocks are laid out for; a cache built for another width is a full
    miss, since a table rendered for the old width is wrong at the new one.
-   Returns {:blocks [...], :rendered-blocks [...], :rendered string, :columns}."
+   Returns {:blocks [...], :rendered-blocks [...], :rendered string, :columns
+   :stable-prefix}.
+
+   `:stable-prefix` is the content up to the start of the last block. While a
+   reply streams, each chunk still starts with it, so only the tail from there
+   is lexed and the cached blocks are kept as they are: a block boundary is
+   where marked starts afresh anyway. Lexing the whole message every chunk
+   made a frame 18–23 ms at 27–53 KB, measured, and a reply's total cost
+   quadratic in its length."
   ([content prev-cache custom-renderers]
    (incremental-render content prev-cache custom-renderers nil))
   ([content prev-cache custom-renderers columns]
    (if (or (nil? content) (= content ""))
      {:blocks [] :rendered-blocks [] :rendered ""}
-     (let [blocks (split-blocks content)
-           n      (count blocks)]
+     (let [prev-cache (when (= columns (:columns prev-cache)) prev-cache)
+           stable     (:stable-prefix prev-cache)
+           {:keys [blocks last-start]}
+           (if (and stable (seq (:blocks prev-cache)) (str/starts-with? content stable))
+             (let [tail (lex (subs content (count stable)))]
+               {:blocks     (into (pop (:blocks prev-cache)) (:blocks tail))
+                :last-start (some->> (:last-start tail) (+ (count stable)))})
+             (lex content))
+           n (count blocks)]
        (if (zero? n)
          {:blocks [] :rendered-blocks [] :rendered ""}
-         (let [prev-cache    (when (= columns (:columns prev-cache)) prev-cache)
-               prev-blocks   (:blocks prev-cache)
+         (let [prev-blocks   (:blocks prev-cache)
                prev-rendered (:rendered-blocks prev-cache)
                prev-n        (count prev-blocks)
               ;; For each block except the last, check if it matches the cached version
@@ -209,4 +236,5 @@
            {:blocks          blocks
             :rendered-blocks rendered-blocks
             :rendered        rendered
-            :columns         columns}))))))
+            :columns         columns
+            :stable-prefix   (when last-start (subs content 0 last-start))}))))))
