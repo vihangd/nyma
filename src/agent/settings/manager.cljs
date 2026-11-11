@@ -80,23 +80,14 @@
    ;; rather than computing them and dropping them. "silent" prints nothing,
    ;; including the resume banner. An unknown value warns and shows the card.
    :startup                "card"
-   ;; Layout mode for the chat view. Accepts:
-   ;;   true    — default, natural-flow + writeToStdout commits
-   ;;   false   — fixed-height + Ink <Static> emissions to scrollback
-   ;;   "pager" — in-app scrollable pager (all turns stay inside Ink)
-   ;; The setting key can be written as either kebab-case
-   ;; ("scrollback-mode") or camelCase ("scrollbackMode") in the JSON
-   ;; file; load-json normalizes both to kebab-case before merge.
-   ;; See src/agent/ui/scrollback.cljs and src/agent/ui/chat_pager.cljs.
+   ;; Inert since the Ink UI went (see inert-keys); kept so an old file merges.
    :scrollback-mode        true
    ;; left/right-segments name built-in status-line segments in render order;
    ;; unset keeps the four that have always been shown. `poll-git` drives the
    ;; `git` and `path` segments — porcelain is an execSync, so it runs on an
    ;; interval and never on the render path.
-   :status-line            {:preset "default"
-                            :left-segments nil
+   :status-line            {:left-segments nil
                             :right-segments nil
-                            :separator nil
                             :poll-git true
                             :poll-git-interval-ms 5000}
    ;; Where pickers, prompts and info overlays are placed. `anchor` accepts any
@@ -199,7 +190,7 @@
                         :description "Implementation worker with edit tools (opt-in)."
                         :system-prompt "You are a worker. Implement the delegated task and return a concise summary of changes (files touched, what changed)."}}
    ;; Subagent extension knobs.
-   :subagent       {:async-by-default false :max-depth 1}
+   :subagent       {:async-by-default false}
    ;; Native plan-mode knobs.
    ;;  :auto-approve  — skip the approval gate (non-interactive / autonomous).
    ;;  :planner-role  — role whose model is used for PLANNING turns
@@ -442,7 +433,7 @@
    scrollback — a doc comment pointing at two files that no longer exist. A user
    who sets one gets exactly the silence they would get from a typo.
    `tool-display` and `tool-display-max-lines` have since been revived by the
-   expandable tool view (interactive.cljs reads them), so four remain.
+   expandable tool view (interactive.cljs reads them), so three remain.
 
    This is the production copy, and `test/settings_reader_lint.test.cljs` READS
    it rather than keeping its own — the lints that mirror the thing they guard

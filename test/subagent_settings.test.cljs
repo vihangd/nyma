@@ -37,9 +37,8 @@
                                                 (-> (expect (:system-prompt cfg)) (.toBeDefined))))))))
 
 (describe "subagent:settings-knobs" (fn []
-                                      (it "has :subagent knobs with max-depth 1 (recursion cap)"
+                                      (it "has :subagent knobs"
                                           (fn []
-                                            (-> (expect (get-in defaults [:subagent :max-depth])) (.toBe 1))
                                             (-> (expect (get-in defaults [:subagent :async-by-default])) (.toBe false))))
 
                                       (it "has :plan-mode :auto-approve false by default"

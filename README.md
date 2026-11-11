@@ -752,7 +752,6 @@ before relying on a value here.
   "tool-display": "collapsed",
   "tool-display-max-lines": 40,
   "scrollback-mode": true,
-  "status-line": { "preset": "default" },
   "ui": {
     "overlay": {
       "anchor": "bottom-center",
