@@ -537,9 +537,7 @@
                                      (let [agent      (make-agent)
                                            api        (make-api agent)
                                            deactivate ((.-default suite-index) api)]
-        ;; Should not throw
-                                       (deactivate)
-                                       (-> (expect true) (.toBe true)))))
+                                       (-> (expect (fn [] (deactivate))) (.not.toThrow)))))
 
                                (it "security analysis blocks destructive in full pipeline via skip"
                                    (fn []

@@ -105,9 +105,7 @@
                       (.then ((:emit-collect bus) "before_agent_start" #js {})
                              (fn [_] (swap! fires inc)))
                       (deact2))
-                    (cleanup)
-                    ;; Just verify cleanup doesn't throw
-                    (-> (expect true) (.toBe true)))))))
+                    (-> (expect (fn [] (cleanup))) (.not.toThrow)))))))
 
 ;;; ─── action predicate ────────────────────────────────────────
 

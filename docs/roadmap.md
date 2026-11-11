@@ -2100,3 +2100,13 @@ Bot to be a bare model loop with every action as a client tool, which switches n
 - Untested, I/O-bound, covered only by gated integration tests: `lsp_suite/lsp_client`, `codemode/worker`.
 - Resize/theme `invalidate` re-renders everything: 100–170 ms at 1000 messages; first paint 533 ms (what
   `/resume` pays). Per-block wrap cache in `chat_renderer.cljs:290` is the next render win.
+- `--version`/`--help` still load the whole app under `bun dist/agent/cli.mjs` (0.4–0.5 s; the binary
+  0.12 s): squint hoists `ns` requires, so the fix is a tiny entry namespace that checks argv before
+  importing `agent.cli`, and `package.json` `bin` pointing at it.
+- `custom_provider_relay` activate measured 211 ms with two entries; not the cache reads (one file each),
+  so profile `register!` before touching it.
+- Tests: 14 console stubs restored outside `finally` (`events:109`, `loop:154`, `gateway_core:10,54`,
+  `extension_loader:40,…`, `events_v2:96`, `pi_rpc_commands:175`, `crash_recovery:103`); a failing test
+  leaks the stub into the next. `extension_scope:256` asserts nothing after a swallowed emit.
+  `refine:84`, `token_estimation:94` and `ext_lsp_suite_integration:105` use `(expect true)` as a skip
+  marker — `it.skip` with a reason would read better.

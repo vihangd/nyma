@@ -76,7 +76,7 @@
             (it "emitting event with no handlers does not throw"
                 (fn []
                   (let [bus (create-event-bus)]
-                    ((:emit bus) "ghost" {}))))
+                    (-> (expect (fn [] ((:emit bus) "ghost" {}))) (.not.toThrow)))))
 
             (it "all-event-types is a non-empty vector"
                 (fn []

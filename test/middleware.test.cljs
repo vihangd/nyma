@@ -403,8 +403,7 @@
                                                (fn []
                                                  (let [ic  (tool-persistence-interceptor (atom {:session (atom nil)}))
                                                        ctx {:tool-name "read" :args {} :result "x" :cancelled false}]
-        ;; Should not throw
-                                                   ((:leave ic) ctx))))
+                                                   (-> (expect (fn [] ((:leave ic) ctx))) (.not.toThrow)))))
 
                                            (it "skips append for an ephemeral (nil path) session"
                                                (fn []

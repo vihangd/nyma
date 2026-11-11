@@ -126,13 +126,7 @@
 (describe "agent.loop/run - retry-state reset" (fn []
                                                  (it "blocked path does not consume retry-state"
                                                      test-retry-state-not-consumed-by-blocked-path)
-
-                                                 (it "PLACEHOLDER — blocked path is separate from retry loop"
-                                                     (fn []
-        ;; The blocked path (before_provider_request returns {block: true})
-        ;; exits before the retry loop is entered. Full retry loop tests
-        ;; require a streamText mock and live in integration tests.
-                                                       (-> (expect true) (.toBe true))))))
+))
 
 ;;; ─── a filter abort, end to end ─────────────────────────────────────
 

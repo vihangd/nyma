@@ -98,8 +98,7 @@
                                                {:now-fn (fn [] 10000)
                                                 :write-fn (fn [_ _] (throw (js/Error. "ENOSPC")))
                                                 :remove-fn (fn [_] nil)})]
-                    ((:note! c) "text")
-                    (-> (expect true) (.toBe true)))))
+                    (-> (expect (fn [] ((:note! c) "text"))) (.not.toThrow)))))
 
             (it "is inert for an ephemeral session"
                 (fn []
@@ -248,8 +247,7 @@
 
             (it "is safe with nothing pending"
                 (fn []
-                  (p/flush-all!)
-                  (-> (expect true) (.toBe true))))))
+                  (-> (expect (fn [] (p/flush-all!))) (.not.toThrow))))))
 
 ;;; ─── recovery must be durable ────────────────────────────────────────────
 ;;; The resume path folded the sidecar into `:messages` and deleted it in the

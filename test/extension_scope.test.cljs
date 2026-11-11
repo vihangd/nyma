@@ -65,10 +65,11 @@
                                       (let [agent    (make-test-agent)
                                             base-api (create-extension-api agent)
                                             scoped   (create-scoped-api base-api "admin" #{:all})]
-        ;; Should not throw
-                                        (.registerTool scoped "x" #js {:execute (fn [_] "ok")})
-                                        (.on scoped "agent_start" (fn [_]))
-                                        (.addMiddleware scoped {:name :test :enter (fn [ctx] ctx)}))))
+                                        (-> (expect (fn []
+                                                      (.registerTool scoped "x" #js {:execute (fn [_] "ok")})
+                                                      (.on scoped "agent_start" (fn [_]))
+                                                      (.addMiddleware scoped {:name :test :enter (fn [ctx] ctx)})))
+                                            (.not.toThrow)))))
 
                                 (it "prefixes flag registration with namespace"
                                     (fn []
@@ -387,11 +388,11 @@
                                                            (let [agent    (make-test-agent)
                                                                  base-api (create-extension-api agent)
                                                                  scoped   (create-scoped-api base-api "everything" #{:all})]
-                                                         ;; None of these should throw
-                                                             (.registerTool scoped "t" #js {:execute (fn [_] "ok")})
-                                                             (.registerCommand scoped "c" #js {})
-                                                             (.on scoped "evt" (fn [_]))
-                                                             (-> (expect true) (.toBe true)))))))))
+                                                             (-> (expect (fn []
+                                                                           (.registerTool scoped "t" #js {:execute (fn [_] "ok")})
+                                                                           (.registerCommand scoped "c" #js {})
+                                                                           (.on scoped "evt" (fn [_]))))
+                                                                 (.not.toThrow)))))))))
 
 ;;; ─── create-state-api integration ───────────────────────────────────────────
 

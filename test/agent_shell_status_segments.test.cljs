@@ -134,8 +134,7 @@
                                 (fn []
       ;; Older hosts without the API should not throw.
                                   (let [mock-api #js {}]
-                                    (register-all! mock-api)
-                                    (-> (expect true) (.toBe true)))))))
+                                    (-> (expect (fn [] (register-all! mock-api))) (.not.toThrow)))))))
 
 ;;; ─── Separators belong to the status line, not the segments ────────────────
 

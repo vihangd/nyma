@@ -60,7 +60,7 @@
 
             (it "handles empty extension list"
                 (fn []
-                  (deactivate-all [])))))
+                  (-> (expect (fn [] (deactivate-all []))) (.not.toThrow))))))
 
 ;; --- topo-sort: dependency ordering and duplicate-namespace handling ---
 ;; The recent loader bug was caused by topo-sort silently deduplicating

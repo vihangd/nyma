@@ -62,9 +62,10 @@
                                                 (let [mgr   (create-session-manager nil)
                                                       store (create-agent-store {:messages []})]
         ;; Should not throw; nothing to assert on disk.
-                                                  (attach-session-persistence! {:store store} mgr)
-                                                  ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})
-                                                  (-> (expect true) (.toBe true)))))
+                                                  (-> (expect (fn []
+                                                                (attach-session-persistence! {:store store} mgr)
+                                                                ((:dispatch! store) :message-added {:message {:role "user" :content "q"}})))
+                                                      (.not.toThrow)))))
 
                                           (it "does NOT re-append while :replaying-session? is set (/resume, /import)"
                                               (fn []

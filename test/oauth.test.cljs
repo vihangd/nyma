@@ -52,9 +52,8 @@
 
                                         (it "does nothing if no credentials exist"
                                             (fn []
-      ;; Should not throw
-                                              (oauth/clear-credentials "nonexistent-provider-abc")
-                                              (-> (expect true) (.toBe true))))))
+                                              (-> (expect (fn [] (oauth/clear-credentials "nonexistent-provider-abc")))
+                                                  (.not.toThrow))))))
 
 (describe "oauth - needs-refresh?" (fn []
                                      (it "returns true when expired"

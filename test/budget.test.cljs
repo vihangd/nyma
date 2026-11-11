@@ -222,5 +222,4 @@
                       _        (b/activate api)
                       ctx      #js {:abort (fn [] (throw (js/Error. "must not abort")))}]
                   ;; No throw = no timer was armed.
-                  ((get @handlers "before_agent_start") #js {} ctx)
-                  (-> (expect true) (.toBe true))))))
+                  (-> (expect (fn [] ((get @handlers "before_agent_start") #js {} ctx))) (.not.toThrow))))))

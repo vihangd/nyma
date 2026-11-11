@@ -44,9 +44,7 @@
             commands  (atom {})
             bindings  {"ctrl+x" "command:nonexistent"}]
         (apply-keybindings shortcuts commands bindings)
-        ;; Handler should not throw
-        ((:handler (get @shortcuts "ctrl+x")))
-        (-> (expect true) (.toBe true)))))
+        (-> (expect (fn [] ((:handler (get @shortcuts "ctrl+x"))))) (.not.toThrow)))))
 
   (it "handles non-command action"
     (fn []
@@ -55,5 +53,4 @@
             bindings  {"ctrl+z" "custom:action"}]
         (apply-keybindings shortcuts commands bindings)
         ;; Should register but handler does nothing (action doesn't start with "command:")
-        ((:handler (get @shortcuts "ctrl+z")))
-        (-> (expect true) (.toBe true)))))))
+        (-> (expect (fn [] ((:handler (get @shortcuts "ctrl+z"))))) (.not.toThrow)))))))
