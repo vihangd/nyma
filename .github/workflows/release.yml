@@ -38,7 +38,8 @@ jobs:
         run: bun run build
 
       - name: Test
-        run: bun test dist
+        # pretest compiles src and test; `bun run build` above is src only
+        run: bun run test
 
       - name: Tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/v')

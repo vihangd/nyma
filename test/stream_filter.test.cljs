@@ -125,8 +125,7 @@
 
 (describe "agent.loop/run - retry-state reset" (fn []
                                                  (it "blocked path does not consume retry-state"
-                                                     test-retry-state-not-consumed-by-blocked-path)
-))
+                                                     test-retry-state-not-consumed-by-blocked-path)))
 
 ;;; ─── a filter abort, end to end ─────────────────────────────────────
 

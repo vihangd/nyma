@@ -144,7 +144,7 @@ event-sourced store's log with per-type counts.
 bun run build
 ```
 
-Compiles all `.cljs` files from `src/` and `test/` to `.mjs` (ES modules) in `dist/`. JSON resources are copied as-is.
+Compiles the `.cljs` files under `src/` to `.mjs` (ES modules) in `dist/`; JSON resources are copied as-is. `bun run test` compiles `test/` as well before running it (`npx squint compile` does both).
 
 ### Standalone binary
 

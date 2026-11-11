@@ -1046,7 +1046,7 @@ Each entry in `@connections` is a map:
 
 ```bash
 # Build
-bun run build
+npx squint compile
 
 # Run all tests
 bun test

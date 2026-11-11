@@ -34,7 +34,8 @@ jobs:
         run: bun run build
 
       - name: Test
-        run: bun test dist
+        # pretest compiles src and test; `bun run build` above is src only
+        run: bun run test
 
       # `bun run build` regenerates agent/version.cljs, and gen:builtins and
       # gen:event-map write files that are committed. If any of them differ from
