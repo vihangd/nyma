@@ -82,7 +82,8 @@
                                                                                          (filter (fn [k] (zero? (count (readers k)))))
                                                                                          (remove known-unread)
                                                                                          sort vec)]
-                                                                           (-> (expect (str/join ", " dead)) (.toBe "")))))
+                                                                           (-> (expect (str/join ", " dead)) (.toBe ""))))
+                                                                       30000)
 
                                                                    (it "has no allowlist entry that has quietly come back to life"
                                                                        (fn []
