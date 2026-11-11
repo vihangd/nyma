@@ -15,9 +15,17 @@
   (:require ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            ["@anthropic-ai/sandbox-runtime" :refer [SandboxManager]]
             [agent.debug :as d]
             [agent.utils.home :as home]))
+
+;; srt's SandboxManager, loaded by `start!`. A static import cost 95–237 ms
+;; of every launch, measured, sandbox or not; nothing below runs before
+;; `start!` except `host-asker`, which only reads a flag off it.
+(defonce ^:private manager (atom nil))
+
+(defn- ^:async load-manager! []
+  (or @manager
+      (reset! manager (.-SandboxManager (js-await (js/import "@anthropic-ai/sandbox-runtime"))))))
 
 ;; The directory bash may write under, or nil for no sandbox.
 (defonce root (atom nil))
@@ -80,10 +88,10 @@
                 :deniedDomains  []}
    :filesystem {:allowWrite (vec (keep identity (concat [dir git (real (os/tmpdir))
                                                         ;; scripts write /tmp, not $TMPDIR; srt wants it resolved
-                                                        (real "/tmp")]
+                                                         (real "/tmp")]
                                                        ;; installs need them; a child's would be run
                                                        ;; later by its unconfined parent, so not there
-                                                       (when-not child? (keep real (map #(path/join (home/dir) %) cache-dirs))))))
+                                                        (when-not child? (keep real (map #(path/join (home/dir) %) cache-dirs))))))
                 :denyWrite  (vec (concat [(path/join dir ".nyma") (path/join dir ".envrc")]
                                          (when git (git-protected git))))
                 :denyRead   (vec (concat secret-paths (:deny-read cfg)))}})
@@ -96,7 +104,7 @@
    and a session with no one to ask, is refused with the host named."
   [child? ask save!]
   (let [session (atom #{})
-        deny    (fn [reason] (if (.-askCallbackDenyReason SandboxManager) #js {:allow false :reason reason} false))]
+        deny    (fn [reason] (if (some-> @manager .-askCallbackDenyReason) #js {:allow false :reason reason} false))]
     ^:async
     (fn [params]
       (let [host (str (.-host params))]
@@ -115,14 +123,15 @@
 (defn- ^:async start!
   [dir child? cfg opts]
   (try
-    (when-not (.isSupportedPlatform SandboxManager)
-      (throw (js/Error. "this platform is not supported")))
-    (when-let [errs (seq (.-errors (.checkDependencies SandboxManager)))]
-      (throw (js/Error. (first errs))))
-    (js-await (.reset SandboxManager))
-    (js-await (.initialize SandboxManager (clj->js (policy dir (git-common-dir dir) child? cfg))
-                           (host-asker child? (:ask opts) (:save-host! opts))))
-    true
+    (let [SandboxManager (js-await (load-manager!))]
+      (when-not (.isSupportedPlatform SandboxManager)
+        (throw (js/Error. "this platform is not supported")))
+      (when-let [errs (seq (.-errors (.checkDependencies SandboxManager)))]
+        (throw (js/Error. (first errs))))
+      (js-await (.reset SandboxManager))
+      (js-await (.initialize SandboxManager (clj->js (policy dir (git-common-dir dir) child? cfg))
+                             (host-asker child? (:ask opts) (:save-host! opts))))
+      true)
     (catch :default e
       (d/warn "sandbox" (str "bash is not confined to " dir ": " (.-message e)))
       false)))
@@ -161,7 +170,7 @@
    there is none. `:env` is nil when unchanged."
   [command]
   (if (and @ready (js-await @ready))
-    (let [r (js-await (.wrapWithSandboxArgv SandboxManager command))]
+    (let [r (js-await (.wrapWithSandboxArgv @manager command))]
       {:argv (vec (.-argv r)) :env (scrub-env (.-env r)) :sandboxed? true})
     {:argv ["sh" "-c" command] :env nil}))
 
@@ -177,7 +186,7 @@
   "`stderr` with the sandbox's denials for `command` appended, so the model
    learns which path or host was refused instead of retrying blind."
   [command stderr]
-  (let [s (try (.annotateStderrWithSandboxFailures SandboxManager command stderr)
+  (let [s (try (.annotateStderrWithSandboxFailures @manager command stderr)
                (catch :default _ stderr))]
     ;; srt names network denials; file ones only reach its log monitor late
     (cond-> s
