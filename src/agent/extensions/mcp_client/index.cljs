@@ -139,6 +139,9 @@
          defaults     {:show-detail-segment false
                        :max-restarts        3
                        :startup-timeout-ms  30000
+                       ;; How long the first turn waits for the bring-up before
+                       ;; going ahead without the tools; see join-with-cap.
+                       :join-timeout-ms     2000
                        :call-timeout-ms     30000
                        ;; Per-tool description cap (chars) — see tool_bridge.
                        :max-description-length 1200
@@ -161,7 +164,9 @@
                     {:show-detail-segment (boolean (aget mcp "show-detail-segment"))
                      :max-restarts        (or (aget mcp "max-restarts") (:max-restarts defaults))
                      :startup-timeout-ms  (or (aget mcp "startup-timeout-ms") (:startup-timeout-ms defaults))
-                     :call-timeout-ms     (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
+                     :join-timeout-ms     (let [n (aget mcp "join-timeout-ms")]
+                                            (if (number? n) n (:join-timeout-ms defaults)))
+                     :call-timeout-ms   (or (aget mcp "call-timeout-ms") (:call-timeout-ms defaults))
                      :max-description-length (let [n (aget mcp "max-description-length")]
                                                (if (number? n) n (:max-description-length defaults)))
                      :shadow-tools        (parse-shadow-tools (aget mcp "shadow-tools"))
@@ -176,6 +181,28 @@
          (when on-error
            (on-error (malformed-settings-message project-path (.-message e))))
          defaults)))))
+
+(defn join-with-cap
+  "Wait for `p` at most `ms`: :done when it settled in time, :late when it
+   did not. The turn goes on either way; `p` keeps running.
+
+   Measured on a laptop with nine servers, two of them uvx cold starts: the
+   bring-up took 15–18 s, and the first turn waited for all of it although
+   deferral then withheld every schema anyway."
+  [p ms]
+  (js/Promise.race
+   #js [(.then p (fn [_] :done) (fn [_] :done))
+        (js/Promise. (fn [resolve] (js/setTimeout #(resolve :late) ms)))]))
+
+(defn starting-note
+  "What the model is told on a turn that went ahead before the bring-up
+   finished, so it does not conclude the tools do not exist. nil when every
+   server is up."
+  [names]
+  (when (seq names)
+    (str "MCP servers still starting: " (str/join ", " (sort names))
+         ". Their tools are not available on this turn; they will be on the next."
+         " Do not conclude a tool is missing from one unanswered turn.")))
 
 (defn compute-shadow-set
   "Given the shadow map and the current set of active tool names,
@@ -307,6 +334,9 @@
         ;; (0.13 s with no mcp.json to find, 3–6 s with one). Spawning is
         ;; already parallel; the wait was simply in the wrong place.
         bring-up-promise  (atom nil)
+        ;; Set once the bring-up has settled, so a turn can tell "still
+        ;; starting" from "nothing configured" without touching the promise.
+        bring-up-done     (atom false)
 
         ;; Bring up: spawn every configured server, register tools.
         ;; Idempotent — if the manager already has clients, no-op.
@@ -326,7 +356,7 @@
                 (try
                   (js-await (mgr/start-all! @manager-ref configs))
                   (let [names (bridge/register-all! api @manager-ref
-                                                     {:max-description-length (:max-description-length settings)})]
+                                                    {:max-description-length (:max-description-length settings)})]
                     (reset! registered-tools names))
                   ;; Subprocess may have stomped the terminal title.
                   (reclaim-terminal-title!)
@@ -395,14 +425,20 @@
         on-session-ready
         (fn [data]
           (when (nil? @bring-up-promise)
-            (reset! bring-up-promise (on-bring-up data)))
+            (reset! bring-up-done false)
+            (reset! bring-up-promise
+                    (.finally (on-bring-up data) #(reset! bring-up-done true))))
           nil)
 
         ;; agent_start: the join. It is the last hook that runs before
         ;; loop.cljs reads the tool registry, so tools registered by the
         ;; bring-up are present on turn one — not turn two. A user who spent a
         ;; couple of seconds typing waits for nothing; one who hit enter
-        ;; immediately waits only for what is left.
+        ;; immediately waits only for what is left — up to `join-timeout-ms`.
+        ;; Past that the turn goes ahead without the MCP tools and the model is
+        ;; told so (before_agent_start below); start-all! registers nothing
+        ;; until every server has answered, so one cold uvx start otherwise
+        ;; held every tool, and the first reply, for as long as it took.
         ;;
         ;; on-bring-up already swallows its own failures, so this cannot reject
         ;; and a dead server cannot block the turn — but the catch stays,
@@ -410,7 +446,13 @@
         on-agent-start
         (^:async fn [_data]
           (when-let [p @bring-up-promise]
-            (try (js-await p) (catch :default _ nil))))
+            (when-not @bring-up-done
+              (try
+                (when (= :late (js-await (join-with-cap p (:join-timeout-ms settings))))
+                  (d/info "mcp-client"
+                          (str "bring-up still running after " (:join-timeout-ms settings)
+                               " ms; this turn goes ahead without the MCP tools")))
+                (catch :default _ nil)))))
 
         ;; session_shutdown: tools off, then stop all.
         ;;
@@ -490,8 +532,18 @@
     ;; their tools, which is the whole point.
     (.on api "before_agent_start"
          (fn [_ev]
-           (when-let [block (deferred/server-summary @deferred-catalog)]
-             #js {"system-prompt-additions" #js [block]}))
+           (let [blocks (cond-> []
+                          (seq @deferred-catalog)
+                          (conj (deferred/server-summary @deferred-catalog))
+                          ;; the join above gave up on this turn
+                          (and (some? @bring-up-promise) (not @bring-up-done))
+                          (conj (starting-note
+                                 (keep (fn [{:keys [name client]}]
+                                         (when (not= :running (client/state client)) name))
+                                       (mgr/all-clients @manager-ref)))))
+                 blocks (remove nil? blocks)]
+             (when (seq blocks)
+               #js {"system-prompt-additions" (clj->js (vec blocks))})))
          50)
 
     (.on api "session_ready" on-session-ready 50)

@@ -144,6 +144,7 @@ counts and last error messages — useful when something's red.
 | `show-detail-segment` | `false` | Per-server icons in the status line |
 | `max-restarts` | `3` | Auto-reconnect attempts on disconnect |
 | `startup-timeout-ms` | `30000` | Max time to spawn + handshake |
+| `join-timeout-ms` | `2000` | How long the first turn waits for the bring-up before going ahead without the MCP tools |
 | `call-timeout-ms` | `30000` | Per-tool-call deadline |
 
 ---
@@ -156,11 +157,14 @@ counts and last error messages — useful when something's red.
   awaiting five servers here used to cost 3–6 seconds before nyma
   drew anything.
 - **Tool registration**: the bring-up is joined at `agent_start`, the
-  last hook before the turn reads the tool registry. So a slow server
-  delays the first turn rather than missing it — its tools are present
-  on turn 1, not turn 2. A user who spends a couple of seconds typing
-  waits for nothing; one who hits enter immediately waits only for
-  what is left.
+  last hook before the turn reads the tool registry. A user who spends a
+  couple of seconds typing waits for nothing; one who hits enter
+  immediately waits only for what is left — up to `join-timeout-ms`
+  (2 s). Past that the turn goes ahead without the MCP tools and the
+  system prompt names the servers still starting, so the model does not
+  conclude the tools do not exist; they are there on the next turn.
+  Tools register only once every server has answered, so one cold `uvx`
+  start used to hold the first reply for 15–18 s.
 - **Auto-restart**: if a subprocess dies mid-session, the client
   reconnects with exponential backoff (`500ms · 2^n`, capped at
   `max-restarts`). After the cap, state is `:stopped-error` and
