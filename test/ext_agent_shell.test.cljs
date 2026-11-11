@@ -10,7 +10,6 @@
             [agent.extensions.agent-shell.features.mode-switcher :as mode-switcher]
             [agent.extensions.agent-shell.features.session-mgmt :as session-mgmt]
             [agent.extensions.agent-shell.acp.notifications :as notifications]
-            [agent.extensions.agent-shell.features.permission-ui :as permission-ui]
             [agent.extensions.agent-shell.features.input-router :as input-router]
             [agent.extensions.agent-shell.features.handoff :as handoff]
             [agent.extensions.agent-shell.index :as shell-index]))
@@ -167,14 +166,6 @@
                                              (-> (expect (contains? cmds "effort")) (.toBe true))
         ;; sessions
                                              (-> (expect (contains? cmds "sessions")) (.toBe true)))))
-
-                                     (it "registers auto-approve flag on activate"
-                                         (fn []
-                                           (let [api      (make-mock-api)
-                                                 activate (.-default shell-index)
-                                                 _        (activate api)
-                                                 flags    @(.-_flags api)]
-                                             (-> (expect (contains? flags "auto-approve")) (.toBe true)))))
 
                                      (it "deactivator unregisters commands"
                                          (fn []
@@ -1071,27 +1062,6 @@
                                                                                         (= (.-method p) "session/load")) p)))
                                                                           @(:_writes conn))]
                                                      (-> (expect (nil? resume-req)) (.toBe true)))))))))
-
-;;; ─── Permission UI ──────────────────────────────────────────────────────────
-
-(describe "agent-shell:permission-ui" (fn []
-                                        (it "registers auto-approve flag on activate"
-                                            (fn []
-                                              (let [api (make-mock-api)
-                                                    _   (permission-ui/activate api)]
-                                                (-> (expect (contains? @(.-_flags api) "auto-approve")) (.toBe true)))))
-
-                                        (it "auto-approve flag defaults to false"
-                                            (fn []
-                                              (let [api (make-mock-api)
-                                                    _   (permission-ui/activate api)]
-                                                (-> (expect (.-default (get @(.-_flags api) "auto-approve"))) (.toBe false)))))
-
-                                        (it "deactivator returns a function"
-                                            (fn []
-                                              (let [api   (make-mock-api)
-                                                    deact (permission-ui/activate api)]
-                                                (-> (expect (fn? deact)) (.toBe true)))))))
 
 ;;; ─── Completed-edit tracking ───────────────────────────────────────────────
 

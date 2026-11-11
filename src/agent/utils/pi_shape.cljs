@@ -113,12 +113,6 @@
   (first (keep-indexed (fn [i b] (when (and (= "toolCall" (:type b)) (= id (:id b))) i))
                        (:content msg))))
 
-(defn result-text [r]
-  (cond (string? r)    r
-        (nil? r)       ""
-        (undefined? r) ""
-        :else          (try (js/JSON.stringify r) (catch :default _ (str r)))))
-
 (defn tool-result-message
   "A finished tool execution → pi ToolResultMessage. `:result` is kept beside
    pi's fields for consumers of nyma's earlier turn_end shape."

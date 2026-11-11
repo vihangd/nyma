@@ -240,18 +240,6 @@
         (.sendNotification c "textDocument/didSave"
                            #js {:textDocument #js {:uri uri}})))))
 
-(defn did-close!
-  "Send textDocument/didClose and remove the file from tracking."
-  [client uri]
-  (let [{:keys [conn open-files state]} client
-        c @conn]
-    (when (and c (= @state :running) (get @open-files uri))
-      (.sendNotification c "textDocument/didClose"
-                         #js {:textDocument #js {:uri uri}})
-      (swap! open-files dissoc uri))))
-
-;; ── Request wrappers ──────────────────────────────────────────────
-
 (defn ^:async request!
   "Send an LSP request. Throws if not running."
   [client method params]

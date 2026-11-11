@@ -124,19 +124,6 @@
           (-> (expect (get-in (:metadata entry) [:args :path])) (.toBe "/foo")))
         ((:close store)))))
 
-  (it "upsert-branch-summary and retrieve"
-    (fn []
-      (let [store (make-store)]
-        ((:upsert-branch-summary store)
-          {:id "bs1" :branch-leaf-id "leaf42" :session-file "s1"
-           :summary "Did some auth work" :files-read ["src/auth.cljs"]
-           :files-modified ["src/login.cljs"]})
-        (let [summaries ((:get-branch-summaries store) "s1")]
-          (-> (expect (count summaries)) (.toBe 1))
-          (-> (expect (:summary (first summaries))) (.toBe "Did some auth work"))
-          (-> (expect (first (:files-read (first summaries)))) (.toBe "src/auth.cljs")))
-        ((:close store)))))
-
   (it "upsert-entry is idempotent (INSERT OR REPLACE)"
     (fn []
       (let [store (make-store)]

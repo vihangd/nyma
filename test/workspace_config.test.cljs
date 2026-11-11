@@ -16,13 +16,11 @@
 
 (beforeEach
   (fn []
-    (reset! wc/aliases-atom {})
-    (reset! wc/flags-atom {})))
+    (reset! wc/aliases-atom {})))
 
 (afterEach
   (fn []
-    (reset! wc/aliases-atom {})
-    (reset! wc/flags-atom {})))
+    (reset! wc/aliases-atom {})))
 
 ;;; ─── Group 1: Config loading ──────────────────────────────────
 
@@ -30,8 +28,7 @@
   (it "returns empty maps when .nyma/settings.json does not exist"
     (fn []
       (let [config (wc/load-config!)]
-        (-> (expect (= (:aliases config) {})) (.toBe true))
-        (-> (expect (= (:flags config) {})) (.toBe true)))))
+        (-> (expect (= (:aliases config) {})) (.toBe true)))))
 
   (it "parses aliases and flags from valid JSON"
     (fn []
@@ -53,30 +50,6 @@
     (fn []
       (let [caught (try (js/JSON.parse "NOT VALID JSON") (catch :default _ :error))]
         (-> (expect (= caught :error)) (.toBe true)))))))
-
-;;; ─── Group 2: Aliases atom ────────────────────────────────────
-
-(describe "workspace-config:aliases-atom" (fn []
-  (it "get-aliases returns empty map initially"
-    (fn []
-      (-> (expect (empty? (wc/get-aliases))) (.toBe true))))
-
-  (it "set-alias! adds to the atom"
-    (fn []
-      (wc/set-alias! "foo" "/help")
-      (-> (expect (get (wc/get-aliases) "foo")) (.toBe "/help"))))
-
-  (it "set-alias! can overwrite existing alias"
-    (fn []
-      (wc/set-alias! "foo" "/help")
-      (wc/set-alias! "foo" "/clear")
-      (-> (expect (get (wc/get-aliases) "foo")) (.toBe "/clear"))))
-
-  (it "remove-alias! removes from atom"
-    (fn []
-      (wc/set-alias! "foo" "/help")
-      (wc/remove-alias! "foo")
-      (-> (expect (nil? (get (wc/get-aliases) "foo"))) (.toBe true))))))
 
 ;;; ─── Group 3: Activate / deactivate (via wc/default) ─────────
 

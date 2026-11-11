@@ -66,7 +66,6 @@
 
 ;; ── Severity (analyze.md) ─────────────────────────────────────
 
-(def critical-severity "CRITICAL")
 (def severity-levels   ["CRITICAL" "HIGH" "MEDIUM" "LOW"])
 
 ;; ── Pure parsers ──────────────────────────────────────────────

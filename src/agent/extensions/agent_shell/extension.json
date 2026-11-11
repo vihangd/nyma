@@ -7,7 +7,6 @@
     "events",
     "ui",
     "messages",
-    "flags",
     "state"
   ],
   "dependsOn": [],

@@ -73,7 +73,7 @@
     :manifest  #js {"namespace" "agent-runner-claude-sdk" "description" "In-process Claude Agent SDK runner" "capabilities" #js ["events"] "dependsOn" #js ["agent-shell"] "dependencies" #js {"@anthropic-ai/claude-agent-sdk" "*"}}}
    {:namespace "agent-shell"
     :module    ext-agent-shell
-    :manifest  #js {"namespace" "agent-shell" "description" "Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.)" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "flags" "state"] "dependsOn" #js [] "settings" #js {"agent-shell" #js {"default-agent" nil "auto-approve" false "auto-connect" false "agents" #js {}}}}}
+    :manifest  #js {"namespace" "agent-shell" "description" "Unified frontend for ACP coding agents (Claude Code, Gemini CLI, etc.)" "capabilities" #js ["spawn" "commands" "events" "ui" "messages" "state"] "dependsOn" #js [] "settings" #js {"agent-shell" #js {"default-agent" nil "auto-approve" false "auto-connect" false "agents" #js {}}}}}
    {:namespace "agent-state"
     :module    ext-agent-state
     :manifest  #js {"namespace" "agent-state" "description" "Reports what nyma is doing (idle, streaming, tool, waiting) to a supervisor process via a command hook" "capabilities" #js ["events" "spawn"] "dependsOn" #js [] "settings" #js {"agent-state" #js {"enabled" nil "agent" "nyma" "command" nil}}}}

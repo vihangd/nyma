@@ -793,62 +793,6 @@ with every section below present.
                     (str "; the extension summary was rejected: " (str/join "; " rejected)))
                   ")"))))))
 
-(def ^:private branch-summary-prompt
-  "Summarize this conversation branch in a structured format. Include:
-
-## Goal
-What was the user trying to accomplish?
-
-## Progress
-### Done
-- List completed items
-
-### In Progress
-- List items that were started but not finished
-
-## Key Decisions
-- Important choices made during the conversation
-
-## Next Steps
-- What remains to be done
-
-## Critical Context
-- Technical details, constraints, or gotchas that should be preserved
-
-Keep the summary concise but preserve all actionable information.")
-
-(defn ^:async summarize-branch
-  "Summarize a branch of conversation when switching away from it.
-   Collects messages from the given leaf back to root, extracts file operations,
-   and generates a structured LLM summary."
-  [session model branch-leaf-id]
-  (let [all-entries  ((:get-tree session))
-        by-id        (into {} (map (fn [e] [(:id e) e]) all-entries))
-        ;; Walk from leaf to root
-        branch-msgs  (loop [current branch-leaf-id
-                            path    []]
-                       (if-let [entry (get by-id current)]
-                         (recur (:parent-id entry) (cons entry path))
-                         (vec path)))
-        files-read     (extract-files-read branch-msgs)
-        files-modified (extract-files-modified branch-msgs)
-        conversation   (format-messages
-                        (filter #(contains? #{"user" "assistant"} (:role %)) branch-msgs))
-        prompt-text    (str branch-summary-prompt
-                            "\n\n<conversation>\n" conversation "\n</conversation>"
-                            (when (seq files-read)
-                              (str "\n\n<read-files>\n" (str/join "\n" files-read) "\n</read-files>"))
-                            (when (seq files-modified)
-                              (str "\n\n<modified-files>\n" (str/join "\n" files-modified) "\n</modified-files>")))
-        result         (js-await
-                        (generateText
-                         #js {:model    model
-                              :messages #js [#js {:role "user" :content prompt-text}]}))]
-    {:summary        (.-text result)
-     :branch-leaf-id branch-leaf-id
-     :files-read     files-read
-     :files-modified files-modified}))
-
 (defn ^:async maybe-auto-compact!
   "Compact BETWEEN turns when context has crossed the trigger point.
 

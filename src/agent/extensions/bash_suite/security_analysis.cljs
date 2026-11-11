@@ -206,11 +206,6 @@
    []
    obfuscation-patterns))
 
-(def privilege-commands
-  "Commands that run what follows them as another user. They are wrappers, not
-   work: the risk belongs to the command BEHIND them."
-  #{"sudo" "doas" "pkexec" "su" "runuser"})
-
 (defn strip-privilege-wrapper
   "Tokens with any leading privilege wrapper removed, so the real command is the
    one classified.

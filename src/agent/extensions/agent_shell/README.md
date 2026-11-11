@@ -78,7 +78,6 @@ file changes — a declined write changed nothing. Set plan mode once with
 | `effort_switcher.cljs` | `/effort` thinking-level control |
 | `session_mgmt.cljs` | `/sessions` list / resume / new |
 | `handoff.cljs` | `/agent handoff` with context capture and transfer |
-| `permission_ui.cljs` | `--auto-approve` flag handling |
 | `mcp_discovery.cljs` | Finds `.mcp.json` / `.cursor/mcp.json` MCP server configs |
 | `acp/*` | ACP transport — JSON-RPC framing, pool, schema, sessions |
 

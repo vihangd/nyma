@@ -154,36 +154,6 @@
             :turn-count          (or (.-turn_count row) 0)
             :models              (mapv #(.-model %) (.all models session-file))})))
 
-     :upsert-branch-summary
-     (fn [summary-map]
-       (let [stmt (.prepare db
-                    "INSERT OR REPLACE INTO branch_summaries
-                     (id, branch_leaf_id, session_file, summary, files_read, files_modified, timestamp)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)")]
-         (.run stmt
-           (or (:id summary-map) "")
-           (or (:branch-leaf-id summary-map) "")
-           (or (:session-file summary-map) "")
-           (or (:summary summary-map) "")
-           (when (:files-read summary-map) (js/JSON.stringify (clj->js (:files-read summary-map))))
-           (when (:files-modified summary-map) (js/JSON.stringify (clj->js (:files-modified summary-map))))
-           (or (:timestamp summary-map) (js/Date.now)))))
-
-     :get-branch-summaries
-     (fn [session-file]
-       (let [stmt (.prepare db
-                    "SELECT * FROM branch_summaries WHERE session_file = ? ORDER BY timestamp DESC")
-             rows (.all stmt session-file)]
-         (mapv (fn [row]
-                 {:id             (.-id row)
-                  :branch-leaf-id (.-branch_leaf_id row)
-                  :summary        (.-summary row)
-                  :files-read     (when (.-files_read row) (js/JSON.parse (.-files_read row)))
-                  :files-modified (when (.-files_modified row) (js/JSON.parse (.-files_modified row)))
-                  :timestamp      (.-timestamp row)})
-           rows)))
-
-     ;; ─── Prompt history ────────────────────────────────────
      :insert-prompt
      (fn [text session-file]
        (let [stmt (.prepare db

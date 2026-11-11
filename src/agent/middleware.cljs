@@ -449,7 +449,6 @@
 (defn- allows-of [ctx] (or (:session-allows ctx) session-allowed))
 
 (defn session-allowed? [tool-name] (contains? @session-allowed tool-name))
-(defn allow-for-session! [tool-name] (swap! session-allowed conj tool-name))
 (defn reset-session-allows! [] (reset! session-allowed #{}))
 
 (defn- arg-get
