@@ -6,7 +6,7 @@ Facts here go stale — nothing guards this file the way `gen:builtins` guards t
 Before acting on a claim ("X is unused", "Y has no consumer"), `grep` it: on 2026-09-23 §1f said
 `mk-tool-ctx` had no adopters while three test files imported it.
 
-Last updated: 2026-08-18 (after escalation + /refine).
+Last updated: 2026-11-11 (beyond-coding deferral, perf/dead-code/test sweep).
 
 ---
 
@@ -47,7 +47,7 @@ Original entry, for context:
 
 #### 1c (as written)
 
-- **What's ready:** `src/agent/utils/debug.cljs` with env-gated `d/debug`/`d/info` (off by default unless `NYMA_DEBUG=1` or `DEBUG` contains `nyma`) and always-on `d/warn`/`d/error`. `configure-logger!` lets tests capture output without touching globals. Full coverage in `test/utils_debug.test.cljs` (15 tests).
+- **What's ready:** `src/agent/debug.cljs` (was `utils/debug.cljs`) with env-gated `d/debug`/`d/info` (off by default unless `NYMA_DEBUG=1` or `DEBUG` contains `nyma`) and always-on `d/warn`/`d/error`. `configure-logger!` lets tests capture output without touching globals. Full coverage in `test/utils_debug.test.cljs` (15 tests).
 - **What's wired:** exactly one production caller — `settings/manager/load-json` emits `d/warn` on duplicate JSON keys. Everywhere else still uses raw `js/console.log` / `js/console.warn`.
 - **Why we stopped:** mechanical migration, not a bug fix. We didn't want to conflate with the cc-kit borrow work.
 - **When to do it:** anytime. Low-risk grep-and-replace.
@@ -2065,3 +2065,38 @@ Round 2 is not a measured win. Codemode took one step more than direct tools, an
 
 The direct arm in round 4 ran 10, 16 and 60 steps (one run looped to 1.16M tokens), so its median (16 / 283k) says more about variance than about codemode. Against direct's best round (10–11 steps, ~165k), round 4 codemode is about 15–20% fewer steps and ~45% fewer input tokens. Remaining per-run losses are one or two scripts each: an unclosed bracket, the call cap hit by fetching attachments one call per mail, `Promise.then` invented, `select-keys` printing `{}`.
 
+## 2026-11-11 — beyond coding: deferred
+
+Researched (OpenBot 1.0, Cowork, ChatGPT Work, OpenClaw, Hermes, Goose, Manus) and parked. nyma already
+runs from `~` (trust, skills and memory treat home as global), defers big MCP catalogs behind
+`mcp_search`/`mcp_call`, reads `readOnlyHint`/`destructiveHint`, reads PDFs and images, and has the
+gateway's email/Slack/Telegram/HTTP channels. What blocks office/assistant use, cheapest first:
+
+| gap | where | fix |
+|---|---|---|
+| every deferred MCP call asks | `mcp_client/deferred.cljs:229` `mcp_call` is destructive by construction, so once deferral is on the annotations stop mattering | decide from the called tool's own annotations (~20 lines) |
+| coding-only persona | `resources/loader.cljs:62` `default-system-prompt`; compaction, Jev, finalize-warn, handoff prompts say "coding agent" too | a `profile` setting (`assistant`) swapping the base prompt |
+| memory is project-only on write | `memory/index.cljs:44` `write-memory!`; the user file is read but never written | `scope: user` on `memory_write` |
+| gateway approvals never reach chat | `gateway/pipelines.cljs:101` `wire-approval-pipeline!` has no caller; no channel `meta!` handles `:approval-request`; `request_approval` always denies | wire it, render Allow/Deny in Slack/Telegram |
+| no scheduler / heartbeat | nothing; only the gateway's idle sweep and IMAP poll | gateway cron reading a `HEARTBEAT.md`; creating a schedule is itself an ask (persistence vector) |
+| MCP OAuth, resources, prompts; `mcp_call` returns text only | `mcp_client/client.cljs` static headers only; `deferred.cljs:255` | when a hosted server needs it |
+
+Prior art converged on: scheduler + heartbeat file, a phone chat channel as the main UI, plain-file
+memory/user profile, skills or recipes, deferred tool loading (Anthropic Tool Search: Opus 4 49→74%,
+~85% fewer tokens). Failure modes to design against: OpenClaw's 135k exposed instances and 12% malicious
+marketplace skills, Cowork's exfil to an allowlisted domain, Goose's invisible-Unicode recipe — so gate
+sends, egress and schedule creation, not only shell. Not building OpenBot's AG-UI backend: it wants the
+Bot to be a bare model loop with every action as a client tool, which switches nyma's own layer off.
+
+### Same sweep — perf, dead code, tests: deferred
+
+- Token estimate runs 3× per user turn (`loop.cljs:495,577`, token-suite budget); ~34 ms on 1.8 MB.
+  Memo per message in a WeakMap when it shows up.
+- `~/.nyma/debug.log` (14.6 MB) and `hooks-audit.log` (4.4 MB) never rotate.
+- SQLite entry store is never switched on (`cli.cljs:773` no store): `upsert-entry` is dead; statements
+  re-prepared per call, no transactions.
+- Tests with module-atom order dependence and no after-hook: `agent_shell_status_segments`,
+  `provider_reasoning_wire`, `ext_agent_shell_notifications`, `gateway_overhead`, `ext_thinking_renderer`.
+- Untested, I/O-bound, covered only by gated integration tests: `lsp_suite/lsp_client`, `codemode/worker`.
+- Resize/theme `invalidate` re-renders everything: 100–170 ms at 1000 messages; first paint 533 ms (what
+  `/resume` pays). Per-block wrap cache in `chat_renderer.cljs:290` is the next render win.
