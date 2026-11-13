@@ -480,7 +480,10 @@
               (swap! state update :messages conj msg))))
 
         ;; context_assembly — extensions can replace messages or system prompt
-        (let [assembly-result
+        (let [;; User turns before any hook could prune them, so a compaction
+              ;; can tell whether the request it would summarise on was cut.
+              built-users (count (filter #(= "user" (:role %)) messages))
+              assembly-result
               (js-await
                (emit-collect "context_assembly"
                              #js {:messages    (clj->js messages)
@@ -988,7 +991,8 @@
                                   ;; is the final step's alone.
                                   (or (js-await (.-responseMessages result))
                                       (some-> (js-await (.-response result)) .-messages))
-                                  (:messages @state)))
+                                  (:messages @state)
+                                  built-users))
                           (catch :default e
                             (dbg/error "loop" (str "request snapshot: " (.-message e)))))
 

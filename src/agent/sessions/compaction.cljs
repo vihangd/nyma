@@ -440,7 +440,7 @@ with every section below present.
    Functions go (callbacks, prepareStep, each tool's execute: a summary call
    must never run a tool). stopWhen goes too, which leaves generateText's
    default of one step."
-  [st-config response-messages live-messages]
+  [st-config response-messages live-messages & [built-users]]
   (let [base  (js/Object.assign #js {} st-config)
         tools (when-let [t (.-tools st-config)]
                 (let [out #js {}]
@@ -456,7 +456,14 @@ with every section below present.
     (when tools (aset base "tools" tools))
     (aset base "messages" (.concat (or (.-messages st-config) #js [])
                                    (or response-messages #js [])))
-    {:base base :msg-count (count live-messages) :last-msg (last live-messages)}))
+    {:base base :msg-count (count live-messages) :last-msg (last live-messages)
+     ;; Did context_assembly / priority_assembly drop turns from what was sent?
+     ;; A summary built on a pruned prefix never sees those turns, yet they are
+     ;; still replaced. Counted in user messages: injected system messages do
+     ;; not move it, a dropped turn does.
+     :pruned? (and (number? built-users)
+                   (< (count (filter #(= "user" (.-role %)) (or (.-messages st-config) #js [])))
+                      built-users))}))
 
 (defn usable-snapshot
   "The snapshot, if it still describes the live conversation: nothing has been
@@ -467,9 +474,24 @@ with every section below present.
   (when state-atom
     (let [s    @state-atom
           snap (:last-request s)]
-      (when (and snap (= (:msg-count snap) (count (:messages s)))
+      (when (and snap (not (:pruned? snap))
+                 (= (:msg-count snap) (count (:messages s)))
                  (identical? (:last-msg snap) (last (:messages s))))
         snap))))
+
+(defn keep-marker
+  "How the summary turn names where to stop: the start of the first kept
+   message. nil when nothing is kept (summarise everything); :ambiguous when
+   that text is blank or also occurs in the span being summarised, since the
+   model would stop at the wrong copy and the work in between would be lost."
+  [to-summarize to-keep]
+  (when (seq to-keep)
+    (let [t (str/trim (str (content/->text (:content (first to-keep)))))
+          q (subs t 0 (min 200 (count t)))]
+      (if (or (< (count q) 12)
+              (str/includes? (format-messages to-summarize) q))
+        :ambiguous
+        q))))
 
 (defn build-cached-summary-prompt
   "The user turn appended to the cached prefix. The conversation is already
@@ -495,14 +517,6 @@ with every section below present.
        (when (seq files-modified)
          (str "\n\n<files-modified>\n" (str/join "\n" files-modified) "\n</files-modified>"))))
 
-(def last-prefix-read
-  "Share of the last prefix summary's input read from cache, or nil. Not every
-   prefix survives a new user turn: Haiku 4.5 with thinking on strips earlier
-   thinking blocks, and measured 47% (system and tools only) where the same
-   run with thinking off read 99%. Idle compaction stops arming on a model
-   where it is low, since there it pays for the prefix instead of saving it."
-  (atom nil))
-
 (defn ^:async compact-with-retry
   "Call generateText with the strategy's system prompt + user-prompt. Validate
    the result and run one fix-retry if validation fails. Always returns a
@@ -512,7 +526,12 @@ with every section below present.
    `opts` `:base` is a `request-snapshot` base: the prompt is appended to that
    prefix instead of standing alone, and the fix-retry continues the same
    exchange so it reads the cache too. `:source` is what quotes are checked
-   against when the prompt itself no longer holds the transcript."
+   against when the prompt itself no longer holds the transcript. `:read`, an
+   atom, receives the share of the first call's input read from cache.
+
+   Not every prefix survives a new user turn: Haiku 4.5 with thinking on
+   strips earlier thinking blocks and measured 47% (system and tools only)
+   where the same run with thinking off read 99%."
   [model user-prompt files-read files-modified & [gen-fn strategy opts]]
   (let [gen          (or gen-fn generateText)
         sys          (:system-prompt (or strategy default-strategy))
@@ -536,18 +555,22 @@ with every section below present.
                               (doto (js/Object.assign #js {} base)
                                 (aset "messages" (.concat (.-messages base) msgs)))
                               #js {:model model :system sys :messages msgs})))
-        _            (when base (reset! last-prefix-read nil))
         first-result (js-await (call #js [first-msg]))
         _            (when base
                        (let [in   (some-> first-result .-usage .-inputTokens)
                              read (some-> first-result .-usage .-inputTokenDetails .-cacheReadTokens)]
-                         (reset! last-prefix-read (when (pos? (or in 0)) (/ (or read 0) in)))
+                         (when-let [a (:read opts)]
+                           (reset! a (when (pos? (or in 0)) (/ (or read 0) in))))
                          (d/info "compaction" "summary on the request prefix"
                                  #js {:inputTokens in :cacheReadTokens read})))
         first-text   (.-text first-result)
         first-errors (validate-compaction first-text files-read files-modified source)]
-    (if (empty? first-errors)
-      first-text
+    (cond
+      (empty? first-errors) first-text
+      ;; Only tool calls, no text: replaying an empty assistant turn is a 400.
+      ;; The caller falls back.
+      (and base (str/blank? (str first-text))) ""
+      :else
       (let [_ (d/warn "compaction" "validation failed, retrying"
                       #js {:errors (clj->js first-errors)})
             fix-msg    #js {:role    "user"
@@ -728,10 +751,7 @@ with every section below present.
                   ((:context-window model-registry) lookup)
                   100000)]
 
-    (when (and ;; compaction.enabled false turns off the idle path too; force?
-               ;; would otherwise walk straight past should-compact?.
-               (not (and (= trigger "idle") (false? enabled?)))
-               (or force?
+    (when (and (or force?
                    ;; Enough NEW material to be worth summarizing.
                    ;;
                    ;; Counted against the live conversation when we have it, not
@@ -872,7 +892,10 @@ with every section below present.
                                :to-summarize        to-summarize
                                :files-read          files-read
                                :files-modified      files-modified})
-                snap         (when (= strat default-strategy) (usable-snapshot state-atom))
+                marker       (keep-marker to-summarize to-keep)
+                snap         (when (and (= strat default-strategy) (not= marker :ambiguous))
+                               (usable-snapshot state-atom))
+                prefix-read  (atom nil)
                 summary-text (or (when snap
                                    (try
                                      (let [t (js-await
@@ -882,12 +905,12 @@ with every section below present.
                                                 {:system-prompt       (:system-prompt strat)
                                                  :custom-instructions custom-instructions
                                                  :previous-summary    (:content prev-compaction)
-                                                 :keep-from           (some-> (first to-keep) :content
-                                                                              content/->text (subs 0 200))
+                                                 :keep-from           marker
                                                  :files-read          files-read
                                                  :files-modified      files-modified})
                                                files-read files-modified gen-fn strat
                                                {:base   (:base snap)
+                                                :read   prefix-read
                                                 :source (str (:content prev-compaction) "\n"
                                                              ;; The model sees the kept span too, and
                                                              ;; section 6 quotes its most recent work.
@@ -911,7 +934,7 @@ with every section below present.
                                                             files-read files-modified))
                         summary-text)
              :before  usage
-             :prefix-read @last-prefix-read}
+             :prefix-read @prefix-read}
           (do
 
             ((:append session)

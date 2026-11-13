@@ -80,8 +80,12 @@
       (number? fixed)                  {:warm-s fixed :cold-s fixed}
       (= :anthropic (shared/detect-cache-provider-for-model model extra-providers))
       (let [t (ttl-of kv-ttl)] {:warm-s t :cold-s t})
+      ;; The longest hit is only a lower bound on the lifetime; firing there
+      ;; spends a summary on every ordinary reading pause. The midpoint of the
+      ;; two bounds is the estimate; the shortest miss is when it is cold.
       (and (pricing/priced? spec) (:hit-max learned) (:miss-min learned))
-      {:warm-s (:hit-max learned) :cold-s (:miss-min learned)})))
+      {:warm-s (/ (+ (:hit-max learned) (:miss-min learned)) 2)
+       :cold-s (:miss-min learned)})))
 
 (def default-profiles
   "DeepSeek and Groq keep caches for hours: the gap this exists for rarely
@@ -105,6 +109,11 @@
         step-start  (atom nil)
         last-touch  (atom nil)
         first-gap   (atom nil)
+        ;; The model THIS run's request went to, for learning. `spec` is only
+        ;; known at the run's end, so it still names the previous run's model
+        ;; when the first step (the one that measures the gap) finishes.
+        req-model   (atom nil)
+        model-key   (fn [m] (str (if (string? m) m (some-> m .-modelId))))
         compacted?  (atom false)
         spec        (atom nil)
         ;; Models whose cache has served a read this session. The dialect alone
@@ -146,6 +155,9 @@
                           (let [msgs    (:messages (.getState api))
                                 conv    {:n (count msgs) :last-msg (last msgs)}
                                 started (now)
+                                ;; The request reads the cache as it starts, cancelled
+                                ;; or not, so the clock restarts here.
+                                _       (reset! last-touch started)
                                 r       (try
                                           (js-await (.compact ctx #js {"force?" true "summarize-only?" true
                                                                        "trigger" "idle"}))
@@ -158,14 +170,13 @@
                                            "% from cache on " @spec " — not arming there again"))
                               (swap! unkept conj (str @spec)))
                             (when (and (= ep @epoch) (:summary r) (same-conv? conv))
-                              ;; The summary call read the cache, which restarts its clock.
-                              (reset! last-touch started)
                               (later! (- (+ started (* 1000 (:cold-s win)) margin-ms) (now))
                                       (apply! ctx ep conv (:summary r))))))))
         handlers
         {"before_provider_request"
-         (fn [_cfg _ctx]
+         (fn [cfg _ctx]
            (cancel!)
+           (reset! req-model (model-key (some-> cfg .-model)))
            (let [t (now)]
              (reset! first-gap (when @last-touch (/ (- t @last-touch) 1000)))
              (reset! step-start t))
@@ -182,7 +193,7 @@
                (when-let [u (some-> step .-usage)]
                  (let [read  (or (some-> u .-inputTokenDetails .-cacheReadTokens)
                                  (.-cachedInputTokens u) 0)
-                       k     (str @spec)
+                       k     (str @req-model)
                        old   (get @learned k)
                        new   (learn old gap read (or (.-inputTokens u) 0))]
                    (when (and (seq k) (not= old new))
@@ -210,7 +221,9 @@
            (cancel!)
            (let [st   (.getState api)
                  snap (:last-request st)
-                 win  (when (and snap @last-touch @spec (contains? @served (str @spec))
+                 ;; compaction.enabled false turns this off too.
+                 on?  (not (false? (get (when (.-settings api) (.settings api "compaction")) "enabled")))
+                 win  (when (and on? snap @last-touch @spec (contains? @served (str @spec))
                                  (not (contains? @unkept (str @spec)))
                                  (>= (or (:last-input-tokens st) 0) min-tokens))
                         (window {:spec            @spec
@@ -218,7 +231,7 @@
                                  :profiles        profiles
                                  :kv-ttl          (:cache-ttl kv-cfg)
                                  :extra-providers (:extra-providers kv-cfg)
-                                 :learned         (get @learned (str @spec))}))]
+                                 :learned         (get @learned (model-key (.-model (:base snap))))}))]
              (when win
                (later! (- (+ @last-touch (* 1000 fire-at (:warm-s win))) (now))
                        (precompute! ctx @epoch win))))

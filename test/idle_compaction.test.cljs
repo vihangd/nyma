@@ -53,7 +53,7 @@
                                  (.toBeFalsy))
                              (-> (expect (ic/window {:spec "zai/glm" :model openai-model
                                                      :learned {:hit-max 200 :miss-min 900}}))
-                                 (.toEqual {:warm-s 200 :cold-s 900}))
+                                 (.toEqual {:warm-s 550 :cold-s 900}))
           ;; Unpriced (a local server): never.
                              (-> (expect (ic/window {:spec "omlx/q" :model openai-model
                                                      :learned {:hit-max 200 :miss-min 900}}))
@@ -69,7 +69,9 @@
         timers (atom {})
         ids    (atom 0)
         calls  (atom [])
-        api    #js {:getState (fn [] @state) :state nil}
+        saved  (atom nil)
+        api    #js {:getState (fn [] @state)
+                    :state    #js {:get (fn [_] nil) :set (fn [_ v] (reset! saved v))}}
         ctx    #js {:ui #js {:available false}
                     :compact (fn [opts]
                                (swap! calls conj opts)
@@ -90,7 +92,8 @@
                    (swap! timers dissoc id)
                    (reset! clock at)
                    (f)))]
-    {:h handlers :ctx ctx :calls calls :clock clock :timers timers :fire! fire!}))
+    {:h handlers :ctx ctx :calls calls :clock clock :timers timers :fire! fire!
+     :api api :saved saved}))
 
 (defn- run-turn!
   "One run: request, one step, usage, end."
@@ -176,3 +179,45 @@
           (reset! (:timers r) {})
           (run-turn! r "anthropic/claude-x")
           (-> (expect (count @(:timers r))) (.toBe 0)))))))
+
+(defn- first-step!
+  "A run whose first request goes to `model-id` and reads `read` of 10k."
+  [{:keys [h ctx clock]} model-id read]
+  ((get h "before_provider_request") #js {:model #js {:modelId model-id}} ctx)
+  (swap! clock + 1000)
+  ((get h "turn_end") #js {:usage #js {:inputTokens 10000
+                                       :inputTokenDetails #js {:cacheReadTokens read}}} ctx))
+
+(describe "review fixes" (fn []
+  (it "learning is filed under the model the request went to, not the last run's"
+      (fn []
+        (let [r (rig (state-for openai-model))]
+          (first-step! r "model-a" 0)
+          ((get (:h r) "after_provider_request") #js {:model "p/model-a"} (:ctx r))
+          (swap! (:clock r) + 120000)
+          (first-step! r "model-b" 9000)
+          (-> (expect (get-in @(:saved r) ["model-b" "hit-max"])) (.toBe 121))
+          (-> (expect (aget @(:saved r) "model-a")) (.toBeUndefined)))))
+
+  (it "compaction.enabled false stops it arming"
+      (fn []
+        (let [r (rig (state-for anthropic-model))]
+          (aset (:api r) "settings" (fn [sec] (if (= sec "compaction") {"enabled" false} {})))
+          (run-turn! r "anthropic/claude-x")
+          (-> (expect (count @(:timers r))) (.toBe 0)))))
+
+  (it "the summary call restarts the cache clock when it starts, even if cancelled"
+      ^:async (fn []
+        (let [r    (rig (state-for anthropic-model))
+              done (atom nil)]
+          (aset (:ctx r) "compact" (fn [_] (js/Promise. (fn [res] (reset! done res)))))
+          (run-turn! r "anthropic/claude-x")
+          (let [p ((:fire! r))]
+            ;; the user is back 10s into the summary call; it reads the cache
+            (swap! (:clock r) + 10000)
+            ((get (:h r) "agent_start") #js {} (:ctx r))
+            (first-step! r "claude-x" 9000)
+            (@done {:summary "S"})
+            (js-await p)
+            ;; the gap is measured from the summary call, not the turn before it
+            (-> (expect (get-in @(:saved r) ["claude-x" "hit-max"])) (.toBe 10))))))))

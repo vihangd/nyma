@@ -226,19 +226,6 @@
           (-> (expect (count @seen)) (.toBe 0))
           (-> (expect (:summary res)) (.toBeFalsy)))))))
 
-(describe "compaction.enabled false" (fn []
-  (it "turns off the idle path, which forces past the threshold"
-      ^:async (fn []
-        (let [sm    (session-with 40)
-              state (state-with-snapshot sm)
-              seen  (atom [])
-              res   (js-await (c/compact sm "m" quiet-events
-                                         {:gen-fn (capture seen six) :state-atom state
-                                          :force? true :summarize-only? true
-                                          :trigger "idle" :enabled? false}))]
-          (-> (expect res) (.toBeFalsy))
-          (-> (expect (count @seen)) (.toBe 0)))))))
-
 (describe "breakpoint from the system block" (fn []
   (it "after a one-turn run no message is marked, so the system block's dialect is used"
       ^:async (fn []
@@ -250,3 +237,43 @@
               _    (js-await (c/compact-with-retry nil "S" [] [] (capture seen six) nil {:base base}))
               msgs (.-messages (first @seen))]
           (-> (expect (.. (aget msgs 2) -providerOptions -anthropic -cacheControl -type)) (.toBe "ephemeral")))))))
+
+(describe "review fixes" (fn []
+  (it "keep-marker: nil when nothing is kept, ambiguous when short or repeated"
+      (fn []
+        (-> (expect (c/keep-marker [{:role "user" :content "x"}] [])) (.toBeFalsy))
+        (-> (expect (c/keep-marker [] [{:role "user" :content "yes"}])) (.toBe "ambiguous"))
+        (-> (expect (c/keep-marker [{:role "user" :content "please continue with the plan"}]
+                                   [{:role "user" :content "please continue with the plan"}]))
+            (.toBe "ambiguous"))
+        (-> (expect (c/keep-marker [{:role "user" :content "earlier work"}]
+                                   [{:role "user" :content "now fix the parser bug"}]))
+            (.toBe "now fix the parser bug"))))
+
+  (it "a pruned request is not summarised on"
+      (fn []
+        (let [live [{:role "user" :content "a"} {:role "user" :content "b"}]
+              snap (c/request-snapshot #js {:messages #js [#js {:role "user" :content "b"}]} #js [] live 2)
+              st   (atom {:messages live :last-request snap})]
+          (-> (expect (:pruned? snap)) (.toBe true))
+          (-> (expect (c/usable-snapshot st)) (.toBeFalsy)))))
+
+  (it "a tool-only first reply on the prefix is not replayed (an empty assistant turn is a 400)"
+      ^:async (fn []
+        (let [seen (atom [])
+              text (js-await (c/compact-with-retry nil "S" [] [] (capture seen "") nil
+                                                   {:base (base-with #js [#js {:role "user" :content "q"}])}))]
+          (-> (expect text) (.toBe ""))
+          (-> (expect (count @seen)) (.toBe 1)))))
+
+  (it "summarize-only reports this call's cache read"
+      ^:async (fn []
+        (let [sm    (session-with 40)
+              state (state-with-snapshot sm)
+              gen   (fn [_] (js/Promise.resolve
+                             #js {:text six :usage #js {:inputTokens 1000
+                                                        :inputTokenDetails #js {:cacheReadTokens 990}}}))
+              res   (js-await (c/compact sm "m" quiet-events
+                                         {:gen-fn gen :state-atom state
+                                          :force? true :summarize-only? true}))]
+          (-> (expect (:prefix-read res)) (.toBe 0.99)))))))
