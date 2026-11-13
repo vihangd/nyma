@@ -144,8 +144,8 @@
                                                                    :extensions    used
                                                                    :maxExtensions limit}))]
         (dbg/warn (str "[loop] step cap: " (if (get answer "continue")
-                                                 (str "extending, " (get answer "reason"))
-                                                 "no progress shown, stopping")
+                                             (str "extending, " (get answer "reason"))
+                                             "no progress shown, stopping")
                        " (" used " of " limit " used)"))
         (when (get answer "continue")
           (swap! state assoc :step-extensions (inc used))
@@ -294,6 +294,14 @@
         (swap! (:state agent) update :messages into queued))
       (reset! (:steer-queue agent) [])
       queued)))
+
+(defn sampling-temperature
+  "The temperature to put on the request: the configured one, or nil for a
+   model that takes none. @ai-sdk/anthropic drops it for those itself, but
+   warns on every request as it does — one line per call in debug.log."
+  [config model]
+  (when-not (thinking/rejects-sampling? model)
+    (:temperature config)))
 
 (defn ^:async run
   "Execute the agent loop. Yields events via the event bus.
@@ -600,7 +608,7 @@
                              ;; Sent explicitly. Absent, the provider picks —
                              ;; and every benchmark in this repo was measured at
                              ;; whatever that happened to be.
-                             :temperature     (:temperature config)
+                             :temperature     (sampling-temperature config active-model)
                              ;; Without this the provider decides, and a model
                              ;; that plans in prose can spend an entire turn
                              ;; without ever calling a tool.
@@ -615,7 +623,7 @@
                              :maxRetries      (or (:max-retries config) 5)
                              :stopWhen        #js [(stepCountIs (if final-report? 1 (:max-steps config)))
                                                   ;; An extension saw a loop.
-                                                  (fn [_] (boolean (:stop-run @state)))]
+                                                   (fn [_] (boolean (:stop-run @state)))]
                              ;; Extended thinking is opt-in per request: with no
                              ;; `thinking` field a Claude model returns no
                              ;; reasoning at all, measured against Opus 5.
@@ -1032,14 +1040,14 @@
               ;; Capture a provider error so turn_finalize still runs below.
                 (catch :default e (reset! turn-error e))))
 
-           (let [{:keys [input output cache-read cache-write]} @step-usage]
-             (when (and (:store agent) (not @usage-billed?) (pos? (+ input output)))
-               ((:dispatch! (:store agent)) :usage-updated
-                                            {:input-tokens input :output-tokens output
-                                             :cache-read-tokens cache-read :cache-write-tokens cache-write
-                                             :steps @steps-this-run
-                                             :request-spec (fallback/request-spec st-config)
-                                             :cost (or (:run-cost @state) 0)})))
+            (let [{:keys [input output cache-read cache-write]} @step-usage]
+              (when (and (:store agent) (not @usage-billed?) (pos? (+ input output)))
+                ((:dispatch! (:store agent)) :usage-updated
+                                             {:input-tokens input :output-tokens output
+                                              :cache-read-tokens cache-read :cache-write-tokens cache-write
+                                              :steps @steps-this-run
+                                              :request-spec (fallback/request-spec st-config)
+                                              :cost (or (:run-cost @state) 0)})))
 
            ;; turn_finalize — awaited post-turn boundary. ALWAYS fires: block,
            ;; normal, AND error paths all reach here (the try/catch above captures

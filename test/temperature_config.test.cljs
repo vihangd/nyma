@@ -25,35 +25,40 @@
                                         :settings settings}))))
 
 (describe "temperature reaches the agent config"
-  (fn []
-    (it "defaults low rather than leaving it to the provider"
-        (fn [] (-> (expect (temp-for {})) (.toBe 0.2))))
+          (fn []
+            (it "defaults low rather than leaving it to the provider"
+                (fn [] (-> (expect (temp-for {})) (.toBe 0.2))))
 
-    (it "honours what the user set"
-        (fn [] (-> (expect (temp-for {:temperature 0.7})) (.toBe 0.7))))
+            (it "honours what the user set"
+                (fn [] (-> (expect (temp-for {:temperature 0.7})) (.toBe 0.7))))
 
-    (it "reads the string-keyed form settings.json produces"
-        (fn [] (-> (expect (temp-for {"temperature" 0.5})) (.toBe 0.5))))
+            (it "reads the string-keyed form settings.json produces"
+                (fn [] (-> (expect (temp-for {"temperature" 0.5})) (.toBe 0.5))))
 
-    (it "treats 0 as a real value, not a missing one"
+            (it "treats 0 as a real value, not a missing one"
         ;; squint's `or` is a nil-check helper rather than JS ||, but a plain
         ;; truthiness test here would silently turn 0 into 0.2
-        (fn [] (-> (expect (temp-for {:temperature 0})) (.toBe 0))))
+                (fn [] (-> (expect (temp-for {:temperature 0})) (.toBe 0))))
 
-    (it "falls back when the value is not a number"
-        (fn [] (-> (expect (temp-for {:temperature "hot"})) (.toBe 0.2))))))
+            (it "falls back when the value is not a number"
+                (fn [] (-> (expect (temp-for {:temperature "hot"})) (.toBe 0.2))))))
 
 (describe "temperature is actually sent"
-  (fn []
-    (it "appears in the streamText config, not just the agent config"
+          (fn []
+            (it "is left off for models that reject sampling, kept for the rest"
+                (fn []
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-opus-5-5"})) (.toBe nil))
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-sonnet-4-6"})) (.toBe 0.2))
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "gpt-5.5"})) (.toBe 0.2))))
+
+            (it "appears in the streamText config, not just the agent config"
         ;; The failure this catches: carrying a value all the way to :config and
         ;; never putting it on the request. Asserting the compiled loop is crude,
         ;; but the suite has no streamText mock and a value that never ships is
         ;; exactly the bug that shipped twice before.
-        (fn []
-          (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
-            (-> (expect src) (.toContain "temperature")))))))
-
+                (fn []
+                  (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
+                    (-> (expect src) (.toContain "temperature")))))))
 
 ;; ── output cap ───────────────────────────────────────────────────
 ;; Traced, not guessed: on rust/decimal the model emitted 70,565 characters of
@@ -69,43 +74,42 @@
                                               :settings settings}))))
 
 (describe "max-output-tokens reaches the agent config"
-  (fn []
-    (it "unset, the loop picks the model's own limit"
-        (fn [] (-> (expect (cap-for {})) (.toBeNil))))
+          (fn []
+            (it "unset, the loop picks the model's own limit"
+                (fn [] (-> (expect (cap-for {})) (.toBeNil))))
 
-    (it "reads a model's limit, relayed or not, and nil when unknown"
-        (fn []
-          (-> (expect (model-info/max-output "anthropic/claude-opus-5-5")) (.toBe 128000))
-          (-> (expect (model-info/max-output "some-relay/claude-opus-5-5")) (.toBe 128000))
-          (-> (expect (model-info/max-output "omlx/not-a-listed-model")) (.toBeNil))))
+            (it "reads a model's limit, relayed or not, and nil when unknown"
+                (fn []
+                  (-> (expect (model-info/max-output "anthropic/claude-opus-5-5")) (.toBe 128000))
+                  (-> (expect (model-info/max-output "some-relay/claude-opus-5-5")) (.toBe 128000))
+                  (-> (expect (model-info/max-output "omlx/not-a-listed-model")) (.toBeNil))))
 
-    (it "the setting wins, then the model, then 8000"
-        (fn []
-          (-> (expect (loop/output-cap 4000 "anthropic/claude-opus-5-5")) (.toBe 4000))
-          (-> (expect (loop/output-cap nil "anthropic/claude-opus-5-5")) (.toBe 128000))
+            (it "the setting wins, then the model, then 8000"
+                (fn []
+                  (-> (expect (loop/output-cap 4000 "anthropic/claude-opus-5-5")) (.toBe 4000))
+                  (-> (expect (loop/output-cap nil "anthropic/claude-opus-5-5")) (.toBe 128000))
           ;; inside the window: the request has to fit with its input
-          (-> (expect (< (loop/output-cap nil "anthropic/claude-opus-5-5" 1000000 900000) 10001)) (.toBe true))
-          (-> (expect (loop/output-cap 100000 "x" 131072 1000)) (.toBe 65536))
-          (-> (expect (loop/output-cap 100000 "x" 8192 100000)) (.toBe 1024))
-          (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))
+                  (-> (expect (< (loop/output-cap nil "anthropic/claude-opus-5-5" 1000000 900000) 10001)) (.toBe true))
+                  (-> (expect (loop/output-cap 100000 "x" 131072 1000)) (.toBe 65536))
+                  (-> (expect (loop/output-cap 100000 "x" 8192 100000)) (.toBe 1024))
+                  (-> (expect (loop/output-cap nil "omlx/not-a-listed-model")) (.toBe 8000))
           ;; the floor is the window's, and never lifts a setting
-          (-> (expect (loop/output-cap 500 "x" 131072 1000)) (.toBe 500))
-          (-> (expect (loop/output-cap 500 "x" 8192 100000)) (.toBe 500))))
+                  (-> (expect (loop/output-cap 500 "x" 131072 1000)) (.toBe 500))
+                  (-> (expect (loop/output-cap 500 "x" 8192 100000)) (.toBe 500))))
 
-    (it "honours what the user set"
-        (fn [] (-> (expect (cap-for {:max-output-tokens 4000})) (.toBe 4000))))
+            (it "honours what the user set"
+                (fn [] (-> (expect (cap-for {:max-output-tokens 4000})) (.toBe 4000))))
 
-    (it "reads the string-keyed form settings.json produces"
-        (fn [] (-> (expect (cap-for {"max-output-tokens" 2000})) (.toBe 2000))))
+            (it "reads the string-keyed form settings.json produces"
+                (fn [] (-> (expect (cap-for {"max-output-tokens" 2000})) (.toBe 2000))))
 
-    (it "is actually sent, not merely carried"
+            (it "is actually sent, not merely carried"
         ;; the thinking_budget failure: that module has always written
         ;; providerOptions.thinkingBudget, a key nothing reads, so the cap it
         ;; claimed to apply never existed
-        (fn []
-          (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
-            (-> (expect src) (.toContain "maxOutputTokens")))))))
-
+                (fn []
+                  (let [src (fs/readFileSync "dist/agent/loop.mjs" "utf8")]
+                    (-> (expect src) (.toContain "maxOutputTokens")))))))
 
 ;; ── the settings MANAGER, not a settings map ─────────────────────
 ;; cli.cljs passes `:settings settings`, where settings is the manager
@@ -116,25 +120,25 @@
 ;; output cap was ignored. The unit tests missed it because they pass a plain
 ;; map, which is the one shape production never uses.
 (describe "settings reach config through the manager"
-  (fn []
-    (it "resolves a manager via its :get, the shape cli.cljs actually passes"
-        (fn []
-          (let [mgr #js {:get (fn [] #js {"max-output-tokens" 1234
-                                          "temperature" 0.55
-                                          "retry" #js {"max-retries" 2}})}
-                cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
-                                            :settings mgr}))]
-            (-> (expect (:max-output-tokens cfg)) (.toBe 1234))
-            (-> (expect (:temperature cfg))       (.toBe 0.55))
-            (-> (expect (:max-retries cfg))       (.toBe 2)))))
+          (fn []
+            (it "resolves a manager via its :get, the shape cli.cljs actually passes"
+                (fn []
+                  (let [mgr #js {:get (fn [] #js {"max-output-tokens" 1234
+                                                  "temperature" 0.55
+                                                  "retry" #js {"max-retries" 2}})}
+                        cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
+                                                    :settings mgr}))]
+                    (-> (expect (:max-output-tokens cfg)) (.toBe 1234))
+                    (-> (expect (:temperature cfg))       (.toBe 0.55))
+                    (-> (expect (:max-retries cfg))       (.toBe 2)))))
 
-    (it "still accepts a plain map"
-        (fn []
-          (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
-                                            :settings {:temperature 0.9}}))]
-            (-> (expect (:temperature cfg)) (.toBe 0.9)))))
+            (it "still accepts a plain map"
+                (fn []
+                  (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}
+                                                    :settings {:temperature 0.9}}))]
+                    (-> (expect (:temperature cfg)) (.toBe 0.9)))))
 
-    (it "survives no settings at all"
-        (fn []
-          (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}}))]
-            (-> (expect (:temperature cfg)) (.toBe 0.2)))))))
+            (it "survives no settings at all"
+                (fn []
+                  (let [cfg (:config (create-agent {:model #js {} :system-prompt "" :tools {}}))]
+                    (-> (expect (:temperature cfg)) (.toBe 0.2)))))))
