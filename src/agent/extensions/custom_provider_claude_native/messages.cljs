@@ -132,15 +132,26 @@
 
 ;; ── Prompt extraction ────────────────────────────────────────
 
-(defn- extract-system [prompt]
-  (let [sys-parts #js []]
-    (.forEach prompt (fn [msg]
-                       (when (= (.-role msg) "system")
-                         (let [c (.-content msg)]
-                           (when (string? c)
-                             (.push sys-parts c))))))
-    (when (pos? (.-length sys-parts))
-      (.join sys-parts "\n\n"))))
+(defn- cache-control-of
+  "The breakpoint kv_cache put on a prompt message
+   (providerOptions.anthropic.cacheControl), or nil. This provider is
+   hand-rolled, so without reading it every breakpoint was computed, counted
+   against the four allowed, and never reached the wire."
+  [msg]
+  (some-> (.-providerOptions msg) (aget "anthropic") (aget "cacheControl")))
+
+(defn- extract-system
+  "The system prompt: a string, as always, unless a system message carries a
+   breakpoint — then text blocks, the only form that can hold one."
+  [prompt]
+  (let [sys (.filter prompt #(and (= (.-role %) "system") (string? (.-content %))))]
+    (when (pos? (.-length sys))
+      (if (.some sys cache-control-of)
+        (.map sys (fn [m]
+                    (let [b #js {:type "text" :text (.-content m)}]
+                      (when-let [cc (cache-control-of m)] (aset b "cache_control" cc))
+                      b)))
+        (.join (.map sys #(.-content %)) "\n\n")))))
 
 (defn- prompt->anthropic-messages [prompt]
   (let [result #js []]
@@ -151,7 +162,13 @@
                                   "assistant" (assistant-msg->anthropic msg)
                                   "tool"      (tool-msg->anthropic msg)
                                   nil)]
-                         (when am (.push result am)))))
+                         (when am
+                           ;; A message-level breakpoint goes on its last block,
+                           ;; as @ai-sdk/anthropic places it.
+                           (when-let [cc (cache-control-of msg)]
+                             (let [c (.-content am)]
+                               (aset (aget c (dec (.-length c))) "cache_control" cc)))
+                           (.push result am)))))
     result))
 
 ;; ── Public: build full request body ─────────────────────────

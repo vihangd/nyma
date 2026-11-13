@@ -279,3 +279,32 @@
                                              :content #js [#js {:type "text" :text "hi"}]}]
                            :providerOptions #js {:anthropic #js {:thinking #js {:type "disabled"}}}})]
             (-> (expect (get-in body ["thinking" "type"])) (.toBe "disabled")))))))
+
+;; ── Prompt-cache breakpoints ─────────────────────────────────
+
+(defn- cc [] #js {:anthropic #js {:cacheControl #js {:type "ephemeral" :ttl "1h"}}})
+
+(describe "claude-native/messages — cache breakpoints reach the wire" (fn []
+  (it "a marked message carries cache_control on its last block"
+      (fn []
+        (let [m    (doto (user-msg "a" "b") (aset "providerOptions" (cc)))
+              body (msgs/build-request-body "claude-sonnet-4-6" #js {:prompt #js [m]})
+              blocks (.-content (aget (get body "messages") 0))]
+          (-> (expect (.-cache_control (aget blocks 0))) (.toBeUndefined))
+          (-> (expect (.. (aget blocks 1) -cache_control -ttl)) (.toBe "1h")))))
+
+  (it "a marked system message turns the system prompt into blocks"
+      (fn []
+        (let [s1   (doto (sys-msg "stable") (aset "providerOptions" (cc)))
+              body (msgs/build-request-body "claude-sonnet-4-6"
+                                            #js {:prompt #js [s1 (sys-msg "dynamic") (user-msg "hi")]})
+              sys  (get body "system")]
+          (-> (expect (.-length sys)) (.toBe 2))
+          (-> (expect (.. (aget sys 0) -cache_control -type)) (.toBe "ephemeral"))
+          (-> (expect (.-text (aget sys 1))) (.toBe "dynamic")))))
+
+  (it "unmarked, the system prompt stays one string"
+      (fn []
+        (let [body (msgs/build-request-body "claude-sonnet-4-6"
+                                            #js {:prompt #js [(sys-msg "a") (sys-msg "b") (user-msg "hi")]})]
+          (-> (expect (get body "system")) (.toBe "a\n\nb")))))))
