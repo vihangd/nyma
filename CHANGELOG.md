@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.1 — 2026-11-13
+
+### Fixed
+- 0.13.0 sent `temperature: null` to models that reject sampling (Opus 4.7+,
+  Sonnet 5+, Fable). Anthropic's SDK ignored it; a relay validated by pydantic
+  refused the request with "temperature: Input should be a valid number" and
+  the turn produced nothing. The key is now omitted.
+
 ## 0.13.0 — 2026-11-13
 
 Six weeks and 311 commits. The headline is containment: bash runs inside a
