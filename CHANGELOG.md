@@ -1,5 +1,126 @@
 # Changelog
 
+## 0.13.0 — 2026-11-13
+
+Six weeks and 311 commits. The headline is containment: bash runs inside a
+sandbox by default, a judge answers the permission prompts a human should not
+have to, and subagents can no longer spend, write or hang beyond what their
+parent allowed. Alongside it, nyma speaks pi's protocols and the Agent Client
+Protocol, so it runs inside Emacs, Zed and JetBrains unchanged.
+
+### Added
+- **Sandboxed bash.** The main session's bash is confined to its cwd on
+  Anthropic's sandbox-runtime (Seatbelt on macOS, bubblewrap + seccomp on
+  Linux): writes only under the project and temp, no reads of `~/.ssh`,
+  `~/.aws`, credentials or nyma's own config, network only to the package
+  registries plus `sandbox.allow-hosts`. A command that needs a new host asks;
+  only the permission gate can let a command out, and a worktree child never
+  gets out. Provider keys are scrubbed from the sandboxed environment, and a
+  denial is named in the tool result so the model stops retrying it.
+- **A judge for permission asks.** `utils/decide` puts one choice question to
+  TypeSafe's Jev and acts on a confident answer: unlisted bash commands, MCP
+  calls, `web_fetch` hosts, skill selection and the finalize nudge. Each use is
+  opt-in on its own key; writes get a stricter bar; hidden characters and
+  look-alike names stay visible to it. Every decision is logged so the judge
+  can be checked against what it said.
+- **Workspace trust.** A checked-out repo's hooks, commands, MCP servers and
+  subagent roles do not run until the user says so, in the TUI, the gateway
+  and the SDK alike.
+- **pi compatibility.** `--mode rpc` and `--mode json` are pi's protocols;
+  `--mode pi-rpc` runs the pi Emacs frontends and other pi RPC clients
+  unchanged, including extension dialogs and permission prompts. pi's `.pi`
+  skills, prompts and extensions load as they are, pi's CLI flags are accepted,
+  and `sessions.pi-mirror` keeps a copy of each session in pi's file format.
+- **`--mode acp`**: an Agent Client Protocol server, for Zed, JetBrains and
+  any other ACP editor. Plan mode, session allows and model text map onto
+  ACP's modes and permission options.
+- **Subagents.** `--worktree` and worktree-isolated children with their own
+  checkout; a child is a session you can open, show while it runs, and
+  continue or steer by id. Roles fall back to the parent's model and honour
+  `--settings`. `/review [base]` reviews the change as a read-only subagent;
+  an opt-in critic reviews a run's change once at the end.
+- **Checkpoints.** Persistent rewind points covering bash changes too;
+  `/undo` picker, `/diff` for everything the session changed, `/fork` offers
+  to restore files changed after the fork point.
+- **Codemode.** Squint scripts that call tools, MCP and OpenAPI as functions,
+  with typed returns, helpers, saved scripts and a per-call view of what each
+  returned. Scripts run only what was approved and cannot grant themselves
+  anything.
+- **MCP.** `mcp_search` returns typed signatures (raw schema on request);
+  file results are saved to disk; per-server env, timeouts and tool
+  allow/deny; `/mcp add`; `readOnlyHint:false` asks. Generic tool deferral in
+  token-suite withholds any tool's schema until searched for.
+- **Images and documents.** `@shot.png` or ctrl+v attaches an image; PDFs and
+  documents reach the model; images travel over rpc, pi-rpc and the gateway
+  and are stored beside the session.
+- **Rendering.** Markdown via `Bun.markdown.ansi`, laid out to the width,
+  code blocks indented instead of framed, line breaks kept in lists and
+  quotes. `/copy code [N]` copies a block exactly.
+- **Cost and progress.** Live cost, step and cache hit rate on the status
+  line; a capped run earns more steps with evidence of progress; a run
+  repeating itself is detected and escalated; opt-in fallback model chain per
+  role; prices and context windows generated from models.dev.
+- **Smaller.** `/commit` drafts a Conventional Commit; `/compact <focus>`;
+  `/jobs`; `/permissions` with bash command-pattern grants; `/resume <words>`;
+  Claude Code's `.claude/commands` as prompt templates; flat `<name>.md`
+  skills; shift+tab cycles the permission mode; alt+enter queues a follow-up
+  for after the turn; `--settings <json>`, `--max-steps`,
+  `--append-system-prompt`, `-` reads stdin; a notification when a permission
+  prompt is waiting; `settings.startup` turns the project card down.
+
+### Fixed
+181 fixes. The ones that changed behaviour you would notice:
+- **Permissions.** "Allow always" no longer covers interpreters, wrappers,
+  verbs that run their arguments, or a tool's exec flags; "Allow for this
+  session" ends with the session; a tool that declares no metadata no longer
+  walks past the gate; a `web_fetch` grant is an origin with no query.
+- **bash-suite.** Chained commands, redirects, backgrounded commands, inline
+  interpreter scripts and shells invoked by path all reach the classifier; a
+  quoted heredoc to `cat`/`tee` is content, not commands; unlisted commands
+  ask instead of running.
+- **Subagents.** A child asks through the parent's gate, runs the parent's
+  tool hooks, is billed to the parent, cannot exceed the parent's limits or
+  depth, cannot hang the parent, and is not a success when its worktree died.
+- **Sessions.** `/new` and `/fork` actually start and branch; disk is written
+  before memory; failed tool calls are kept; totals follow the session they
+  describe; failed compactions no longer leave the conversation in `$TMPDIR`.
+- **Loop.** A steered message reaches the model in the same run; no provider
+  retry once a tool has run; context overflow recovered where it arrives;
+  `max_tokens` stays inside the context window; a response gets the model's
+  own output limit; no temperature sent to models that reject sampling (Opus
+  4.7+, Sonnet 5+, Fable), which also silences one SDK warning per request.
+- **Thinking.** Adaptive thinking with effort on current Claude models; `off`
+  leaves always-thinking models at their default instead of dropping them to
+  low.
+- **web_fetch.** http(s) only; private and link-local addresses refused on
+  every hop, IPv4 hidden in IPv6 included; a cross-host redirect goes back to
+  the model; a refused URL reaches no fallback provider.
+- **CLI.** `-p` no longer blocks on a pipe nobody closes; SIGTERM and SIGHUP
+  run the shutdown sequence, and `nohup` works; `--extension`/`--skill`
+  survive `/reload`; a compiled nyma resolves the packages its extensions
+  import; ctrl+v image paste works in the binary.
+- `.nymaignore` covers every filesystem tool; 16-colour terminals get
+  distinct semantic colours; a space no longer reopens the `@` popup.
+
+### Performance
+- Startup: heavy modules and sandbox-runtime load on first use.
+  `--version` 0.48–0.65 s → 0.41–0.53 s under bun.
+- Streaming: only the tail of a reply is lexed per chunk. 40 KB in 200 B
+  chunks 1373 ms → 89 ms; worst frame 52.8 → 9.3 ms.
+- No synchronous git on the streaming path: the status poller and
+  edit-diff's snapshots spawn asynchronously; the repo root is cached per cwd.
+- The first turn waits at most 2 s (`mcp.join-timeout-ms`) for MCP servers
+  still starting; the model is told which are late instead of the turn
+  stalling 15–18 s behind nine servers.
+- Checkpoints save touched files once per bash command.
+
+### Notes
+- Dependencies: ai 7.0.127, pi-tui 1.0, squint 0.14.210, marked 18. Binaries
+  compile with `--no-orphans`. Bun is pinned to 1.4.2 in CI.
+- Three settings keys nothing read were dropped (`status-line.preset`,
+  `status-line.separator`, `subagent.max-depth`); ~110 lines of unreachable
+  code went with them. docs/roadmap.md lists what this sweep deferred.
+
 ## 0.12.0 — 2026-09-30
 
 Project awareness. Opening a project now tells you where you are, and fifteen
