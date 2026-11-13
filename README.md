@@ -66,7 +66,7 @@ user input → loop.cljs → middleware pipeline → tool.execute
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) (v1.0+)
+- [Bun](https://bun.sh) 1.4.2 or later (the markdown renderer is `Bun.markdown`; CI pins 1.4.2)
 - [Node.js](https://nodejs.org) (v18+ for squint CLI)
 - An API key for at least one LLM provider:
   - `ANTHROPIC_API_KEY` for Claude (default)
@@ -154,7 +154,7 @@ bun run bundle:all    # all seven targets
 ```
 
 `bun run bundle` runs the squint compile itself, so it is the only command needed. It produces a
-single ~85 MB executable that starts in **~40 ms**, against ~160 ms for `bun dist/agent/cli.mjs`. The
+single ~120 MB executable that starts in **~30 ms**, against ~400 ms for `bun dist/agent/cli.mjs`. The
 binary is gitignored.
 
 **It is a snapshot.** Editing anything under `src/` does not change `./nyma` until you rebuild — while
@@ -170,10 +170,10 @@ The flags are not arbitrary, and `test/bundle_flags.test.cljs` fails if they dri
 | `--format=esm` | **load-bearing.** `--bytecode` implies CJS, and out of a CJS binary the extension loader's disk-loaded `.mjs` files cannot resolve their bare npm imports — every extension fails with `Cannot find package 'ai'`, silently, since an empty scan is not an error |
 | `--minify` | −5.9 MB; startup unchanged, because bytecode already did the parse |
 
-Extensions in the binary: the 40 builtins are compiled in via the generated registry
+Extensions in the binary: the 41 builtins are compiled in via the generated registry
 (`src/agent/builtin_extensions.cljs` — regenerate with `bun run gen:builtins` after adding one), and
 user extensions are still discovered by scanning `~/.nyma/extensions` and `.nyma/extensions` at
-runtime. A bundled nyma reports the same 40 extensions and 20 providers as the dist entry point.
+runtime. A bundled nyma reports the same extensions and providers as the dist entry point.
 
 #### Releases
 
@@ -207,9 +207,9 @@ Only the two builds whose runner can execute them (linux-x64, macos-arm64) are s
 are cross-compiled and verified by the archive step alone. The smoke test checks `--version` against
 `package.json`, which also catches a binary built from a tree where the version generator did not run.
 
-`.github/workflows/ci.yml` runs the same suite on every push and PR, plus a drift check on the three
-generated files (`src/agent/version.cljs`, `src/agent/builtin_extensions.cljs`, `docs/event-map.md`)
-and one real `--compile` build, since the flag pairing that makes extensions work is only observable
+`.github/workflows/ci.yml` runs the same suite on every push and PR, plus a drift check on the
+generated files (`src/agent/version.cljs`, `src/agent/builtin_extensions.cljs`, `docs/event-map.md`,
+the namespace table in `AGENTS.md`, the events table in `README.md`) and one real `--compile` build, since the flag pairing that makes extensions work is only observable
 by compiling.
 
 `src/agent/version.cljs` is generated from `package.json` by `bun run build`, so it cannot go stale —
@@ -324,7 +324,7 @@ TypeScript tests (`test/*.test.ts`) are also supported and run alongside compile
 
 ### Current Test Coverage
 
-**Total: 11,200+ assertions across 300+ test files** (run `bun run test` to see live counts).
+**Total: 6,100+ tests across 425 test files** (run `bun run test` to see live counts).
 
 Coverage spans the full stack:
 

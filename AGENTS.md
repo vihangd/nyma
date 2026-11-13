@@ -179,7 +179,7 @@ bun run dev
 npx squint compile
 bun dist/agent/cli.mjs
 
-# Standalone binary (~85MB, ~40ms start vs ~160ms via dist)
+# Standalone binary (~120MB, ~30ms start vs ~400ms via dist)
 bun run bundle            # ./nyma for this machine; runs the compile itself
 bun run bundle:all        # all seven targets (macos x2, linux glibc x2, linux musl x2, windows)
 bun run gen:builtins      # after ADDING an extension: regenerates the compiled-in registry
