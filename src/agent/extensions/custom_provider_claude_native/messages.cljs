@@ -171,6 +171,27 @@
                            (.push result am)))))
     result))
 
+;; ── Breakpoint budget ────────────────────────────────────────
+
+(def ^:private max-breakpoints
+  "Anthropic rejects a request with more cache_control blocks than this."
+  4)
+
+(defn cap-breakpoints!
+  "Drop the OLDEST message breakpoints past the limit, in place. kv_cache's
+   own count stays within it at the default settings, but max-message-
+   breakpoints is a setting, and step-breakpoint adds one per step; the
+   @ai-sdk/anthropic path drops extras itself, this hand-rolled one sent them
+   and every request failed. The system mark and the newest marks stay: they
+   cover the longest prefixes."
+  [system messages]
+  (let [sys-n  (if (js/Array.isArray system) (count (filter #(some? (.-cache_control %)) system)) 0)
+        marked (vec (mapcat (fn [m] (filter #(some? (.-cache_control %)) (.-content m))) messages))
+        extra  (- (+ sys-n (count marked)) max-breakpoints)]
+    (doseq [b (take (max 0 extra) marked)]
+      (js-delete b "cache_control"))
+    messages))
+
 ;; ── Public: build full request body ─────────────────────────
 
 (defn build-request-body
@@ -179,7 +200,7 @@
   [model-id opts]
   (let [prompt     (.-prompt opts)
         system-str (extract-system prompt)
-        messages   (prompt->anthropic-messages prompt)
+        messages   (cap-breakpoints! system-str (prompt->anthropic-messages prompt))
         ;; Extended thinking, under the same providerOptions.anthropic.thinking
         ;; key @ai-sdk/anthropic uses — agent.thinking routes `claude-native` to
         ;; the anthropic dialect, and this provider is hand-rolled, so without

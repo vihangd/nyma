@@ -308,3 +308,17 @@
         (let [body (msgs/build-request-body "claude-sonnet-4-6"
                                             #js {:prompt #js [(sys-msg "a") (sys-msg "b") (user-msg "hi")]})]
           (-> (expect (get body "system")) (.toBe "a\n\nb")))))))
+
+(describe "claude-native/messages — breakpoint budget" (fn []
+  (it "drops the oldest message marks past four"
+      (fn []
+        (let [mk   (fn [t] (doto (user-msg t) (aset "providerOptions" (cc))))
+              s1   (doto (sys-msg "stable") (aset "providerOptions" (cc)))
+              body (msgs/build-request-body "claude-sonnet-4-6"
+                                            #js {:prompt #js [s1 (mk "a") (asst-msg "x") (mk "b")
+                                                              (asst-msg "y") (mk "c") (asst-msg "z") (mk "d")]})
+              ms   (get body "messages")
+              marked (fn [i] (some? (.-cache_control (aget (.-content (aget ms i)) 0))))]
+          (-> (expect (marked 0)) (.toBe false))
+          (-> (expect (marked 2)) (.toBe true))
+          (-> (expect (marked 6)) (.toBe true)))))))
