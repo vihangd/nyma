@@ -47,7 +47,10 @@
           (fn []
             (it "is left off for models that reject sampling, kept for the rest"
                 (fn []
-                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-opus-5-5"})) (.toBe nil))
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-opus-5-5"})) (.toBe js/undefined))
+                  ;; undefined, not null: null reaches the wire and a pydantic relay rejects it
+                  (-> (expect (js/JSON.stringify #js {:temperature (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-opus-5-5"})}))
+                      (.toBe "{}"))
                   (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-sonnet-4-6"})) (.toBe 0.2))
                   (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "gpt-5.5"})) (.toBe 0.2))))
 

@@ -296,11 +296,14 @@
       queued)))
 
 (defn sampling-temperature
-  "The temperature to put on the request: the configured one, or nil for a
-   model that takes none. @ai-sdk/anthropic drops it for those itself, but
-   warns on every request as it does — one line per call in debug.log."
+  "The temperature to put on the request: the configured one, or `undefined`
+   for a model that takes none. @ai-sdk/anthropic drops it for those itself,
+   but warns on every request as it does — one line per call in debug.log.
+   `undefined`, never nil: nil is `temperature: null` on the wire, and a
+   relay behind pydantic answers \"Input should be a valid number\"."
   [config model]
-  (when-not (thinking/rejects-sampling? model)
+  (if (thinking/rejects-sampling? model)
+    js/undefined
     (:temperature config)))
 
 (defn ^:async run
