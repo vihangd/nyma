@@ -7,6 +7,7 @@
             [agent.extensions.token-suite.structured-context :as structured-context]
             [agent.extensions.token-suite.smart-compaction :as smart-compaction]
             [agent.extensions.token-suite.anthropic-compaction :as anthropic-compaction]
+            [agent.extensions.token-suite.idle-compaction :as idle-compaction]
             [agent.extensions.token-suite.token-preview :as token-preview]
             [agent.extensions.token-suite.tool-deferral :as tool-deferral]
             [agent.token-estimation :as te]
@@ -77,6 +78,7 @@
     (swap! deactivators conj (structured-context/activate api))
     (swap! deactivators conj (smart-compaction/activate api))
     (swap! deactivators conj (anthropic-compaction/activate api))
+    (swap! deactivators conj (idle-compaction/activate api))
     (swap! deactivators conj (token-preview/activate api))
     (swap! deactivators conj (tool-deferral/activate api))
 

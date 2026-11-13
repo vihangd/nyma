@@ -34,6 +34,7 @@ The single hard rule: when context usage crosses **80%**, the suite disables exp
 | `before_compact` | `smart_compaction` | Pre-compact archive of dropped messages |
 | `tool_execution_end` | `repo_map`, `structured_context` | Re-index the repo, refresh the hot file set |
 | `editor_change` | `token_preview` | Live token count in the editor footer |
+| `agent_end`, `turn_end`, `input`, `before_provider_request` | `idle_compaction` | Arm, learn from and cancel the idle-compaction timers |
 
 ## Sub-modules
 
@@ -46,10 +47,33 @@ The single hard rule: when context usage crosses **80%**, the suite disables exp
 | `structured_context.cljs` | Discover hot / warm / cold file sets (`context_files` tool) |
 | `smart_compaction.cljs` | Background compaction with archive + re-read detection |
 | `token_preview.cljs` | Live editor-footer token count |
+| `idle_compaction.cljs` | Summarise an idle session on its warm prompt cache; apply the summary only once the cache has expired |
+
+## Idle compaction
+
+A long session left idle comes back to a cold prompt cache, and the next request
+pays for the whole prefix again (1.25-2x on Anthropic, which charges for cache
+writes). At 90% of the time the cache stays warm, `idle_compaction` builds the
+summary on the request prefix, which costs a cache read. It applies the summary
+only after the cache has expired. A user who comes back sooner keeps the full
+conversation.
+
+How long the cache lasts depends on the provider:
+- **Anthropic dialect:** `kv-cache.cache-ttl`, 5m by default.
+- **A settings profile:** you can set this per provider.
+- **Anything else priced:** learned from the gaps that did and did not read the
+  cache.
+- **DeepSeek, Groq and unpriced (local) models:** never compacted this way.
+
+```json
+{"token-suite": {"idle-compaction": {
+  "enabled": true, "min-tokens": 100000, "fire-at": 0.9,
+  "profiles": {"zai": {"ttl-s": 300}, "openlux-kiro": {"class": "none"}}}}}
+```
 
 ## Capabilities
 
-`events`, `context`, `tools`, `middleware`, `commands`
+`events`, `context`, `tools`, `middleware`, `commands`, `ui`, `state`
 
 ## See also
 

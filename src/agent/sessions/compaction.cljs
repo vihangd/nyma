@@ -877,10 +877,20 @@ with every section below present.
                                        (d/warn "compaction" (str "summary on the request prefix failed, using the standalone prompt: "
                                                                  (.-message e)))
                                        nil)))
-                                 (js-await
-                                  (compact-with-retry model user-prompt files-read files-modified gen-fn strat)))]
+                                 ;; A summary-only pass exists to read a warm cache;
+                                 ;; the standalone prompt would pay full price for
+                                 ;; a summary nobody may ever use.
+                                 (when-not summarize-only?
+                                   (js-await
+                                    (compact-with-retry model user-prompt files-read files-modified gen-fn strat))))]
           (if summarize-only?
-            {:summary summary-text :before usage}
+            ;; Kept only if it will pass when applied: a rejected one makes the
+            ;; apply run the full summariser on a cold cache, the worst case.
+            {:summary (when (and summary-text
+                                 (extension-summary-usable? summary-text (:content prev-compaction)
+                                                            files-read files-modified))
+                        summary-text)
+             :before  usage}
           (do
 
             ((:append session)

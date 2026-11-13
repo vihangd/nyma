@@ -51,6 +51,15 @@
                         :full-threshold 0.85
                         :use-llm-summary false
                         :summarization-model nil}
+   ;; Summarise an idle session on its warm prompt cache, apply once the cache
+   ;; has expired. See idle_compaction. `profiles` is keyed by provider name or
+   ;; full `provider/model`: {"ttl-s": 300} fixes the cache lifetime,
+   ;; {"class": "none"} turns it off for that provider.
+   :idle-compaction {:enabled    true
+                     :min-tokens 100000
+                     :fire-at    0.9
+                     ;; On top of idle-compaction/default-profiles.
+                     :profiles   {}}
    :anthropic-compaction {:enabled true
                           :trigger-tokens 150000
                           :pause-after-compaction false}})

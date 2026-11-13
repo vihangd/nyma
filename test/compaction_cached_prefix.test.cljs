@@ -213,3 +213,15 @@
             (-> (expect (some (fn [k] (fn? (.-execute (aget (.-tools b) k))))
                               (js/Object.keys (.-tools b))))
                 (.toBeFalsy))))))))
+
+(describe "summarize-only without a usable snapshot" (fn []
+  (it "makes no model call: the standalone prompt would pay full price"
+      ^:async (fn []
+        (let [sm   (session-with 40)
+              seen (atom [])
+              res  (js-await (c/compact sm "m" quiet-events
+                                        {:gen-fn (capture seen six)
+                                         :state-atom (atom {:messages []})
+                                         :force? true :summarize-only? true}))]
+          (-> (expect (count @seen)) (.toBe 0))
+          (-> (expect (:summary res)) (.toBeFalsy)))))))

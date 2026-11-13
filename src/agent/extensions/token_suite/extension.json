@@ -7,7 +7,8 @@
     "tools",
     "middleware",
     "commands",
-    "ui"
+    "ui",
+    "state"
   ],
   "dependsOn": [],
   "settings": {
@@ -18,7 +19,8 @@
       "diff-edit": null,
       "structured-context": null,
       "smart-compaction": null,
-      "anthropic-compaction": null
+      "anthropic-compaction": null,
+      "idle-compaction": null
     }
   }
 }
