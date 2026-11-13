@@ -978,6 +978,20 @@
                             ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
                             (swap! state update :messages conj {:role "assistant" :content final-text})))
 
+                      ;; What this run last sent, so a compaction can summarise
+                      ;; on the same prefix and read the cache it warmed.
+                        (try
+                          (swap! state assoc :last-request
+                                 (compaction/request-snapshot
+                                  st-config
+                                  ;; Every step's, not `.response.messages`: that
+                                  ;; is the final step's alone.
+                                  (or (js-await (.-responseMessages result))
+                                      (some-> (js-await (.-response result)) .-messages))
+                                  (:messages @state)))
+                          (catch :default e
+                            (dbg/error "loop" (str "request snapshot: " (.-message e)))))
+
                       ;; Dispatch usage to event-sourced store
                         (when (and usage store)
                           (let [input-tokens  (or (.-inputTokens usage) 0)

@@ -412,34 +412,135 @@ with every section below present.
             default-strategy))
     default-strategy))
 
+(defn- cache-mark
+  "The providerOptions of the newest message in `messages` that carries a cache
+   breakpoint, or nil. Whatever dialect kv_cache wrote (Anthropic with its ttl,
+   Google) is copied as-is, so this namespace never has to know which."
+  [messages]
+  (some (fn [m]
+          (let [po (.-providerOptions m)]
+            (when (and po (some #(some-> (aget po %) .-cacheControl) (js/Object.keys po)))
+              po)))
+        (reverse (vec messages))))
+
+(defn- marked-count [messages]
+  (count (filter #(some? (cache-mark #js [%])) messages)))
+
+(defn request-snapshot
+  "What the last model request sent, minus everything that only makes sense
+   inside a streaming run, plus the response it got back.
+
+   A summary built on THIS prefix reads the prompt cache the run just warmed:
+   same system, same tools, same providerOptions, same messages, one user turn
+   appended. The built-in summariser sends its own system prompt and the
+   transcript re-serialised as one user message, which shares no prefix with
+   anything — so every compaction paid full input price for the whole span,
+   and an idle compaction that runs to beat the cache's expiry beat nothing.
+
+   Functions go (callbacks, prepareStep, each tool's execute: a summary call
+   must never run a tool). stopWhen goes too, which leaves generateText's
+   default of one step."
+  [st-config response-messages live-messages]
+  (let [base  (js/Object.assign #js {} st-config)
+        tools (when-let [t (.-tools st-config)]
+                (let [out #js {}]
+                  (doseq [k (js/Object.keys t)]
+                    (let [tl (js/Object.assign #js {} (aget t k))]
+                      (doseq [tk (js/Object.keys tl)]
+                        (when (fn? (aget tl tk)) (js-delete tl tk)))
+                      (aset out k tl)))
+                  out))]
+    (doseq [k (js/Object.keys base)]
+      (when (fn? (aget base k)) (js-delete base k)))
+    (doseq [k ["abortSignal" "stopWhen"]] (js-delete base k))
+    (when tools (aset base "tools" tools))
+    (aset base "messages" (.concat (or (.-messages st-config) #js [])
+                                   (or response-messages #js [])))
+    {:base base :msg-count (count live-messages) :last-msg (last live-messages)}))
+
+(defn usable-snapshot
+  "The snapshot, if it still describes the live conversation: nothing has been
+   added or replaced since the request it recorded. The last message is
+   compared by identity, so a /resume into another session of the same length
+   is not mistaken for this one."
+  [state-atom]
+  (when state-atom
+    (let [s    @state-atom
+          snap (:last-request s)]
+      (when (and snap (= (:msg-count snap) (count (:messages s)))
+                 (identical? (:last-msg snap) (last (:messages s))))
+        snap))))
+
+(defn build-cached-summary-prompt
+  "The user turn appended to the cached prefix. The conversation is already
+   above it, so unlike `build-compact-user-prompt` this carries no transcript —
+   only what to summarise, where to stop, and the file lists to cover."
+  [{:keys [system-prompt custom-instructions previous-summary keep-from
+           files-read files-modified]}]
+  (str "Stop working on the task. Do not call any tools.\n\n"
+       system-prompt
+       "\n\nSummarize the conversation above"
+       (if (seq keep-from)
+         (str ", up to but NOT including the message that begins:\n<keep-from>\n"
+              keep-from "\n</keep-from>\nThat message and everything after it stays"
+              " verbatim after your summary.")
+         ".")
+       (when (seq previous-summary)
+         (str "\n\nIt opens with an earlier summary. MERGE into it: keep its sections,"
+              " verbatim quotes and exact paths; add what is new; prefer newer facts"
+              " and note contradictions in section 5. Output the COMPLETE merged summary."))
+       (when custom-instructions (str "\n\n" custom-instructions))
+       (when (seq files-read)
+         (str "\n\n<files-read>\n" (str/join "\n" files-read) "\n</files-read>"))
+       (when (seq files-modified)
+         (str "\n\n<files-modified>\n" (str/join "\n" files-modified) "\n</files-modified>"))))
+
 (defn ^:async compact-with-retry
   "Call generateText with the strategy's system prompt + user-prompt. Validate
    the result and run one fix-retry if validation fails. Always returns a
    string (uses unvalidated fallback rather than blocking compaction).
-   Optional gen-fn replaces generateText (used in tests)."
-  [model user-prompt files-read files-modified & [gen-fn strategy]]
+   Optional gen-fn replaces generateText (used in tests).
+
+   `opts` `:base` is a `request-snapshot` base: the prompt is appended to that
+   prefix instead of standing alone, and the fix-retry continues the same
+   exchange so it reads the cache too. `:source` is what quotes are checked
+   against when the prompt itself no longer holds the transcript."
+  [model user-prompt files-read files-modified & [gen-fn strategy opts]]
   (let [gen          (or gen-fn generateText)
         sys          (:system-prompt (or strategy default-strategy))
-        first-result (js-await
-                      (gen
-                       #js {:model    model
-                            :system   sys
-                            :messages #js [#js {:role "user" :content user-prompt}]}))
+        base         (:base opts)
+        source       (or (:source opts) user-prompt)
+        first-msg    (if-let [po (when (and base (<= (marked-count (.-messages base)) 2))
+                                   ;; Four breakpoints is the API's limit: the
+                                   ;; system block plus kv_cache's two leave one.
+                                   (cache-mark (.-messages base)))]
+                       #js {:role "user" :content user-prompt :providerOptions po}
+                       #js {:role "user" :content user-prompt})
+        call         (fn [msgs]
+                       (gen (if base
+                              (doto (js/Object.assign #js {} base)
+                                (aset "messages" (.concat (.-messages base) msgs)))
+                              #js {:model model :system sys :messages msgs})))
+        first-result (js-await (call #js [first-msg]))
+        _            (when base
+                       (d/info "compaction" "summary on the request prefix"
+                               #js {:inputTokens (some-> first-result .-usage .-inputTokens)
+                                    :cacheReadTokens (some-> first-result .-usage .-inputTokenDetails
+                                                             .-cacheReadTokens)}))
         first-text   (.-text first-result)
-        first-errors (validate-compaction first-text files-read files-modified user-prompt)]
+        first-errors (validate-compaction first-text files-read files-modified source)]
     (if (empty? first-errors)
       first-text
       (let [_ (d/warn "compaction" "validation failed, retrying"
                       #js {:errors (clj->js first-errors)})
+            fix-msg    #js {:role    "user"
+                            :content (build-fix-user-prompt first-text first-errors)}
             fix-result (js-await
-                        (gen
-                         #js {:model    model
-                              :system   sys
-                              :messages #js [#js {:role    "user"
-                                                  :content (build-fix-user-prompt
-                                                            first-text first-errors)}]}))
+                        (call (if base
+                                #js [first-msg #js {:role "assistant" :content (str first-text)} fix-msg]
+                                #js [fix-msg])))
             fix-text   (.-text fix-result)
-            fix-errors (validate-compaction fix-text files-read files-modified user-prompt)]
+            fix-errors (validate-compaction fix-text files-read files-modified source)]
         (when (seq fix-errors)
           (d/warn "compaction" "validation failed after retry — using unvalidated summary"
                   #js {:errors (clj->js fix-errors)}))
@@ -591,7 +692,10 @@ with every section below present.
    read by NOBODY, so turning compaction off or retuning it did nothing."
   [session model events & [{:keys [custom-instructions model-registry gen-fn
                                    model-key threshold reserve enabled? force? observed-usage
-                                   state-atom max-working strategy]}]]
+                                   state-atom max-working strategy
+                                   ;; Idle compaction: compute the summary only and
+                                   ;; return it, or apply one computed earlier.
+                                   summarize-only? summary trigger]}]]
   (let [context ((:build-context session))
         ;; Prefer the provider's own count of the last request. The estimate
         ;; below walks the whole session tree; what is actually sent is pruned
@@ -650,13 +754,13 @@ with every section below present.
             files-read      (take-last max-tracked-files (extract-files-read tree-entries))
             files-modified  (take-last max-tracked-files (extract-files-modified tree-entries))
             ;; "manual" is a /compact; anything else is the threshold.
-            trigger         (if force? "manual" "auto")
+            trigger         (or trigger (if force? "manual" "auto"))
             evt-ctx #js {:context               context
                          :usage                 usage
                          :trigger               trigger
                          ;; nil unless a caller passed text; /compact takes none.
                          :customInstructions    (or custom-instructions nil)
-                         :summary               nil
+                         :summary               (or summary nil)
                          :split-point           split-point
                          :messages-to-summarize (clj->js to-summarize)
                          ;; Same span, WITH :metadata. Extensions that extract
@@ -673,7 +777,12 @@ with every section below present.
                          :previous-summary      (:content prev-compaction)
                          :files-read            (clj->js files-read)
                          :files-modified        (clj->js files-modified)}
-            dump    (write-precompact-dump session to-summarize to-keep)
+            ;; A summary-only pass changes nothing, so it neither dumps nor asks
+            ;; the before_compact hooks; a precomputed summary is already the
+            ;; answer they would be asked for (and token_suite's hook would
+            ;; overwrite it unconditionally).
+            quiet?  (or summarize-only? (some? summary))
+            dump    (when-not quiet? (write-precompact-dump session to-summarize to-keep))
             _       (when dump
                       (aset evt-ctx "precompactJsonPath" (:json-path dump))
                       (aset evt-ctx "precompactTextPath" (:text-path dump)))]
@@ -684,7 +793,8 @@ with every section below present.
         ;; `nyma-precompact-*` directory behind — 363 had accumulated on one
         ;; machine before the first fix.
         (try
-        (js-await ((:emit-async events) "before_compact" evt-ctx))
+        (when-not quiet?
+          (js-await ((:emit-async events) "before_compact" evt-ctx)))
 
         (if (and (.-summary evt-ctx)
                  ;; An extension summary is used only if it VALIDATES. It used
@@ -742,8 +852,36 @@ with every section below present.
                                :to-summarize        to-summarize
                                :files-read          files-read
                                :files-modified      files-modified})
-                summary-text (js-await
-                              (compact-with-retry model user-prompt files-read files-modified gen-fn strat))]
+                snap         (when (= strat default-strategy) (usable-snapshot state-atom))
+                summary-text (or (when snap
+                                   (try
+                                     (let [t (js-await
+                                              (compact-with-retry
+                                               (.-model (:base snap))
+                                               (build-cached-summary-prompt
+                                                {:system-prompt       (:system-prompt strat)
+                                                 :custom-instructions custom-instructions
+                                                 :previous-summary    (:content prev-compaction)
+                                                 :keep-from           (some-> (first to-keep) :content
+                                                                              content/->text (subs 0 200))
+                                                 :files-read          files-read
+                                                 :files-modified      files-modified})
+                                               files-read files-modified gen-fn strat
+                                               {:base   (:base snap)
+                                                :source (str (:content prev-compaction) "\n"
+                                                             ;; The model sees the kept span too, and
+                                                             ;; section 6 quotes its most recent work.
+                                                             (format-messages (concat to-summarize to-keep)))}))]
+                                       (when-not (str/blank? (str t)) t))
+                                     (catch :default e
+                                       (d/warn "compaction" (str "summary on the request prefix failed, using the standalone prompt: "
+                                                                 (.-message e)))
+                                       nil)))
+                                 (js-await
+                                  (compact-with-retry model user-prompt files-read files-modified gen-fn strat)))]
+          (if summarize-only?
+            {:summary summary-text :before usage}
+          (do
 
             ((:append session)
              {:role     "compaction"
@@ -772,7 +910,7 @@ with every section below present.
                                :before  usage
                                :after   after})
               {:before usage :after after :summariser :built-in
-               :rejected rejected-errors})))
+               :rejected rejected-errors})))))
           (finally (cleanup-precompact-dump dump)))))))
 
 (defn compaction-receipt
