@@ -225,3 +225,16 @@
                                          :force? true :summarize-only? true}))]
           (-> (expect (count @seen)) (.toBe 0))
           (-> (expect (:summary res)) (.toBeFalsy)))))))
+
+(describe "compaction.enabled false" (fn []
+  (it "turns off the idle path, which forces past the threshold"
+      ^:async (fn []
+        (let [sm    (session-with 40)
+              state (state-with-snapshot sm)
+              seen  (atom [])
+              res   (js-await (c/compact sm "m" quiet-events
+                                         {:gen-fn (capture seen six) :state-atom state
+                                          :force? true :summarize-only? true
+                                          :trigger "idle" :enabled? false}))]
+          (-> (expect res) (.toBeFalsy))
+          (-> (expect (count @seen)) (.toBe 0)))))))

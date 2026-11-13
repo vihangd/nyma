@@ -711,7 +711,10 @@ with every section below present.
                   ((:context-window model-registry) lookup)
                   100000)]
 
-    (when (and (or force?
+    (when (and ;; compaction.enabled false turns off the idle path too; force?
+               ;; would otherwise walk straight past should-compact?.
+               (not (and (= trigger "idle") (false? enabled?)))
+               (or force?
                    ;; Enough NEW material to be worth summarizing.
                    ;;
                    ;; Counted against the live conversation when we have it, not

@@ -34,7 +34,7 @@ The single hard rule: when context usage crosses **80%**, the suite disables exp
 | `before_compact` | `smart_compaction` | Pre-compact archive of dropped messages |
 | `tool_execution_end` | `repo_map`, `structured_context` | Re-index the repo, refresh the hot file set |
 | `editor_change` | `token_preview` | Live token count in the editor footer |
-| `agent_end`, `turn_end`, `input`, `before_provider_request` | `idle_compaction` | Arm, learn from and cancel the idle-compaction timers |
+| `agent_end`, `turn_end`, `agent_start`, `before_provider_request`, `after_provider_request` | `idle_compaction` | Arm, learn from and cancel the idle-compaction timers |
 
 ## Sub-modules
 

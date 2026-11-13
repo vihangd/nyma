@@ -9,7 +9,8 @@
    prefix. Claude Code does this for its 1h cache; nyma's own sessions put it
    at ~16% of Anthropic spend on a 5m cache.
 
-   Two timers, both cancelled the moment the session does anything:
+   Two timers, both cancelled the moment the session does anything (a run
+   starting, or any request):
      1. at `fire-at` x the time the cache is known to stay warm, after the last
         request: build the summary on the request prefix (compact
         :summarize-only?), which is a cache read. Nothing changes yet.
@@ -106,6 +107,10 @@
         first-gap   (atom nil)
         compacted?  (atom false)
         spec        (atom nil)
+        ;; Models whose cache has served a read this session. The dialect alone
+        ;; is not proof: a gateway can accept breakpoints and never serve them
+        ;; (kv_cache gives up on those), and there a summary pays full price.
+        served      (atom #{})
         cancel!     (fn []
                       (swap! epoch inc)
                       (doseq [t @timers] (clear-timeout t))
@@ -181,12 +186,15 @@
            nil)
 
          "after_provider_request"
-         (fn [evt _ctx] (reset! spec (.-model evt)) nil)
+         (fn [evt _ctx]
+           (reset! spec (.-model evt))
+           (when (pos? (or (.-cachedTokens evt) 0))
+             (swap! served conj (str (.-model evt))))
+           nil)
 
          "compact"
          (fn [_ _ctx] (reset! compacted? true) nil)
 
-         "input"      (fn [_ _ctx] (cancel!) nil)
          "agent_start" (fn [_ _ctx] (cancel!) nil)
 
          "agent_end"
@@ -194,7 +202,7 @@
            (cancel!)
            (let [st   (.getState api)
                  snap (:last-request st)
-                 win  (when (and snap @last-touch @spec
+                 win  (when (and snap @last-touch @spec (contains? @served (str @spec))
                                  (>= (or (:last-input-tokens st) 0) min-tokens))
                         (window {:spec            @spec
                                  :model           (.-model (:base snap))

@@ -98,7 +98,7 @@
   ((get h "before_provider_request") #js {} ctx)
   (swap! clock + 2000)
   ((get h "turn_end") #js {:usage #js {:inputTokens 150000}} ctx)
-  ((get h "after_provider_request") #js {:model spec} ctx)
+  ((get h "after_provider_request") #js {:model spec :cachedTokens 120000} ctx)
   ((get h "agent_end") #js {} ctx))
 
 (defn- state-for [model]
@@ -130,7 +130,7 @@
                                         (let [r (rig (state-for anthropic-model))]
                                           (run-turn! r "anthropic/claude-x")
                                           (js-await ((:fire! r)))
-                                          ((get (:h r) "input") #js {} (:ctx r))
+                                          ((get (:h r) "agent_start") #js {} (:ctx r))
                                           (-> (expect (count @(:timers r))) (.toBe 0))
                                           (-> (expect (count @(:calls r))) (.toBe 1)))))
 
@@ -154,3 +154,14 @@
                                 (let [r (rig (state-for openai-model))]
                                   (run-turn! r "omlx/q")
                                   (-> (expect (count @(:timers r))) (.toBe 0)))))))
+
+(describe "idle timers need a cache that serves" (fn []
+  (it "a model that never read from its cache is not armed"
+      (fn []
+        (let [{:keys [h ctx clock timers]} (rig (state-for anthropic-model))]
+          ((get h "before_provider_request") #js {} ctx)
+          (swap! clock + 2000)
+          ((get h "turn_end") #js {:usage #js {:inputTokens 150000}} ctx)
+          ((get h "after_provider_request") #js {:model "openlux-kiro/claude-x" :cachedTokens 0} ctx)
+          ((get h "agent_end") #js {} ctx)
+          (-> (expect (count @timers)) (.toBe 0)))))))
