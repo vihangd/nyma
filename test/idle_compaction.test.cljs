@@ -165,3 +165,14 @@
           ((get h "after_provider_request") #js {:model "openlux-kiro/claude-x" :cachedTokens 0} ctx)
           ((get h "agent_end") #js {} ctx)
           (-> (expect (count @timers)) (.toBe 0)))))))
+
+(describe "a prefix that does not survive" (fn []
+  (it "stops arming on a model whose summary barely read the cache"
+      ^:async (fn []
+        (let [r (rig (state-for anthropic-model))]
+          (aset (:ctx r) "compact" (fn [_] (js/Promise.resolve {:summary "SUM" :prefix-read 0.47})))
+          (run-turn! r "anthropic/claude-x")
+          (js-await ((:fire! r)))
+          (reset! (:timers r) {})
+          (run-turn! r "anthropic/claude-x")
+          (-> (expect (count @(:timers r))) (.toBe 0)))))))

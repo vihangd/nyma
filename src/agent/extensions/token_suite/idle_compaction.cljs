@@ -111,6 +111,9 @@
         ;; is not proof: a gateway can accept breakpoints and never serve them
         ;; (kv_cache gives up on those), and there a summary pays full price.
         served      (atom #{})
+        ;; Models whose prefix did NOT survive the summary turn (see
+        ;; compaction/last-prefix-read): there a summary costs the prefix.
+        unkept      (atom #{})
         cancel!     (fn []
                       (swap! epoch inc)
                       (doseq [t @timers] (clear-timeout t))
@@ -149,6 +152,11 @@
                                           (catch :default e
                                             (d/warn "idle-compaction" (str "summary failed: " (.-message e)))
                                             nil))]
+                            (when (some-> (:prefix-read r) (< 0.5))
+                              (d/info "idle-compaction"
+                                      (str "summary read " (js/Math.round (* 100 (:prefix-read r)))
+                                           "% from cache on " @spec " — not arming there again"))
+                              (swap! unkept conj (str @spec)))
                             (when (and (= ep @epoch) (:summary r) (same-conv? conv))
                               ;; The summary call read the cache, which restarts its clock.
                               (reset! last-touch started)
@@ -203,6 +211,7 @@
            (let [st   (.getState api)
                  snap (:last-request st)
                  win  (when (and snap @last-touch @spec (contains? @served (str @spec))
+                                 (not (contains? @unkept (str @spec)))
                                  (>= (or (:last-input-tokens st) 0) min-tokens))
                         (window {:spec            @spec
                                  :model           (.-model (:base snap))

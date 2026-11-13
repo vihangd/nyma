@@ -238,3 +238,15 @@
                                           :trigger "idle" :enabled? false}))]
           (-> (expect res) (.toBeFalsy))
           (-> (expect (count @seen)) (.toBe 0)))))))
+
+(describe "breakpoint from the system block" (fn []
+  (it "after a one-turn run no message is marked, so the system block's dialect is used"
+      ^:async (fn []
+        (let [seen (atom [])
+              base (doto (base-with #js [#js {:role "user" :content "q"} #js {:role "assistant" :content "a"}])
+                     (aset "system" #js [#js {:role "system" :content "stable"
+                                              :providerOptions #js {:anthropic #js {:cacheControl #js {:type "ephemeral"}}}}
+                                         #js {:role "system" :content "dynamic"}]))
+              _    (js-await (c/compact-with-retry nil "S" [] [] (capture seen six) nil {:base base}))
+              msgs (.-messages (first @seen))]
+          (-> (expect (.. (aget msgs 2) -providerOptions -anthropic -cacheControl -type)) (.toBe "ephemeral")))))))

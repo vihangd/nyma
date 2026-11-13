@@ -495,6 +495,14 @@ with every section below present.
        (when (seq files-modified)
          (str "\n\n<files-modified>\n" (str/join "\n" files-modified) "\n</files-modified>"))))
 
+(def last-prefix-read
+  "Share of the last prefix summary's input read from cache, or nil. Not every
+   prefix survives a new user turn: Haiku 4.5 with thinking on strips earlier
+   thinking blocks, and measured 47% (system and tools only) where the same
+   run with thinking off read 99%. Idle compaction stops arming on a model
+   where it is low, since there it pays for the prefix instead of saving it."
+  (atom nil))
+
 (defn ^:async compact-with-retry
   "Call generateText with the strategy's system prompt + user-prompt. Validate
    the result and run one fix-retry if validation fails. Always returns a
@@ -513,7 +521,14 @@ with every section below present.
         first-msg    (if-let [po (when (and base (<= (marked-count (.-messages base)) 2))
                                    ;; Four breakpoints is the API's limit: the
                                    ;; system block plus kv_cache's two leave one.
-                                   (cache-mark (.-messages base)))]
+                                   ;; The system block is the fallback source:
+                                   ;; kv_cache's per-step marks go on copies, so
+                                   ;; after a one-turn run no message carries
+                                   ;; one, and without ours only the system
+                                   ;; prompt read from cache (47%, measured).
+                                   (or (cache-mark (.-messages base))
+                                       (let [sys (.-system base)]
+                                         (when (js/Array.isArray sys) (cache-mark sys)))))]
                        #js {:role "user" :content user-prompt :providerOptions po}
                        #js {:role "user" :content user-prompt})
         call         (fn [msgs]
@@ -521,12 +536,14 @@ with every section below present.
                               (doto (js/Object.assign #js {} base)
                                 (aset "messages" (.concat (.-messages base) msgs)))
                               #js {:model model :system sys :messages msgs})))
+        _            (when base (reset! last-prefix-read nil))
         first-result (js-await (call #js [first-msg]))
         _            (when base
-                       (d/info "compaction" "summary on the request prefix"
-                               #js {:inputTokens (some-> first-result .-usage .-inputTokens)
-                                    :cacheReadTokens (some-> first-result .-usage .-inputTokenDetails
-                                                             .-cacheReadTokens)}))
+                       (let [in   (some-> first-result .-usage .-inputTokens)
+                             read (some-> first-result .-usage .-inputTokenDetails .-cacheReadTokens)]
+                         (reset! last-prefix-read (when (pos? (or in 0)) (/ (or read 0) in)))
+                         (d/info "compaction" "summary on the request prefix"
+                                 #js {:inputTokens in :cacheReadTokens read})))
         first-text   (.-text first-result)
         first-errors (validate-compaction first-text files-read files-modified source)]
     (if (empty? first-errors)
@@ -893,7 +910,8 @@ with every section below present.
                                  (extension-summary-usable? summary-text (:content prev-compaction)
                                                             files-read files-modified))
                         summary-text)
-             :before  usage}
+             :before  usage
+             :prefix-read @last-prefix-read}
           (do
 
             ((:append session)
