@@ -121,7 +121,7 @@
     (try
       ;; "ready", not the first frame: shortcuts register when extensions
       ;; activate, after the TUI has already painted.
-      (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "ready") 15000))) (.toBe true))
+      (-> (expect (js-await (wait-for #(re-find #"ready|✓" (strip @buf)) 15000))) (.toBe true))
       (js-await (js/Bun.sleep 300))
       (.write (.-terminal proc) "\u001b[Z")
       (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "Mode: accept-edits") 5000))) (.toBe true))

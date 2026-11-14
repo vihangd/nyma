@@ -43,17 +43,17 @@
 ;;; ─── default state ────────────────────────────────────────────────────────
 
 (describe "status-bar/default-state" (fn []
-                                       (it "shows nyma in the bar"
+                                       (it "spends no columns on a nyma prefix"
                                            (fn []
                                              (let [bar  (create-status-bar theme)
                                                    text (render-bar bar 80)]
-                                               (-> (expect (.includes text "nyma")) (.toBe true)))))
+                                               (-> (expect (.includes text "nyma")) (.toBe false)))))
 
                                        (it "shows ready when not streaming"
                                            (fn []
                                              (let [bar  (create-status-bar theme)
                                                    text (render-bar bar 80)]
-                                               (-> (expect (.includes text "ready")) (.toBe true)))))
+                                               (-> (expect (.includes text "✓")) (.toBe true)))))
 
                                        (it "does not show turns when turn-count is 0"
                                            (fn []
@@ -82,15 +82,14 @@
                                           (.setState bar {:streaming false})
                                           (let [text (render-bar bar 80)]
                                             (-> (expect (.includes text "streaming")) (.toBe false))
-                                            (-> (expect (.includes text "ready")) (.toBe true))))))
+                                            (-> (expect (.includes text "✓")) (.toBe true))))))
 
                                   (it "shows turn count when positive"
                                       (fn []
                                         (let [bar (create-status-bar theme)]
                                           (.setState bar {:turn-count 5})
                                           (let [text (render-bar bar 80)]
-                                            (-> (expect (.includes text "5")) (.toBe true))
-                                            (-> (expect (.includes text "turns")) (.toBe true))))))
+                                            (-> (expect (.includes text "✓ 5")) (.toBe true))))))
 
                                   (it "partial updates preserve other fields"
                                       (fn []
@@ -129,7 +128,7 @@
                                      (let [bar (create-status-bar theme)]
                                        (.setState bar {:model "a-very-long-model-name-that-wont-fit" :streaming false})
                                        (let [text (render-bar bar 30)]
-                                         (-> (expect (.includes text "ready")) (.toBe true))))))))
+                                         (-> (expect (.includes text "✓")) (.toBe true))))))))
 
 ;;; ─── extension auto-append segments ───────────────────────────────────────
 ;;; These regressions exist because for a long time register-segment
@@ -166,11 +165,11 @@
                    {:auto-append? true
                     :position     :right
                     :render       (fn [_] {:visible? true
-                                           :content  "leanc ✓"})})
+                                           :content  "leanc"})})
                   (let [bar  (create-status-bar theme)
                         text (render-bar bar 200)
                         idx-x (.indexOf text "leanc")
-                        idx-r (.indexOf text "ready")]
+                        idx-r (.lastIndexOf text "✓")]
                     (-> (expect (>= idx-x 0)) (.toBe true))
                     (-> (expect (>= idx-r 0)) (.toBe true))
                     ;; right segments precede the built-in 'ready'
@@ -213,7 +212,7 @@
                   (let [bar  (create-status-bar theme)
                         text (render-bar bar 200)]
                     ;; Built-in content still renders despite the bad segment.
-                    (-> (expect (.includes text "nyma")) (.toBe true))
+                    (-> (expect (.includes text "✓")) (.toBe true))
                     ;; Other working segment still renders.
                     (-> (expect (.includes text "OK1")) (.toBe true)))))))
 
@@ -404,15 +403,15 @@
         (segs/reset-registry!) (segs/install-builtins!)
         (let [bar (create-status-bar theme)]
           (.setState bar #js {:model "m" :last-cache-read 9400 :ctx-used 10000})
-          (-> (expect (render-bar bar 120)) (.toContain "cache:94%"))
+          (-> (expect (render-bar bar 120)) (.toContain "↻ 94%"))
           (.setState bar #js {:model "m" :last-cache-read 0 :ctx-used 10000})
-          (-> (expect (render-bar bar 120)) (.not.toContain "cache:")))))
+          (-> (expect (render-bar bar 120)) (.not.toContain "↻")))))
   (it "labels finished prompts, and the one in flight with its step"
       (fn []
         (segs/reset-registry!) (segs/install-builtins!)
         (let [bar (create-status-bar theme)]
           (.setState bar #js {:model "m" :turn-count 1})
-          (-> (expect (render-bar bar 120)) (.toContain "1 turn "))
+          (-> (expect (render-bar bar 120)) (.toContain "✓ 1 "))
           (.setState bar #js {:model "m" :turn-count 1 :streaming true :run-steps 87})
           (-> (expect (render-bar bar 120)) (.toContain "turn 2 · step 87")))))
   (it "renders cost and context fill when the bar has usage state"
@@ -422,7 +421,7 @@
           (.setState bar #js {:model "m" :cost-usd 0.0421 :ctx-used 30000 :ctx-window 200000})
           (let [line (render-bar bar 120)]
             (-> (expect line) (.toContain "$0.04"))
-            (-> (expect line) (.toContain "ctx:15%"))))))
+            (-> (expect line) (.toContain "◫ 15%"))))))
   (it "hides cost at zero"
       (fn []
         (segs/reset-registry!) (segs/install-builtins!)
@@ -436,7 +435,7 @@
           (.setState bar #js {:model "claude-sonnet" :cost-usd 1.5 :ctx-used 50000 :ctx-window 200000})
           (let [line (render-bar bar 60)]
             (-> (expect line) (.toContain "claude-sonnet"))
-            (-> (expect line) (.not.toContain "ctx:"))))))
+            (-> (expect line) (.not.toContain "◫"))))))
   (it "shows the elapsed clock while streaming-since is set, nothing at idle"
       (fn []
         (segs/reset-registry!) (segs/install-builtins!)
@@ -457,6 +456,15 @@
           (-> (expect (render-bar bar 120)) (.toContain "claude-x ◑ med"))
           (.setState bar #js {:thinking "off"})
           (-> (expect (render-bar bar 120)) (.not.toContain "med")))))
+  (it "ascii keeps the old labels: ready │ N turns, ctx:"
+      (fn []
+        (segs/set-glyphs! "ascii")
+        (segs/reset-registry!) (segs/install-builtins!)
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "m" :turn-count 2 :ctx-used 30000 :ctx-window 200000})
+          (let [line (render-bar bar 120)]
+            (-> (expect line) (.toContain "ready │ 2 turns"))
+            (-> (expect line) (.toContain "ctx:15%"))))))
   (it "reads think:<level> in ascii, and an unknown set is refused"
       (fn []
         (-> (expect (segs/set-glyphs! "fancy")) (.toBe false))
@@ -466,5 +474,5 @@
         (-> (expect (segs/thinking-label "high")) (.toContain " high"))))
   (it "every unicode glyph is one column"
       (fn []
-        (doseq [[k g] (:unicode segs/glyph-sets)]
+        (doseq [[k g] (:unicode segs/glyph-sets) :when (seq g)]
           (-> (expect (str k " " (visibleWidth g))) (.toBe (str k " 1"))))))))

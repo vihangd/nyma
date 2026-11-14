@@ -164,20 +164,32 @@
                                                         muted))
                                             think-label (RESET)))
                          ;; Built-in left content.
-                         core-left (str (fg muted) " nyma " (RESET)
-                                        (fg border) "│" (RESET)
-                                        " "
+                         ;; No ` nyma │` prefix: the terminal title names the
+                         ;; app, and the columns go to the model.
+                         core-left (str " "
                                         (or provider-piece "")
                                         (fg primary) model-piece (RESET)
                                         (or think-piece ""))
                          ;; Built-in right content.
+                         ;; Idle: `✓ 3` (ready, three turns) — ascii keeps
+                         ;; `ready │ 3 turns`.
+                         compact?   (not (segs/ascii-glyphs?))
                          core-right (str " "
-                                         (if streaming
-                                           (str (fg secondary) (BOLD) "● streaming" (RESET))
-                                           (str (fg muted) (DIM) "ready" (RESET)))
-                                         (when-let [label (turn-label turn-count streaming run-steps)]
-                                           (str (fg border) " │" (RESET)
-                                                (fg muted) (DIM) " " label (RESET)))
+                                         (cond
+                                           streaming
+                                           (str (fg secondary) (BOLD) "● streaming" (RESET)
+                                                (when-let [label (turn-label turn-count streaming run-steps)]
+                                                  (str (fg border) " │" (RESET)
+                                                       (fg muted) (DIM) " " label (RESET))))
+                                           compact?
+                                           (str (fg muted) (DIM) (segs/glyph :ready)
+                                                (when (pos? (or turn-count 0)) (str " " turn-count))
+                                                (RESET))
+                                           :else
+                                           (str (fg muted) (DIM) "ready" (RESET)
+                                                (when-let [label (turn-label turn-count streaming run-steps)]
+                                                  (str (fg border) " │" (RESET)
+                                                       (fg muted) (DIM) " " label (RESET)))))
                                          " ")
                          ;; Extension auto-append segments.
                          ;; Usage/context numbers refresh per step, whenever

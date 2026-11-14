@@ -67,7 +67,7 @@
                                 :terminal #js {:cols 120 :rows 40
                                                :data (fn [_ d] (swap! buf str (.decode dec d #js {:stream true})))}})]
     (try
-      (-> (expect (js-await (wait-for #(str/includes? (strip @buf) "ready") 15000))) (.toBe true))
+      (-> (expect (js-await (wait-for #(re-find #"ready|✓" (strip @buf)) 15000))) (.toBe true))
       ;; A trailing space, then Enter — what a person types. The popup used
       ;; to reopen on the space and Enter picked a file instead of submitting.
       (.write (.-terminal proc) "what is in @shot.png ")

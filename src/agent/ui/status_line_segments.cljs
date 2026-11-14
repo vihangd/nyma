@@ -77,11 +77,17 @@
 (defn- nf [cp] (js/String.fromCodePoint cp))
 
 (def glyph-sets
-  {:unicode {:think-minimal "○" :think-low "◔" :think-medium "◑" :think-high "◕" :think-xhigh "●"}
+  {:unicode {:think-minimal "○" :think-low "◔" :think-medium "◑" :think-high "◕" :think-xhigh "●"
+             :ctx "◫" :cache "↻" :time "⏲" :sub "⑂" :tok "Σ" :session "#" :branch ""
+             :ready "✓" :tok-in "↑" :tok-out "↓"}
    :nerd    {:think-minimal (nf 0xF09D1) :think-low (nf 0xF09D1) :think-medium (nf 0xF09D1)
-             :think-high (nf 0xF09D1) :think-xhigh (nf 0xF09D1)}
+             :think-high (nf 0xF09D1) :think-xhigh (nf 0xF09D1)
+             :ctx (nf 0xF029A) :cache (nf 0xF00E8) :time (nf 0xF051B) :sub (nf 0xF126)
+             :branch (nf 0xE725) :ready (nf 0xF00C)}
    :ascii   {:think-minimal "think:" :think-low "think:" :think-medium "think:"
-             :think-high "think:" :think-xhigh "think:"}})
+             :think-high "think:" :think-xhigh "think:"
+             :ctx "ctx:" :cache "cache:" :time "" :sub "sub:" :tok "tok:" :session "ses:"
+             :branch "" :ready "ready" :tok-in "^" :tok-out "v"}})
 
 (def ^:private glyph-mode (atom "unicode"))
 
@@ -102,6 +108,20 @@
     (if (contains? #{"unicode" "nerd" "ascii"} m)
       (do (reset! glyph-mode m) true)
       false)))
+
+(defn labelled
+  "`<glyph> <value>`; a text label (`ctx:`), an empty glyph or a one-char
+   prefix (`#`, `↑`) joins without the space."
+  [k v]
+  (let [g (glyph k)]
+    (if (or (= g "") (.endsWith g ":") (contains? #{:session :tok-in :tok-out} k))
+      (str g v)
+      (str g " " v))))
+
+(defn ascii-glyphs?
+  "True when the line is drawn with text labels rather than glyphs."
+  []
+  (= "ready" (glyph :ready)))
 
 (def ^:private thinking-short
   {"minimal" "min" "low" "low" "medium" "med" "high" "high" "xhigh" "xhigh"})
@@ -239,7 +259,7 @@
 
 (defn- model-seg [{:keys [model-id theme]}]
   (if (seq model-id)
-    (visible (str "" model-id)
+    (visible (str model-id)
              (get-in theme [:colors :primary] "#7aa2f7"))
     (hidden)))
 
@@ -259,7 +279,7 @@
           color  (if dirty?
                    (get-in theme [:colors :warning] "#e0af68")
                    (get-in theme [:colors :secondary] "#9ece6a"))]
-      (visible (str " " git-branch suffix) color))
+      (visible (labelled :branch (str git-branch suffix)) color))
     (hidden)))
 
 (defn- pr-seg [{:keys [pr-info theme]}]
@@ -271,28 +291,28 @@
 (defn- subagents-seg [{:keys [subagents theme]}]
   (let [n (or subagents 0)]
     (if (pos? n)
-      (visible (str "sub:" n)
+      (visible (labelled :sub n)
                (get-in theme [:colors :warning] "#e0af68"))
       (hidden))))
 
 (defn- token-in-seg [{:keys [token-in theme]}]
   (let [n (or token-in 0)]
     (if (pos? n)
-      (visible (str "↑" (compact-number n))
+      (visible (labelled :tok-in (compact-number n))
                (get-in theme [:colors :muted] "#565f89"))
       (hidden))))
 
 (defn- token-out-seg [{:keys [token-out theme]}]
   (let [n (or token-out 0)]
     (if (pos? n)
-      (visible (str "↓" (compact-number n))
+      (visible (labelled :tok-out (compact-number n))
                (get-in theme [:colors :muted] "#565f89"))
       (hidden))))
 
 (defn- token-total-seg [{:keys [token-total theme]}]
   (let [n (or token-total 0)]
     (if (pos? n)
-      (visible (str "tok:" (compact-number n))
+      (visible (labelled :tok (compact-number n))
                (get-in theme [:colors :muted] "#565f89"))
       (hidden))))
 
@@ -317,7 +337,7 @@
   ;; extension spend. Hidden at zero because @ai-sdk/openai turns a missing
   ;; field into 0, so `0%` would claim a miss we cannot tell from silence.
   (if (and (pos? (or last-cache-read 0)) (pos? (or ctx-used 0)))
-    (visible (str "cache:" (min 100 (js/Math.round (/ (* 100 last-cache-read) ctx-used))) "%")
+    (visible (labelled :cache (str (min 100 (js/Math.round (/ (* 100 last-cache-read) ctx-used))) "%"))
              (get-in theme [:colors :secondary] "#9ece6a"))
     (hidden)))
 
@@ -325,7 +345,7 @@
   (if (and ctx-window (pos? ctx-window))
     (let [pct (js/Math.floor (* 100 (/ (or ctx-used 0) ctx-window)))
           lvl (context-usage-level ctx-used ctx-window)]
-      (visible (str "ctx:" pct "%") (context-color lvl theme)))
+      (visible (labelled :ctx (str pct "%")) (context-color lvl theme)))
     (hidden)))
 
 (defn- context-total-seg [{:keys [ctx-used theme]}]
@@ -361,7 +381,7 @@
 
 (defn- time-spent-seg [{:keys [time-spent-ms theme]}]
   (if (pos? (or time-spent-ms 0))
-    (visible (format-duration-ms time-spent-ms)
+    (visible (labelled :time (format-duration-ms time-spent-ms))
              (get-in theme [:colors :muted] "#565f89"))
     (hidden)))
 
@@ -371,7 +391,7 @@
 
 (defn- session-seg [{:keys [session-id theme]}]
   (if (seq session-id)
-    (visible (str "ses:" (.slice (str session-id) 0 6))
+    (visible (labelled :session (.slice (str session-id) 0 6))
              (get-in theme [:colors :muted] "#565f89"))
     (hidden)))
 
