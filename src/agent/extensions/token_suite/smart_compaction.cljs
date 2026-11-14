@@ -275,8 +275,9 @@ with every section below present.
                                     #js {:model    model
                                          :messages #js [#js {:role "user" :content prompt}]
                                          :maxTokens 4096}))]
-                       (when (.-recordModelUsage api)
-                         (.recordModelUsage api (str model-spec) (.-usage result)))
+                       ;; A failed record must not cost the summary it paid for.
+                       (try (.recordModelUsage api (str model-spec) (.-usage result))
+                            (catch :default _ nil))
                        (when-let [text (.-text result)]
                          (when (seq (.trim text))
                            (aset evt-ctx "summary" text))))

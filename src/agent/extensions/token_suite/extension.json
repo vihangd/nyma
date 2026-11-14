@@ -9,7 +9,8 @@
     "commands",
     "ui",
     "state",
-    "session"
+    "session",
+    "model"
   ],
   "dependsOn": [],
   "settings": {

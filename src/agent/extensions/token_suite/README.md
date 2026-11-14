@@ -75,7 +75,7 @@ How long the cache lasts depends on the provider:
 
 ## Capabilities
 
-`events`, `context`, `tools`, `middleware`, `commands`, `ui`, `state`, `session`
+`events`, `context`, `tools`, `middleware`, `commands`, `ui`, `state`, `session`, `model`
 
 ## See also
 

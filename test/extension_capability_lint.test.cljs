@@ -40,7 +40,7 @@
    "appendEntry" "session" "setSessionName" "session" "getSessionName" "session" "getSessionFile" "session"
    "registerStatusSegment" "ui" "unregisterStatusSegment" "ui"
    "registerProvider" "providers" "unregisterProvider" "providers"
-   "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model"
+   "setModel" "model" "getActiveModelSpec" "model" "getThinkingLevel" "model" "recordModelUsage" "model"
    "dispatchState" "state"})
 
 (def ui-property-capability
@@ -115,7 +115,7 @@
    "exec"           ["exec"]
    "spawn"          ["spawn"]
    "providers"      ["registerProvider" "unregisterProvider"]
-   "model"          ["setModel" "getActiveModelSpec" "getThinkingLevel" "setThinkingLevel" "resolveModel"]
+   "model"          ["setModel" "getActiveModelSpec" "getThinkingLevel" "setThinkingLevel" "resolveModel" "recordModelUsage"]
    "session"        ["appendEntry" "setSessionName" "getSessionName" "getSessionFile"]
    "flags"          ["registerFlag" "getFlag" "unregisterFlag"]
    "context"        ["getTokenBudget"]})
