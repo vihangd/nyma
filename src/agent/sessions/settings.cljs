@@ -35,9 +35,10 @@
        :role            (str (:active-role st))})))
 
 (defn last-saved
-  "The last recorded setup in `session`, or nil."
+  "The last recorded setup on `session`'s active branch, or nil: a /fork back
+   past a /model must not resume on the abandoned branch's model."
   [session]
-  (some->> ((:get-entries session))
+  (some->> ((or (:get-branch-entries session) (:get-entries session)))
            (filter #(= entry-role (:role %)))
            last
            :metadata))
@@ -76,7 +77,8 @@
    surprise. `headless?` skips the mode — print/json/rpc have no one to ask."
   [agent saved {:keys [explicit headless?]}]
   (let [api   (.-extension-api agent)
-        cur   (or (snapshot agent) {})
+        ;; Read fresh at each step: the role applied first may carry a model.
+        cur   #(or (snapshot agent) {})
         skip? #(contains? (or explicit #{}) %)
         out   (atom [])]
     (when saved
@@ -84,26 +86,26 @@
       ;; role_change's keep-model leaves the saved model below to stand.
       (let [r (:role saved)]
         ;; ...unless -m was given: the role's model would override it.
-        (when (and (seq r) (not= r (:role cur)) (not (skip? :model)))
+        (when (and (seq r) (not= r (:role (cur))) (not (skip? :model)))
           ((:emit (:events agent)) "role_change" {:role r :source "session-restore"})
           (swap! out conj (str "role " r))))
       (let [m (:model saved)]
-        (when (and (seq m) (not (skip? :model)) (not= m (:model cur)) api)
+        (when (and (seq m) (not (skip? :model)) (not= m (:model (cur))) api)
           (let [[prov] (registry-utils/split-model-spec m)]
             (if (and prov (not ((:get (:provider-registry agent)) prov)))
-              (do (d/warn "sessions" (str "saved model " m " has no provider here; keeping " (:model cur)))
+              (do (d/warn "sessions" (str "saved model " m " has no provider here; keeping " (:model (cur))))
                   (swap! out conj (str "model " m " unavailable")))
               (do (.setModel api m)
                   (swap! out conj m))))))
       (let [t (:thinking saved)]
-        (when (and (thinking/valid-level? t) (not (skip? :thinking)) (not= t (:thinking cur)))
+        (when (and (thinking/valid-level? t) (not (skip? :thinking)) (not= t (:thinking (cur))))
           (reset! (:thinking-level agent) t)
           (swap! out conj (str "thinking " t))))
       (let [pm   (:permission-mode saved)
             pm   (if (= pm "full-auto") "accept-edits" pm)
             cmd  (mode-command agent)]
         (when (and (seq pm) cmd api (not headless?) (not (skip? :permission-mode))
-                   (not= pm (:permission-mode cur)))
+                   (not= pm (:permission-mode (cur))))
           ;; Through /mode, as ACP does: "plan" has to enter plan mode. Its
           ;; own notice is swallowed (the UI may not be up yet at startup);
           ;; the state says whether it took.

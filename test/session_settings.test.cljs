@@ -63,6 +63,17 @@
           ;; inert for the model
                                                  (-> (expect (count ((:build-context m)))) (.toBe 0))))))
 
+                                       (it "reads the active branch: a fork back past a change is not resumed on it"
+                                           (fn []
+                                             (let [a (mock-agent (path/join @test-dir "s.jsonl"))
+                                                   s @(:session a)]
+                                               (ss/record! a)
+                                               (let [before ((:get-leaf-id s))]
+                                                 (reset! (:thinking-level a) "low")
+                                                 (ss/record! a)
+                                                 ((:branch s) before)
+                                                 (-> (expect (:thinking (ss/last-saved s))) (.toBe "high"))))))
+
                                        (it "records nothing while a temporary model is on"
                                            (fn []
                                              (let [a (mock-agent (path/join @test-dir "s.jsonl"))]
@@ -111,6 +122,15 @@
         (-> (expect (count @(:roles (:spies a)))) (.toBe 0))
         (-> (expect (count @(:modes (:spies a)))) (.toBe 0))
         (-> (expect @(:thinking-level a)) (.toBe "high")))))
+
+  (it "a role that carries a model does not stop the saved model coming back"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))
+            a (assoc a :events {:emit (fn [ev _]
+                                        (when (= ev "role_change")
+                                          (set! (.-model (:config a)) "anthropic/role-model")))})]
+        (ss/restore! a {:role "deep" :model "anthropic/claude-x"} {})
+        (-> (expect (clj->js @(:models (:spies a)))) (.toEqual #js ["anthropic/claude-x"])))))
 
   (it "full-auto comes back as accept-edits; headless skips the mode"
     (fn []
