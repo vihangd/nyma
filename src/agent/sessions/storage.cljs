@@ -154,6 +154,18 @@
             :turn-count          (or (.-turn_count row) 0)
             :models              (mapv #(.-model %) (.all models session-file))})))
 
+     ;; The model a session last ran a turn on — resume's fallback for
+     ;; sessions recorded before session-settings entries existed.
+     :last-model
+     (fn [session-file]
+       (some-> (.prepare db
+                 "SELECT model FROM usage
+                   WHERE session_file = ? AND COALESCE(turn_id, '') != 'extension'
+                     AND input_tokens > 0
+                   ORDER BY id DESC LIMIT 1")
+               (.get session-file)
+               .-model))
+
      :insert-prompt
      (fn [text session-file]
        (let [stmt (.prepare db

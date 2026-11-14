@@ -113,10 +113,15 @@
 
 (defn restore-session!
   "restore! from the agent's current session, with one line saying what came
-   back."
+   back. A session from before these entries existed gets its model back from
+   `(:last-model opts)` (the usage table), and nothing else."
   [agent opts]
   (when-let [session (some-> (:session agent) deref)]
-    (let [parts (restore! agent (last-saved session) opts)]
+    (let [saved (or (last-saved session)
+                    (when-let [f (and (:last-model opts) ((:get-file-path session)))]
+                      (when-let [m (try ((:last-model opts) f) (catch :default _ nil))]
+                        {:model m})))
+          parts (restore! agent saved opts)]
       (when (seq parts)
         (let [msg (str "Restored: " (str/join " · " parts))
               ui  (some-> (.-extension-api agent) .-ui)]

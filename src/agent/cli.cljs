@@ -1324,15 +1324,18 @@ Examples:
       ;; Flags given on this command line win, at startup only: a later
       ;; /resume picks its target on purpose.
       (let [headless? (or (= (:mode values) "rpc") (contains? #{"print" "json"} mode))
+            last-model (some-> (aget api "__sqlite-store") :last-model)
             explicit  (cond-> #{}
                         (or (:model values) (:provider values)) (conj :model)
                         (:thinking values)                      (conj :thinking)
                         (:permission-mode values)               (conj :permission-mode))]
-        (session-settings/restore-session! agent {:explicit explicit :headless? headless?})
+        (session-settings/restore-session! agent {:explicit explicit :headless? headless?
+                                                  :last-model last-model})
         ((:on (:events agent)) "session_start"
          (fn [p]
            (when-not (= "new" (and p (aget p "reason")))
-             (session-settings/restore-session! agent {:headless? headless?})))))
+             (session-settings/restore-session! agent {:headless? headless?
+                                                       :last-model last-model})))))
 
       ;; Load user keybindings and rebuild the action-id registry
       (let [bindings (load-keybindings)]

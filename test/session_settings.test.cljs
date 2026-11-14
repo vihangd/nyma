@@ -4,7 +4,8 @@
             ["node:path" :as path]
             ["node:os" :as os]
             [agent.sessions.manager :refer [create-session-manager]]
-            [agent.sessions.settings :as ss]))
+            [agent.sessions.settings :as ss]
+            [agent.sessions.storage :refer [create-sqlite-store]]))
 
 (def ^:private test-dir (atom nil))
 
@@ -132,3 +133,25 @@
       (let [a (restore-rig (path/join @test-dir "s.jsonl"))]
         (ss/record! a)
         (-> (expect (count (ss/restore-session! a {}))) (.toBe 0)))))))
+
+(describe "session settings: sessions from before" (fn []
+  (it "the usage table's last turn model, skipping extension spend"
+    (fn []
+      (let [db (create-sqlite-store ":memory:")
+            rec (:record-usage db)]
+        (rec {:session-file "a.jsonl" :turn-id "t1" :model "zai/glm-5" :input-tokens 10})
+        (rec {:session-file "a.jsonl" :turn-id "t2" :model "anthropic/claude-x" :input-tokens 10})
+        (rec {:session-file "a.jsonl" :turn-id "extension" :model "anthropic/haiku" :input-tokens 10})
+        (rec {:session-file "b.jsonl" :turn-id "t1" :model "zai/glm-9" :input-tokens 10})
+        (-> (expect ((:last-model db) "a.jsonl")) (.toBe "anthropic/claude-x"))
+        (-> (expect (nil? ((:last-model db) "none.jsonl"))) (.toBe true)))))
+
+  (it "restore-session! falls back to it only when nothing was recorded"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))]
+        (ss/restore-session! a {:last-model (fn [_] "zai/glm-5")})
+        (-> (expect (clj->js @(:models (:spies a)))) (.toEqual #js ["zai/glm-5"])))
+      (let [a (restore-rig (path/join @test-dir "t.jsonl"))]
+        (ss/record! a)
+        (ss/restore-session! a {:last-model (fn [_] "zai/glm-5")})
+        (-> (expect (count @(:models (:spies a)))) (.toBe 0)))))))
