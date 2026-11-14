@@ -174,11 +174,16 @@
   (let [width (max 20 (or width 80))
         label (or (:title session) (:name session) "(empty session)")
         proj  (or (project/project-label (:cwd session)) "—")
+        tail  (str "  " (time/relative-time (:modified session))
+                   "  " (:msg-count session) " msgs")
         ;; the id without its provider: the row has no room for both
         model (some-> (:model session) str (.split "/") last)
-        meta  (str proj (when (seq model) (str "  " model))
-                   "  " (time/relative-time (:modified session))
-                   "  " (:msg-count session) " msgs")
+        with  (str proj "  " model tail)
+        ;; two-col-row drops the WHOLE right column past half the row, so the
+        ;; model goes first when it would not fit.
+        meta  (if (and (seq model) (<= (count with) (js/Math.floor (/ width 2))))
+                with
+                (str proj tail))
         ;; Mirrors two-col-row's own budget so the head-truncation happens here
         ;; rather than its tail-truncation happening there.
         budget (max 1 (- width (count meta) 2))]

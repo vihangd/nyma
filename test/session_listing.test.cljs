@@ -207,7 +207,10 @@
                     (let [s (first (list-sessions @test-dir))]
                       (-> (expect (:model s)) (.toBe "anthropic/claude-x"))
                       (-> (expect (format-row s 100)) (.toContain "claude-x"))
-                      (-> (expect (format-row s 100)) (.not.toContain "anthropic"))))))
+                      (-> (expect (format-row s 100)) (.not.toContain "anthropic"))
+                      ;; too narrow for it: the model goes, the age stays
+                      (-> (expect (format-row s 50)) (.not.toContain "claude-x"))
+                      (-> (expect (format-row s 50)) (.toContain "msgs"))))))
 
             (it "falls back to the id when a session has no title"
                 (fn []
