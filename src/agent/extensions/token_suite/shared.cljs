@@ -60,6 +60,9 @@
    ;; {"class": "none"} turns it off for that provider.
    :idle-compaction {:enabled    true
                      :min-tokens 100000
+                     ;; And this share of the context window: on a 1M model a
+                     ;; 120K session is far from needing a lossy summary.
+                     :min-window-share 0.25
                      :fire-at    0.9
                      ;; On top of idle-compaction/default-profiles.
                      :profiles   {}}

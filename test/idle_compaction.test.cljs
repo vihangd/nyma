@@ -81,7 +81,7 @@
                                   {:summary "SUM" :before 1}
                                   {:before 200000 :after 20000})))}
         {:keys [handlers]}
-        (ic/create api {:min-tokens 100000 :fire-at 0.9 :profiles {}}
+        (ic/create api {:min-tokens 100000 :min-window-share 0.25 :fire-at 0.9 :profiles {}}
                    {:now           (fn [] @clock)
                     :set-timeout   (fn [ms f] (let [id (swap! ids inc)]
                                                 (swap! timers assoc id {:at (+ @clock ms) :f f})
@@ -255,3 +255,15 @@
             (run-turn! r "zai/glm")
             (-> (expect (count @(:timers r))) (.toBe 0)))
           (finally (swap! pricing/token-costs dissoc "zai/glm")))))))
+
+(describe "the context window" (fn []
+  (it "a large window raises the bar: 150K of 1M does not arm, of 200K does"
+      (fn []
+        (let [arm (fn [window]
+                    (let [st (state-for anthropic-model)
+                          r  (rig st)]
+                      (aset (:api r) "getTokenBudget" (fn [] #js {:contextWindow window}))
+                      (run-turn! r "anthropic/claude-x")
+                      (count @(:timers r))))]
+          (-> (expect (arm 1000000)) (.toBe 0))
+          (-> (expect (arm 200000)) (.toBe 1)))))))

@@ -69,7 +69,7 @@ How long the cache lasts depends on the provider:
 
 ```json
 {"token-suite": {"idle-compaction": {
-  "enabled": true, "min-tokens": 100000, "fire-at": 0.9,
+  "enabled": true, "min-tokens": 100000, "min-window-share": 0.25, "fire-at": 0.9,
   "profiles": {"my-gateway": {"ttl-s": 300}, "openlux-kiro": {"class": "none"}}}}}
 ```
 

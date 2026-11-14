@@ -99,6 +99,7 @@
    them by hand). Returns {:handlers {event fn} :stop fn}."
   [api cfg {:keys [now set-timeout clear-timeout]}]
   (let [min-tokens  (:min-tokens cfg)
+        min-share   (or (:min-window-share cfg) 0)
         fire-at     (:fire-at cfg)
         ;; A user's profile adds to the defaults, rather than replacing them.
         profiles    (merge default-profiles (:profiles cfg))
@@ -249,7 +250,11 @@
                  k    (model-key (some-> (:base snap) .-model))
                  win  (when (and on? snap @last-touch @spec (contains? @served (str @spec))
                                  (not (contains? @unkept (str @spec)))
-                                 (>= (or (:last-input-tokens st) 0) min-tokens))
+                                 (>= (or (:last-input-tokens st) 0)
+                                     (max min-tokens
+                                          (* min-share (or (try (some-> (.getTokenBudget api) .-contextWindow)
+                                                                (catch :default _ nil))
+                                                           0)))))
                         (window {:spec            @spec
                                  :model           (.-model (:base snap))
                                  :profiles        profiles
