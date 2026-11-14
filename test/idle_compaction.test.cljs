@@ -221,7 +221,17 @@
             (@done {:summary "S"})
             (js-await p)
             ;; the gap is measured from the summary call, not the turn before it
-            (-> (expect (get-in @(:saved r) ["claude-x" "hit-max"])) (.toBe 10))))))))
+            (-> (expect (get-in @(:saved r) ["claude-x" "hit-max"])) (.toBe 10))))))
+
+  (it "a summary call that sent nothing leaves the cache clock alone"
+      ^:async (fn []
+        (let [r (rig (state-for anthropic-model))]
+          (aset (:ctx r) "compact" (fn [_] (js/Promise.resolve {:summary nil :prefix-read nil})))
+          (run-turn! r "anthropic/claude-x")
+          (js-await ((:fire! r)))
+          ;; a hit here is 270s after the turn, not 0s after the summary call
+          (first-step! r "claude-x" 9000)
+          (-> (expect (get-in @(:saved r) ["claude-x" "hit-max"])) (.toBe 270)))))))
 
 (describe "a learned lifetime that ran short" (fn []
   (it "a summary that missed records the miss instead of giving up on the model"

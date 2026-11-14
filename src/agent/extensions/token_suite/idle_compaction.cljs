@@ -170,7 +170,13 @@
                                                                        "trigger" "idle"}))
                                           (catch :default e
                                             (d/warn "idle-compaction" (str "summary failed: " (.-message e)))
-                                            nil))]
+                                            nil))
+                                ;; Neither a summary nor usage back: compact had
+                                ;; nothing to send (no reusable prefix), the
+                                ;; cache was not touched, the old clock stands.
+                                _       (when (and (nil? (:summary r)) (nil? (:prefix-read r))
+                                               (= started @last-touch))
+                                          (reset! last-touch prev))]
                             (when (some-> (:prefix-read r) (< 0.5))
                               ;; On a learned lifetime the likelier cause is a
                               ;; cache that expired sooner than the midpoint
