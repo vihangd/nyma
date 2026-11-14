@@ -62,18 +62,20 @@ How long the cache lasts depends on the provider:
 - **Anthropic dialect:** `kv-cache.cache-ttl`, 5m by default.
 - **A settings profile:** you can set this per provider.
 - **Anything else priced:** learned from the gaps that did and did not read the
-  cache.
+  cache. z.ai (GLM 5.3 Flash, 2026-11) read the whole prefix after 8 minutes
+  idle and none of it after 12, so idle compaction there learns to summarise at
+  about 9 minutes.
 - **DeepSeek, Groq and unpriced (local) models:** never compacted this way.
 
 ```json
 {"token-suite": {"idle-compaction": {
   "enabled": true, "min-tokens": 100000, "fire-at": 0.9,
-  "profiles": {"zai": {"ttl-s": 300}, "openlux-kiro": {"class": "none"}}}}}
+  "profiles": {"my-gateway": {"ttl-s": 300}, "openlux-kiro": {"class": "none"}}}}}
 ```
 
 ## Capabilities
 
-`events`, `context`, `tools`, `middleware`, `commands`, `ui`, `state`
+`events`, `context`, `tools`, `middleware`, `commands`, `ui`, `state`, `session`
 
 ## See also
 
