@@ -291,7 +291,7 @@
             ;; prefix; `prompt_cache_key` keeps one session's requests on the
             ;; same cache. Opt-in per provider name: a strict gateway can 400
             ;; on a body field it does not know.
-            (when-not provider
+            (when (and (not provider) (:enabled kv-config))
               (let [pname (first (.split (str (some-> model .-provider)) "."))
                     sid   (some-> (try (.getSessionFile api) (catch :default _ nil)) str
                                   (.split "/") last (.replace #"\.jsonl$" ""))]
