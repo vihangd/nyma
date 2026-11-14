@@ -277,3 +277,25 @@
                                          {:gen-fn gen :state-atom state
                                           :force? true :summarize-only? true}))]
           (-> (expect (:prefix-read res)) (.toBe 0.99)))))))
+
+(describe "server-side compaction stays out of the summary" (fn []
+  (it "the snapshot drops contextManagement; the live config keeps it"
+      (fn []
+        (let [cm   #js {:edits #js []}
+              cfg  #js {:messages #js []
+                        :providerOptions #js {:anthropic #js {:contextManagement cm :thinking "t"}}}
+              b    (:base (c/request-snapshot cfg #js [] []))]
+          (-> (expect (.. b -providerOptions -anthropic -contextManagement)) (.toBeUndefined))
+          (-> (expect (.. b -providerOptions -anthropic -thinking)) (.toBe "t"))
+          (-> (expect (.. cfg -providerOptions -anthropic -contextManagement)) (.toBe cm)))))
+
+  (it "a compaction text part is not part of the summary"
+      ^:async (fn []
+        (let [gen  (fn [_] (js/Promise.resolve
+                            #js {:text (str "SERVER" six)
+                                 :content #js [#js {:type "text" :text "SERVER"
+                                                    :providerMetadata #js {:anthropic #js {:type "compaction"}}}
+                                               #js {:type "text" :text six}]}))
+              text (js-await (c/compact-with-retry nil "S" [] [] gen nil
+                                                   {:base (base-with #js [#js {:role "user" :content "q"}])}))]
+          (-> (expect text) (.toBe six)))))))

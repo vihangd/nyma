@@ -453,6 +453,15 @@ with every section below present.
     (doseq [k (js/Object.keys base)]
       (when (fn? (aget base k)) (js-delete base k)))
     (doseq [k ["abortSignal" "stopWhen"]] (js-delete base k))
+    ;; anthropic_compaction's server-side compact edit (trigger 150K) would
+    ;; compact the prefix before our summary turn and hand back its own summary
+    ;; run together with ours. Copied, not mutated: the live run keeps it.
+    (when-let [a (some-> (.-providerOptions base) .-anthropic)]
+      (when (some? (.-contextManagement a))
+        (let [a (js/Object.assign #js {} a)]
+          (js-delete a "contextManagement")
+          (aset base "providerOptions"
+                (doto (js/Object.assign #js {} (.-providerOptions base)) (aset "anthropic" a))))))
     (when tools (aset base "tools" tools))
     (aset base "messages" (.concat (or (.-messages st-config) #js [])
                                    (or response-messages #js [])))
@@ -517,6 +526,16 @@ with every section below present.
        (when (seq files-modified)
          (str "\n\n<files-modified>\n" (str/join "\n" files-modified) "\n</files-modified>"))))
 
+(defn- result-text
+  "The result's text, minus any server-side compaction block (the SDK returns
+   one as a text part tagged providerMetadata.anthropic.type \"compaction\")."
+  [r]
+  (let [parts (.-content r)
+        comp? #(= "compaction" (some-> % .-providerMetadata .-anthropic .-type))]
+    (if (and parts (some comp? parts))
+      (str/join "" (keep #(when (and (= "text" (.-type %)) (not (comp? %))) (.-text %)) parts))
+      (.-text r))))
+
 (defn ^:async compact-with-retry
   "Call generateText with the strategy's system prompt + user-prompt. Validate
    the result and run one fix-retry if validation fails. Always returns a
@@ -563,7 +582,7 @@ with every section below present.
                            (reset! a (when (pos? (or in 0)) (/ (or read 0) in))))
                          (d/info "compaction" "summary on the request prefix"
                                  #js {:inputTokens in :cacheReadTokens read})))
-        first-text   (.-text first-result)
+        first-text   (result-text first-result)
         first-errors (validate-compaction first-text files-read files-modified source)]
     (cond
       (empty? first-errors) first-text
@@ -579,7 +598,7 @@ with every section below present.
                         (call (if base
                                 #js [first-msg #js {:role "assistant" :content (str first-text)} fix-msg]
                                 #js [fix-msg])))
-            fix-text   (.-text fix-result)
+            fix-text   (result-text fix-result)
             fix-errors (validate-compaction fix-text files-read files-modified source)]
         (when (seq fix-errors)
           (d/warn "compaction" "validation failed after retry — using unvalidated summary"
