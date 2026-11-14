@@ -101,8 +101,10 @@
     ;; tagged providerMetadata.anthropic.type "compaction".
     (.on api "turn_end"
          (fn [step _ctx]
-           (when (some #(= "compaction" (some-> % .-providerMetadata .-anthropic .-type))
-                       (or (some-> step .-content) []))
+           (when (and enabled?
+                      (shared/model-supports-compaction? (str (some-> step .-response .-modelId)))
+                      (some #(= "compaction" (some-> % .-providerMetadata .-anthropic .-type))
+                       (or (some-> step .-content) [])))
              (swap! shared/suite-stats update :anthropic-compaction
                     (fn [s] (update s :compactions-observed (fnil inc 0)))))))
 

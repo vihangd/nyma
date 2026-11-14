@@ -196,6 +196,7 @@
               api   (create-extension-api agent)
               _     (ac/activate api)]
           (js-await ((:emit-collect (:events agent)) "turn_end"
-                     #js {:content #js [#js {:type "text" :text "s"
+                     #js {:response #js {:modelId "claude-sonnet-4-6"}
+                          :content #js [#js {:type "text" :text "s"
                                              :providerMetadata #js {:anthropic #js {:type "compaction"}}}]}))
           (-> (expect (:compactions-observed (:anthropic-compaction @shared/suite-stats))) (.toBe 1)))))))
