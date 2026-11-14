@@ -983,7 +983,12 @@
 
                       ;; What this run last sent, so a compaction can summarise
                       ;; on the same prefix and read the cache it warmed.
+                      ;; Not after a steer: prepareStep sent it to the model,
+                      ;; but st-config never held it, so a summary on that
+                      ;; prefix would replace an instruction it never saw.
                         (try
+                          (if (seq @steered)
+                            (swap! state dissoc :last-request)
                           (swap! state assoc :last-request
                                  (compaction/request-snapshot
                                   st-config
@@ -992,7 +997,7 @@
                                   (or (js-await (.-responseMessages result))
                                       (some-> (js-await (.-response result)) .-messages))
                                   (:messages @state)
-                                  built-users))
+                                  built-users)))
                           (catch :default e
                             (dbg/error "loop" (str "request snapshot: " (.-message e)))))
 

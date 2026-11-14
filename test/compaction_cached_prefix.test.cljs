@@ -308,3 +308,17 @@
           (js-await (c/compact-with-retry nil "S" [] [] gen nil {:on-usage #(swap! seen conj %)}))
           (-> (expect (count @seen)) (.toBe 1))
           (-> (expect (.-inputTokens (first @seen))) (.toBe 7)))))))
+
+(describe "a steered run" (fn []
+  (it "leaves no snapshot: the steer never reached st-config"
+      ^:async (fn []
+        (let [agent (make-test-agent
+                     {:model (scripted
+                              [(step #js [#js {:type "tool-call" :toolCallId "c1" :toolName "think"
+                                               :input "{\"thought\":\"w\"}"}])
+                               (step #js [#js {:type "text-start" :id "t"}
+                                          #js {:type "text-delta" :id "t" :delta "done"}
+                                          #js {:type "text-end" :id "t"}])])})]
+          (reset! (:steer-queue agent) [{:role "user" :content "also leave auth.ts alone"}])
+          (js-await (run agent "go"))
+          (-> (expect (:last-request @(:state agent))) (.toBeUndefined)))))))
