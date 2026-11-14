@@ -85,8 +85,8 @@
    :nerd    {:think-minimal (nf 0xF09D1) :think-low (nf 0xF09D1) :think-medium (nf 0xF09D1)
              :think-high (nf 0xF09D1) :think-xhigh (nf 0xF09D1)
              :ctx (nf 0xF029A) :cache (nf 0xF00E8) :time (nf 0xF051B) :sub (nf 0xF126)
-             :branch (nf 0xE725) :ready (nf 0xF00C) :role (nf 0xF0B19)
-             :mode-plan (nf 0xF03E4) :mode-accept-edits (nf 0xF03EB) :mode-full-auto (nf 0xF0E4E)}
+             :branch (nf 0xE725) :ready (nf 0xF00C) :role (nf 0xF0CE3)
+             :mode-plan (nf 0xF03E4) :mode-accept-edits (nf 0xF03EB) :mode-full-auto (nf 0xF0211)}
    :ascii   {:think-minimal "think:" :think-low "think:" :think-medium "think:"
              :think-high "think:" :think-xhigh "think:"
              :ctx "ctx:" :cache "cache:" :time "" :sub "sub:" :tok "tok:" :session "ses:"
