@@ -178,7 +178,7 @@
     :manifest  #js {"namespace" "todos" "description" "Persistent todo ledger for session-scoped task tracking" "capabilities" #js ["events" "tools" "ui" "state"] "dependsOn" #js [] "settings" #js {"todos" #js {"reminder-every-n-turns" 5}}}}
    {:namespace "token-suite"
     :module    ext-token-suite
-    :manifest  #js {"namespace" "token-suite" "description" "Token optimizations, smart compaction, live cost preview (`/token-preview`)" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui" "state"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil "idle-compaction" nil}}}}
+    :manifest  #js {"namespace" "token-suite" "description" "Token optimizations, smart compaction, live cost preview (`/token-preview`)" "capabilities" #js ["events" "context" "tools" "middleware" "commands" "ui" "state" "session"] "dependsOn" #js [] "settings" #js {"token-suite" #js {"kv-cache" nil "repo-map" nil "priority-assembly" nil "diff-edit" nil "structured-context" nil "smart-compaction" nil "anthropic-compaction" nil "idle-compaction" nil}}}}
    {:namespace "verify-gate"
     :module    ext-verify-gate
     :manifest  #js {"namespace" "verify-gate" "description" "Runs a configured test/typecheck command after any turn that edited files and feeds failures back, then optionally has a role review the change (off unless `verify.cmd` or `verify.critic` is set)" "capabilities" #js ["events" "messages" "state" "tools" "ui"] "dependsOn" #js [] "settings" #js {"verify" #js {"cmd" nil "critic" nil "max-attempts" 2 "timeout-ms" 120000}}}}

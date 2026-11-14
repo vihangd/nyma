@@ -27,7 +27,10 @@
                       ;; that survives a long gap between turns — worth it only
                       ;; if your turns are minutes apart. See kv-cache/valid-ttls.
                       :cache-ttl nil
-                      :extra-providers {:anthropic [] :google []}}
+                      :extra-providers {:anthropic [] :google []}
+                      ;; Providers (by name) sent `prompt_cache_key` = the
+                      ;; session id. Only ones known to accept the field.
+                      :cache-key-providers ["openai"]}
    ;; Withhold a tool's JSON Schema from every request until the model asks
    ;; for it with `tool_search`. Off by default and inert with no patterns:
    ;; it changes what the model can see, which is not a default anyone should

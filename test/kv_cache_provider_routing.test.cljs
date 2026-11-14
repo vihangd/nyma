@@ -177,3 +177,28 @@
                                                          (fn []
                                                            (-> (expect (shared/detect-cache-provider-for-model "gemini-2.0-flash"))
                                                                (.toBe :google))))))
+
+(defn ^:async key-body [make-model]
+  (let [{:keys [box fetch]} (capture)
+        model  (make-model fetch)
+        agent  (create-agent {:model model :system-prompt long-system})
+        api    (create-extension-api agent)
+        _      (aset api "getSessionFile" (fn [] "/s/1793-abc.jsonl"))
+        _deact (kv-cache/activate api)
+        config #js {:model model :system "s" :messages #js [#js {:role "user" :content "q"}]
+                    :tools #js {} :providerOptions #js {}}]
+    (js-await ((:emit-collect (:events agent)) "before_provider_request" config))
+    (try (js-await (.-text (streamText #js {:model model :system (.-system config) :messages (.-messages config)
+                                            :providerOptions (.-providerOptions config) :maxRetries 0})))
+         (catch :default _ nil))
+    @box))
+
+(describe "prompt_cache_key" (fn []
+  (it "an openai provider sends the session id"
+      ^:async (fn []
+        (-> (expect (.-prompt_cache_key (js-await (key-body openai-model)))) (.toBe "1793-abc"))))
+  (it "other OpenAI-shaped providers and anthropic do not"
+      ^:async (fn []
+        (let [zai (fn [f] (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1" :name "zai" :fetch f}) "glm"))]
+          (-> (expect (.-prompt_cache_key (js-await (key-body zai)))) (.toBeUndefined))
+          (-> (expect (.-prompt_cache_key (js-await (key-body anthropic-model)))) (.toBeUndefined)))))))

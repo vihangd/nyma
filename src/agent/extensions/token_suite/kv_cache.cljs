@@ -285,7 +285,21 @@
                   (when @prev-annotated? (reset! expected-hit? true))
                   (reset! annotated true))))
 
-            (reset! prev-annotated? @annotated))
+            (reset! prev-annotated? @annotated)
+
+            ;; OpenAI-shaped providers cache implicitly, routed by a hash of the
+            ;; prefix; `prompt_cache_key` keeps one session's requests on the
+            ;; same cache. Opt-in per provider name: a strict gateway can 400
+            ;; on a body field it does not know.
+            (when-not provider
+              (let [pname (first (.split (str (some-> model .-provider)) "."))
+                    sid   (some-> (try (.getSessionFile api) (catch :default _ nil)) str
+                                  (.split "/") last (.replace #"\.jsonl$" ""))]
+                (when (and (seq sid) (some #(= pname %) (:cache-key-providers kv-config)))
+                  (let [po (or (.-providerOptions config-obj)
+                               (let [p #js {}] (aset config-obj "providerOptions" p) p))
+                        o  (or (.-openai po) (let [p #js {}] (aset po "openai" p) p))]
+                    (when-not (.-promptCacheKey o) (aset o "promptCacheKey" sid)))))))
 
           ;; Mutations in place — no return value
           nil)
