@@ -1320,6 +1320,20 @@ Examples:
         (swap! (:state agent) dissoc :pending-session-start)
         ((:emit (:events agent)) "session_start" payload))
 
+      ;; Bring back the setup the session was left in (sessions.settings).
+      ;; Flags given on this command line win, at startup only: a later
+      ;; /resume picks its target on purpose.
+      (let [headless? (or (= (:mode values) "rpc") (contains? #{"print" "json"} mode))
+            explicit  (cond-> #{}
+                        (or (:model values) (:provider values)) (conj :model)
+                        (:thinking values)                      (conj :thinking)
+                        (:permission-mode values)               (conj :permission-mode))]
+        (session-settings/restore-session! agent {:explicit explicit :headless? headless?})
+        ((:on (:events agent)) "session_start"
+         (fn [p]
+           (when-not (= "new" (and p (aget p "reason")))
+             (session-settings/restore-session! agent {:headless? headless?})))))
+
       ;; Load user keybindings and rebuild the action-id registry
       (let [bindings (load-keybindings)]
         (when (seq bindings)

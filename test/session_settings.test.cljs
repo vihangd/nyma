@@ -70,3 +70,65 @@
                                                (swap! (:state a) assoc :plan-mode false :escalated-to "anthropic/big")
                                                (ss/record! a)
                                                (-> (expect (count (saved-entries a))) (.toBe 0)))))))
+
+(defn- restore-rig
+  "A mock agent plus spies: models set, role_change emits, /mode calls."
+  [file]
+  (let [a      (mock-agent file)
+        models (atom [])
+        roles  (atom [])
+        modes  (atom [])
+        api    #js {:setModel (fn [m] (swap! models conj m))
+                    :ui #js {}}]
+    (let [r (assoc a
+           :events {:emit (fn [ev d] (when (= ev "role_change") (swap! roles conj (:role d))))}
+           :commands (atom {"mode" {:handler (fn [args _] (swap! modes conj (first args)))}})
+           :provider-registry {:get (fn [p] (contains? #{"anthropic" "zai"} p))}
+           :spies {:models models :roles roles :modes modes})]
+      ;; the same property cli sets (and every reader uses)
+      (set! (.-extension-api r) api)
+      r)))
+
+(describe "session settings: restore" (fn []
+  (it "applies role, model, thinking and mode that differ"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))
+            parts (ss/restore! a {:model "zai/glm-5" :thinking "low"
+                                  :permission-mode "accept-edits" :role "reviewer"} {})]
+        (-> (expect (count parts)) (.toBe 4))
+        (-> (expect (clj->js @(:models (:spies a)))) (.toEqual #js ["zai/glm-5"]))
+        (-> (expect (clj->js @(:roles (:spies a)))) (.toEqual #js ["reviewer"]))
+        (-> (expect @(:thinking-level a)) (.toBe "low"))
+        (-> (expect (clj->js @(:modes (:spies a)))) (.toEqual #js ["accept-edits"])))))
+
+  (it "leaves explicit fields alone, and the role too when -m was given"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))]
+        (ss/restore! a {:model "zai/glm-5" :thinking "low" :permission-mode "plan" :role "reviewer"}
+                     {:explicit #{:model :thinking :permission-mode}})
+        (-> (expect (count @(:models (:spies a)))) (.toBe 0))
+        (-> (expect (count @(:roles (:spies a)))) (.toBe 0))
+        (-> (expect (count @(:modes (:spies a)))) (.toBe 0))
+        (-> (expect @(:thinking-level a)) (.toBe "high")))))
+
+  (it "full-auto comes back as accept-edits; headless skips the mode"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))]
+        (ss/restore! a {:permission-mode "full-auto"} {})
+        (-> (expect (clj->js @(:modes (:spies a)))) (.toEqual #js ["accept-edits"])))
+      (let [a (restore-rig (path/join @test-dir "t.jsonl"))]
+        (ss/restore! a {:permission-mode "plan"} {:headless? true})
+        (-> (expect (count @(:modes (:spies a)))) (.toBe 0)))))
+
+  (it "a model whose provider is gone is skipped, not thrown"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))
+            parts (ss/restore! a {:model "gone/m1"} {})]
+        (-> (expect (count @(:models (:spies a)))) (.toBe 0))
+        (-> (expect (first parts)) (.toContain "unavailable")))))
+
+  (it "the setup it was left in is a no-op"
+    (fn []
+      (let [a (restore-rig (path/join @test-dir "s.jsonl"))]
+        (ss/record! a)
+        (-> (expect (count (ss/restore-session! a {}))) (.toBe 0)))))))
