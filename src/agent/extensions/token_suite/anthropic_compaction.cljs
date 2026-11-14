@@ -106,7 +106,11 @@
                       (some #(= "compaction" (some-> % .-providerMetadata .-anthropic .-type))
                        (or (some-> step .-content) [])))
              (swap! shared/suite-stats update :anthropic-compaction
-                    (fn [s] (update s :compactions-observed (fnil inc 0)))))))
+                    (fn [s] (update s :compactions-observed (fnil inc 0))))
+             ;; The loop keeps the summary itself off the screen; say it happened.
+             (when-let [ui (.-ui api)]
+               (when (and (.-available ui) (fn? (.-notify ui)))
+                 (.notify ui "Context compacted by Anthropic (server-side)" "info"))))))
 
     ;; deactivate
     (fn [] nil)))
