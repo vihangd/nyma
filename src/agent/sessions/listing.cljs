@@ -51,6 +51,15 @@
            (#(.-content %))
            tidy))
 
+(defn last-model
+  "The model of the last `session-settings` entry (sessions.settings), if any."
+  [entries]
+  (some->> (or entries [])
+           (filter #(= (.-role %) "session-settings"))
+           last
+           (#(.-metadata %))
+           (#(.-model %))))
+
 (defn derive-title
   "A human label for a session: its explicit name, else its first user message.
 
@@ -81,7 +90,7 @@
 (defn list-sessions
   "Scan a directory for .jsonl session files.
 
-   Returns [{:path :name :file :modified :entry-count :title :msg-count :cwd}]
+   Returns [{:path :name :file :modified :entry-count :title :msg-count :cwd :model}]
    sorted by modified desc. Every field comes out of one pass over lines this
    function already had to read and parse."
   [dir]
@@ -115,7 +124,8 @@
                        :entry-count  (count entries)
                        :title        (derive-title entries)
                        :msg-count    (conversation-count entries)
-                       :cwd          (project/session-cwd entries)})
+                       :cwd          (project/session-cwd entries)
+                       :model        (last-model entries)})
                     (catch :default _ nil))))
            (filter some?)
            (sort-by :modified >)
@@ -153,7 +163,7 @@
    (vec (remove #(project/same-project? (:cwd %) cwd) sessions))])
 
 (defn format-row
-  "One session as `<title>` + right-flushed `<project> <age> <n> msgs`.
+  "One session as `<title>` + right-flushed `<project> [model] <age> <n> msgs`.
 
    The title is truncated HEAD-first against the left budget before layout.
    `two-col-row` truncates its left column with `truncate-tail`, which keeps the
@@ -164,7 +174,10 @@
   (let [width (max 20 (or width 80))
         label (or (:title session) (:name session) "(empty session)")
         proj  (or (project/project-label (:cwd session)) "—")
-        meta  (str proj "  " (time/relative-time (:modified session))
+        ;; the id without its provider: the row has no room for both
+        model (some-> (:model session) str (.split "/") last)
+        meta  (str proj (when (seq model) (str "  " model))
+                   "  " (time/relative-time (:modified session))
                    "  " (:msg-count session) " msgs")
         ;; Mirrors two-col-row's own budget so the head-truncation happens here
         ;; rather than its tail-truncation happening there.

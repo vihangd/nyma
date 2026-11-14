@@ -198,6 +198,17 @@
                     (-> (expect row) (.toContain "alpha"))
                     (-> (expect row) (.toContain "7 msgs"))))) 
 
+            (it "shows the recorded model without its provider"
+                (fn []
+                  (let [f (path/join @test-dir "m.jsonl")]
+                    (fs/writeFileSync f (str "{\"id\":\"a\",\"role\":\"user\",\"content\":\"hi\"}\n"
+                                             "{\"id\":\"b\",\"role\":\"session-settings\",\"metadata\":{\"model\":\"zai/glm-5\"}}\n"
+                                             "{\"id\":\"c\",\"role\":\"session-settings\",\"metadata\":{\"model\":\"anthropic/claude-x\"}}\n"))
+                    (let [s (first (list-sessions @test-dir))]
+                      (-> (expect (:model s)) (.toBe "anthropic/claude-x"))
+                      (-> (expect (format-row s 100)) (.toContain "claude-x"))
+                      (-> (expect (format-row s 100)) (.not.toContain "anthropic"))))))
+
             (it "falls back to the id when a session has no title"
                 (fn []
                   (let [row (format-row {:name "1786619539330" :modified (js/Date.now)
