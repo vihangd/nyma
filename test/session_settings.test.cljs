@@ -83,7 +83,7 @@
                     :ui #js {}}]
     (let [r (assoc a
            :events {:emit (fn [ev d] (when (= ev "role_change") (swap! roles conj (:role d))))}
-           :commands (atom {"mode" {:handler (fn [args _] (swap! modes conj (first args)))}})
+           :commands (atom {"mode" {:handler (fn [args _] (swap! modes conj (first args)) (swap! (:state a) assoc :permission-mode (first args)))}})
            :provider-registry {:get (fn [p] (contains? #{"anthropic" "zai"} p))}
            :spies {:models models :roles roles :modes modes})]
       ;; the same property cli sets (and every reader uses)

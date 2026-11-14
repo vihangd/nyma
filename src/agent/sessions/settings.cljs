@@ -104,11 +104,15 @@
             cmd  (mode-command agent)]
         (when (and (seq pm) cmd api (not headless?) (not (skip? :permission-mode))
                    (not= pm (:permission-mode cur)))
-          ;; Through /mode, as ACP does: "plan" has to enter plan mode.
-          ((:handler cmd) [pm] #js {:ui (.-ui api)})
-          (swap! out conj (str "mode " pm
-                               (when (= "full-auto" (:permission-mode saved))
-                                 " (was full-auto)"))))))
+          ;; Through /mode, as ACP does: "plan" has to enter plan mode. Its
+          ;; own notice is swallowed (the UI may not be up yet at startup);
+          ;; the state says whether it took.
+          ((:handler cmd) [pm] #js {:ui (js/Object.assign #js {} (.-ui api)
+                                                          #js {:notify (fn [_ _] nil)})})
+          (swap! out conj
+                 (if (= pm (str (:permission-mode @(:state agent))))
+                   (str "mode " pm (when (= "full-auto" (:permission-mode saved)) " (was full-auto)"))
+                   (str "mode " pm " refused"))))))
     @out))
 
 (defn restore-session!
@@ -117,6 +121,7 @@
    `(:last-model opts)` (the usage table), and nothing else."
   [agent opts]
   (when-let [session (some-> (:session agent) deref)]
+   (try
     (let [saved (or (last-saved session)
                     (when-let [f (and (:last-model opts) ((:get-file-path session)))]
                       (when-let [m (try ((:last-model opts) f) (catch :default _ nil))]
@@ -125,7 +130,11 @@
       (when (seq parts)
         (let [msg (str "Restored: " (str/join " · " parts))
               ui  (some-> (.-extension-api agent) .-ui)]
-          (if (and ui (.-notify ui))
+          (if (and ui (fn? (.-notify ui)))
             (.notify ui msg "info")
             (d/info "sessions" msg))))
-      parts)))
+      parts)
+    ;; A restore that fails leaves the session as configured; never block it.
+    (catch :default e
+      (d/warn "sessions" (str "restore failed: " (.-message e)))
+      nil))))
