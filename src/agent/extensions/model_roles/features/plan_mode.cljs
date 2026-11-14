@@ -413,7 +413,14 @@ the user will approve the plan before execution begins.")
               (or (= sub "cancel") (= sub "stop"))
               (if (:plan-mode s) (cancel! api) (notify api "Not in plan mode." "info"))
               :else (if (:plan-mode s) (cancel! api) (enter! api)))))
-        on-send (fn [data] (on-session-end api data))]
+        on-send (fn [data] (on-session-end api data))
+        ;; A plan belongs to the session it was made in. /new and /resume used
+        ;; to carry plan mode (planner model, read-only gate) into the next one,
+        ;; where /mode then refused to switch over the "unapproved plan".
+        on-sstart (fn [data]
+                    (when (and (contains? #{"new" "resume"} (str (some-> data .-reason)))
+                               (:plan-mode (cur-state api)))
+                      (cancel! api)))]
 
     (.on api "before_agent_start" on-bas)
     (.on api "turn_finalize" on-final)
@@ -423,6 +430,7 @@ the user will approve the plan before execution begins.")
     (.on api "model_resolve" on-mres -10)
     (.on api "provider_error" on-perr)
     (.on api "session_end" on-send)
+    (.on api "session_start" on-sstart)
 
     ;; /planmode, and only /planmode. There is no /plan: both this extension
     ;; and agent_shell's ACP mode switcher used to claim it behind mirror-image

@@ -208,6 +208,23 @@
                     (-> (expect (:active-role @st)) (.toBe :deep))
                     (-> (expect (count @sent)) (.toBe 0)))))))
 
+;; A plan belongs to its session: /new and /resume leave plan mode.
+(describe "plan-mode:session switch"
+          (fn []
+            (it "leaves plan mode on a new or resumed session, not on fork"
+                (fn []
+                  (doseq [[reason left?] [["new" true] ["resume" true] ["fork" false]]]
+                    (let [st (atom {:permission-mode "plan" :plan-mode true :plan-prev-mode "accept-edits"})
+                          handlers (atom {})
+                          api (stub-api st (atom []))]
+                      (set! (.-on api) (fn [e h] (swap! handlers assoc e h)))
+                      (set! (.-registerCommand api) (fn [_ _] nil))
+                      (set! (.-unregisterCommand api) (fn [_] nil))
+                      (pm/activate api)
+                      ((get @handlers "session_start") #js {:reason reason})
+                      (-> (expect (:plan-mode @st)) (.toBe (not left?)))
+                      (-> (expect (:permission-mode @st)) (.toBe (if left? "accept-edits" "plan")))))))))
+
 ;; `/planmode cancel` printed only `Plan mode OFF.` — nothing about the draft it
 ;; threw away or what to do next.
 (describe "plan-mode:/planmode cancel receipt"
