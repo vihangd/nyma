@@ -234,16 +234,16 @@
                                                ;; Hiding both defaults made the COMMON case show nothing,
                                                ;; and nothing reads the same as "these segments are not
                                                ;; installed". Muted and labelled instead.
-                                               (it "default mode + default role are shown, labelled and muted"
+                                               ;; The mode always shows, muted, so the quiet state is
+                                               ;; still an answer; the default role said nothing a user
+                                               ;; acts on, so it hides.
+                                               (it "default mode shows as a muted glyph; the default role hides"
                                                    (fn []
-                                                     (let [m (status-seg/render-mode "default")
-                                                           r (status-seg/render-role "default")]
+                                                     (let [m (status-seg/render-mode "default")]
                                                        (-> (expect (:visible? m)) (.toBe true))
-                                                       (-> (expect (:content m)) (.toBe "mode:default"))
-                                                       (-> (expect (:visible? r)) (.toBe true))
-                                                       (-> (expect (:content r)) (.toBe "role:default"))
-                                                       ;; muted, so they never compete with a real badge
-                                                       (-> (expect (:color m)) (.toBe (:color r))))))
+                                                       (-> (expect (:content m)) (.toBe "○ default"))
+                                                       (-> (expect (:visible? (status-seg/render-role "default"))) (.toBeFalsy))
+                                                       (-> (expect (:content (status-seg/render-mode "plan"))) (.toBe "⏸ plan")))))
 
                                                (it "an EMPTY axis is still hidden — no data is not a default"
                                                    (fn []
@@ -274,13 +274,13 @@
                                                    (fn []
                                                      (let [seg (status-seg/render-role "deep")]
                                                        (-> (expect (:visible? seg)) (.toBe true))
-                                                       (-> (expect (:content seg)) (.toBe "deep"))
+                                                       (-> (expect (:content seg)) (.toBe "◆ deep"))
                                                        (-> (expect (.startsWith (:color seg) "#")) (.toBe true)))))
 
                                                ;; The two axes coexist: model role + permission mode show together.
                                                (it "role and mode badges coexist (fast + full-auto)"
                                                    (fn []
-                                                     (-> (expect (:content (status-seg/render-role "fast"))) (.toBe "fast"))
+                                                     (-> (expect (:content (status-seg/render-role "fast"))) (.toBe "◆ fast"))
                                                      (-> (expect (:content (status-seg/render-mode "full-auto"))) (.toContain "full-auto"))))))
 
 ;;; ─── Role cycling must not change the permission policy ─────────

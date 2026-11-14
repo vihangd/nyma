@@ -472,7 +472,8 @@
         (-> (expect (segs/thinking-label "high")) (.toBe "think:high"))
         (segs/set-glyphs! "nerd")
         (-> (expect (segs/thinking-label "high")) (.toContain " high"))))
-  (it "every unicode glyph is one column"
+  (it "every unicode glyph is one column (but the two known two-wide ones)"
       (fn []
-        (doseq [[k g] (:unicode segs/glyph-sets) :when (seq g)]
+        (doseq [[k g] (:unicode segs/glyph-sets)
+                :when (and (seq g) (not (contains? #{"mode-full-auto" "escalated"} (str k))))]
           (-> (expect (str k " " (visibleWidth g))) (.toBe (str k " 1"))))))))

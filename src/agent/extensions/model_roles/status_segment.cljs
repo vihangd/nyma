@@ -1,21 +1,21 @@
 (ns agent.extensions.model-roles.status-segment
   "Status-line segments for the two orthogonal axes:
      role segment — the active MODEL role (deep/fast/commit/custom), muted;
-                    'default' shows as a muted `role:default`.
-     mode segment — the active permission MODE, color-coded so a permissive one
-                    is visually obvious (Claude's `⏵⏵ accept edits on` analog);
-                    'default' shows as a muted `mode:default`.
-   Both show together, so e.g. `fast` + `⏵⏵ full-auto` coexist.
+                    hidden for the default role.
+     mode segment — the active permission MODE as a glyph + name, color-coded
+                    so a permissive one is visually obvious (`⏵⏵ full-auto`);
+                    'default' shows muted as `○ default`.
 
-   The two defaults used to be hidden, which made the common case — a default
-   role in a default mode — show nothing at all. Nothing is ambiguous: it reads
-   the same whether the axes are at their defaults or the segments never
-   registered. Muted, and labelled, so the quiet state is still an answer.
+   The mode always shows, so the quiet state is still an answer; the default
+   role is the one piece of the line that said nothing a user acts on.
+   Glyphs come from the status line's one table (`segs/glyph`), so the nerd
+   and ascii sets apply here too.
 
    The render context the status bar passes is sparse ({:theme} only), so the
    segments cannot read agent state from it — `register!` closes over `role-fn`
    / `mode-fn` thunks that read live state at render time (the same trick the
-   mcp_client segments use with captured atoms).")
+   mcp_client segments use with captured atoms)."
+  (:require [agent.ui.status-line-segments :as segs]))
 
 ;; Fallback hexes (Tokyo-Night), used when the theme omits the key.
 (def ^:private color-plan   "#7aa2f7")  ;; blue
@@ -31,28 +31,32 @@
 
 (defn render-mode
   "Pure: a permission-mode string (+ optional theme) → a status segment map.
-   The three non-default modes get a color-coded glyph badge; 'default' shows
-   muted and labelled; an EMPTY string is hidden (no data, not a default).
+   Every mode reads as glyph + name (`✎ accept-edits`); the three non-default
+   ones are color-coded, 'default' is muted (`○ default`); an EMPTY string is
+   hidden (no data, not a default).
    Colors resolve from the theme, falling back to fixed hexes. Exposed for
    tests."
   [mode & [theme]]
-  (case (str mode)
-    "plan"         {:content "◯ plan"         :color (themed theme :info color-plan)      :visible? true}
-    "accept-edits" {:content "✎ accept-edits" :color (themed theme :warning color-accept) :visible? true}
-    "full-auto"    {:content "⏵⏵ full-auto"   :color (themed theme :error color-auto)     :visible? true}
-    "default"      {:content "mode:default"   :color (themed theme :muted color-role)     :visible? true}
-    {:visible? false}))
+  (let [m (str mode)
+        c (case m
+            "plan"         (themed theme :info color-plan)
+            "accept-edits" (themed theme :warning color-accept)
+            "full-auto"    (themed theme :error color-auto)
+            "default"      (themed theme :muted color-role)
+            nil)]
+    (if c
+      {:content (segs/labelled (keyword (str "mode-" m)) m) :color c :visible? true}
+      {:visible? false})))
 
 (defn render-role
   "Pure: a model-role string (+ optional theme) → a status segment map. Renders
-   the role name muted; 'default' is labelled 'role:default' so the segment is
-   never blank; an EMPTY string is hidden. Exposed for tests."
+   the role name muted (`◆ deep`); 'default' and an EMPTY string are hidden.
+   Exposed for tests."
   [role & [theme]]
   (let [r (str role)]
     (cond
-      (= r "")        {:visible? false}
-      (= r "default") {:content "role:default" :color (themed theme :muted color-role) :visible? true}
-      :else           {:content r :color (themed theme :muted color-role) :visible? true})))
+      (or (= r "") (= r "default") (= r ":default")) {:visible? false}
+      :else {:content (segs/labelled :role r) :color (themed theme :muted color-role) :visible? true})))
 
 (defn render-escalated
   "Pure: the escalated 'provider/model' spec (or nil) → a status segment map.
@@ -64,7 +68,7 @@
       {:visible? false}
       (let [i    (.lastIndexOf s "/")
             name (if (pos? i) (.substring s (inc i)) s)]
-        {:content (str "\u26a1 " name)
+        {:content (segs/labelled :escalated name)
          :color   (themed theme :warning color-accept)
          :visible? true}))))
 
