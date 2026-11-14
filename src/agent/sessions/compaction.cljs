@@ -1022,6 +1022,32 @@ with every section below present.
                :rejected rejected-errors})))))
           (finally (cleanup-precompact-dump dump)))))))
 
+(defn adopt-server-summary!
+  "Make an Anthropic server-side compaction this run's compaction too.
+
+   The server summarised the context and answered from the summary, but nyma's
+   history still held what it summarised, so the next run sent all of it
+   again. Recorded as a `compaction` entry, the final answer re-appended after
+   it (a resume resets to the last summary, see `compacted-messages`), and the
+   live conversation becomes summary + answer.
+
+   The request snapshot goes: it describes the uncompacted prefix."
+  [session state-atom events summary]
+  (let [summary (str/trim (str summary))]
+    (when (and session state-atom (seq summary))
+      (let [msgs   (:messages @state-atom)
+            answer (let [m (last msgs)] (when (= "assistant" (:role m)) m))
+            before (te/estimate-messages-tokens msgs)]
+        ((:append session) {:role "compaction" :content summary
+                            :metadata {:source "anthropic-server" :tokens-before before}})
+        (when answer ((:append session) {:role "assistant" :content (:content answer)}))
+        (apply-to-live-state! state-atom summary (if answer [answer] []))
+        (swap! state-atom dissoc :last-request)
+        (let [after (te/estimate-messages-tokens (:messages @state-atom))]
+          ((:emit events) "compact" {:summary summary :trigger "server"
+                                     :before before :after after})
+          {:before before :after after})))))
+
 (defn compaction-receipt
   "What /compact tells the user, from what `compact` returned.
 

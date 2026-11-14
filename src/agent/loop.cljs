@@ -814,7 +814,9 @@
                             (let [chunk-val (.-value chunk)
                                   _         (when (and (= "text-start" (.-type chunk-val))
                                                        (= "compaction" (some-> chunk-val .-providerMetadata .-anthropic .-type)))
-                                              (swap! compaction-ids conj (str (.-id chunk-val))))
+                                              (swap! compaction-ids conj (str (.-id chunk-val)))
+                                              ;; A later compaction supersedes an earlier one.
+                                              (reset! compaction-text ""))
                                   compaction? (and (contains? #{"text-start" "text-delta" "text-end"} (.-type chunk-val))
                                                    (contains? @compaction-ids (str (.-id chunk-val))))
                                   _         (when (and compaction? (= "text-delta" (.-type chunk-val)))
@@ -1021,6 +1023,15 @@
                                   built-users)))
                           (catch :default e
                             (dbg/error "loop" (str "request snapshot: " (.-message e)))))
+
+                      ;; Anthropic compacted on the server: carry its summary
+                      ;; into the next run instead of re-sending what it covers.
+                        (when (seq @compaction-text)
+                          (try
+                            (compaction/adopt-server-summary!
+                             (some-> (:session agent) deref) state (:events agent) @compaction-text)
+                            (catch :default e
+                              (dbg/error "loop" (str "server compaction: " (.-message e))))))
 
                       ;; Dispatch usage to event-sourced store
                         (when (and usage store)

@@ -6,7 +6,11 @@
   (:require ["bun:test" :refer [describe it expect]]
             ["ai/test" :refer [MockLanguageModelV4 convertArrayToReadableStream]]
             [agent.core :refer [create-agent]]
-            [agent.loop :refer [run]]))
+            [agent.loop :refer [run]]
+            [agent.sessions.manager :refer [create-session-manager attach-session-persistence! session->seed-messages]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]))
 
 ;;; ─── retry-state atom ────────────────────────────────────────────────
 
@@ -208,6 +212,31 @@
     (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "the answer"))
     (-> (expect (.join (clj->js @seen) "|")) (.not.toContain "SUMMARY"))))
 
+(defn ^:async test-server-compaction-adopted []
+  (let [dir    (fs/mkdtempSync (path/join (os/tmpdir) "nyma-srv-compact-"))
+        mgr    (create-session-manager (path/join dir "s.jsonl"))
+        agent  (create-agent {:model (scripted (atom []) [compaction-step]) :system-prompt "x"})
+        events (atom [])]
+    (try
+      ((:load mgr))
+      (reset! (:session agent) mgr)
+      (attach-session-persistence! agent mgr)
+      ((:on (:events agent)) "compact" (fn [d] (swap! events conj (:trigger d))))
+      (js-await (run agent "go"))
+      (let [msgs (:messages @(:state agent))]
+        (-> (expect (count msgs)) (.toBe 2))
+        (-> (expect (:content (first msgs))) (.toContain "SUMMARY"))
+        (-> (expect (:content (second msgs))) (.toBe "the answer")))
+      (-> (expect (:last-request @(:state agent))) (.toBeUndefined))
+      (-> (expect (clj->js @events)) (.toEqual #js ["server"]))
+      ;; a resume sees the same two
+      (let [m2 (create-session-manager (path/join dir "s.jsonl"))]
+        ((:load m2))
+        (-> (expect (mapv :role (session->seed-messages ((:build-context m2))))) (.toEqual ["user" "assistant"])))
+      (finally (fs/rmSync dir #js {:recursive true :force true})))))
+
 (describe "loop: Anthropic server-side compaction" (fn []
   (it "the summary block is neither streamed, filtered, nor stored as the reply"
-      test-server-compaction-hidden)))
+      test-server-compaction-hidden)
+  (it "its summary replaces the history for the next run and a resume"
+      test-server-compaction-adopted)))
