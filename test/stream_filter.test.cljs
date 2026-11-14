@@ -188,3 +188,26 @@
                                             test-abort-ends-attempt)
                                         (it "does not rerun a pass that ran a tool"
                                             test-no-retry-after-tool)))
+
+(def ^:private compaction-step
+  #js [#js {:type "text-start" :id "0" :providerMetadata #js {:anthropic #js {:type "compaction"}}}
+       #js {:type "text-delta" :id "0" :delta "## Task\nSUMMARY"}
+       #js {:type "text-end" :id "0"}
+       #js {:type "text-start" :id "1"}
+       #js {:type "text-delta" :id "1" :delta "the answer"}
+       #js {:type "text-end" :id "1"}
+       #js {:type "finish" :finishReason #js {:unified "stop" :raw "stop"} :usage usage-part}])
+
+(defn ^:async test-server-compaction-hidden []
+  (let [calls  (atom [])
+        seen   (atom [])
+        agent  (create-agent {:model (scripted calls [compaction-step]) :system-prompt "x"})]
+    ((:on (:events agent)) "message_update" (fn [d] (swap! seen conj (str (.-text d)))))
+    ((:on (:events agent)) "stream_filter" (fn [d] (swap! seen conj (str (.-chunk d))) nil))
+    (js-await (run agent "go"))
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "the answer"))
+    (-> (expect (.join (clj->js @seen) "|")) (.not.toContain "SUMMARY"))))
+
+(describe "loop: Anthropic server-side compaction" (fn []
+  (it "the summary block is neither streamed, filtered, nor stored as the reply"
+      test-server-compaction-hidden)))

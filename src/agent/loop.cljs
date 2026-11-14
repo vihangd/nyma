@@ -793,7 +793,15 @@
                         ;; The provider's own explanation, if the stream carried
                         ;; one. Kept so it can be attached to whatever the SDK
                         ;; throws afterwards.
-                        stream-error (atom nil)]
+                        stream-error (atom nil)
+                        ;; Anthropic's server-side compaction comes back as a
+                        ;; text block tagged providerMetadata.anthropic.type
+                        ;; "compaction": the summary of the context so far. It
+                        ;; is for the next request (the SDK sends it back as a
+                        ;; compaction block), not a reply — kept off the screen,
+                        ;; out of stream_filter, and out of the stored text.
+                        compaction-ids  (atom #{})
+                        compaction-text (atom "")]
 
                   ;; Stream events with stream_filter on text deltas
                   ;; Read once: each read of the getter tees the stream, and a
@@ -804,7 +812,14 @@
                         (let [chunk (js-await (.next iter))]
                           (when (and (not (.-done chunk)) (not @aborted))
                             (let [chunk-val (.-value chunk)
-                                  evt-type  (event-type chunk-val)]
+                                  _         (when (and (= "text-start" (.-type chunk-val))
+                                                       (= "compaction" (some-> chunk-val .-providerMetadata .-anthropic .-type)))
+                                              (swap! compaction-ids conj (str (.-id chunk-val))))
+                                  compaction? (and (contains? #{"text-start" "text-delta" "text-end"} (.-type chunk-val))
+                                                   (contains? @compaction-ids (str (.-id chunk-val))))
+                                  _         (when (and compaction? (= "text-delta" (.-type chunk-val)))
+                                              (swap! compaction-text str (or (.-text chunk-val) "")))
+                                  evt-type  (when-not compaction? (event-type chunk-val))]
                               ;; An error part is a real turn outcome, not a
                               ;; chunk to forward under a nil event name.
                               (when (= "error" (.-type chunk-val))
@@ -939,6 +954,12 @@
                                                       (aset e "cause" se)
                                                       (catch :default _ nil)))
                                                (throw e)))
+                            ;; `.text` joins the final step's text parts, the
+                            ;; compaction summary's too.
+                            final-text     (let [c @compaction-text]
+                                             (if (and (seq c) (string? final-text) (str/includes? final-text c))
+                                               (str/triml (.replace final-text c ""))
+                                               final-text))
                             ;; A stream that carried an error and produced no
                             ;; text is a FAILED turn, not an empty one. Some
                             ;; providers end such a stream cleanly, so `.text`
