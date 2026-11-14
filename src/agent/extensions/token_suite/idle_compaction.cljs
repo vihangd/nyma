@@ -84,8 +84,9 @@
       ;; spends a summary on every ordinary reading pause. The midpoint of the
       ;; two bounds is the estimate; the shortest miss is when it is cold.
       (and (pricing/priced? spec) (:hit-max learned) (:miss-min learned))
-      {:warm-s (/ (+ (:hit-max learned) (:miss-min learned)) 2)
-       :cold-s (:miss-min learned)})))
+      {:warm-s   (/ (+ (:hit-max learned) (:miss-min learned)) 2)
+       :cold-s   (:miss-min learned)
+       :learned? true})))
 
 (def default-profiles
   "DeepSeek and Groq keep caches for hours: the gap this exists for rarely
@@ -123,6 +124,10 @@
         ;; Models whose prefix did NOT survive the summary turn (see
         ;; compaction/last-prefix-read): there a summary costs the prefix.
         unkept      (atom #{})
+        remember!   (fn [k l]
+                      (swap! learned assoc k l)
+                      (try (some-> store (.set "learned" (clj->js @learned)))
+                           (catch :default _ nil)))
         cancel!     (fn []
                       (swap! epoch inc)
                       (doseq [t @timers] (clear-timeout t))
@@ -154,6 +159,7 @@
                         (when (= ep @epoch)
                           (let [msgs    (:messages (.getState api))
                                 conv    {:n (count msgs) :last-msg (last msgs)}
+                                prev    @last-touch
                                 started (now)
                                 ;; The request reads the cache as it starts, cancelled
                                 ;; or not, so the clock restarts here.
@@ -165,10 +171,25 @@
                                             (d/warn "idle-compaction" (str "summary failed: " (.-message e)))
                                             nil))]
                             (when (some-> (:prefix-read r) (< 0.5))
-                              (d/info "idle-compaction"
-                                      (str "summary read " (js/Math.round (* 100 (:prefix-read r)))
-                                           "% from cache on " @spec " — not arming there again"))
-                              (swap! unkept conj (str @spec)))
+                              ;; On a learned lifetime the likelier cause is a
+                              ;; cache that expired sooner than the midpoint
+                              ;; guessed: a miss past every hit says so, and
+                              ;; pulls the next timer in. Inside a known-warm
+                              ;; gap (or on a fixed TTL) the prefix itself did
+                              ;; not survive the summary turn.
+                              (let [k   (:key win)
+                                    old (get @learned k)
+                                    new (when (and (:learned? win) prev)
+                                          (learn old (/ (- started prev) 1000) 0 min-learn-input))]
+                                (if (and new (not= (:miss-min old) (:miss-min new)))
+                                  (do (d/info "idle-compaction"
+                                              (str "summary missed the cache on " k " — expired by "
+                                                   (js/Math.round (:miss-min new)) "s"))
+                                      (remember! k new))
+                                  (do (d/info "idle-compaction"
+                                              (str "summary read " (js/Math.round (* 100 (:prefix-read r)))
+                                                   "% from cache on " @spec " — not arming there again"))
+                                      (swap! unkept conj (str @spec))))))
                             (when (and (= ep @epoch) (:summary r) (same-conv? conv))
                               (later! (- (+ started (* 1000 (:cold-s win)) margin-ms) (now))
                                       (apply! ctx ep conv (:summary r))))))))
@@ -197,9 +218,7 @@
                        old   (get @learned k)
                        new   (learn old gap read (or (.-inputTokens u) 0))]
                    (when (and (seq k) (not= old new))
-                     (swap! learned assoc k new)
-                     (try (some-> store (.set "learned" (clj->js @learned)))
-                          (catch :default _ nil)))))))
+                     (remember! k new))))))
            (reset! last-touch @step-start)
            (reset! step-start (now))
            nil)
@@ -223,6 +242,7 @@
                  snap (:last-request st)
                  ;; compaction.enabled false turns this off too.
                  on?  (not (false? (get (when (.-settings api) (.settings api "compaction")) "enabled")))
+                 k    (model-key (some-> (:base snap) .-model))
                  win  (when (and on? snap @last-touch @spec (contains? @served (str @spec))
                                  (not (contains? @unkept (str @spec)))
                                  (>= (or (:last-input-tokens st) 0) min-tokens))
@@ -231,10 +251,10 @@
                                  :profiles        profiles
                                  :kv-ttl          (:cache-ttl kv-cfg)
                                  :extra-providers (:extra-providers kv-cfg)
-                                 :learned         (get @learned (model-key (.-model (:base snap))))}))]
+                                 :learned         (get @learned k)}))]
              (when win
                (later! (- (+ @last-touch (* 1000 fire-at (:warm-s win))) (now))
-                       (precompute! ctx @epoch win))))
+                       (precompute! ctx @epoch (assoc win :key k)))))
            nil)}]
     {:handlers handlers :stop cancel!}))
 

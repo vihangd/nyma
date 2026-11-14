@@ -53,7 +53,7 @@
                                  (.toBeFalsy))
                              (-> (expect (ic/window {:spec "zai/glm" :model openai-model
                                                      :learned {:hit-max 200 :miss-min 900}}))
-                                 (.toEqual {:warm-s 550 :cold-s 900}))
+                                 (.toEqual {:warm-s 550 :cold-s 900 :learned? true}))
           ;; Unpriced (a local server): never.
                              (-> (expect (ic/window {:spec "omlx/q" :model openai-model
                                                      :learned {:hit-max 200 :miss-min 900}}))
@@ -63,15 +63,16 @@
 ;;; ─── the timers ───────────────────────────────────────────────────────────
 
 (defn- rig
-  "Handlers over a fake clock. `state` is what api.getState returns."
-  [state]
+  "Handlers over a fake clock. `state` is what api.getState returns; `seed`
+   the stored learned lifetimes."
+  [state & [seed]]
   (let [clock  (atom 1000000)
         timers (atom {})
         ids    (atom 0)
         calls  (atom [])
         saved  (atom nil)
         api    #js {:getState (fn [] @state)
-                    :state    #js {:get (fn [_] nil) :set (fn [_ v] (reset! saved v))}}
+                    :state    #js {:get (fn [_] seed) :set (fn [_ v] (reset! saved v))}}
         ctx    #js {:ui #js {:available false}
                     :compact (fn [opts]
                                (swap! calls conj opts)
@@ -221,3 +222,21 @@
             (js-await p)
             ;; the gap is measured from the summary call, not the turn before it
             (-> (expect (get-in @(:saved r) ["claude-x" "hit-max"])) (.toBe 10))))))))
+
+(describe "a learned lifetime that ran short" (fn []
+  (it "a summary that missed records the miss instead of giving up on the model"
+      ^:async (fn []
+        (swap! pricing/token-costs assoc "zai/glm" [1 1])
+        (try
+          (let [r (rig (state-for openai-model) {"glm" {"hit-max" 480 "miss-min" 740}})]
+            (aset (:ctx r) "compact" (fn [_] (js/Promise.resolve {:summary "SUM" :prefix-read 0})))
+            (run-turn! r "zai/glm")
+            ;; 0.9 x the 610s midpoint after the request started
+            (-> (expect (- (:at (first (vals @(:timers r)))) 1000000)) (.toBe 549000))
+            (js-await ((:fire! r)))
+            (-> (expect (get-in @(:saved r) ["glm" "miss-min"])) (.toBe 549))
+            ;; still armed next time, sooner
+            (reset! (:timers r) {})
+            (run-turn! r "zai/glm")
+            (-> (expect (count @(:timers r))) (.toBe 1)))
+          (finally (swap! pricing/token-costs dissoc "zai/glm")))))))
