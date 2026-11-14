@@ -62,8 +62,9 @@
     (aset anth "contextManagement"
           #js {:edits #js [#js {:type    "compact_20260112"
                                 :trigger #js {:type "input_tokens"
-                                              :value trigger}}]
-               :pauseAfterCompaction (boolean pause?)})
+                                              :value trigger}
+                                ;; Per edit: the SDK reads it nowhere else.
+                                :pauseAfterCompaction (boolean pause?)}]})
     true))
 
 (defn activate [api]
@@ -89,23 +90,21 @@
            nil)
          90)
 
-    ;; after_provider_request — track turns + observe compaction events.
+    ;; after_provider_request — count turns on supported models.
     (.on api "after_provider_request"
          (fn [event _ctx]
-           (let [model    (.-model event)
-                 model-id (str (or model ""))]
-             (when (and enabled? (shared/model-supports-compaction? model-id))
-               (swap! shared/suite-stats update :anthropic-compaction
-                      (fn [s] (update s :turns inc)))
-               ;; If the response carries a context_management indicator
-               ;; (shape TBD pending live verification against the API),
-               ;; bump the compactions-observed counter. Until then this
-               ;; remains zero and is safe — the field name is unknown.
-               (when-let [cm (or (.-contextManagement event)
-                                 (.-context_management event))]
-                 (when cm
-                   (swap! shared/suite-stats update :anthropic-compaction
-                          (fn [s] (update s :compactions-observed inc)))))))))
+           (when (and enabled? (shared/model-supports-compaction? (str (or (.-model event) ""))))
+             (swap! shared/suite-stats update :anthropic-compaction
+                    (fn [s] (update s :turns inc))))))
+
+    ;; turn_end — the SDK hands a server compaction back as a text part
+    ;; tagged providerMetadata.anthropic.type "compaction".
+    (.on api "turn_end"
+         (fn [step _ctx]
+           (when (some #(= "compaction" (some-> % .-providerMetadata .-anthropic .-type))
+                       (or (some-> step .-content) []))
+             (swap! shared/suite-stats update :anthropic-compaction
+                    (fn [s] (update s :compactions-observed (fnil inc 0)))))))
 
     ;; deactivate
     (fn [] nil)))

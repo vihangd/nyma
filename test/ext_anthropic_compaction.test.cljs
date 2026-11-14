@@ -106,7 +106,7 @@
 (defn ^:async test-pause-after-compaction-default-false []
   (let [cfg (make-config "claude-sonnet-4-6")]
     (js-await (fire-bpr "claude-sonnet-4-6" cfg))
-    (-> (expect (.. cfg -providerOptions -anthropic -contextManagement -pauseAfterCompaction))
+    (-> (expect (.-pauseAfterCompaction (aget (.. cfg -providerOptions -anthropic -contextManagement -edits) 0)))
         (.toBe false))))
 
 (describe "anthropic-compaction/context-management" (fn []
@@ -188,3 +188,14 @@
                                                     (fn []
                                                       (-> (expect (shared/model-supports-compaction? nil))
                                                           (.toBe false))))))
+
+(describe "anthropic-compaction/observed" (fn []
+  (it "a compaction part in a step counts"
+      ^:async (fn []
+        (let [agent (make-agent "claude-sonnet-4-6")
+              api   (create-extension-api agent)
+              _     (ac/activate api)]
+          (js-await ((:emit-collect (:events agent)) "turn_end"
+                     #js {:content #js [#js {:type "text" :text "s"
+                                             :providerMetadata #js {:anthropic #js {:type "compaction"}}}]}))
+          (-> (expect (:compactions-observed (:anthropic-compaction @shared/suite-stats))) (.toBe 1)))))))
