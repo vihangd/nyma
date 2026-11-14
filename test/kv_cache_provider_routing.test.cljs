@@ -15,7 +15,10 @@
             [agent.core :refer [create-agent]]
             [agent.extensions.token-suite.shared :as shared]
             [agent.extensions.token-suite.kv-cache :as kv-cache]
-            [agent.extensions :refer [create-extension-api]]))
+            [agent.extensions :refer [create-extension-api]]
+            ["node:fs" :as fs]
+            ["node:os" :as os]
+            ["node:path" :as path]))
 
 (defn- reset-stats! []
   (swap! shared/suite-stats assoc :kv-cache
@@ -201,4 +204,17 @@
       ^:async (fn []
         (let [zai (fn [f] (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1" :name "zai" :fetch f}) "glm"))]
           (-> (expect (.-prompt_cache_key (js-await (key-body zai)))) (.toBeUndefined))
-          (-> (expect (.-prompt_cache_key (js-await (key-body anthropic-model)))) (.toBeUndefined)))))))
+          (-> (expect (.-prompt_cache_key (js-await (key-body anthropic-model)))) (.toBeUndefined)))))
+  (it "kv-cache.enabled false sends none"
+      ^:async (fn []
+        (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "nyma-kv-off-"))
+              cwd (js/process.cwd)]
+          (fs/mkdirSync (path/join dir ".nyma"))
+          (fs/writeFileSync (path/join dir ".nyma" "settings.json")
+                            (js/JSON.stringify #js {"token-suite" #js {"kv-cache" #js {:enabled false}}}))
+          (js/process.chdir dir)
+          (try
+            (-> (expect (.-prompt_cache_key (js-await (key-body openai-model)))) (.toBeUndefined))
+            (finally
+              (js/process.chdir cwd)
+              (fs/rmSync dir #js {:recursive true :force true}))))))))
