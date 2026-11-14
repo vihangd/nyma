@@ -920,8 +920,15 @@ with every section below present.
                                :files-read          files-read
                                :files-modified      files-modified})
                 marker       (keep-marker to-summarize to-keep)
+                ;; Only on the model compaction would use anyway: after /model
+                ;; or a fallback the snapshot names one the user left, and
+                ;; its tokens would be priced at `lookup`'s rates.
+                same-model?  (fn [s] (let [m (some-> (:base s) .-model)]
+                                       (and m (= (.-modelId m) (.-modelId model))
+                                            (= (.-provider m) (.-provider model)))))
                 snap         (when (and (= strat default-strategy) (not= marker :ambiguous))
-                               (usable-snapshot state-atom))
+                               (let [s (usable-snapshot state-atom)]
+                                 (when (and s (same-model? s)) s)))
                 prefix-read  (atom nil)
                 on-usage     (fn [u]
                                (when-let [e (and store (pricing/usage-event lookup u))]

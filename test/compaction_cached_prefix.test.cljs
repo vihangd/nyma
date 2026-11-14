@@ -111,6 +111,8 @@
       ((:append sm) {:role "assistant" :content (apply str (repeat 300 "padding "))}))
     sm))
 
+(def claude-x #js {:modelId "claude-x" :provider "anthropic.messages"})
+
 (def quiet-events
   {:on (fn [_ _] nil) :emit (fn [_ _] nil)
    :emit-async (fn [_ _] (js/Promise.resolve nil))})
@@ -126,7 +128,7 @@
                                                       (let [sm    (session-with 40)
                                                             state (state-with-snapshot sm)
                                                             seen  (atom [])]
-                                                        (js-await (c/compact sm "standalone-model" quiet-events
+                                                        (js-await (c/compact sm claude-x quiet-events
                                                                              {:gen-fn (capture seen six) :state-atom state :force? true}))
                                                         (-> (expect (.-system (first @seen))) (.toBe "SYS"))
                                                         (-> (expect (.includes (.-content (last (vec (.-messages (first @seen)))))
@@ -142,7 +144,7 @@
                                                                     (if (= "SYS" (.-system cfg))
                                                                       (js/Promise.reject (js/Error. "boom"))
                                                                       (js/Promise.resolve #js {:text six})))
-                                                            res   (js-await (c/compact sm "standalone-model" quiet-events
+                                                            res   (js-await (c/compact sm claude-x quiet-events
                                                                                        {:gen-fn gen :state-atom state :force? true}))]
                                                         (-> (expect (:summariser res)) (.toBe "built-in"))
                                                         (-> (expect (.-system (last @seen))) (.toBe c/compact-system-prompt)))))
@@ -153,7 +155,7 @@
                                                             state  (state-with-snapshot sm)
                                                             before (count ((:get-tree sm)))
                                                             msgs   (:messages @state)
-                                                            res    (js-await (c/compact sm "m" quiet-events
+                                                            res    (js-await (c/compact sm claude-x quiet-events
                                                                                         {:gen-fn (capture (atom []) six) :state-atom state
                                                                                          :force? true :summarize-only? true}))]
                                                         (-> (expect (:summary res)) (.toBe six))
@@ -165,7 +167,7 @@
                                                       (let [sm    (session-with 40)
                                                             state (state-with-snapshot sm)
                                                             seen  (atom [])
-                                                            res   (js-await (c/compact sm "m" quiet-events
+                                                            res   (js-await (c/compact sm claude-x quiet-events
                                                                                        {:gen-fn (capture seen six) :state-atom state
                                                                                         :force? true :summary six :trigger "idle"}))]
                                                         (-> (expect (count @seen)) (.toBe 0))
@@ -219,7 +221,7 @@
       ^:async (fn []
         (let [sm   (session-with 40)
               seen (atom [])
-              res  (js-await (c/compact sm "m" quiet-events
+              res  (js-await (c/compact sm claude-x quiet-events
                                         {:gen-fn (capture seen six)
                                          :state-atom (atom {:messages []})
                                          :force? true :summarize-only? true}))]
@@ -273,7 +275,7 @@
               gen   (fn [_] (js/Promise.resolve
                              #js {:text six :usage #js {:inputTokens 1000
                                                         :inputTokenDetails #js {:cacheReadTokens 990}}}))
-              res   (js-await (c/compact sm "m" quiet-events
+              res   (js-await (c/compact sm claude-x quiet-events
                                          {:gen-fn gen :state-atom state
                                           :force? true :summarize-only? true}))]
           (-> (expect (:prefix-read res)) (.toBe 0.99)))))))
@@ -322,3 +324,13 @@
           (reset! (:steer-queue agent) [{:role "user" :content "also leave auth.ts alone"}])
           (js-await (run agent "go"))
           (-> (expect (:last-request @(:state agent))) (.toBeUndefined)))))))
+
+(describe "a snapshot on another model" (fn []
+  (it "is not used: compaction runs on the active model"
+      ^:async (fn []
+        (let [sm    (session-with 40)
+              state (state-with-snapshot sm)
+              seen  (atom [])]
+          (js-await (c/compact sm #js {:modelId "claude-y" :provider "anthropic.messages"} quiet-events
+                               {:gen-fn (capture seen six) :state-atom state :force? true}))
+          (-> (expect (.-system (first @seen))) (.toBe c/compact-system-prompt)))))))
