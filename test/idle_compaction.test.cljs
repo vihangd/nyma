@@ -240,3 +240,18 @@
             (run-turn! r "zai/glm")
             (-> (expect (count @(:timers r))) (.toBe 1)))
           (finally (swap! pricing/token-costs dissoc "zai/glm")))))))
+
+(describe "a partial read on a learned lifetime" (fn []
+  (it "is not a miss: the model stops arming, the bounds stay"
+      ^:async (fn []
+        (swap! pricing/token-costs assoc "zai/glm" [1 1])
+        (try
+          (let [r (rig (state-for openai-model) {"glm" {"hit-max" 480 "miss-min" 740}})]
+            (aset (:ctx r) "compact" (fn [_] (js/Promise.resolve {:summary "SUM" :prefix-read 0.47})))
+            (run-turn! r "zai/glm")
+            (js-await ((:fire! r)))
+            (-> (expect @(:saved r)) (.toBeNil))
+            (reset! (:timers r) {})
+            (run-turn! r "zai/glm")
+            (-> (expect (count @(:timers r))) (.toBe 0)))
+          (finally (swap! pricing/token-costs dissoc "zai/glm")))))))

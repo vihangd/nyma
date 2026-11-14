@@ -179,7 +179,11 @@
                               ;; not survive the summary turn.
                               (let [k   (:key win)
                                     old (get @learned k)
-                                    new (when (and (:learned? win) prev)
+                                    ;; Near-zero only: a partial read means the
+                                    ;; prefix changed, as `learn` says too, and
+                                    ;; a "miss" there would pull the persisted
+                                    ;; cold bound down toward the warm one.
+                                    new (when (and (:learned? win) prev (< (:prefix-read r) 0.05))
                                           (learn old (/ (- started prev) 1000) 0 min-learn-input))]
                                 (if (and new (not= (:miss-min old) (:miss-min new)))
                                   (do (d/info "idle-compaction"
