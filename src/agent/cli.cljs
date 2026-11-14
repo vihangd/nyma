@@ -1333,7 +1333,9 @@ Examples:
                                                   :last-model last-model})
         ((:on (:events agent)) "session_start"
          (fn [p]
-           (when-not (= "new" (and p (aget p "reason")))
+           ;; A fork keeps the setup it was taken in; restoring the last
+           ;; record would undo a /model made since.
+           (when-not (contains? #{"new" "fork"} (and p (aget p "reason")))
              (session-settings/restore-session! agent {:headless? headless?
                                                        :last-model last-model})))))
 
