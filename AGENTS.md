@@ -83,6 +83,7 @@ Generated from each namespace's docstring by `bun run gen:namespaces` (drift-che
 | `src/agent/sessions/partial.cljs` | `agent.sessions.partial` | Keep the in-flight assistant response on disk while it streams. |
 | `src/agent/sessions/pi_mirror.cljs` | `agent.sessions.pi-mirror` | An opt-in copy of each session in pi's file format (`pi.sessions`). |
 | `src/agent/sessions/project.cljs` | `agent.sessions.project` | Which project does a session belong to? |
+| `src/agent/sessions/settings.cljs` | `agent.sessions.settings` | A session's setup — model, thinking level, permission mode, model role — recorded in its own file, so resuming it brings the setup back. |
 | `src/agent/sessions/storage.cljs` | `agent.sessions.storage` | SQLite-backed session entry store with usage tracking. |
 | `src/agent/settings/manager.cljs` | `agent.settings.manager` | Two-scope settings. |
 | `src/agent/state.cljs` | `agent.state` | Event-sourced state store. |

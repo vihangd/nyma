@@ -20,6 +20,7 @@
             [agent.sessions.pi-mirror :as pi-mirror]
             [agent.sessions.listing :refer [list-sessions scope-to-project format-row]]
             [agent.sessions.archive :as archive]
+            [agent.sessions.settings :as session-settings]
             [agent.sessions.storage :as storage]
             [agent.version :refer [version]]
             [agent.settings.manager :refer [create-settings-manager inert-warning]]
@@ -1143,6 +1144,7 @@ Examples:
                   :sessionFile ((:get-file-path session))
                   :messageCount (count seeded)}))))
     (attach-session-persistence! agent session)
+    (session-settings/attach-recorder! agent)
     (when (:sessions (:pi merged)) (pi-mirror/attach! agent session))
 
     ;; Initial permission mode (modes-as-roles). Interactive defaults to
