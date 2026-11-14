@@ -86,7 +86,9 @@
    ;; unset keeps the four that have always been shown. `poll-git` drives the
    ;; `git` and `path` segments — porcelain is an execSync, so it runs on an
    ;; interval and never on the render path.
-   :status-line            {:left-segments nil
+   ;; `glyphs`: "unicode" (default), "nerd" (needs a Nerd Font) or "ascii".
+   :status-line            {:glyphs "unicode"
+                            :left-segments nil
                             :right-segments nil
                             :poll-git true
                             :poll-git-interval-ms 5000}

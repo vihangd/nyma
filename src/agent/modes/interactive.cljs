@@ -709,8 +709,10 @@
                                  (:status-line ((:get sm))))]
                        (doseq [id (segs/apply-settings! cfg)]
                          (d/warn "status-line"
-                                 (str "unknown segment \"" id "\" — ignored. Known: "
-                                      (str/join ", " (sort (segs/builtin-ids)))))))
+                                 (if (.startsWith (str id) "glyphs=")
+                                   (str "unknown " id " — use unicode, nerd or ascii")
+                                   (str "unknown segment \"" id "\" — ignored. Known: "
+                                        (str/join ", " (sort (segs/builtin-ids))))))))
 
         chat-pane    (create-chat-pane theme-fn)
         status-bar   (create-status-bar theme-fn)
@@ -720,6 +722,7 @@
                          (.setState status-bar
                                     #js {:model      (model-id agent)
                                          :provider   (provider-name agent)
+                                         :thinking   (some-> (:thinking-level agent) deref)
                                          :role       (let [r (str (or (:active-role st) ":default"))]
                                                        (if (.startsWith r ":") (.slice r 1) r))
                                          :streaming  @streaming

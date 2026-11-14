@@ -445,3 +445,26 @@
           (-> (expect (render-bar bar 120)) (.toContain "1m"))
           (.setState bar #js {:streaming false :streaming-since nil})
           (-> (expect (render-bar bar 120)) (.not.toContain "1m")))))))
+
+;; The thinking level was nowhere on screen; it sits with the model now.
+(describe "status-bar/thinking"
+ (fn []
+  (afterEach (fn [] (segs/set-glyphs! "unicode")))
+  (it "shows the level beside the model, nothing when off"
+      (fn []
+        (let [bar (create-status-bar theme)]
+          (.setState bar #js {:model "claude-x" :thinking "medium"})
+          (-> (expect (render-bar bar 120)) (.toContain "claude-x ◑ med"))
+          (.setState bar #js {:thinking "off"})
+          (-> (expect (render-bar bar 120)) (.not.toContain "med")))))
+  (it "reads think:<level> in ascii, and an unknown set is refused"
+      (fn []
+        (-> (expect (segs/set-glyphs! "fancy")) (.toBe false))
+        (segs/set-glyphs! "ascii")
+        (-> (expect (segs/thinking-label "high")) (.toBe "think:high"))
+        (segs/set-glyphs! "nerd")
+        (-> (expect (segs/thinking-label "high")) (.toContain " high"))))
+  (it "every unicode glyph is one column"
+      (fn []
+        (doseq [[k g] (:unicode segs/glyph-sets)]
+          (-> (expect (str k " " (visibleWidth g))) (.toBe (str k " 1"))))))))

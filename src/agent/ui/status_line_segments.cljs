@@ -18,6 +18,7 @@
    All segments should degrade gracefully when their data is missing —
    return {:visible? false} rather than rendering empty noise."
   (:require [agent.pricing :as pricing]
+            [agent.ui.themes :as themes]
             [agent.utils.sandbox :as sandbox]
             [agent.utils.home :as home]
              ["node:path" :as path]
@@ -65,6 +66,52 @@
   "Test helper — clears the registry and reinstalls built-ins."
   []
   (reset! registry {}))
+
+;;; ─── Glyphs ─────────────────────────────────────────────
+;;
+;; Plain Unicode by default: Nerd Font icons are private-use codepoints that a
+;; font without them draws as boxes (Starship dropped them from its defaults for
+;; this). `status-line.glyphs "nerd"` opts in; a non-UTF-8 locale or NYMA_ASCII
+;; gets the old text labels. Unicode picks are one column wide, no emoji.
+
+(defn- nf [cp] (js/String.fromCodePoint cp))
+
+(def glyph-sets
+  {:unicode {:think-minimal "○" :think-low "◔" :think-medium "◑" :think-high "◕" :think-xhigh "●"}
+   :nerd    {:think-minimal (nf 0xF09D1) :think-low (nf 0xF09D1) :think-medium (nf 0xF09D1)
+             :think-high (nf 0xF09D1) :think-xhigh (nf 0xF09D1)}
+   :ascii   {:think-minimal "think:" :think-low "think:" :think-medium "think:"
+             :think-high "think:" :think-xhigh "think:"}})
+
+(def ^:private glyph-mode (atom "unicode"))
+
+(defn glyph
+  "The status-line glyph for `k` in the selected set; nerd falls back to
+   unicode for a key it does not draw, and ascii wins whenever the terminal
+   cannot show unicode."
+  [k]
+  (let [mode (if (themes/unicode-ok?) @glyph-mode "ascii")]
+    (or (get-in glyph-sets [(keyword mode) k])
+        (get-in glyph-sets [:unicode k])
+        "")))
+
+(defn set-glyphs!
+  "Select the glyph set; returns false for an unknown name (the set is kept)."
+  [mode]
+  (let [m (str (or mode "unicode"))]
+    (if (contains? #{"unicode" "nerd" "ascii"} m)
+      (do (reset! glyph-mode m) true)
+      false)))
+
+(def ^:private thinking-short
+  {"minimal" "min" "low" "low" "medium" "med" "high" "high" "xhigh" "xhigh"})
+
+(defn thinking-label
+  "`◑ med` for a thinking level, nil for off/unknown. Ascii reads `think:med`."
+  [level]
+  (when-let [short (get thinking-short (str level))]
+    (let [g (glyph (keyword (str "think-" level)))]
+      (if (.endsWith g ":") (str g short) (str g " " short)))))
 
 ;;; ─── Context usage tiers ────────────────────────────────
 
@@ -513,9 +560,11 @@
   "Re-install the built-ins according to `settings.status-line`. Returns the
    unknown ids so the caller can warn once, at startup, rather than per frame."
   [cfg]
-  (let [{:keys [spec order unknown]} (resolve-auto-append cfg (builtin-ids))]
+  (let [{:keys [spec order unknown]} (resolve-auto-append cfg (builtin-ids))
+        glyphs-ok? (set-glyphs! (:glyphs cfg))]
     (install-builtins! spec order)
-    unknown))
+    (cond-> unknown
+      (not glyphs-ok?) (conj (str "glyphs=" (:glyphs cfg))))))
 
 ;; Register built-ins at module load.
 (install-builtins!)

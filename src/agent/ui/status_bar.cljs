@@ -115,7 +115,7 @@
 
         bar #js {:render
                  (fn [width]
-                   (let [{:keys [model provider streaming turn-count role run-steps]} @state
+                   (let [{:keys [model provider streaming turn-count role run-steps thinking]} @state
                          theme     (theme-now)
                          primary   (get-in theme [:colors :primary]   "#7aa2f7")
                          secondary (get-in theme [:colors :secondary] "#9ece6a")
@@ -150,12 +150,26 @@
                          provider-piece (when show-prov?
                                           (str (fg muted) (DIM) provider (RESET)
                                                (fg border) "/" (RESET)))
+                         ;; The thinking level sits with the model, as pi and
+                         ;; Codex show it: the two together are what a request
+                         ;; costs. Coloured like the editor border, which
+                         ;; already tracks the level. Hidden when off.
+                         think-label (segs/thinking-label thinking)
+                         think-piece (when think-label
+                                       (str " " (fg (or (get-in theme [:colors :editor-border
+                                                                       (case (str thinking)
+                                                                         "minimal" :low
+                                                                         "xhigh"   :high
+                                                                         (keyword (str thinking)))])
+                                                        muted))
+                                            think-label (RESET)))
                          ;; Built-in left content.
                          core-left (str (fg muted) " nyma " (RESET)
                                         (fg border) "│" (RESET)
                                         " "
                                         (or provider-piece "")
-                                        (fg primary) model-piece (RESET))
+                                        (fg primary) model-piece (RESET)
+                                        (or think-piece ""))
                          ;; Built-in right content.
                          core-right (str " "
                                          (if streaming
