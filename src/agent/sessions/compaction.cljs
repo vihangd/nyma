@@ -503,6 +503,18 @@ with every section below present.
         :ambiguous
         q))))
 
+(defn marker-sent?
+  "Does the stop marker occur in what the snapshot sent? It comes from the
+   session's text, but context_assembly and the tool-result policy can
+   truncate or rewrite a message before it goes out, and a marker the model
+   cannot find makes it stop at the wrong place. Matched in the JSON form, so
+   one escaping applies to both sides."
+  [snap marker]
+  (or (nil? marker)
+      (let [esc (js/JSON.stringify marker)]
+        (str/includes? (js/JSON.stringify (.-messages (:base snap)))
+                       (subs esc 1 (dec (count esc)))))))
+
 (defn build-cached-summary-prompt
   "The user turn appended to the cached prefix. The conversation is already
    above it, so unlike `build-compact-user-prompt` this carries no transcript —
@@ -928,7 +940,7 @@ with every section below present.
                                             (= (.-provider m) (.-provider model)))))
                 snap         (when (and (= strat default-strategy) (not= marker :ambiguous))
                                (let [s (usable-snapshot state-atom)]
-                                 (when (and s (same-model? s)) s)))
+                                 (when (and s (same-model? s) (marker-sent? s marker)) s)))
                 prefix-read  (atom nil)
                 on-usage     (fn [u]
                                (when-let [e (and store (pricing/usage-event lookup u))]

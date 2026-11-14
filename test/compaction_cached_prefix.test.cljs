@@ -334,3 +334,11 @@
           (js-await (c/compact sm #js {:modelId "claude-y" :provider "anthropic.messages"} quiet-events
                                {:gen-fn (capture seen six) :state-atom state :force? true}))
           (-> (expect (.-system (first @seen))) (.toBe c/compact-system-prompt)))))))
+
+(describe "marker-sent?" (fn []
+  (it "finds the marker in sent messages, escapes and all"
+      (fn []
+        (let [snap {:base #js {:messages #js [#js {:role "user" :content "say \"hi\"\nthen go"}]}}]
+          (-> (expect (c/marker-sent? snap "say \"hi\"\nthen")) (.toBe true))
+          (-> (expect (c/marker-sent? snap "truncated away")) (.toBe false))
+          (-> (expect (c/marker-sent? snap nil)) (.toBe true)))))))
