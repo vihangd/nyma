@@ -1169,6 +1169,13 @@
 
       ;; Initial status render
       (sync-status!)
+      ;; The thinking level shows beside the model; a shortcut or an
+      ;; extension can change it while idle, with no other repaint coming.
+      (when-let [tl (:thinking-level agent)]
+        (add-watch tl "status-thinking" (fn [_ _ old new]
+                                          (when (not= old new)
+                                            (sync-status!)
+                                            (.requestRender tui)))))
 
       ;; Global Esc → abort the in-flight run (stream + tools listening on
       ;; the run's AbortSignal). The gating is `abort-on-escape?`; its
@@ -1281,6 +1288,7 @@
                                (conj (vec msgs) {:role "info" :content text :id (new-id)}))))
               :exit!      (fn []
                             (.stop tui)
+                            (some-> (:thinking-level agent) (remove-watch "status-thinking"))
                             ;; Or the render ticker keeps the event loop alive
                             ;; and the process never exits.
                             (set-streaming! false)
