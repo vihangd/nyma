@@ -1325,10 +1325,13 @@ Examples:
       ;; /resume picks its target on purpose.
       (let [headless? (or (= (:mode values) "rpc") (contains? #{"print" "json"} mode))
             last-model (some-> (aget api "__sqlite-store") :last-model)
+            ;; --settings is this run's override too, as much as a flag
+            over      (or (some-> (:settings values) settings-arg) {})
             explicit  (cond-> #{}
-                        (or (:model values) (:provider values)) (conj :model)
-                        (:thinking values)                      (conj :thinking)
-                        (:permission-mode values)               (conj :permission-mode))]
+                        (or (:model values) (:provider values)
+                            (:model over) (:provider over))       (conj :model)
+                        (or (:thinking values) (:thinking over))  (conj :thinking)
+                        (:permission-mode values)                 (conj :permission-mode))]
         (session-settings/restore-session! agent {:explicit explicit :headless? headless?
                                                   :last-model last-model})
         ((:on (:events agent)) "session_start"
