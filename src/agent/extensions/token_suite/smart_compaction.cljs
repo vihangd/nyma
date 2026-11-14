@@ -275,6 +275,8 @@ with every section below present.
                                     #js {:model    model
                                          :messages #js [#js {:role "user" :content prompt}]
                                          :maxTokens 4096}))]
+                       (when (.-recordModelUsage api)
+                         (.recordModelUsage api (str model-spec) (.-usage result)))
                        (when-let [text (.-text result)]
                          (when (seq (.trim text))
                            (aset evt-ctx "summary" text))))

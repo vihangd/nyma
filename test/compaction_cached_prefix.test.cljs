@@ -299,3 +299,12 @@
               text (js-await (c/compact-with-retry nil "S" [] [] gen nil
                                                    {:base (base-with #js [#js {:role "user" :content "q"}])}))]
           (-> (expect text) (.toBe six)))))))
+
+(describe "summary calls are recorded" (fn []
+  (it "on-usage gets each call's usage"
+      ^:async (fn []
+        (let [seen (atom [])
+              gen  (fn [_] (js/Promise.resolve #js {:text six :usage #js {:inputTokens 7 :outputTokens 3}}))]
+          (js-await (c/compact-with-retry nil "S" [] [] gen nil {:on-usage #(swap! seen conj %)}))
+          (-> (expect (count @seen)) (.toBe 1))
+          (-> (expect (.-inputTokens (first @seen))) (.toBe 7)))))))

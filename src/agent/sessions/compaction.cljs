@@ -11,6 +11,7 @@
             [agent.token-estimation :as te]
             [agent.debug :as d]
             [agent.model-info :as model-info]
+            [agent.pricing :as pricing]
             [agent.utils.spill-file :as spill]
             [agent.ui.think-tag-parser :refer [strip-think-tags]]))
 
@@ -547,6 +548,7 @@ with every section below present.
    exchange so it reads the cache too. `:source` is what quotes are checked
    against when the prompt itself no longer holds the transcript. `:read`, an
    atom, receives the share of the first call's input read from cache.
+   `:on-usage` gets each call's SDK usage.
 
    Not every prefix survives a new user turn: Haiku 4.5 with thinking on
    strips earlier thinking blocks and measured 47% (system and tools only)
@@ -570,10 +572,13 @@ with every section below present.
                        #js {:role "user" :content user-prompt :providerOptions po}
                        #js {:role "user" :content user-prompt})
         call         (fn [msgs]
-                       (gen (if base
-                              (doto (js/Object.assign #js {} base)
-                                (aset "messages" (.concat (.-messages base) msgs)))
-                              #js {:model model :system sys :messages msgs})))
+                       (.then (gen (if base
+                                     (doto (js/Object.assign #js {} base)
+                                       (aset "messages" (.concat (.-messages base) msgs)))
+                                     #js {:model model :system sys :messages msgs}))
+                              (fn [r]
+                                (when-let [f (:on-usage opts)] (f (some-> r .-usage)))
+                                r)))
         first-result (js-await (call #js [first-msg]))
         _            (when base
                        (let [in   (some-> first-result .-usage .-inputTokens)
@@ -754,7 +759,10 @@ with every section below present.
                                    state-atom max-working strategy
                                    ;; Idle compaction: compute the summary only and
                                    ;; return it, or apply one computed earlier.
-                                   summarize-only? summary trigger]}]]
+                                   summarize-only? summary trigger
+                                   ;; The agent's store: a summary call is spend
+                                   ;; like any other, recorded as :extension-usage.
+                                   store]}]]
   (let [context ((:build-context session))
         ;; Prefer the provider's own count of the last request. The estimate
         ;; below walks the whole session tree; what is actually sent is pruned
@@ -915,6 +923,9 @@ with every section below present.
                 snap         (when (and (= strat default-strategy) (not= marker :ambiguous))
                                (usable-snapshot state-atom))
                 prefix-read  (atom nil)
+                on-usage     (fn [u]
+                               (when-let [e (and store (pricing/usage-event lookup u))]
+                                 ((:dispatch! store) :extension-usage e)))
                 summary-text (or (when snap
                                    (try
                                      (let [t (js-await
@@ -928,8 +939,9 @@ with every section below present.
                                                  :files-read          files-read
                                                  :files-modified      files-modified})
                                                files-read files-modified gen-fn strat
-                                               {:base   (:base snap)
-                                                :read   prefix-read
+                                               {:base     (:base snap)
+                                                :read     prefix-read
+                                                :on-usage on-usage
                                                 :source (str (:content prev-compaction) "\n"
                                                              ;; The model sees the kept span too, and
                                                              ;; section 6 quotes its most recent work.
@@ -944,7 +956,8 @@ with every section below present.
                                  ;; a summary nobody may ever use.
                                  (when-not summarize-only?
                                    (js-await
-                                    (compact-with-retry model user-prompt files-read files-modified gen-fn strat))))]
+                                    (compact-with-retry model user-prompt files-read files-modified gen-fn strat
+                                                       {:on-usage on-usage}))))]
           (if summarize-only?
             ;; Kept only if it will pass when applied: a rejected one makes the
             ;; apply run the full summariser on a cold cache, the worst case.
@@ -1031,7 +1044,8 @@ with every section below present.
                                  :observed-usage (:last-input-tokens @(:state agent))
                                  ;; Without this the compaction is recorded but
                                  ;; the running conversation never shrinks.
-                                 :state-atom (:state agent)}
+                                 :state-atom (:state agent)
+                                 :store (:store agent)}
                                 (settings->opts (resolve-settings (:settings agent))))))
       (catch :default e
         ;; Never let compaction take the turn with it — a failed summary is
@@ -1075,7 +1089,8 @@ with every section below present.
                                     (:events agent)
                                     (merge {:model-registry (:model-registry agent)
                                             :model-key (model-info/config-model-key (:config agent))
-                                            :state-atom (:state agent)}
+                                            :state-atom (:state agent)
+                                            :store (:store agent)}
                                            (settings->opts (resolve-settings (:settings agent)))
                                            {:force? true})))]
         (when done (d/warn "[compaction] context overflow — compacted"))

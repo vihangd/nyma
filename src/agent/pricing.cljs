@@ -161,3 +161,26 @@
     (< n 1000)     (str n)
     (< n 1000000)  (let [v (/ n 1000)]   (str (.toFixed v 1) "k"))
     :else           (let [v (/ n 1000000)] (str (.toFixed v 1) "M"))))
+
+(defn usage-event
+  "The :extension-usage payload for one call outside the loop (a consult, a
+   compaction summary), priced at `model-spec`. nil when it used nothing.
+   `usage` is the AI SDK's usage object."
+  [model-spec usage]
+  (let [u      (or usage #js {})
+        spec   (str model-spec)
+        input  (or (.-inputTokens u) 0)
+        output (or (.-outputTokens u) 0)
+        cr     (or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
+        cw     (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)]
+    (when (pos? (+ input output))
+      {:model              spec
+       :input-tokens       input
+       :output-tokens      output
+       :cache-read-tokens  cr
+       :cache-write-tokens cw
+       :cost-unknown?      (not (priced? spec))
+       :cost               (calculate-turn-cost spec {:input-tokens       input
+                                                      :output-tokens      output
+                                                      :cache-read-tokens  cr
+                                                      :cache-write-tokens cw})})))

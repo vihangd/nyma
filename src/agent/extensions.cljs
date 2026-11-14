@@ -551,26 +551,9 @@
        ;; path would bill a paid consult at a free local worker's rate.
        ;; `usage` is the AI SDK's usage object from generateText/streamText.
          :recordModelUsage  (fn [model-spec usage]
-                              (let [store (:store agent)
-                                    u     (or usage #js {})
-                                    input  (or (.-inputTokens u) 0)
-                                    output (or (.-outputTokens u) 0)
-                                    cr     (or (some-> u .-inputTokenDetails .-cacheReadTokens) 0)
-                                    cw     (or (some-> u .-inputTokenDetails .-cacheWriteTokens) 0)]
-                                (when (and store (pos? (+ input output)))
-                                  ((:dispatch! store) :extension-usage
-                                   {:model              (str model-spec)
-                                    :input-tokens       input
-                                    :output-tokens      output
-                                    :cache-read-tokens  cr
-                                    :cache-write-tokens cw
-                                    :cost-unknown? (not (pricing/priced? (str model-spec)))
-                                    :cost (pricing/calculate-turn-cost
-                                           (str model-spec)
-                                           {:input-tokens       input
-                                            :output-tokens      output
-                                            :cache-read-tokens  cr
-                                            :cache-write-tokens cw})}))
+                              (let [store (:store agent)]
+                                (when-let [e (and store (pricing/usage-event model-spec usage))]
+                                  ((:dispatch! store) :extension-usage e))
                                 nil))
 
        ;; ── Thinking level ──────────────────────────────────

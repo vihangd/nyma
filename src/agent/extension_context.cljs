@@ -66,6 +66,7 @@
                                           (merge (settings->opts (resolve-settings (:settings agent)))
                                                  {:model-registry (:model-registry agent)
                                                    :state-atom     (:state agent)
+                                                   :store          (:store agent)
                                                   :model-key (model-info/config-model-key
                                                               (:config agent))}
                                                  ;; squint has no js->clj — this threw for ANY extension

@@ -1104,6 +1104,7 @@
                                      (merge (settings->opts (resolve-settings (:settings agent)))
                                             {:model-registry (:model-registry agent)
                                              :state-atom     (:state agent)
+                                             :store          (:store agent)
                                              :force?         true
                                              ;; `/compact keep the auth refactor details` — the
                                              ;; words were accepted and dropped; compaction has

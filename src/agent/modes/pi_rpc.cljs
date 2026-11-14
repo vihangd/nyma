@@ -922,6 +922,7 @@
                                        (merge (compaction/settings->opts (compaction/resolve-settings (:settings agent)))
                                               {:model-registry (:model-registry agent)
                                                :state-atom     (:state agent)
+                                               :store          (:store agent)
                                                :force?         true
                                                :custom-instructions (.-customInstructions cmd)
                                                :model-key      (model-info/config-model-key (:config agent))})))]
