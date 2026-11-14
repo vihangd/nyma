@@ -250,7 +250,12 @@
             (.toBe "ambiguous"))
         (-> (expect (c/keep-marker [{:role "user" :content "earlier work"}]
                                    [{:role "user" :content "now fix the parser bug"}]))
-            (.toBe "now fix the parser bug"))))
+            (.toBe "now fix the parser bug"))
+        ;; a copy past a long tool result's 2000-char cut still counts
+        (-> (expect (c/keep-marker [{:role "tool_result"
+                                     :content (str (.repeat "x" 2500) " now fix the parser bug")}]
+                                   [{:role "user" :content "now fix the parser bug"}]))
+            (.toBe "ambiguous"))))
 
   (it "a pruned request is not summarised on"
       (fn []

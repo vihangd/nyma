@@ -498,8 +498,12 @@ with every section below present.
   (when (seq to-keep)
     (let [t (str/trim (str (content/->text (:content (first to-keep)))))
           q (subs t 0 (min 200 (count t)))]
+      ;; Against everything the model sees, untruncated (format-messages cuts
+      ;; tool results at 2000 chars), in the JSON form marker-sent? uses.
       (if (or (< (count q) 12)
-              (str/includes? (format-messages to-summarize) q))
+              (let [esc (js/JSON.stringify q)]
+                (str/includes? (js/JSON.stringify (clj->js to-summarize))
+                               (subs esc 1 (dec (count esc))))))
         :ambiguous
         q))))
 
