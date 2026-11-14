@@ -189,6 +189,13 @@
 
 (describe "format-row"
           (fn []
+            (it "never tail-truncates the title, at any width"
+                (fn []
+                  (let [s {:title (str "Fix the picker " (.repeat "and more " 20)) :cwd "/repo/alpha"
+                           :model "anthropic/claude-opus-5-5" :modified (js/Date.now) :msg-count 7}]
+                    (doseq [w (range 30 121)]
+                      (-> (expect (.startsWith (format-row s w) "Fix the")) (.toBe true))))))
+
             (it "shows title, project, age and turn count"
                 (fn []
                   (let [row (format-row {:title "Fix the picker" :cwd "/repo/alpha"

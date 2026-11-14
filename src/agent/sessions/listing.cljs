@@ -10,7 +10,8 @@
             ;; picker_frame takes only pure helpers from pi-tui (visibleWidth,
             ;; truncateToWidth) — no TUI is started, so this is safe on the
             ;; pre-TUI `-r` path.
-            [agent.ui.picker-frame :refer [two-col-row truncate-to]]
+            [agent.ui.picker-frame :refer [two-col-row truncate-to right-fits?]]
+            ["@earendil-works/pi-tui" :refer [visibleWidth]]
             [agent.utils.time :as time]))
 
 (def ^:private title-max
@@ -37,6 +38,11 @@
         (str (.slice t 0 (dec title-max)) "…")
         t))))
 
+(defn- last-of-role
+  "The last entry of `role`, or nil."
+  [entries role]
+  (some->> (or entries []) (filter #(= (.-role %) role)) last))
+
 (defn explicit-name
   "Content of an explicit `session-name` entry, if any.
 
@@ -45,20 +51,12 @@
    old code read ONLY this and fell back to the filename, so the fallback was
    the only path ever taken."
   [entries]
-  (some->> (or entries [])
-           (filter #(= (.-role %) "session-name"))
-           last
-           (#(.-content %))
-           tidy))
+  (some-> (last-of-role entries "session-name") .-content tidy))
 
 (defn last-model
   "The model of the last `session-settings` entry (sessions.settings), if any."
   [entries]
-  (some->> (or entries [])
-           (filter #(= (.-role %) "session-settings"))
-           last
-           (#(.-metadata %))
-           (#(.-model %))))
+  (some-> (last-of-role entries "session-settings") .-metadata .-model))
 
 (defn derive-title
   "A human label for a session: its explicit name, else its first user message.
@@ -179,12 +177,13 @@
         ;; the id without its provider: the row has no room for both
         model (some-> (:model session) str (.split "/") last)
         with  (str proj "  " model tail)
-        ;; two-col-row drops the WHOLE right column past half the row, so the
-        ;; model goes first when it would not fit.
-        meta  (if (and (seq model) (<= (count with) (js/Math.floor (/ width 2))))
-                with
-                (str proj tail))
+        ;; two-col-row drops the WHOLE right column when it does not fit, so
+        ;; the model goes first; then the rest, as two-col-row would.
+        meta  (cond
+                (and (seq model) (right-fits? with width)) with
+                (right-fits? (str proj tail) width)        (str proj tail)
+                :else                                      "")
         ;; Mirrors two-col-row's own budget so the head-truncation happens here
         ;; rather than its tail-truncation happening there.
-        budget (max 1 (- width (count meta) 2))]
+        budget (if (seq meta) (max 1 (- width (visibleWidth meta) 2)) width)]
     (two-col-row (truncate-to label budget) meta width)))

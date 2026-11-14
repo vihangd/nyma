@@ -160,6 +160,15 @@
                     (str "…" tail)
                     (recur (inc i)))))))))
 
+(defn right-fits?
+  "Does `two-col-row` keep `right` on a `width`-column row? Metadata is short
+   and fixed-shape, so it may take up to half the row — but only while the
+   identifier keeps a legible 24 columns. On a narrow terminal both cannot
+   fit, and knowing WHICH model a row is beats knowing its price."
+  [right width]
+  (let [rw (width-of right)]
+    (and (pos? rw) (<= rw (js/Math.floor (/ width 2))) (>= (- width rw 2) 24))))
+
 (defn two-col-row
   "Lay out `left` and `right` on one row exactly `width` wide: `left` padded
    out, `right` flush to the end, at least one space between.
@@ -171,14 +180,7 @@
   (let [width (max 1 (or width 1))
         right (str right)
         gap   2
-        ;; Metadata is short and fixed-shape, so it may take up to half the row
-        ;; — but only while the identifier keeps a legible budget. On a narrow
-        ;; terminal both cannot fit, and knowing WHICH model a row is beats
-        ;; knowing its price, so the metadata is what gets dropped.
-        left-budget (- width (width-of right) gap)
-        show-right? (and (seq right)
-                         (<= (width-of right) (js/Math.floor (/ width 2)))
-                         (>= left-budget 24))
+        show-right? (right-fits? right width)
         right   (if show-right? right "")
         gap     (if show-right? gap 0)
         left-w  (max 1 (- width (width-of right) gap))
