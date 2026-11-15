@@ -52,9 +52,10 @@
 
 (defn- has-code?
   "A status code standing alone in `m`, not inside a request id or a token
-   count (\"req_429…\", \"1403 tokens\")."
+   count (\"req_429abc\", \"trace_401f\", \"1403 tokens\"): no letter, digit,
+   underscore or dot on either side."
   [m code]
-  (.test (js/RegExp. (str "(?:^|[^\\d.])" code "(?![\\d.])")) m))
+  (.test (js/RegExp. (str "(?:^|[^\\w.])" code "(?![\\w.])")) m))
 
 (def types
   "The classifications, which double as Claude-Code hook matcher values."

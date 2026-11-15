@@ -50,6 +50,12 @@
                   (-> (expect (ec/error-type "failed to generate a response"))
                       (.not.toBe "rate_limit"))))
 
+            (it "a code inside an id is not that status"
+                (fn []
+                  (-> (expect (ec/error-type "Internal error, request id req_429abc")) (.not.toBe "rate_limit"))
+                  (-> (expect (ec/error-type "failed, trace_401f")) (.not.toBe "auth"))
+                  (-> (expect (ec/error-type "HTTP 429: slow down")) (.toBe "rate_limit"))))
+
             (it "never returns nil — a nil matcher silently matches nothing"
                 (fn []
                   (doseq [m [nil "" "   "]]
