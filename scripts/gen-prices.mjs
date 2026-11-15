@@ -42,7 +42,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 
 
 /** models.dev JSON -> sorted {prices, context, output, pdf} keyed as nyma looks them up. */
 export function extract(data) {
-  const prices = {}, context = {}, output = {}, pdf = [];
+  const prices = {}, context = {}, output = {}, pdf = [], textOnly = [];
   for (const [prov, prefix] of Object.entries(PROVIDERS)) {
     for (const [id, m] of Object.entries(data[prov]?.models ?? {})) {
       if (!(m.modalities?.output ?? ["text"]).includes("text")) continue;
@@ -56,16 +56,19 @@ export function extract(data) {
       if (num(m.limit?.context)) context[key] = m.limit.context;
       if (num(m.limit?.output)) output[key] = m.limit.output;
       if (m.modalities?.input?.includes("pdf")) pdf.push(key);
+      // Only a model that DECLARES its inputs and leaves out images: an
+      // unlisted one is unknown, not text-only.
+      if (Array.isArray(m.modalities?.input) && !m.modalities.input.includes("image")) textOnly.push(key);
     }
   }
   const sorted = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
-  return { prices: sorted(prices), context: sorted(context), output: sorted(output), pdf: pdf.sort() };
+  return { prices: sorted(prices), context: sorted(context), output: sorted(output), pdf: pdf.sort(), textOnly: textOnly.sort() };
 }
 
 const v = (x) => (x === null ? "nil" : String(x));
 
 export function render(data, date = new Date().toISOString().slice(0, 10)) {
-  const { prices, context, output, pdf } = extract(data);
+  const { prices, context, output, pdf, textOnly } = extract(data);
   const map = (o, f) =>
     "{" + Object.entries(o).map(([k, x]) => `${JSON.stringify(k)} ${f(x)}`).join("\n   ") + "}";
   return `(ns agent.pricing-data
@@ -88,6 +91,10 @@ export function render(data, date = new Date().toISOString().slice(0, 10)) {
 
 (def pdf-input
   #{${pdf.map((k) => JSON.stringify(k)).join("\n    ")}})
+
+;; Models that declare their inputs and take no image.
+(def text-only
+  #{${textOnly.map((k) => JSON.stringify(k)).join("\n    ")}})
 `;
 }
 

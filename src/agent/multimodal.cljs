@@ -14,12 +14,17 @@
 
    No resizing here: providers auto-downscale images past their long-edge cap
    (Anthropic >1568px / >2576px on 4.7+). Render/screenshot at a sane source
-   scale and look sparingly.")
+   scale and look sparingly."
+  (:require [agent.pricing-data :as pricing-data]))
 
 (defn file-part
-  "An AI-SDK tool-result file content part carrying base64 image/file data."
+  "An AI-SDK tool-result file content part carrying base64 image/file data.
+   AI SDK 7 takes the data TAGGED in a tool result ({type data, data}); a bare
+   string fails its schema (\"The messages do not match the ModelMessage[]
+   schema\"), which broke the step after every image tool call, on every
+   provider."
   [base64 media-type]
-  #js {:type "file" :data base64 :mediaType media-type})
+  #js {:type "file" :data #js {:type "data" :data base64} :mediaType media-type})
 
 (defn text-part [s]
   #js {:type "text" :text (str s)})
@@ -64,3 +69,89 @@
     (if (some-> output .-content)
       #js {:type "content" :value (.-content output)}
       #js {:type "text" :value (str output)})))
+
+
+;; ── Models that take no image ─────────────────────────────────────
+;; An image sent to a text-only model is a 400 (DeepSeek, GLM, MiniMax,
+;; gpt-oss), and nothing checked: a pasted screenshot or a view_image result
+;; failed the turn. models.dev declares each model's inputs; only a model that
+;; declares them and leaves images out counts, so an unknown one is sent as is.
+
+(def ^:private text-only-segments-memo (atom nil))
+
+(defn- last-seg [k] (subs k (inc (.lastIndexOf k "/"))))
+
+(defn- text-only-segments
+  "Last id segments every known row of which is text-only (`deepseek-v4-pro`),
+   for gateway ids keyed differently from the vendor's row."
+  []
+  (or @text-only-segments-memo
+      (reset! text-only-segments-memo
+              (let [known (group-by last-seg (keys pricing-data/context))]
+                (set (for [[seg ks] known
+                           :when (every? #(contains? pricing-data/text-only %) ks)]
+                       seg))))))
+
+(defn text-only?
+  "Does the model behind `model-key` (`provider/id`) declare no image input?"
+  [model-key]
+  (let [k (str model-key)
+        i (.indexOf k "/")]
+    (boolean
+     (or (contains? pricing-data/text-only k)
+         (and (pos? i) (contains? pricing-data/text-only (subs k (inc i))))
+         (contains? (text-only-segments) (last-seg k))))))
+
+(defn- image-part? [p]
+  (and (some? p) (not (string? p))
+       (let [t  (aget p "type")
+             mt (str (or (aget p "mediaType") (aget p "mimeType") ""))]
+         (or (= t "image")
+             (and (contains? #{"file" "image-data" "media"} t) (.startsWith mt "image/"))))))
+
+(defn- omitted [model-key]
+  #js {:type "text" :text (str "[image omitted: " model-key " takes no image input]")})
+
+(defn- jsmap
+  "Map `f` over a JS array or a vector, keeping the kind — no clj->js, which
+   converts deeply and turned the SDK's message objects into ones its schema
+   refused."
+  [f xs]
+  (if (js/Array.isArray xs) (.map xs (fn [x] (f x))) (mapv f xs)))
+
+(defn- lower-parts [parts model-key]
+  (if (and (or (vector? parts) (js/Array.isArray parts)) (some image-part? parts))
+    (jsmap #(if (image-part? %) (omitted model-key) %) parts)
+    parts))
+
+(defn- lower-tool-result [p model-key]
+  (let [out (and (some? p) (not (string? p)) (= "tool-result" (aget p "type")) (aget p "output"))]
+    (if (and out (= "content" (aget out "type")))
+      (let [v  (aget out "value")
+            v2 (lower-parts v model-key)]
+        (if (identical? v v2)
+          p
+          (js/Object.assign #js {} p #js {:output (js/Object.assign #js {} out #js {:value v2})})))
+      p)))
+
+(defn- tool-image? [p]
+  (let [out (and (some? p) (not (string? p)) (= "tool-result" (aget p "type")) (aget p "output"))
+        v   (and out (= "content" (aget out "type")) (aget out "value"))]
+    (boolean (and v (some image-part? v)))))
+
+(defn- lower-message [m model-key]
+  (let [c (aget m "content")]
+    (if (and (or (vector? c) (js/Array.isArray c))
+             (some #(or (image-part? %) (tool-image? %)) c))
+      (js/Object.assign #js {} m
+                        #js {:content (jsmap #(lower-tool-result % model-key)
+                                             (lower-parts c model-key))})
+      m)))
+
+(defn lower-images
+  "`messages` with every image part (user attachments and tool-result images)
+   replaced by a note, when the model takes no image input. Untouched otherwise."
+  [messages model-key]
+  (if (text-only? model-key)
+    (jsmap #(lower-message % model-key) messages)
+    messages))

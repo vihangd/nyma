@@ -3,6 +3,7 @@
   (:require ["ai" :refer [streamText stepCountIs]]
             [agent.context :refer [build-context get-active-tools get-active-tools-filtered]]
             [agent.utils.stall :as stall]
+            [agent.multimodal :as multimodal]
             [agent.middleware :refer [wrap-tools-with-middleware]]
             [agent.model-info :as model-info]
             [agent.sessions.compaction :as compaction]
@@ -541,6 +542,8 @@
               ;; reads PDFs; otherwise its text. Done here, at the wire, so
               ;; the session keeps the PDF for a later capable model.
               messages (js-await (pdf/lower-for-model messages model-key))
+              ;; Same for images, on a model that declares none.
+              messages (multimodal/lower-images messages model-key)
 
               ;; Per-step usage sum, the pass's bill. `totalUsage` covers one
               ;; streamText call, so a retry drops every step the discarded
@@ -639,11 +642,21 @@
                                                   #js {})
                              :onError         (fn [e] (throw (.-error e)))
                              :prepareStep     (fn [o]
-                                                (when (seq @steered)
+                                                (cond
+                                                  (seq @steered)
                                                   ;; Not `messages`: the SDK carries what
                                                   ;; this returns into the next step's.
-                                                  #js {:messages (.concat (.-initialMessages o) (.-responseMessages o)
-                                                                          (clj->js @steered))}))
+                                                  #js {:messages (multimodal/lower-images
+                                                                  (.concat (.-initialMessages o) (.-responseMessages o)
+                                                                           (clj->js @steered))
+                                                                  model-key)}
+
+                                                  ;; A tool's image result reaches the next
+                                                  ;; step through the SDK, not the
+                                                  ;; history: lowered here for a model
+                                                  ;; that takes none.
+                                                  (multimodal/text-only? model-key)
+                                                  #js {:messages (multimodal/lower-images (.-messages o) model-key)}))
                              :onStepFinish    (fn [step]
                                                 ;; Steps, not runs. `:turn-count`
                                                 ;; in the store counts agent

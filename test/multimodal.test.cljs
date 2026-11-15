@@ -32,7 +32,7 @@
                                        (let [r (mm/image-result "QkFTRTY0" "image/png" "an image")]
                                          (-> (expect (.-summary r)) (.toBe "an image"))
                                          (-> (expect (.. r -content (at 0) -type)) (.toBe "file"))
-                                         (-> (expect (.. r -content (at 0) -data)) (.toBe "QkFTRTY0"))
+                                         (-> (expect (.. r -content (at 0) -data -data)) (.toBe "QkFTRTY0"))
                                          (-> (expect (.. r -content (at 0) -mediaType)) (.toBe "image/png")))))
 
                                  (it "tool-model-output: content output → content; string → text"
@@ -102,7 +102,7 @@
                                         (-> (expect (:text r)) (.toBe "here"))
                                         (-> (expect (count (:images r))) (.toBe 1))
                                         (-> (expect (.-type (first (:images r)))) (.toBe "file"))
-                                        (-> (expect (.-data (first (:images r)))) (.toBe "B64"))
+                                        (-> (expect (.. (first (:images r)) -data -data)) (.toBe "B64"))  ;; v7: tagged
                                         (-> (expect (.-mediaType (first (:images r)))) (.toBe "image/jpeg")))))
 
                                 (it "drops an image item with no base64 data"
@@ -158,3 +158,12 @@
                               (it "the tool carries toModelOutput (so middleware surfaces the image)"
                                   (fn []
                                     (-> (expect (some? (.-toModelOutput tools/view-image-tool))) (.toBe true))))))
+
+(describe "file-part and the SDK schema" (fn []
+  (it "carries tagged data, as AI SDK 7 requires in a tool result"
+    ;; bare base64 failed "The messages do not match the ModelMessage[] schema"
+    ;; on the step after every view_image call
+    (fn []
+      (let [p (mm/file-part "B64" "image/png")]
+        (-> (expect (.. p -data -type)) (.toBe "data"))
+        (-> (expect (.. p -data -data)) (.toBe "B64")))))))

@@ -41,8 +41,12 @@
                         (= t "text") (.push arr #js {:type "text" :text (.-text p)})
                         ;; A tool's image (view_image, a screenshot) was
                         ;; dropped here; the model saw only the caption.
-                        (contains? #{"image-data" "media" "file-data"} t)
-                        (when-let [b (file-part->anthropic #js {:mediaType (.-mediaType p) :data (.-data p)
+                        (contains? #{"file" "image-data" "media" "file-data"} t)
+                        ;; v7 tags the data ({type data, data}); older parts
+                        ;; carry it bare.
+                        (when-let [b (file-part->anthropic #js {:mediaType (.-mediaType p)
+                                                                :data (let [d (.-data p)]
+                                                                        (if (and d (= "data" (.-type d))) (.-data d) d))
                                                                 :filename (.-filename p)})]
                           (.push arr b))))))
         arr)
