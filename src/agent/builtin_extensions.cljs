@@ -109,13 +109,13 @@
     :manifest  #js {"namespace" "custom-provider-kimi" "description" "Moonshot/Kimi models with thinking-model passthrough" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "local"
     :module    ext-custom-provider-local
-    :manifest  #js {"namespace" "local" "description" "Any OpenAI-compatible local endpoint, registered from the `local-models` setting" "capabilities" #js ["providers"] "dependsOn" #js []}}
+    :manifest  #js {"namespace" "local" "description" "Any OpenAI-compatible local endpoint, registered from the `local-models` setting" "capabilities" #js ["providers" "model"] "dependsOn" #js []}}
    {:namespace "custom-provider-minimax"
     :module    ext-custom-provider-minimax
     :manifest  #js {"namespace" "custom-provider-minimax" "description" "MiniMax M2.x models via OpenAI-compatible API" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-opencode-zen"
     :module    ext-custom-provider-opencode-zen
-    :manifest  #js {"namespace" "custom-provider-opencode-zen" "description" "opencode-zen models via OpenAI-compatible API" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"opencode-zen" #js {"rescue-parsing" false}}}}
+    :manifest  #js {"namespace" "custom-provider-opencode-zen" "description" "opencode-zen models via OpenAI-compatible API" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"opencode-zen" #js {"rescue-parsing" false}}}}
    {:namespace "custom-provider-openrouter"
     :module    ext-custom-provider-openrouter
     :manifest  #js {"namespace" "custom-provider-openrouter" "description" "OpenRouter models via OpenAI-compatible API" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {} "settings" #js {"openrouter" #js {"provider" nil}}}}

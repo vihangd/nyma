@@ -2,7 +2,8 @@
   "namespace": "local",
   "description": "Any OpenAI-compatible local endpoint, registered from the `local-models` setting",
   "capabilities": [
-    "providers"
+    "providers",
+    "model"
   ],
   "dependsOn": []
 }

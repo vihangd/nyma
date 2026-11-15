@@ -87,3 +87,13 @@
         (when (undefined? (aget body (name k)))
           (aset body (name k) (clj->js v))))
       (js/JSON.stringify body))))
+
+(defn openai-effort
+  "A nyma level on OpenAI's minimal..high `reasoning_effort` scale as most
+   gateways and local servers accept it: minimal → low (Qwen on Zen reasons
+   not at all at `minimal`), xhigh → high."
+  [level]
+  (case level
+    "minimal" "low"
+    "xhigh"   "high"
+    level))

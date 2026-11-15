@@ -31,6 +31,7 @@
             [agent.utils.credentials :as credentials]
             [agent.utils.toolcall-rescue :as adapter]
             [agent.providers.model-fetch :as model-fetch]
+            [agent.utils.reasoning-request :as rr]
             [agent.utils.reasoning-stream :as rs]))
 
 ;; ── Built-in presets ─────────────────────────────────────────────
@@ -82,6 +83,7 @@
    :api-key-env   (or (.-apiKeyEnv o) (aget o "api-key-env") (get o "apiKeyEnv") "")
    :rescue-parsing (or (.-rescueParsing o) (aget o "rescue-parsing") (get o "rescueParsing"))
    :think-prefill (or (.-thinkPrefill o) (aget o "think-prefill") (get o "thinkPrefill"))
+   :reasoning     (or (.-reasoning o) (get o "reasoning"))
    :models        (or (.-models o) (get o "models") [])})
 
 (defn- normalize-entry [e]
@@ -114,6 +116,41 @@
          :contextWindow (or (:ctx m) (:context-window m)
                             (get m "contextWindow") 32768)}))
 
+;; ── Reasoning dialect ─────────────────────────────────────────────
+;; Local servers each read a different switch, and ignore the others:
+;;   - Ollama /v1: `reasoning_effort` high|medium|low|max|none (`none` turns
+;;     thinking off; `think` is ignored there).
+;;   - llama.cpp: `reasoning_effort: none` turns it off; levels and Qwen's
+;;     switch go through `chat_template_kwargs` (reasoning_effort,
+;;     enable_thinking), which the model's Jinja template reads.
+;;   - vLLM: `chat_template_kwargs.enable_thinking`.
+;;   - LM Studio: ignores all of them (reported); nothing to lose.
+;; So both go out. A server that rejects them: `"reasoning": "none"` on the
+;; `local-models` entry sends neither.
+(def level-fn-atom (atom nil))
+
+(defmethod rr/reasoning-body "local" [_ level _model-id]
+  (if-let [l (rr/active-level level)]
+    (let [e (rr/openai-effort l)]
+      {:reasoning_effort     e
+       :chat_template_kwargs {:enable_thinking true :reasoning_effort e}})
+    {:reasoning_effort     "none"
+     :chat_template_kwargs {:enable_thinking false}}))
+
+(defn reasoning-rewriter
+  "Wrap `lift` (the <think> replay rewriter) with the live thinking level,
+   unless the entry opts out with `\"reasoning\": \"none\"`."
+  [entry lift]
+  (if (= "none" (str (or (:reasoning entry) (get entry "reasoning"))))
+    lift
+    (fn [body-str init]
+      (let [lifted (lift body-str init)]
+        (try
+          (rr/splice-absent lifted (rr/reasoning-body "local"
+                                                      (when-let [f @level-fn-atom] (f))
+                                                      nil))
+          (catch :default _ lifted))))))
+
 (defn- create-model-fn [entry get-active-tools]
   (fn [model-id]
     (let [key          (resolve-key entry)
@@ -127,8 +164,10 @@
           ;; Orphan-closer lifting is enabled only when the user declared
           ;; thinkPrefill — i.e. asserted this model's template pre-fills <think>.
           ;; Otherwise a turn merely quoting "</think>" would lose its leading text.
-          mk-fetch     #(rs/make-fetch (rs/make-lift-think-request-rewriter
-                                        (boolean prefill?))
+          mk-fetch     #(rs/make-fetch (reasoning-rewriter
+                                        entry
+                                        (rs/make-lift-think-request-rewriter
+                                         (boolean prefill?)))
                                        {:think-prefill? (boolean prefill?)})
           base-fetch   (if rescue?
                          (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)
@@ -256,6 +295,8 @@
 ;; ── Entry point ──────────────────────────────────────────────────
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (let [settings       (.settings api)
         user-entries   (some-> settings load-settings-models
                                (->> (mapv normalize-entry)))

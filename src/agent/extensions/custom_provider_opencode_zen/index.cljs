@@ -5,6 +5,7 @@
             [agent.debug :as d]
             [agent.providers.model-fetch :as model-fetch]
             [agent.utils.credentials :as credentials]
+            [agent.utils.reasoning-request :as rr]
             [agent.utils.reasoning-stream :as rs]
             [agent.utils.toolcall-rescue :as rescue]))
 
@@ -104,6 +105,45 @@
 (def ^:private active-tools-atom (atom (fn [] #{})))
 (def ^:private rescue-enabled? (atom false))
 
+(def level-fn-atom (atom nil))
+
+;; ── Reasoning dialect (chat path) ─────────────────────────────────
+;; Zen relays each family to its own upstream, and what survives depends on
+;; it. Measured 2026-11-15 (reasoning chars / output tokens):
+;;   - `thinking: disabled` turns reasoning off for GLM, DeepSeek, Qwen, Kimi
+;;     K3 and MiniMax M3, but 400s for Gemini and Grok ("thinking: cannot be
+;;     represented by google").
+;;   - GLM and DeepSeek take low/high/max effort; GLM's default is max, so
+;;     OpenAI's `high` asked for less (68 against 304 with nothing).
+;;   - Qwen takes minimal..high (max 400s; minimal reasons not at all).
+;;   - Gemini and Grok take reasoning_effort (Gemini: 0 → 1603 at high).
+(def ^:private thinking-families ["qwen" "kimi" "minimax"])
+
+(defmethod rr/reasoning-body provider-name [_ level model-id]
+  (let [id (.toLowerCase (str model-id))
+        l  (rr/active-level level)]
+    (cond
+      (or (str/starts-with? id "glm-") (str/starts-with? id "deepseek-"))
+      (rr/thinking-effort-body level false)
+
+      (some #(str/starts-with? id %) thinking-families)
+      (if l
+        {:thinking {:type "enabled"} :reasoning_effort (rr/openai-effort l)}
+        {:thinking {:type "disabled"}})
+
+      l {:reasoning_effort (rr/openai-effort l)})))
+
+(defn request-rewriter
+  "Lift <think> for replay, then add the live thinking level for the model in
+   the body."
+  [body-str init]
+  (let [lifted (rs/lift-think-request-rewriter body-str init)]
+    (try
+      (rr/splice-absent lifted (rr/reasoning-body provider-name
+                                                  (when-let [f @level-fn-atom] (f))
+                                                  (.-model (js/JSON.parse lifted))))
+      (catch :default _ lifted))))
+
 (defn- create-oc-zen-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -132,7 +172,7 @@
         ;; open-weight models, because the JSON schema itself competes for the
         ;; capacity the task needs. The parser already exists for `local` and
         ;; `relay`; this makes it reachable here, opt-in per settings.
-        (let [f (rs/make-fetch rs/lift-think-request-rewriter)]
+        (let [f (rs/make-fetch request-rewriter)]
           (aset opts "fetch"
                 (if @rescue-enabled?
                   (rescue/wrap-fetch-with-rescue f @active-tools-atom)
@@ -145,6 +185,8 @@
             :chat      (.chat provider id)))))))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   ;; Opt-in, settings-driven — the same shape `local` and `relay` already use,
   ;; so this is one more provider honouring an existing switch rather than a
   ;; new mechanism:  {"opencode-zen": {"rescue-parsing": true}}

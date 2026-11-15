@@ -2,7 +2,8 @@
   "namespace": "custom-provider-opencode-zen",
   "description": "opencode-zen models via OpenAI-compatible API",
   "capabilities": [
-    "providers"
+    "providers",
+    "model"
   ],
   "dependsOn": [],
   "dependencies": {},

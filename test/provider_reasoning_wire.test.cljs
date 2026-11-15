@@ -15,7 +15,9 @@
             [agent.extensions.custom-provider-minimax.index :as minimax]
             [agent.extensions.custom-provider-kimi.index :as kimi]
             [agent.extensions.custom-provider-relay.index :as relay]
-            [agent.extensions.custom-provider-deepseek.index :as deepseek]))
+            [agent.extensions.custom-provider-deepseek.index :as deepseek]
+            [agent.extensions.custom-provider-opencode-zen.index :as zen]
+            [agent.extensions.custom-provider-local.index :as local]))
 
 (def ^:private base-body
   (js/JSON.stringify #js {:model "m" :messages #js [#js {:role "user" :content "hi"}]}))
@@ -216,3 +218,60 @@
                   (let [b (rewrite (relay/chat-request-rewriter "velona") (body-for "deepseek/deepseek-v4-pro"))]
                     (-> (expect (.-reasoning b)) (.toBeUndefined))
                     (-> (expect (.-reasoning_effort b)) (.toBeUndefined)))))))
+
+;; ── opencode-zen (chat path) ──────────────────────────────────────
+(describe "wire/opencode-zen"
+          (fn []
+            (it "GLM and DeepSeek get thinking + low/high/max; off disables"
+                (fn []
+                  (reset! zen/level-fn-atom (fn [] "high"))
+                  (let [b (rewrite zen/request-rewriter (body-for "glm-5.3-flash"))]
+                    (-> (expect (.-reasoning_effort b)) (.toBe "max")))
+                  (reset! zen/level-fn-atom (fn [] "off"))
+                  ;; measured: Zen honours disabled even for glm-5.3
+                  (let [b (rewrite zen/request-rewriter (body-for "deepseek-v4-pro"))]
+                    (-> (expect (.-type (.-thinking b))) (.toBe "disabled")))))
+
+            (it "Qwen gets OpenAI's scale with thinking (max 400s there)"
+                (fn []
+                  (reset! zen/level-fn-atom (fn [] "xhigh"))
+                  (let [b (rewrite zen/request-rewriter (body-for "qwen3.6-plus"))]
+                    (-> (expect (.-reasoning_effort b)) (.toBe "high"))
+                    (-> (expect (.-type (.-thinking b))) (.toBe "enabled")))))
+
+            (it "Gemini/Grok never get a thinking key (Zen 400s on it)"
+                (fn []
+                  (reset! zen/level-fn-atom (fn [] "medium"))
+                  (let [b (rewrite zen/request-rewriter (body-for "gemini-3.5-flash-lite"))]
+                    (-> (expect (.-thinking b)) (.toBeUndefined))
+                    (-> (expect (.-reasoning_effort b)) (.toBe "medium")))
+                  (reset! zen/level-fn-atom (fn [] "off"))
+                  (let [b (rewrite zen/request-rewriter (body-for "grok-4.5"))]
+                    (-> (expect (.-thinking b)) (.toBeUndefined))
+                    (-> (expect (.-reasoning_effort b)) (.toBeUndefined)))))))
+
+;; ── local servers ─────────────────────────────────────────────────
+(describe "wire/local"
+          (fn []
+            (let [lift (fn [b _] b)]
+              (it "off sends both off switches (Ollama /v1, llama.cpp, vLLM)"
+                  (fn []
+                    (reset! local/level-fn-atom (fn [] "off"))
+                    (let [b (rewrite (local/reasoning-rewriter {} lift) nil)]
+                      (-> (expect (.-reasoning_effort b)) (.toBe "none"))
+                      (-> (expect (.. b -chat_template_kwargs -enable_thinking)) (.toBe false)))))
+
+              (it "a level goes out top-level and to the template"
+                  (fn []
+                    (reset! local/level-fn-atom (fn [] "xhigh"))
+                    (let [b (rewrite (local/reasoning-rewriter {} lift) nil)]
+                      (-> (expect (.-reasoning_effort b)) (.toBe "high"))
+                      (-> (expect (.. b -chat_template_kwargs -enable_thinking)) (.toBe true))
+                      (-> (expect (.. b -chat_template_kwargs -reasoning_effort)) (.toBe "high")))))
+
+              (it "an entry with reasoning none sends nothing"
+                  (fn []
+                    (reset! local/level-fn-atom (fn [] "high"))
+                    (let [b (rewrite (local/reasoning-rewriter {:reasoning "none"} lift) nil)]
+                      (-> (expect (.-reasoning_effort b)) (.toBeUndefined))
+                      (-> (expect (.-chat_template_kwargs b)) (.toBeUndefined))))))))
