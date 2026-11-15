@@ -163,8 +163,7 @@
 
 (defn ^:export default [api]
   (reset! settings-atom (.settings api))
-  (reset! level-fn-atom (when (.-getThinkingLevel api)
-                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
+  (reset! level-fn-atom (rr/level-reader (when (.-getThinkingLevel api) #(.getThinkingLevel api))))
   (.registerProvider api provider-name
                      #js {:createModel create-openrouter-model
                           :baseUrl     default-base-url

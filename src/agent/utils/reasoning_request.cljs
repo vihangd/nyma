@@ -97,3 +97,27 @@
     "minimal" "low"
     "xhigh"   "high"
     level))
+
+(defn level-reader
+  "Guard `read` (a thunk calling the extension's own `api.getThinkingLevel`,
+   kept at the call site so the capability lint sees it): nil when absent,
+   and nil rather than a throw on a read that fails. Read per request:
+   /thinking changes at any time."
+  [read]
+  (when read
+    (fn [] (try (read) (catch :default _e nil)))))
+
+(defn- bare-id [model-id]
+  (let [s (str model-id) i (.lastIndexOf s "/")] (.toLowerCase (subs s (inc i)))))
+
+(defn glm-deepseek-body
+  "The GLM / DeepSeek V4 body for `model-id` (vendor prefix allowed), or nil
+   for any other family. GLM-5.3 rejects `thinking: disabled` (400 on z.ai
+   direct and on opencode-zen), so `off` there is the lightest effort.
+   ponytail: hardcoded family; a new always-thinking GLM goes in the regex,
+   or retry on 400 code 1210 if they multiply."
+  [level model-id]
+  (let [id (bare-id model-id)]
+    (cond
+      (.startsWith id "glm-")        (thinking-effort-body level (some? (re-find #"^glm-5\.3" id)))
+      (.startsWith id "deepseek-v4") (thinking-effort-body level false))))

@@ -111,7 +111,8 @@
 ;; Zen relays each family to its own upstream, and what survives depends on
 ;; it. Measured 2026-11-15 (reasoning chars / output tokens):
 ;;   - `thinking: disabled` turns reasoning off for GLM, DeepSeek, Qwen, Kimi
-;;     K3 and MiniMax M3, but 400s for Gemini and Grok ("thinking: cannot be
+;;     K3 and MiniMax M3 (not glm-5.3: 400, as on z.ai), but 400s for Gemini
+;;     and Grok ("thinking: cannot be
 ;;     represented by google").
 ;;   - GLM and DeepSeek take low/high/max effort; GLM's default is max, so
 ;;     OpenAI's `high` asked for less (68 against 304 with nothing).
@@ -122,16 +123,14 @@
 (defmethod rr/reasoning-body provider-name [_ level model-id]
   (let [id (.toLowerCase (str model-id))
         l  (rr/active-level level)]
-    (cond
-      (or (str/starts-with? id "glm-") (str/starts-with? id "deepseek-"))
-      (rr/thinking-effort-body level false)
+    (or (rr/glm-deepseek-body level id)
+        (cond
+          (some #(str/starts-with? id %) thinking-families)
+          (if l
+            {:thinking {:type "enabled"} :reasoning_effort (rr/openai-effort l)}
+            {:thinking {:type "disabled"}})
 
-      (some #(str/starts-with? id %) thinking-families)
-      (if l
-        {:thinking {:type "enabled"} :reasoning_effort (rr/openai-effort l)}
-        {:thinking {:type "disabled"}})
-
-      l {:reasoning_effort (rr/openai-effort l)})))
+          l {:reasoning_effort (rr/openai-effort l)}))))
 
 (defn request-rewriter
   "Lift <think> for replay, then add the live thinking level for the model in
@@ -185,8 +184,7 @@
             :chat      (.chat provider id)))))))
 
 (defn ^:export default [api]
-  (reset! level-fn-atom (when (.-getThinkingLevel api)
-                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
+  (reset! level-fn-atom (rr/level-reader (when (.-getThinkingLevel api) #(.getThinkingLevel api))))
   ;; Opt-in, settings-driven — the same shape `local` and `relay` already use,
   ;; so this is one more provider honouring an existing switch rather than a
   ;; new mechanism:  {"opencode-zen": {"rescue-parsing": true}}

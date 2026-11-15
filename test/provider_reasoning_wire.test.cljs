@@ -228,7 +228,10 @@
                   (let [b (rewrite zen/request-rewriter (body-for "glm-5.3-flash"))]
                     (-> (expect (.-reasoning_effort b)) (.toBe "max")))
                   (reset! zen/level-fn-atom (fn [] "off"))
-                  ;; measured: Zen honours disabled even for glm-5.3
+                  ;; measured: Zen's glm-5.3 400s on disabled, as z.ai does
+                  (let [b (rewrite zen/request-rewriter (body-for "glm-5.3"))]
+                    (-> (expect (.-thinking b)) (.toBeUndefined))
+                    (-> (expect (.-reasoning_effort b)) (.toBe "low")))
                   (let [b (rewrite zen/request-rewriter (body-for "deepseek-v4-pro"))]
                     (-> (expect (.-type (.-thinking b))) (.toBe "disabled")))))
 

@@ -331,8 +331,7 @@
 ;; ── Entry point ──────────────────────────────────────────────────
 
 (defn ^:export default [api]
-  (reset! level-fn-atom (when (.-getThinkingLevel api)
-                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
+  (reset! level-fn-atom (rr/level-reader (when (.-getThinkingLevel api) #(.getThinkingLevel api))))
   (let [settings       (.settings api)
         user-entries   (some-> settings load-settings-models
                                (->> (mapv normalize-entry)))

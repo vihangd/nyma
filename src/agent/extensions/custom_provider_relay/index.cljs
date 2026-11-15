@@ -397,25 +397,10 @@
 ;; openlux): GLM and DeepSeek V4 take `thinking` + low/high/max effort, where
 ;; an OpenAI `high` asks GLM for LESS than its default max. Kimi on openlux
 ;; reasons on any `reasoning_effort` and ignores `thinking`, so it stays here.
-(defn- bare-id [model-id]
-  (let [s (str model-id) i (.lastIndexOf s "/")] (.toLowerCase (subs s (inc i)))))
-
-(defn- glm-always-thinks?
-  ;; ponytail: hardcoded family; on a new always-thinking GLM, retry on 400
-  ;; code 1210 instead of listing it here.
-  [id] (str/starts-with? id "glm-5.3"))
-
 (defmethod rr/reasoning-body reasoning-dialect [_ level model-id]
-  (let [id (bare-id model-id)]
-    (cond
-      (str/starts-with? id "glm-")         (rr/thinking-effort-body level (glm-always-thinks? id))
-      (str/starts-with? id "deepseek-v4")  (rr/thinking-effort-body level false)
-      :else
+  (or (rr/glm-deepseek-body level model-id)
       (when-let [l (rr/active-level level)]
-        {:reasoning_effort (case l
-                             "minimal" "low"
-                             "xhigh"   "high"
-                             l)}))))
+        {:reasoning_effort (rr/openai-effort l)})))
 
 ;; Velona (measured 2026-11-15, deepseek-v4-pro and kimi-k2.6): reasoning is
 ;; always on and never returned; neither `reasoning_effort` nor
@@ -643,8 +628,7 @@
               (register! api entry (merge-declared fresh declared) endpoints-box))))))))
 
 (defn ^:export default [api]
-  (reset! level-fn-atom (when (.-getThinkingLevel api)
-                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
+  (reset! level-fn-atom (rr/level-reader (when (.-getThinkingLevel api) #(.getThinkingLevel api))))
   (reset! active-tools-atom (rescue/active-tools-fn api))
   (let [settings   (.settings api)
         user       (try (load-settings-entries settings)
