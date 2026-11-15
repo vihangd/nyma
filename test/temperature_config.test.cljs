@@ -52,6 +52,9 @@
                   (-> (expect (js/JSON.stringify #js {:temperature (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-opus-5-5"})}))
                       (.toBe "{}"))
                   (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-sonnet-4-6"})) (.toBe 0.2))
+                  ;; measured: 400 "`temperature` is deprecated for this model"
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-haiku-5-5"})) (.toBe js/undefined))
+                  (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "claude-haiku-4-5"})) (.toBe 0.2))
                   (-> (expect (loop/sampling-temperature {:temperature 0.2} #js {:modelId "gpt-5.5"})) (.toBe 0.2))))
 
             (it "appears in the streamText config, not just the agent config"

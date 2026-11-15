@@ -82,10 +82,12 @@
 
 (defn rejects-sampling?
   "Current Claude models refuse non-default temperature/top_p with a 400:
-   Opus 4.7+, Sonnet 5+, Fable, Mythos. Sonnet/Opus 4.6 still accept them.
-   (The same split as @ai-sdk/anthropic's capability table.)"
+   Opus 4.7+, Sonnet 5+, Haiku 5+, Fable, Mythos. Sonnet/Opus 4.6 still
+   accept them. Haiku 5.5 measured: \"`temperature` is deprecated for this
+   model\" — and @ai-sdk/anthropic's capability table has no haiku-5 row, so
+   it does not strip it either."
   [model]
-  (boolean (re-find #"claude-(fable|mythos)-|claude-opus-(4-[7-9]|[5-9])|claude-sonnet-[5-9]" (model-id model))))
+  (boolean (re-find #"claude-(fable|mythos)-|claude-opus-(4-[7-9]|[5-9])|claude-(sonnet|haiku)-[5-9]" (model-id model))))
 
 (defn- always-thinks?
   "Models that reject disabling thinking outright (a 400): `off` can only
