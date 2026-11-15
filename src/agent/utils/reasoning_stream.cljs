@@ -183,7 +183,12 @@
             ts (js/TransformStream.
                 #js {:transform
                      (fn [chunk controller]
-                       (swap! buffer str (.decode decoder chunk #js {:stream true}))
+                       ;; CRLF folded on the whole buffer, so a \r\n split
+                       ;; across chunks still folds once both halves are in.
+                       ;; Otherwise a CRLF server never matches \n\n: the
+                       ;; whole reply buffers to the end and goes untransformed.
+                       (swap! buffer #(.replace (str % (.decode decoder chunk #js {:stream true}))
+                                                (js/RegExp. "\r\n" "g") "\n"))
                        ;; SSE events are delimited by \n\n. Process complete
                        ;; events; keep partial in buffer.
                        (let [parts (.split @buffer "\n\n")

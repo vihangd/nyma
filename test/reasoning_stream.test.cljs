@@ -201,6 +201,17 @@
                    (-> (expect content) (.toContain "plan"))
                    (-> (expect content) (.not.toContain "gAAAAB")))))))
 
+(describe "reasoning-stream/wrap-response CRLF"
+          (fn []
+            (it "a CRLF server, with \\r\\n split across reads, streams per event"
+                (^:async fn []
+                 (let [chunks #js ["data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"},\"index\":0}]}\r"
+                                   "\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"index\":0}]}\r\n\r\n"
+                                   "data: [DONE]\r\n\r\n"]
+                       content (assembled-content (js-await (.text (wrap-response (sse-response chunks) false))))]
+                   (-> (expect content) (.toContain "<think>plan</think>"))
+                   (-> (expect content) (.toContain "ok")))))))
+
 ;;; ─── prefill must not fire on the role-only chunk ────────────────────────
 ;;;
 ;;; vLLM opens every stream with {"role":"assistant","content":""} and then
