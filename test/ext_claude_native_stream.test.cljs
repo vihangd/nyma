@@ -305,3 +305,13 @@
 
 (describe "claude-native/stream — thinking blocks" (fn []
                                                      (it "streams thinking as reasoning parts, signature on the end" test-thinking-block)))
+
+(defn ^:async test-window-exceeded-is-error []
+  (let [parts (js-await (collect-parts [msg-start (block-start 0 "text") (text-delta 0 "par")
+                                        (block-stop 0) (msg-delta-line "model_context_window_exceeded") msg-stop]))
+        err   (first (filter #(= "error" (.-type %)) parts))]
+    (-> (expect (some? err)) (.toBe true))
+    (-> (expect (.includes (.-message (.-error err)) "model_context_window_exceeded")) (.toBe true))))
+
+(describe "claude-native/stream — window exceeded" (fn []
+  (it "stop_reason model_context_window_exceeded becomes an overflow error" test-window-exceeded-is-error)))

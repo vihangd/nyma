@@ -15,6 +15,7 @@
    `should-fall-back?` says no to 401 and to context overflow even though both
    stop the turn dead."
   (:require [clojure.string :as str]
+            [agent.utils.error-class :as error-class]
             [agent.model-info :as model-info]))
 
 ;; ── how ──────────────────────────────────────────────────────────
@@ -57,7 +58,9 @@
    ;; unreachable or wedged backend this way, which is squarely what the chain
    ;; is for. A bare "context" in request-patterns used to swallow it.
    "deadline exceeded"
-   "503" "502" "504" "500" "overloaded" "capacity" "saturated"
+   "503" "502" "504" "500" "529" "overloaded" "capacity" "saturated"
+   ;; openlux's capacity 429: "当前分组上游负载已饱和", no code, no English.
+   "负载已饱和"
    "service unavailable" "bad gateway" "internal server error"
    "no healthy upstream"
    ;; The model itself is not there: a 404 on the model route, or a local
@@ -103,6 +106,9 @@
     (cond
       (str/blank? m)              false
       (has request-patterns)      false
+      ;; The shared overflow list: a prompt that does not fit is not the
+      ;; endpoint's fault, and compaction is what recovers it.
+      (error-class/context-overflow? m) false
       (has availability-patterns) true
       :else                       false)))
 

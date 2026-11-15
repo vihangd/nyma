@@ -1,6 +1,7 @@
 (ns agent.sessions.compaction
   "Context window compaction."
   (:require [agent.utils.content :as content]
+            [agent.utils.error-class :as error-class]
             ["ai" :refer [generateText]]
             ["node:fs" :as fs]
             ["node:path" :as path]
@@ -1110,21 +1111,13 @@ with every section below present.
 
 ;; ── Overflow recovery ──────────────────────────────────────────────────────
 
-(def ^:private overflow-patterns
-  ;; Providers phrase this a dozen ways and none of them is a stable code.
-  ["context length" "context_length" "maximum context" "context window"
-   "too many tokens" "prompt is too long" "input is too long"
-   "reduce the length" "exceeds the maximum number of tokens" "exceed context"
-   "token limit"])
-
 (defn context-overflow-error?
   "Is this provider error 'your prompt does not fit'?
 
    Pure and string-matched on purpose: there is no portable error code for it
    across the relay, local and first-party providers this talks to."
   [e]
-  (let [msg (str/lower-case (str (or (some-> e .-message) e "")))]
-    (boolean (some #(str/includes? msg %) overflow-patterns))))
+  (error-class/context-overflow? (str (or (some-> e .-message) e ""))))
 
 (defn ^:async recover-from-overflow!
   "Compact after a context-overflow error. True if the history got shorter; the

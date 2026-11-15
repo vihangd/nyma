@@ -27,6 +27,35 @@
    \"generate\"."
   (:require [clojure.string :as str]))
 
+(def overflow-patterns
+  "Every way a provider says \"your prompt does not fit\", lower-case. ONE list:
+   compaction's overflow recovery, this classifier and the fallback chain each
+   kept their own, and they disagreed (Anthropic's \"exceed context limit\" and
+   Gemini's \"exceeds the maximum number of tokens\" recovered but classified
+   as unknown). Never a bare \"context\": Go servers say \"context deadline
+   exceeded\" for a timeout."
+  ["context length" "context_length" "maximum context" "context window"
+   "too many tokens" "prompt is too long" "input is too long"
+   "reduce the length" "exceeds the maximum number of tokens" "exceed context"
+   "token limit" "maximum tokens"
+   ;; llama.cpp: "request (N tokens) exceeds the available context size"
+   "context size"
+   ;; z.ai 1261, DashScope, xAI, Anthropic's stop reason
+   "prompt exceeds max length" "range of input length" "maximum prompt length"
+   "model_context_window_exceeded"])
+
+(defn context-overflow?
+  "Does this message say the prompt did not fit? Pure."
+  [msg]
+  (let [m (str/lower-case (str (or msg "")))]
+    (boolean (some #(.includes m %) overflow-patterns))))
+
+(defn- has-code?
+  "A status code standing alone in `m`, not inside a request id or a token
+   count (\"req_429…\", \"1403 tokens\")."
+  [m code]
+  (.test (js/RegExp. (str "(?:^|[^\\d.])" code "(?![\\d.])")) m))
+
 (def types
   "The classifications, which double as Claude-Code hook matcher values."
   #{"context_length" "auth" "rate_limit" "overloaded" "unavailable" "unknown"})
@@ -43,18 +72,21 @@
       (str/blank? m) "unknown"
 
       ;; First: a prompt that will not fit. See the ordering note above.
-      (has "context length" "context_length" "context window" "too long"
-           "maximum tokens" "prompt is too long")
+      (or (context-overflow? m) (has "too long"))
       "context_length"
 
-      (has "401" "403" "invalid api key" "invalid x-api-key" "invalid_api_key"
-           "api key" "api_key" "unauthorized" "authentication" "forbidden")
+      (or (has-code? m "401") (has-code? m "403")
+          (has "invalid api key" "invalid x-api-key" "invalid_api_key"
+               "api key" "api_key" "unauthorized" "authentication" "forbidden"))
       "auth"
 
-      (has "429" "rate limit" "rate_limit" "rate-limit" "quota")
+      (or (has-code? m "429") (has "rate limit" "rate_limit" "rate-limit" "quota"))
       "rate_limit"
 
-      (has "overloaded" "capacity" "saturated" "503" "502" "504")
+      ;; openlux's capacity 429 carries neither the code nor English:
+      ;; "当前分组上游负载已饱和" (this group's upstream load is saturated).
+      (or (has-code? m "503") (has-code? m "502") (has-code? m "504") (has-code? m "529")
+          (has "overloaded" "capacity" "saturated" "负载已饱和"))
       "overloaded"
 
       (has "econnrefused" "enotfound" "econnreset" "etimedout" "fetch failed"

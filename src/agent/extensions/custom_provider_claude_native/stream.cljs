@@ -168,6 +168,16 @@
         (reset! stop-reason (.. evt -delta -stop_reason))
         (reset! delta-usage (.-usage evt)))
 
+      ;; The window ran out mid-answer: an overflow, not a finish, so the
+      ;; loop's compact-and-retry recognises it (error-class overflow list).
+      (and (= t "message_stop") (= "model_context_window_exceeded" @stop-reason))
+      (do
+        (enqueue-safe! ctrl
+                       #js {:type  "error"
+                            :error (js/Error. "model_context_window_exceeded: the prompt exceeds the context window")}
+                       closed?)
+        (close-safe! ctrl closed?))
+
       (= t "message_stop")
       (let [fr  (or @stop-reason "end_turn")]
         (enqueue-safe! ctrl
