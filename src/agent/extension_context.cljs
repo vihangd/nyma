@@ -71,7 +71,10 @@
                                                               (:config agent))}
                                                  ;; squint has no js->clj — this threw for ANY extension
                                                  ;; calling api.compact(opts).
-                                                 (ji/js->clj* opts)))))
+                                                 (ji/js->clj* opts)
+                                                 ;; a function: the JSON round-trip drops it
+                                                 (when-let [f (some-> opts (aget "abort?"))]
+                                                   {:abort? f})))))
 
          ;; System prompt
          :getSystemPrompt    (fn [] (:system-prompt (:config agent)))

@@ -183,6 +183,25 @@
                                                                                "## 6. Pending Tasks"))
                                                             (.toBe true)))))
 
+                                        (it "abort? true after before_compact leaves the conversation alone"
+                                            ;; a prompt sent while a PreCompact hook ran must not be cut
+                                            ^:async (fn []
+                                                      (let [sm    (session-with 40)
+                                                            state (state-with-snapshot sm)
+                                                            evs   {:on (fn [_ _] nil) :emit (fn [_ _] nil)
+                                                                   :emit-async (fn [_ _]
+                                                                                 (swap! state update :messages conj
+                                                                                        {:role "user" :content "new prompt"})
+                                                                                 (js/Promise.resolve nil))}
+                                                            n0    (count (:messages @state))
+                                                            res   (js-await (c/compact sm claude-x evs
+                                                                                       {:gen-fn (capture (atom []) six) :state-atom state
+                                                                                        :force? true :summary six :trigger "idle"
+                                                                                        :abort? (fn [] (not= n0 (count (:messages @state))))}))]
+                                                        (-> (expect res) (.toBeNil))
+                                                        (-> (expect (:content (last (:messages @state)))) (.toBe "new prompt"))
+                                                        (-> (expect (count (:messages @state))) (.toBe (inc n0))))))
+
                                         (it "a precomputed summary is applied without a model call"
                                             ^:async (fn []
                                                       (let [sm    (session-with 40)

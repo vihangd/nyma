@@ -777,6 +777,10 @@ with every section below present.
                                    ;; Idle compaction: compute the summary only and
                                    ;; return it, or apply one computed earlier.
                                    summarize-only? summary trigger
+                                   ;; Checked once the before_compact hooks return: true
+                                   ;; drops the compaction (idle compaction, when the
+                                   ;; user sent a prompt while a PreCompact hook ran).
+                                   abort?
                                    ;; The agent's store: a summary call is spend
                                    ;; like any other, recorded as :extension-usage.
                                    store]}]]
@@ -882,6 +886,8 @@ with every section below present.
           (js-await ((:emit-async events) "before_compact" evt-ctx))
           (when (some? summary) (aset evt-ctx "summary" summary)))
 
+        (if (and abort? (abort?))
+          nil
         (if (and (.-summary evt-ctx)
                  ;; An extension summary is used only if it VALIDATES. It used
                  ;; to be written regardless ("warn, but never block"), which in
@@ -1026,7 +1032,7 @@ with every section below present.
                                :before  usage
                                :after   after})
               {:before usage :after after :summariser :built-in
-               :rejected rejected-errors})))))
+               :rejected rejected-errors}))))))
           (finally (cleanup-precompact-dump dump)))))))
 
 (defn adopt-server-summary!

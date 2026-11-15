@@ -153,7 +153,8 @@
                         (when (and (= ep @epoch) (same-conv? conv))
                           (try
                             (let [r (js-await (.compact ctx #js {"force?" true "summary" summary
-                                                                 "trigger" "idle"}))]
+                                                                 "trigger" "idle"
+                                                                 "abort?" #(or (not= ep @epoch) (not (same-conv? conv)))}))]
                               (when (and r (some-> ctx .-ui .-available))
                                 (.notify (.-ui ctx)
                                          (str "Compacted while idle — the prompt cache had expired"
