@@ -219,6 +219,12 @@
                                               :baseUrl     default-base-url
                                               :apiKeyEnv   "OPENCODE_ZEN_API_KEY"
                                               :api         "openai-compatible"
+                                              ;; A gateway: its rates are its
+                                              ;; own (opencode-zen/… rows), so a
+                                              ;; model with none must read as
+                                              ;; unpriced, not borrow the
+                                              ;; vendor's price for the bare id.
+                                              :unpriced    true
                                               :models      (clj->js (mapv ->js-model ms))})))
         all       (constantly true)
         cached    (model-fetch/cached-models provider-name all)]

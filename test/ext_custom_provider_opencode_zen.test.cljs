@@ -60,7 +60,7 @@
                                                                   (let [agent (create-agent {:model "test" :system-prompt "test"})
                                                                         api   (create-extension-api agent)
                                                                         _     ((.-default zen-ext) api)
-                                                                        info  ((:get (:model-registry agent)) "minimax-m2.5-free")]
+                                                                        info  ((:get (:model-registry agent)) "opencode-zen/minimax-m2.5-free")]
                                                                     (-> (expect (:context-window info)) (.toBe 204800)))))
 
                                                             (it "registers zero-cost pricing for free models"
@@ -68,7 +68,7 @@
                                                                   (let [agent (create-agent {:model "test" :system-prompt "test"})
                                                                         api   (create-extension-api agent)
                                                                         _     ((.-default zen-ext) api)
-                                                                        costs (get @pricing/token-costs "minimax-m2.5-free")]
+                                                                        costs (get @pricing/token-costs "opencode-zen/minimax-m2.5-free")]
                                                                     (-> (expect (first costs)) (.toBe 0))
                                                                     (-> (expect (second costs)) (.toBe 0)))))
 
@@ -77,7 +77,7 @@
                                                                   (let [agent (create-agent {:model "test" :system-prompt "test"})
                                                                         api   (create-extension-api agent)
                                                                         _     ((.-default zen-ext) api)
-                                                                        costs (get @pricing/token-costs "gpt-5.4-pro")]
+                                                                        costs (get @pricing/token-costs "opencode-zen/gpt-5.4-pro")]
                                                                     (-> (expect (first costs)) (.toBe 30.0))
                                                                     (-> (expect (second costs)) (.toBe 180.0)))))))
 
@@ -350,3 +350,14 @@
           (-> (expect (.-context_management (js/JSON.parse @sent))) (.toBeUndefined))
           (-> (expect (.-model (js/JSON.parse @sent))) (.toBe "m"))
           (finally (set! js/globalThis.fetch orig))))))))
+
+(describe "opencode-zen pricing" (fn []
+  (it "a Zen model with no rate row is unpriced, not the vendor's bare-id price"
+    (fn []
+      (let [agent (create-agent {:model "claude-sonnet-4-6"})
+            api   (create-extension-api agent)]
+        ((.-default zen-ext) api)
+        (swap! pricing/token-costs assoc "zz-test-model" [5 5])
+        (-> (expect (pricing/lookup-cost "opencode-zen/zz-test-model")) (.toBeFalsy))
+        (-> (expect (pricing/lookup-cost "opencode-zen/claude-sonnet-4-6")) (.toBeTruthy))
+        (swap! pricing/token-costs dissoc "zz-test-model"))))))
