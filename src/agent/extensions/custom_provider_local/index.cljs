@@ -125,8 +125,11 @@
 ;;     enable_thinking), which the model's Jinja template reads.
 ;;   - vLLM: `chat_template_kwargs.enable_thinking`.
 ;;   - LM Studio: ignores all of them (reported); nothing to lose.
-;; So both go out. A server that rejects them: `"reasoning": "none"` on the
-;; `local-models` entry sends neither.
+;; So both go out. A server that rejects them answers 400 naming the field
+;; ("does not support thinking": Ollama, for a model without it, whenever
+;; thinking is on; vLLM on `none`): that request is sent again without them,
+;; and that model gets none from then on. `"reasoning": "none"` on the
+;; `local-models` entry never sends them.
 (def level-fn-atom (atom nil))
 
 (defmethod rr/reasoning-body "local" [_ level _model-id]
@@ -137,19 +140,50 @@
     {:reasoning_effort     "none"
      :chat_template_kwargs {:enable_thinking false}}))
 
+(def ^:private rejects
+  "entry-name/model pairs whose server refused the reasoning fields."
+  (atom #{}))
+
+(defn- body-model [body-str]
+  (try (str (.-model (js/JSON.parse body-str))) (catch :default _ "")))
+
+(defn- reject-key [entry model] (str (:name entry) "/" model))
+
 (defn reasoning-rewriter
   "Wrap `lift` (the <think> replay rewriter) with the live thinking level,
-   unless the entry opts out with `\"reasoning\": \"none\"`."
+   unless the entry opts out with `\"reasoning\": \"none\"` or the server
+   already refused it for this model."
   [entry lift]
   (if (= "none" (str (or (:reasoning entry) (get entry "reasoning"))))
     lift
     (fn [body-str init]
       (let [lifted (lift body-str init)]
-        (try
-          (rr/splice-absent lifted (rr/reasoning-body "local"
-                                                      (when-let [f @level-fn-atom] (f))
-                                                      nil))
-          (catch :default _ lifted))))))
+        (if (contains? @rejects (reject-key entry (body-model lifted)))
+          lifted
+          (try
+            (rr/splice-absent lifted (rr/reasoning-body "local"
+                                                        (when-let [f @level-fn-atom] (f))
+                                                        nil))
+            (catch :default _ lifted)))))))
+
+(defn retry-without-reasoning
+  "A 400 that names thinking/reasoning: remember the model and send the same
+   request again (the rewriter then leaves the fields out). Once per model."
+  [entry f]
+  (fn [url init]
+    (-> (f url init)
+        (.then (fn [res]
+                 (let [k (reject-key entry (body-model (some-> init .-body)))]
+                   (if (or (not= 400 (.-status res)) (contains? @rejects k))
+                     res
+                     (-> (.text (.clone res))
+                         (.then (fn [t]
+                                  (if (re-find #"(?i)think|reason" t)
+                                    (do (swap! rejects conj k)
+                                        (d/info "local-provider"
+                                                (str k " refused the reasoning fields; sending without"))
+                                        (f url init))
+                                    res)))))))))))
 
 (defn- create-model-fn [entry get-active-tools]
   (fn [model-id]
@@ -169,9 +203,11 @@
                                         (rs/make-lift-think-request-rewriter
                                          (boolean prefill?)))
                                        {:think-prefill? (boolean prefill?)})
-          base-fetch   (if rescue?
-                         (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)
-                         (mk-fetch))
+          base-fetch   (retry-without-reasoning
+                        entry
+                        (if rescue?
+                          (adapter/wrap-fetch-with-rescue (mk-fetch) get-active-tools)
+                          (mk-fetch)))
           ;; A local server that rejects the placeholder answers 401 and the
           ;; user sees a bare "Invalid API key" — naming neither the provider
           ;; nor the variable to set. Everything needed to say so is right here.

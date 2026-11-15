@@ -275,3 +275,30 @@
                     (let [b (rewrite (local/reasoning-rewriter {:reasoning "none"} lift) nil)]
                       (-> (expect (.-reasoning_effort b)) (.toBeUndefined))
                       (-> (expect (.-chat_template_kwargs b)) (.toBeUndefined))))))))
+
+(defn ^:async test-local-retry-without-reasoning []
+  ;; measured: Ollama answers 400 "does not support thinking" for a model
+  ;; without it whenever reasoning_effort is set to a level
+  (reset! local/level-fn-atom (fn [] "high"))
+  (let [entry  {:name "retry-test"}
+        rw     (local/reasoning-rewriter entry (fn [b _] b))
+        sent   (atom [])
+        server (fn [_url init]
+                 (let [b (js/JSON.parse (rw (.-body init) init))]
+                   (swap! sent conj b)
+                   (js/Promise.resolve
+                    (if (.-reasoning_effort b)
+                      (js/Response. "{\"error\":{\"message\":\"m does not support thinking\"}}" #js {:status 400})
+                      (js/Response. "{}" #js {:status 200})))))
+        f      (local/retry-without-reasoning entry server)
+        init   #js {:body (body-for "plain-model")}
+        res    (js-await (f "u" init))
+        res2   (js-await (f "u" init))]
+    (-> (expect (.-status res)) (.toBe 200))
+    (-> (expect (count @sent)) (.toBe 3))
+    ;; the model is remembered: the next request goes out without the fields
+    (-> (expect (.-status res2)) (.toBe 200))
+    (-> (expect (.-reasoning_effort (last @sent))) (.toBeUndefined))))
+
+(describe "wire/local retry" (fn []
+  (it "a 400 naming thinking resends once without the fields, then remembers" test-local-retry-without-reasoning)))
