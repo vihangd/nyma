@@ -247,3 +247,20 @@
       (let [cfg #js {:maxOutputTokens 5000 :messages #js []}]
         (fb/retarget! cfg #js {:modelId "m"} "acme/x")
         (-> (expect (.-maxOutputTokens cfg)) (.toBe 5000)))))))
+
+(defn ^:async test-fallback-reruns-request-setup []
+  ;; kv_cache breakpoints and server compaction are set in
+  ;; before_provider_request; they were built for the failed model only
+  (let [agent (make-test-agent {:model (failing)})
+        seen  (atom [])]
+    ((:on (:events agent)) "before_provider_request"
+                           (fn [cfg _] (swap! seen conj (some-> (.-model cfg) .-modelId)) nil))
+    ((:on (:events agent)) "provider_error"
+                           (fn [ctx _]
+                             (fb/retarget! (.-config ctx) (answer 1000) "fb-provider/fb-model")
+                             #js {:retry true}))
+    (js-await (run agent "go"))
+    (-> (expect (count @seen)) (.toBe 2))))
+
+(describe "fallback and request setup" (fn []
+  (it "before_provider_request runs again for the fallback model" test-fallback-reruns-request-setup)))

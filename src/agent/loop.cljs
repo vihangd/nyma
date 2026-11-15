@@ -947,6 +947,17 @@
                         ;; The request was built before these existed.
                         (aset st-config "messages"
                               (.concat (aget st-config "messages") (clj->js (:inject retry))))
+                        ;; A fallback swapped the model and cleared what was
+                        ;; built for the old one. Rebuild it for the new one:
+                        ;; its thinking dialect, then the extensions' request
+                        ;; setup (cache breakpoints, server compaction), which
+                        ;; otherwise ran for the model that failed only.
+                        (when (= "provider-fallback" (:reason retry))
+                          (when-let [po (thinking/level->provider-options
+                                         (when-let [tl (:thinking-level agent)] @tl)
+                                         (aget st-config "model"))]
+                            (aset st-config "providerOptions" po))
+                          (js-await (emit-collect "before_provider_request" st-config)))
                         (if (< attempt 2)
                           (recur (inc attempt))
                         ;; Max retries exceeded
@@ -1025,15 +1036,15 @@
                         (try
                           (if (seq @steered)
                             (swap! state dissoc :last-request)
-                          (swap! state assoc :last-request
-                                 (compaction/request-snapshot
-                                  st-config
+                            (swap! state assoc :last-request
+                                   (compaction/request-snapshot
+                                    st-config
                                   ;; Every step's, not `.response.messages`: that
                                   ;; is the final step's alone.
-                                  (or (js-await (.-responseMessages result))
-                                      (some-> (js-await (.-response result)) .-messages))
-                                  (:messages @state)
-                                  built-users)))
+                                    (or (js-await (.-responseMessages result))
+                                        (some-> (js-await (.-response result)) .-messages))
+                                    (:messages @state)
+                                    built-users)))
                           (catch :default e
                             (dbg/error "loop" (str "request snapshot: " (.-message e)))))
 
