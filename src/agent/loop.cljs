@@ -723,6 +723,10 @@
                                                 (swap! steered into (inject-steer-messages! agent)))}
 
               _ (reset! request-config st-config)
+              ;; Before any extension wraps it (kv_cache's step-breakpoint): a
+              ;; fallback re-runs the hooks, which must wrap this, not the
+              ;; previous wrapping.
+              base-prepare-step (aget st-config "prepareStep")
               ;; before_provider_request — extensions can MUTATE st-config in place
               provider-result (js-await
                                (emit-collect "before_provider_request" st-config))]
@@ -974,13 +978,23 @@
                                          (when-let [tl (:thinking-level agent)] @tl)
                                          (aget st-config "model"))]
                             (aset st-config "providerOptions" po))
-                          (js-await (emit-collect "before_provider_request" st-config)))
+                          (aset st-config "prepareStep" base-prepare-step))
+                        (if-let [block (when (= "provider-fallback" (:reason retry))
+                                         (let [r (js-await (emit-collect "before_provider_request" st-config))]
+                                           (when (get r "block")
+                                             (or (get r "reason") "Blocked by extension"))))]
+                          ;; A guard that blocks the fallback model blocks it,
+                          ;; as it would have on the first request.
+                          (do (if-let [store (:store agent)]
+                                ((:dispatch! store) :message-added {:message {:role "assistant" :content block}})
+                                (swap! state update :messages conj {:role "assistant" :content block}))
+                              (emit "agent_end" {:text block :usage nil}))
                         (if (< attempt 2)
                           (recur (inc attempt))
                         ;; Max retries exceeded
                           (emit "agent_end" {:text         @accumulated
                                              :usage        nil
-                                             :finishReason "stream-filter-aborted"})))
+                                             :finishReason "stream-filter-aborted"}))))
 
                     ;; Normal completion — capture final state, track usage
                       (let [final-text     (try

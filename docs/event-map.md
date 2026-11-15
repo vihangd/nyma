@@ -105,7 +105,7 @@ that matters least often, which is why this is worth a table of its own.
 | `acp_thought` | 2 | agent-key | **text, thought** |
 | `acp_tool_start` | 2 | agent-key | **kind, status, title, tool-id, toolCallId, toolName** |
 | `acp_tool_update` | 2 | agent-key, status | **content, tool-id, toolCallId** |
-| `agent_end` | 3 | text, usage | **finishReason** |
+| `agent_end` | 4 | text, usage | **finishReason** |
 | `provider_error` | 2 | config, message, model | **error, final, source** |
 | `session_ready` | 2 | cwd, extensions, model | **reason** |
 | `session_start` | 3 | reason | **previousSessionFile** |

@@ -274,5 +274,41 @@
     (js-await (run agent "go"))
     (-> (expect (count @seen)) (.toBe 2))))
 
+(defn ^:async test-fallback-block-is-honoured []
+  (let [agent  (make-test-agent {:model (failing)})
+        calls  (atom 0)
+        fb-mdl (new MockLanguageModelV4
+                    #js {:doStream (fn [_] (swap! calls inc) (js/Promise.reject (js/Error. "sent")))})]
+    ((:on (:events agent)) "before_provider_request"
+                           (fn [cfg _] (when (identical? fb-mdl (.-model cfg))
+                                         #js {:block true :reason "no fallback here"})))
+    ((:on (:events agent)) "provider_error"
+                           (fn [ctx _]
+                             (fb/retarget! (.-config ctx) fb-mdl "fb-provider/fb-model")
+                             #js {:retry true}))
+    (js-await (run agent "go"))
+    (-> (expect @calls) (.toBe 0))
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "no fallback here"))))
+
+(defn ^:async test-fallback-wraps-prepare-step-once []
+  ;; kv_cache wraps prepareStep in before_provider_request
+  (let [agent (make-test-agent {:model (failing)})
+        depth (atom [])]
+    ((:on (:events agent)) "before_provider_request"
+                           (fn [cfg _]
+                             (let [inner (.-prepareStep cfg)]
+                               (swap! depth conj (if (some-> inner .-wrapped) 2 1))
+                               (aset cfg "prepareStep" (doto (fn [o] (if inner (inner o) #js {}))
+                                                         (aset "wrapped" true))))
+                             nil))
+    ((:on (:events agent)) "provider_error"
+                           (fn [ctx _]
+                             (fb/retarget! (.-config ctx) (answer 1000) "fb-provider/fb-model")
+                             #js {:retry true}))
+    (js-await (run agent "go"))
+    (-> (expect (clj->js @depth)) (.toEqual #js [1 1]))))
+
 (describe "fallback and request setup" (fn []
-  (it "before_provider_request runs again for the fallback model" test-fallback-reruns-request-setup)))
+  (it "before_provider_request runs again for the fallback model" test-fallback-reruns-request-setup)
+  (it "a block from that second run stops the fallback request" test-fallback-block-is-honoured)
+  (it "an extension's prepareStep wrapper is not wrapped twice" test-fallback-wraps-prepare-step-once)))
