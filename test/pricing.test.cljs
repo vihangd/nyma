@@ -196,12 +196,19 @@
   (it "are priced at 2x input when kv_cache marks 1h breakpoints"
     (fn []
       (try
-        (reset! pricing/one-hour-cache-writes? true)
+        (reset! pricing/one-hour-cache-models #{"claude-opus-4-8"})
+        (-> (expect (pricing/calculate-turn-cost "anthropic/claude-opus-4-8"
+                                                 {:input-tokens 1000000 :cache-write-tokens 1000000}))
+            (.toBeCloseTo 10 6))
+        ;; another model keeps its own write rate
+        (-> (expect (pricing/calculate-turn-cost "claude-sonnet-4-6"
+                                                 {:input-tokens 1000000 :cache-write-tokens 1000000}))
+            (.toBeCloseTo 3.75 6))
         ;; opus-4-8: input 5 → 1h write 10 per 1M (the row's 6.25 is the 5m rate)
         (-> (expect (pricing/calculate-turn-cost "claude-opus-4-8"
                                                  {:input-tokens 1000000 :cache-write-tokens 1000000}))
             (.toBeCloseTo 10 6))
-        (finally (reset! pricing/one-hour-cache-writes? false)))
+        (finally (reset! pricing/one-hour-cache-models #{})))
       (-> (expect (pricing/calculate-turn-cost "claude-opus-4-8"
                                                {:input-tokens 1000000 :cache-write-tokens 1000000}))
           (.toBeCloseTo 6.25 6))))))

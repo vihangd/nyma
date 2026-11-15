@@ -235,8 +235,6 @@
                                                (str/join ", " (sort valid-ttls))))
                                   nil)))
 
-        _                 (reset! pricing/one-hour-cache-writes? (= "1h" ttl))
-
         on-before
         (fn [config-obj _ctx]
           ;; Reset FIRST: a stale true must not survive a request that skips
@@ -287,6 +285,8 @@
                   (when @prev-annotated? (reset! expected-hit? true))
                   (reset! annotated true))))
 
+            (when (and @annotated (= provider :anthropic) (= "1h" ttl))
+              (swap! pricing/one-hour-cache-models conj model-id))
             (reset! prev-annotated? @annotated)
 
             ;; OpenAI-shaped providers cache implicitly, routed by a hash of the
@@ -386,7 +386,7 @@
     ;; dead code — a fresh activate creates fresh atoms — while a leaked
     ;; handler double-annotates prompts and double-counts stats on reload.)
     (fn []
-      (reset! pricing/one-hour-cache-writes? false)
+      (reset! pricing/one-hour-cache-models #{})
       (.off api "before_provider_request" on-before)
       (.off api "after_provider_request" on-after)
       (.off api "compact" on-compact))))

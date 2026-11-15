@@ -97,12 +97,17 @@
   [config]
   (or (model-info/config-model-key config) ""))
 
-(def one-hour-cache-writes?
-  "Set by kv_cache when it marks breakpoints with a 1h TTL. Anthropic bills a
+(def one-hour-cache-models
+  "Bare model ids kv_cache has sent breakpoints with a 1h TTL. Anthropic bills a
    1-hour cache write at 2x input, not the 1.25x the price rows carry for the
    5-minute default, and the usage the SDK hands back does not say which TTL a
-   write had — nyma chose it, so nyma says."
-  (atom false))
+   write had — nyma chose it, so nyma says. Per model: a process-wide flag
+   doubled every model's cache writes (Gemini, OpenRouter), and did so even
+   with kv-cache disabled."
+  (atom #{}))
+
+(defn- one-hour-writes? [model-id]
+  (contains? @one-hour-cache-models (last (.split (str model-id) "/"))))
 
 (defn calculate-turn-cost
   "USD cost for one turn, pricing cached input separately when the model
@@ -138,7 +143,7 @@
         (let [fresh (max 0 (- input cr cw))]
           (+ (per-1m fresh in-rate)
              (per-1m cr (or cr-rate in-rate))
-             (per-1m cw (if (and @one-hour-cache-writes? (number? cw-rate))
+             (per-1m cw (if (and (number? cw-rate) (one-hour-writes? model-id))
                           (* 2 in-rate)
                           (or cw-rate in-rate)))
              (per-1m output out-rate)))))
