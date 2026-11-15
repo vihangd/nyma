@@ -1198,12 +1198,16 @@ Examples:
 
     ;; Load all extensions (both .cljs and .ts/.js). Up to a few seconds with
     ;; 40 builtins, during which the terminal was blank; one line on stderr,
-    ;; cleared once the TUI paints over it.
-    (when (and (not (contains? #{"print" "json"} mode)) (.-isTTY js/process.stderr))
-      (.write js/process.stderr (str "nyma " version ": loading extensions…\r")))
-    (let [loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
+    ;; erased once they are in. Not left for the TUI to paint over: it draws
+    ;; from column 0 without clearing, and the tail of this line stayed on the
+    ;; card ("nyma 0.13.1  ·  ng extensions…").
+    (let [notice?           (and (not (contains? #{"print" "json"} mode)) (.-isTTY js/process.stderr))
+          _                 (when notice?
+                              (.write js/process.stderr (str "nyma " version ": loading extensions…\r")))
+          loaded-extensions (js-await (discover-and-load (:extension-dirs resources) api
                                                          (:builtin-extensions resources)
                                                          (:extension-files resources)))
+          _                 (when notice? (.write js/process.stderr "\r\u001b[2K"))
           extensions-atom   (atom loaded-extensions)
           ;; Dev: save-to-live for extensions on disk (opt-in). Builtins are
           ;; compiled in and need the restart `bun run dev` already does.
