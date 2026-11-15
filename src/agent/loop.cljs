@@ -663,8 +663,13 @@
                                                   ;; step through the SDK, not the
                                                   ;; history: lowered here for a model
                                                   ;; that takes none.
+                                                  ;; Same rule: from `messages`, the
+                                                  ;; returned list compounded and
+                                                  ;; kv_cache's marks piled up past 4.
                                                   (multimodal/text-only? model-key)
-                                                  #js {:messages (multimodal/lower-images (.-messages o) model-key)}))
+                                                  #js {:messages (multimodal/lower-images
+                                                                  (.concat (.-initialMessages o) (.-responseMessages o))
+                                                                  model-key)}))
                              :onStepFinish    (fn [step]
                                                 ;; Steps, not runs. `:turn-count`
                                                 ;; in the store counts agent
