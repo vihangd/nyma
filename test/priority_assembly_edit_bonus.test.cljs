@@ -78,3 +78,18 @@
                           scored (map-indexed (fn [i m] [(pa/score-message m i total) i]) msgs)
                           lowest (first (sort-by first scored))]
                       (-> (expect (second lowest)) (.not.toBe 2)))))))
+
+(describe "pruning notice"
+          (fn []
+            (test "rides on the system prompt, never as a mid-conversation system message"
+                  ;; @ai-sdk/google throws on a system message past the first
+                  (fn []
+                    (let [api   #js {:estimateTokens (fn [s] (count (str s)))}
+                          msgs  (clj->js (vec (for [i (range 10)] {:role (if (even? i) "user" "assistant")
+                                                                   :content (.repeat "x" 100)})))
+                          r     (pa/prune-messages api #js {:messages msgs :systemPrompt "SYS"
+                                                            :tokenBudget #js {:inputBudget 500}}
+                                                   {:min-keep 3})]
+                      (-> (expect (some #(= "system" (.-role %)) (.-messages r))) (.toBeFalsy))
+                      (-> (expect (.includes (.-system r) "messages pruned")) (.toBe true))
+                      (-> (expect (.startsWith (.-system r) "SYS")) (.toBe true)))))))

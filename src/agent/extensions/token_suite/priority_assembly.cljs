@@ -43,7 +43,7 @@
         focus-bonus (if (and (= role "assistant") (is-focus-summary? msg)) 50 0)]
     (+ base recency edit-bonus focus-bonus)))
 
-(defn- prune-messages [api event pa-cfg]
+(defn prune-messages [api event pa-cfg]
   (let [messages    (.-messages event)
         total       (.-length messages)
         budget      (.-tokenBudget event)
@@ -102,18 +102,22 @@
               (doseq [i (range total)]
                 (when-not (contains? @removed i)
                   (swap! final conj (aget messages i))))
-              ;; Insert pruning notice
-              (let [notice #js {:role "system"
-                                :content (str "[" pruned-count " messages pruned to fit context window]")}
-                    arr (clj->js @final)]
-                (.splice arr 1 0 notice)
+              ;; The notice rides on the system prompt. As a `system` message
+              ;; at index 1 it was a mid-conversation system turn, which
+              ;; @ai-sdk/google throws on ("system messages are only supported
+              ;; at the beginning") and Anthropic only takes on some models.
+              (let [notice (str "[" pruned-count " messages pruned to fit context window]")
+                    sys    (.-systemPrompt event)
+                    arr    (clj->js @final)]
                 ;; Stats
                 (swap! shared/suite-stats update :priority-assembly
                        (fn [s] (-> s
                                    (update :turns inc)
                                    (update :messages-pruned + pruned-count)
                                    (update :tokens-saved + (- @current @tokens)))))
-                #js {:messages arr}))))))))
+                (if (string? sys)
+                  #js {:messages arr :system (str sys "\n\n" notice)}
+                  #js {:messages arr})))))))))
 
 (defn activate [api]
   (let [config (shared/load-config)
