@@ -167,23 +167,29 @@
             (catch :default _ lifted)))))))
 
 (defn retry-without-reasoning
-  "A 400 that names thinking/reasoning: remember the model and send the same
-   request again (the rewriter then leaves the fields out). Once per model."
+  "Any 400: send the same request once more without the reasoning fields (the
+   rewriter leaves them out for a model in `rejects`). The model stays in
+   `rejects` only if that second request is accepted, so an unrelated 400 never
+   turns reasoning off. Matching the error text missed strict servers, whose
+   400 names the field (`Unrecognized request argument supplied:
+   chat_template_kwargs`) and neither thinking nor reasoning."
   [entry f]
-  (fn [url init]
-    (-> (f url init)
-        (.then (fn [res]
-                 (let [k (reject-key entry (body-model (some-> init .-body)))]
-                   (if (or (not= 400 (.-status res)) (contains? @rejects k))
-                     res
-                     (-> (.text (.clone res))
-                         (.then (fn [t]
-                                  (if (re-find #"(?i)think|reason" t)
-                                    (do (swap! rejects conj k)
-                                        (d/info "local-provider"
-                                                (str k " refused the reasoning fields; sending without"))
-                                        (f url init))
-                                    res)))))))))))
+  (if (= "none" (str (or (:reasoning entry) (get entry "reasoning"))))
+    f
+    (fn [url init]
+      (-> (f url init)
+          (.then (fn [res]
+                   (let [k (reject-key entry (body-model (some-> init .-body)))]
+                     (if (or (not= 400 (.-status res)) (contains? @rejects k))
+                       res
+                       (do (swap! rejects conj k)
+                           (-> (f url init)
+                               (.then (fn [res2]
+                                        (if (= 400 (.-status res2))
+                                          (do (swap! rejects disj k) res)
+                                          (do (d/info "local-provider"
+                                                      (str k " refused the reasoning fields; sending without"))
+                                              res2))))))))))))))
 
 (defn- create-model-fn [entry get-active-tools]
   (fn [model-id]

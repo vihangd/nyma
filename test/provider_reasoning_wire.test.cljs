@@ -310,8 +310,44 @@
     (-> (expect (.-status res2)) (.toBe 200))
     (-> (expect (.-reasoning_effort (last @sent))) (.toBeUndefined))))
 
+(defn- local-server [rw sent reject?]
+  (fn [_url init]
+    (let [b (js/JSON.parse (rw (.-body init) init))]
+      (swap! sent conj b)
+      (js/Promise.resolve
+       (if (reject? b)
+         (js/Response. "{\"error\":\"bad\"}" #js {:status 400})
+         (js/Response. "{}" #js {:status 200}))))))
+
+(defn ^:async test-local-retry-strict-server []
+  ;; api.openai.com: "Unrecognized request argument supplied: chat_template_kwargs"
+  (reset! local/level-fn-atom (fn [] "high"))
+  (let [entry {:name "retry-strict"}
+        sent  (atom [])
+        f     (local/retry-without-reasoning
+               entry (local-server (local/reasoning-rewriter entry (fn [b _] b)) sent
+                                   #(some? (.-chat_template_kwargs %))))
+        res   (js-await (f "u" #js {:body (body-for "strict-model")}))]
+    (-> (expect (.-status res)) (.toBe 200))
+    (-> (expect (count @sent)) (.toBe 2))))
+
+(defn ^:async test-local-retry-unrelated-400 []
+  ;; a 400 the fields did not cause: the resend fails too, so reasoning stays on
+  (reset! local/level-fn-atom (fn [] "high"))
+  (let [entry {:name "retry-unrelated"}
+        sent  (atom [])
+        f     (local/retry-without-reasoning
+               entry (local-server (local/reasoning-rewriter entry (fn [b _] b)) sent
+                                   (constantly true)))
+        res   (js-await (f "u" #js {:body (body-for "m")}))
+        _     (js-await (f "u" #js {:body (body-for "m")}))]
+    (-> (expect (.-status res)) (.toBe 400))
+    (-> (expect (.-reasoning_effort (nth @sent 2))) (.toBe "high"))))
+
 (describe "wire/local retry" (fn []
-  (it "a 400 naming thinking resends once without the fields, then remembers" test-local-retry-without-reasoning)))
+  (it "a 400 naming thinking resends once without the fields, then remembers" test-local-retry-without-reasoning)
+  (it "a strict server's 400 that names neither thinking nor reasoning still resends" test-local-retry-strict-server)
+  (it "a 400 the fields did not cause leaves reasoning on" test-local-retry-unrelated-400)))
 
 (describe "wire/groq scale" (fn []
   (it "minimal goes out as low (gpt-oss 400s on minimal)"
