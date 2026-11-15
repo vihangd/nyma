@@ -337,3 +337,16 @@
                 defaulted (filterv (fn [id] (= 100000 (cw (str "opencode-zen/" id)))) ids)]
             (-> (expect (count ids)) (.toBeGreaterThan 20))
             (-> (expect defaulted) (.toEqual #js ["ling-2.6-flash"])))))))
+
+(describe "opencode-zen Messages fetch" (fn []
+  (it "drops context_management, which Zen rejects on every request"
+    ^:async (fn []
+      (let [orig js/globalThis.fetch
+            sent (atom nil)]
+        (set! js/globalThis.fetch (fn [_u init] (reset! sent (.-body init)) (js/Promise.resolve nil)))
+        (try
+          (js-await (zen-ext/drop-context-management-fetch
+                     "u" #js {:body (js/JSON.stringify #js {:model "m" :context_management #js {:edits #js []}})}))
+          (-> (expect (.-context_management (js/JSON.parse @sent))) (.toBeUndefined))
+          (-> (expect (.-model (js/JSON.parse @sent))) (.toBe "m"))
+          (finally (set! js/globalThis.fetch orig))))))))

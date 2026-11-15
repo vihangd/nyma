@@ -92,6 +92,19 @@
         (aset base "cost" c)))
     base))
 
+(defn drop-context-management-fetch
+  "Zen's Messages path drops the compaction beta header, then rejects every
+   request that carries `context_management` (measured 2026-11-15, Sonnet 4.6:
+   400 \"context_management: Extra inputs are not permitted\"). So server
+   compaction cannot work here; strip it and client-side compaction takes over."
+  [url init]
+  (let [body (some-> init .-body)]
+    (if (and (string? body) (.includes body "\"context_management\""))
+      (let [b (js/JSON.parse body)]
+        (js-delete b "context_management")
+        (js/fetch url (js/Object.assign #js {} init #js {:body (js/JSON.stringify b)})))
+      (js/fetch url init))))
+
 (defn resolve-base-url []
   (or (aget js/process.env "OPENCODE_ZEN_BASE_URL") default-base-url))
 
@@ -177,7 +190,8 @@
                   (rescue/wrap-fetch-with-rescue f @active-tools-atom)
                   f))))
       (if (= protocol :anthropic)
-        ((createAnthropic opts) id)
+        (do (aset opts "fetch" drop-context-management-fetch)
+            ((createAnthropic opts) id))
         (let [provider (createOpenAI opts)]
           (case protocol
             :responses (.responses provider id)
