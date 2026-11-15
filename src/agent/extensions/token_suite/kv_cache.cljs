@@ -235,6 +235,8 @@
                                                (str/join ", " (sort valid-ttls))))
                                   nil)))
 
+        _                 (reset! pricing/one-hour-cache-writes? (= "1h" ttl))
+
         on-before
         (fn [config-obj _ctx]
           ;; Reset FIRST: a stale true must not survive a request that skips
@@ -384,6 +386,7 @@
     ;; dead code — a fresh activate creates fresh atoms — while a leaked
     ;; handler double-annotates prompts and double-counts stats on reload.)
     (fn []
+      (reset! pricing/one-hour-cache-writes? false)
       (.off api "before_provider_request" on-before)
       (.off api "after_provider_request" on-after)
       (.off api "compact" on-compact))))

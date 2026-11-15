@@ -97,6 +97,13 @@
   [config]
   (or (model-info/config-model-key config) ""))
 
+(def one-hour-cache-writes?
+  "Set by kv_cache when it marks breakpoints with a 1h TTL. Anthropic bills a
+   1-hour cache write at 2x input, not the 1.25x the price rows carry for the
+   5-minute default, and the usage the SDK hands back does not say which TTL a
+   write had — nyma chose it, so nyma says."
+  (atom false))
+
 (defn calculate-turn-cost
   "USD cost for one turn, pricing cached input separately when the model
    declares cache rates. Returns 0 when the model has no pricing at all.
@@ -131,7 +138,9 @@
         (let [fresh (max 0 (- input cr cw))]
           (+ (per-1m fresh in-rate)
              (per-1m cr (or cr-rate in-rate))
-             (per-1m cw (or cw-rate in-rate))
+             (per-1m cw (if (and @one-hour-cache-writes? (number? cw-rate))
+                          (* 2 in-rate)
+                          (or cw-rate in-rate)))
              (per-1m output out-rate)))))
     0))
 

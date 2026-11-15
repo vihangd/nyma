@@ -191,3 +191,17 @@
                     (-> (expect (.-prices r)) (.toEqual #js {"claude-x" #js [1 2 0.1] "groq/m" #js [0 0]}))
                     (-> (expect (.-context r)) (.toEqual #js {"claude-x" 1000}))
                     (-> (expect (.-pdf r)) (.toEqual #js ["claude-x"])))))))
+
+(describe "1-hour cache writes" (fn []
+  (it "are priced at 2x input when kv_cache marks 1h breakpoints"
+    (fn []
+      (try
+        (reset! pricing/one-hour-cache-writes? true)
+        ;; opus-4-8: input 5 → 1h write 10 per 1M (the row's 6.25 is the 5m rate)
+        (-> (expect (pricing/calculate-turn-cost "claude-opus-4-8"
+                                                 {:input-tokens 1000000 :cache-write-tokens 1000000}))
+            (.toBeCloseTo 10 6))
+        (finally (reset! pricing/one-hour-cache-writes? false)))
+      (-> (expect (pricing/calculate-turn-cost "claude-opus-4-8"
+                                               {:input-tokens 1000000 :cache-write-tokens 1000000}))
+          (.toBeCloseTo 6.25 6))))))
