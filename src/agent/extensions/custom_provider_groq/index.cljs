@@ -89,11 +89,12 @@
   [model-id]
   (contains? reasoning-models (str model-id)))
 
-;; Groq's scale tops out at `high`, so xhigh clamps.
+;; Groq's scale is low|medium|high: xhigh clamps down, and minimal is a 400
+;; ("`reasoning_effort` must be one of `low`, `medium`, or `high`", gpt-oss).
 (defmethod rr/reasoning-body provider-name [_ level model-id]
   (when-let [l (rr/active-level level)]
     (when (reasoning-model? model-id)
-      {:reasoning_effort (if (= l "xhigh") "high" l)
+      {:reasoning_effort (rr/openai-effort l)
        :reasoning_format "parsed"})))
 
 (defn make-request-rewriter

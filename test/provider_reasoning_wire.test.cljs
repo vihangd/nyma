@@ -305,3 +305,10 @@
 
 (describe "wire/local retry" (fn []
   (it "a 400 naming thinking resends once without the fields, then remembers" test-local-retry-without-reasoning)))
+
+(describe "wire/groq scale" (fn []
+  (it "minimal goes out as low (gpt-oss 400s on minimal)"
+    (fn []
+      (reset! groq/level-fn-atom (fn [] "minimal"))
+      (-> (expect (.-reasoning_effort (rewrite (groq/make-request-rewriter "openai/gpt-oss-20b") nil)))
+          (.toBe "low"))))))
