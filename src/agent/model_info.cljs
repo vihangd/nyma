@@ -59,13 +59,32 @@
   (let [i (.indexOf id "/")]
     (when-not (neg? i) (.slice id (inc i)))))
 
+(def ^:private by-last-segment-memo (atom nil))
+
+(defn- by-last-segment
+  "Output limits keyed by the id's last segment, from the vendors' own rows
+   (not the hosts that resell them, whose limits are their own). The smallest
+   wins on a clash: over-asking is a 400, under-asking only a shorter answer."
+  []
+  (or @by-last-segment-memo
+      (reset! by-last-segment-memo
+    (reduce-kv (fn [m k v]
+                 (if (re-find #"^(openrouter|groq|opencode-zen)/" k)
+                   m
+                   (let [seg (subs k (inc (.lastIndexOf k "/")))]
+                     (assoc m seg (min v (get m seg v))))))
+               {} pricing-data/output-limit))))
+
 (defn max-output
   "The most tokens `model-id` can return, or nil when unknown: exact, then the
-   bare id, which is what a relayed model is known by."
+   bare id, then the vendor's own row for the last segment — a gateway serves
+   `openlux/deepseek-v4-pro` or `velona/z-ai/glm-5.3` under ids the table keys
+   as `deepseek/deepseek-v4-pro` and `zai/glm-5.3`, and fell to 8000."
   [model-id]
   (let [id (str model-id)]
     (or (get pricing-data/output-limit id)
-        (when-let [bare (bare-id id)] (get pricing-data/output-limit bare)))))
+        (when-let [bare (bare-id id)] (get pricing-data/output-limit bare))
+        (get (by-last-segment) (subs id (inc (.lastIndexOf id "/")))))))
 
 (defn- usable
   "An entry with no context window is not an answer — it's a placeholder a

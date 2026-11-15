@@ -30,6 +30,12 @@ const PROVIDERS = {
   minimax: "minimax/",
   groq: "groq/",
   openrouter: "openrouter/",
+  // Without these, z.ai (a settings provider), Zen's discovered ids and
+  // qwen-cli had no output limit and got the 8000 fallback: a reasoning model
+  // at max effort spent it before answering.
+  zai: "zai/",
+  opencode: "opencode-zen/",
+  alibaba: "qwen-cli/",
 };
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
