@@ -2,7 +2,8 @@
   "Hand-rolled LanguageModelV3 implementation for Anthropic's Messages API.
    Bypasses @ai-sdk/anthropic to support betas (advisor, etc.) without waiting
    for SDK updates."
-  (:require [agent.extensions.custom-provider-claude-native.messages :as msgs]
+  (:require ["ai" :refer [APICallError]]
+            [agent.extensions.custom-provider-claude-native.messages :as msgs]
             [agent.extensions.custom-provider-claude-native.stream :as sse]
             [agent.extensions.custom-provider-claude-native.tools :as tools]))
 
@@ -57,8 +58,19 @@
         resp      (js-await (js/fetch (str anthropic-api-url "/messages")
                                       fetch-opts))]
     (when-not (.-ok resp)
-      (let [err-body (js-await (.text resp))]
-        (throw (js/Error. (str "Anthropic API " (.-status resp) ": " err-body)))))
+      ;; An APICallError, not a bare Error: the SDK retries only those marked
+      ;; retryable (and honours retry-after), so a 429 or 529 here failed on
+      ;; the first attempt.
+      (let [err-body (js-await (.text resp))
+            status   (.-status resp)]
+        (throw (APICallError. #js {:message           (str "Anthropic API " status ": " err-body)
+                                   :url               (str anthropic-api-url "/messages")
+                                   :requestBodyValues (js/JSON.parse body-str)
+                                   :statusCode        status
+                                   :responseHeaders   (js/Object.fromEntries (.entries (.-headers resp)))
+                                   :responseBody      err-body
+                                   :isRetryable       (or (= status 408) (= status 409) (= status 429)
+                                                          (>= status 500))}))))
     ;; Build a ReadableStream and kick off SSE piping
     (let [ctrl-box  (atom nil)
           out-stream (js/ReadableStream. #js {:start (fn [c] (reset! ctrl-box c))})
