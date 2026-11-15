@@ -315,3 +315,18 @@
 
 (describe "claude-native/stream — window exceeded" (fn []
   (it "stop_reason model_context_window_exceeded becomes an overflow error" test-window-exceeded-is-error)))
+
+(defn ^:async test-compaction-block []
+  (let [ev    (fn [o] (js/JSON.stringify o))
+        parts (js-await (collect-parts
+                         [msg-start
+                          (ev #js {:type "content_block_start" :index 0 :content_block #js {:type "compaction" :content nil}})
+                          (ev #js {:type "content_block_delta" :index 0 :delta #js {:type "compaction_delta" :content "## Summary"}})
+                          (block-stop 0) (msg-delta-line "end_turn") msg-stop]))
+        start (first (filter #(= "text-start" (.-type %)) parts))]
+    (-> (expect (.. start -providerMetadata -anthropic -type)) (.toBe "compaction"))
+    (-> (expect (.-delta (first (filter #(= "text-delta" (.-type %)) parts)))) (.toBe "## Summary"))
+    (-> (expect (some #(= "text-end" (.-type %)) parts)) (.toBe true))))
+
+(describe "claude-native/stream — server compaction" (fn []
+  (it "a compaction block streams as tagged text, as @ai-sdk/anthropic does" test-compaction-block)))

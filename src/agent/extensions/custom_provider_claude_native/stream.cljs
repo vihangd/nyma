@@ -100,6 +100,22 @@
                                      :toolName tool-name}
                            closed?))
 
+;; Anthropic's server-side compaction: the summary of the context so
+          ;; far, as a text block tagged providerMetadata.anthropic.type
+          ;; "compaction" — the shape @ai-sdk/anthropic streams, which the loop
+          ;; keeps off the screen and carries into the next run, and which
+          ;; messages.cljs sends back as a compaction block.
+          "compaction"
+          (let [block-id (str "compaction-" idx)
+                sig      (.-signature block)]
+            (swap! blocks assoc idx {:type "compaction" :id block-id :signature sig})
+            (enqueue-safe! ctrl #js {:type "text-start" :id block-id
+                                     :providerMetadata #js {:anthropic (cond-> #js {:type "compaction"}
+                                                                         sig (doto (aset "signature" sig)))}}
+                           closed?)
+            (when (and sig (seq (str (.-content block))))
+              (enqueue-safe! ctrl #js {:type "text-delta" :id block-id :delta (.-content block)} closed?)))
+
           ;; Extended thinking. The signature arrives as its own delta and is
           ;; carried on reasoning-end, where @ai-sdk/anthropic puts it, so the
           ;; block can be replayed.
@@ -121,6 +137,10 @@
                                      :id    (:id block)
                                      :delta (.-text delta)}
                            closed?)
+
+            (and (= (:type block) "compaction") (= (.-type delta) "compaction_delta"))
+            (when (some? (.-content delta))
+              (enqueue-safe! ctrl #js {:type "text-delta" :id (:id block) :delta (.-content delta)} closed?))
 
             (and (= (:type block) "thinking") (= (.-type delta) "thinking_delta"))
             (enqueue-safe! ctrl #js {:type  "reasoning-delta"
@@ -145,6 +165,9 @@
         (when block
           (case (:type block)
             "text"
+            (enqueue-safe! ctrl #js {:type "text-end" :id (:id block)} closed?)
+
+            "compaction"
             (enqueue-safe! ctrl #js {:type "text-end" :id (:id block)} closed?)
 
             "thinking"

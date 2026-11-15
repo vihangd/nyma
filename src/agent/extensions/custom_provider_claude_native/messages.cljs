@@ -8,8 +8,18 @@
 
 ;; ── Content-part conversion ──────────────────────────────────
 
-(defn- text-part->anthropic [part]
-  #js {:type "text" :text (.-text part)})
+(defn- text-part->anthropic
+  "A text part, or — when it carries Anthropic's compaction marker (set by the
+   stream on a server compaction block) — the compaction block itself, sent
+   back so the server resumes from its summary rather than compacting again.
+   An empty one is dropped, as @ai-sdk/anthropic does."
+  [part]
+  (let [meta (some-> (.-providerOptions part) (aget "anthropic"))]
+    (if (= "compaction" (some-> meta (aget "type")))
+      (when (seq (str (.-text part)))
+        (cond-> #js {:type "compaction" :content (.-text part)}
+          (string? (aget meta "signature")) (doto (aset "signature" (aget meta "signature")))))
+      #js {:type "text" :text (.-text part)})))
 
 (defn- tool-call-part->anthropic [part]
   ;; V3 ToolCallPart.input is `unknown` — could be a JSON string or an already-parsed object.
@@ -231,6 +241,17 @@
                      "disabled" {"type" "disabled"}
                      nil)
         effort     (when anth (aget anth "effort"))
+        ;; Server-side compaction (token_suite/anthropic_compaction), in the
+        ;; camelCase shape @ai-sdk/anthropic takes; the wire is snake_case.
+        ;; It was dropped here, so claude-native never compacted server-side.
+        ctx-mgmt   (when-let [cm (when anth (aget anth "contextManagement"))]
+                     {"edits" (vec (for [e (or (aget cm "edits") [])
+                                         :when (= "compact_20260112" (aget e "type"))]
+                                     (cond-> {"type" "compact_20260112"}
+                                       (aget e "trigger") (assoc "trigger" (aget e "trigger"))
+                                       (some? (aget e "pauseAfterCompaction"))
+                                       (assoc "pause_after_compaction" (aget e "pauseAfterCompaction"))
+                                       (aget e "instructions") (assoc "instructions" (aget e "instructions")))))})
         ;; Current Claude models reject non-default sampling parameters with
         ;; a 400, and settings default temperature to 0.2 — every request
         ;; failed. @ai-sdk/anthropic strips them for these models; so must this.
@@ -249,6 +270,7 @@
              "messages"   messages}
       thinking                         (assoc "thinking" thinking)
       effort                           (assoc "output_config" {"effort" effort})
+      (seq (get ctx-mgmt "edits"))     (assoc "context_management" ctx-mgmt)
       system-str                       (assoc "system" system-str)
       (and sampling? (some? (.-temperature opts))) (assoc "temperature" (.-temperature opts))
       (and sampling? (some? (.-topP opts)))        (assoc "top_p" (.-topP opts))

@@ -48,7 +48,16 @@
                     tools-arr (assoc "tools" tools-arr)
                     tool-ch   (assoc "tool_choice" tool-ch))
         body-str  (js/JSON.stringify (clj->js body-map))
-        beta      (extract-beta-flags opts)
+        ;; Betas the body itself needs, as @ai-sdk/anthropic adds them:
+        ;; compaction edits, and replayed signed compaction blocks.
+        body-beta (cond-> []
+                    (get base-map "context_management") (conj "compact-2026-01-12")
+                    (some (fn [m] (some #(and (= "compaction" (.-type %)) (.-signature %))
+                                        (let [c (.-content m)] (if (js/Array.isArray c) c []))))
+                          (get base-map "messages"))
+                    (conj "compact-2026-09-04"))
+        beta      (let [b (concat (some-> (extract-beta-flags opts) (.split ",")) body-beta)]
+                    (when (seq b) (.join (clj->js (distinct b)) ",")))
         headers   (build-headers api-key beta)
         abort-sig (.-abortSignal opts)
         fetch-opts #js {:method  "POST"

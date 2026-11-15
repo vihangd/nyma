@@ -362,3 +362,27 @@
             c    (get-in body ["messages" 1 "content"])]
         (-> (expect (.-cache_control (first c))) (.toBeDefined))
         (-> (expect (.-cache_control (second c))) (.toBeUndefined)))))))
+
+(describe "claude-native/messages — server compaction" (fn []
+  (it "sends context_management in wire shape"
+    (fn []
+      (let [o (make-opts [(user-msg "hi")] 4096)
+            _ (aset o "providerOptions" #js {:anthropic #js {:contextManagement
+                                                             #js {:edits #js [#js {:type "compact_20260112"
+                                                                                  :trigger #js {:type "input_tokens" :value 50000}
+                                                                                  :pauseAfterCompaction false}]}}})
+            b (msgs/build-request-body "claude-sonnet-4-6" o)
+            e (first (get-in b ["context_management" "edits"]))]
+        (-> (expect (get e "type")) (.toBe "compact_20260112"))
+        (-> (expect (get e "pause_after_compaction")) (.toBe false))
+        (-> (expect (.-value (get e "trigger"))) (.toBe 50000)))))
+  (it "replays a compaction-tagged text part as a compaction block"
+    (fn []
+      (let [asst #js {:role "assistant"
+                      :content #js [#js {:type "text" :text "## Summary"
+                                         :providerOptions #js {:anthropic #js {:type "compaction"}}}
+                                    (text-part "answer")]}
+            b    (msgs/build-request-body "claude-sonnet-4-6" (make-opts [(user-msg "hi") asst (user-msg "more")]))
+            c    (get-in b ["messages" 1 "content"])]
+        (-> (expect (.-type (first c))) (.toBe "compaction"))
+        (-> (expect (.-content (first c))) (.toBe "## Summary")))))))
