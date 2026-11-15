@@ -172,10 +172,11 @@
                                   nil)]
                          (when am
                            ;; A message-level breakpoint goes on its last block,
-                           ;; as @ai-sdk/anthropic places it.
+                           ;; as @ai-sdk/anthropic places it — but never on a
+                           ;; thinking block, which Anthropic refuses to mark.
                            (when-let [cc (cache-control-of msg)]
-                             (let [c (.-content am)]
-                               (aset (aget c (dec (.-length c))) "cache_control" cc)))
+                             (when-let [b (last (remove #(= "thinking" (.-type %)) (.-content am)))]
+                               (aset b "cache_control" cc)))
                            (.push result am)))))
     result))
 

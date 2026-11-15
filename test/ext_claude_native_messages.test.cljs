@@ -349,3 +349,16 @@
         (-> (expect (count c)) (.toBe 2))
         (-> (expect (.-type (first c))) (.toBe "thinking"))
         (-> (expect (.-signature (first c))) (.toBe "s")))))))
+
+(describe "claude-native/messages — breakpoints and thinking" (fn []
+  (it "a message breakpoint skips a trailing thinking block"
+    (fn []
+      (let [asst #js {:role "assistant"
+                      :providerOptions #js {:anthropic #js {:cacheControl #js {:type "ephemeral"}}}
+                      :content #js [(text-part "ok")
+                                    #js {:type "reasoning" :text "plan"
+                                         :providerOptions #js {:anthropic #js {:signature "s"}}}]}
+            body (msgs/build-request-body "claude-haiku-4-5-20251001" (make-opts [(user-msg "hi") asst (user-msg "more")]))
+            c    (get-in body ["messages" 1 "content"])]
+        (-> (expect (.-cache_control (first c))) (.toBeDefined))
+        (-> (expect (.-cache_control (second c))) (.toBeUndefined)))))))
