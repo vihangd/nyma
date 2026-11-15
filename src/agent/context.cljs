@@ -1,6 +1,7 @@
 (ns agent.context
   "Message filtering, context building."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [agent.ui.think-tag-parser :as think]))
 
 (defn- message-entry? [entry]
   (or (contains? #{"user" "assistant" "tool_call" "tool_result"} (:role entry))
@@ -46,6 +47,20 @@
        (string? (:content entry))
        (str/blank? (:content entry))))
 
+(defn- without-reasoning
+  "An earlier answer as the provider should see it: no <think> blocks. The
+   live history kept them while the saved one strips them (sessions/manager),
+   so a live session resent its old reasoning as answer text — 73% of
+   assistant text in one session — and a resumed one sent a different
+   prefix, missing the cache. Providers that need reasoning replayed get it
+   within a run from the SDK's own step messages, not from here."
+  [entry]
+  (if (and (= "assistant" (:role entry))
+           (string? (:content entry))
+           (str/includes? (:content entry) "<think"))
+    (update entry :content think/strip-think-tags)
+    entry))
+
 (defn build-context
   "Build the message list for the current conversation turn.
    Walks the active state and filters to LLM-relevant messages.
@@ -56,6 +71,7 @@
     (->> messages
          (filter message-entry?)
          (filter llm-visible?)
+         (map without-reasoning)
          (remove blank-assistant?)
          (map provider-role)
          vec)))
