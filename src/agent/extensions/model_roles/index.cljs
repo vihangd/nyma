@@ -423,7 +423,7 @@
                                    (catch :default _e nil))]
                     (when model
                       (.set attempted cfg (conj tried spec))
-                      (fb/retarget! cfg model spec)
+                      (fb/retarget! cfg model spec (fb/window-of api spec))
                       ;; Said once, in the transcript. Answering from a model the
                       ;; status line does not name is worse than failing.
                       (d/warn "model-roles" (fb/announcement from spec msg))

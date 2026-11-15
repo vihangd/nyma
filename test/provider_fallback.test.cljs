@@ -233,3 +233,17 @@
           (-> (expect (.-model cfg)) (.toBe "new"))
           (-> (expect (.-anthropic (.-providerOptions cfg))) (.toBeUndefined))
           (-> (expect (< (.-maxOutputTokens cfg) 128000)) (.toBe true)))))))
+
+(describe "retarget! and the fallback's window" (fn []
+  (it "max_tokens is re-clamped to fit the fallback's smaller window"
+    (fn []
+      (let [big  (.repeat "word " 120000)   ; ~150k tokens of input
+            cfg  #js {:maxOutputTokens 393216
+                      :messages #js [#js {:role "user" :content big}]}]
+        (fb/retarget! cfg #js {:modelId "m"} "minimax/MiniMax-M2.7" 204800)
+        (-> (expect (+ (* 1.1 150000) (.-maxOutputTokens cfg))) (.toBeLessThanOrEqual 204800)))))
+  (it "without a known window only the model's own limit applies"
+    (fn []
+      (let [cfg #js {:maxOutputTokens 5000 :messages #js []}]
+        (fb/retarget! cfg #js {:modelId "m"} "acme/x")
+        (-> (expect (.-maxOutputTokens cfg)) (.toBe 5000)))))))

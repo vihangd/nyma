@@ -269,7 +269,7 @@
     (when (and st-config (.-resolveModel api))
       (try
         (let [obj (.resolveModel api provider model-id)]
-          (when obj (fallback/retarget! st-config obj spec)))
+          (when obj (fallback/retarget! st-config obj spec (fallback/window-of api spec))))
         (catch :default e
           (d/warn "escalate" (str "resolveModel failed for " spec ": " (.-message e))))))
     ;; Report the real outcome. This returned `true` unconditionally, and the

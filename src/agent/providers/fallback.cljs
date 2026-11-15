@@ -15,6 +15,7 @@
    `should-fall-back?` says no to 401 and to context overflow even though both
    stop the turn dead."
   (:require [clojure.string :as str]
+            [agent.token-estimation :as te]
             [agent.utils.error-class :as error-class]
             [agent.model-info :as model-info]))
 
@@ -29,16 +30,32 @@
   [cfg]
   (.get retargeted cfg))
 
+(defn window-of
+  "`spec`'s context window through the extension API, or nil."
+  [api spec]
+  (try (some-> (.-getModelInfo api) (.call api spec) .-contextWindow)
+       (catch :default _ nil)))
+
 (defn retarget!
   "Point the request `cfg` at `model`. Its other fields were built for the model
    that failed: providerOptions carry that provider's thinking dialect, and a
    max_tokens above the new model's limit is a 400 on the retry."
-  [cfg model spec]
+  [cfg model spec & [window]]
   (.set retargeted cfg spec)
   (aset cfg "model" model)
   (aset cfg "providerOptions" #js {})
   (when-let [cap (aget cfg "maxOutputTokens")]
-    (aset cfg "maxOutputTokens" (min cap (or (model-info/max-output spec) 8000)))))
+    (let [cap (min cap (or (model-info/max-output spec) 8000))]
+      ;; The cap was sized against the PRIMARY's window. A fallback with a
+      ;; smaller one (1M DeepSeek → 204800 MiniMax with 150k in hand) got
+      ;; input + max_tokens over its window: a context-length 400, which the
+      ;; chain treats as the caller's fault and stops on.
+      (aset cfg "maxOutputTokens"
+            (if (and (number? window) (pos? window))
+              (let [input (te/estimate-messages-tokens (vec (or (aget cfg "messages") [])))]
+                (min cap (max 1024 (min (js/Math.floor (/ window 2))
+                                        (- window (js/Math.ceil (* 1.1 input)))))))
+              cap)))))
 
 ;; ── when ─────────────────────────────────────────────────────────
 
