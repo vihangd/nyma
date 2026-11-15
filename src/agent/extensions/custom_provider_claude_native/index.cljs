@@ -8,10 +8,13 @@
 ;; Anthropic context windows (tokens)
 (def ^:private models
   [{:id "claude-haiku-4-5-20251001" :name "Claude Haiku 4.5"  :ctx 200000}
-   {:id "claude-sonnet-4-6"         :name "Claude Sonnet 4.6" :ctx 200000}
-   {:id "claude-opus-4-6"           :name "Claude Opus 4.6"   :ctx 200000}
-   {:id "claude-opus-4-7"           :name "Claude Opus 4.7"   :ctx 200000}
-   {:id "claude-opus-4-8"           :name "Claude Opus 4.8"   :ctx 200000}
+   ;; 1M, as model_info and models.dev have them. Declaring 200000 here
+   ;; did not stay local: a non-gateway provider's ids are also registered
+   ;; bare, so anthropic/…, relays and Zen planned compaction at 170k too.
+   {:id "claude-sonnet-4-6"         :name "Claude Sonnet 4.6" :ctx 1000000}
+   {:id "claude-opus-4-6"           :name "Claude Opus 4.6"   :ctx 1000000}
+   {:id "claude-opus-4-7"           :name "Claude Opus 4.7"   :ctx 1000000}
+   {:id "claude-opus-4-8"           :name "Claude Opus 4.8"   :ctx 1000000}
    ;; Opus 5 (2026-07-24): 1M context default, 128k output.
    ;; NOT thinking-on-by-default: measured against a live Opus 5, a request with
    ;; no `thinking` field returns no reasoning parts at all. nyma sends one only

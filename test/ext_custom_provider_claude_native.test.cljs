@@ -52,21 +52,21 @@
 ;; ── Model metadata wiring ────────────────────────────────────
 
 (describe "custom-provider-claude-native — model metadata" (fn [])
-          (it "registers 200,000-token context window for claude-sonnet-4-6"
+          (it "registers the 1M context window for claude-sonnet-4-6"
               (fn []
                 (let [agent (create-agent {:model "test" :system-prompt "test"})
                       api   (create-extension-api agent)
                       _     ((.-default claude-ext) api)
                       info  ((:get (:model-registry agent)) "claude-sonnet-4-6")]
-                  (-> (expect (:context-window info)) (.toBe 200000)))))
+                  (-> (expect (:context-window info)) (.toBe 1000000)))))
 
-          (it "registers 200,000-token context window for claude-opus-4-7"
+          (it "registers the 1M context window for claude-opus-4-7 (not the 200k it once declared over the shared ids)"
               (fn []
                 (let [agent (create-agent {:model "test" :system-prompt "test"})
                       api   (create-extension-api agent)
                       _     ((.-default claude-ext) api)
                       info  ((:get (:model-registry agent)) "claude-opus-4-7")]
-                  (-> (expect (:context-window info)) (.toBe 200000))))))
+                  (-> (expect (:context-window info)) (.toBe 1000000))))))
 
 ;; ── Credential resolution ────────────────────────────────────
 
