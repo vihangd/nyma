@@ -861,10 +861,11 @@ with every section below present.
                          :files-read            (clj->js files-read)
                          :files-modified        (clj->js files-modified)}
             ;; A summary-only pass changes nothing, so it neither dumps nor asks
-            ;; the before_compact hooks; a precomputed summary is already the
-            ;; answer they would be asked for (and token_suite's hook would
-            ;; overwrite it unconditionally).
-            quiet?  (or summarize-only? (some? summary))
+            ;; the before_compact hooks. Applying a precomputed summary DOES
+            ;; compact, so they run (a PreCompact backup, the pre-compact
+            ;; archive); the summary itself is put back afterwards, since
+            ;; token_suite's hook overwrites it unconditionally.
+            quiet?  summarize-only?
             dump    (when-not quiet? (write-precompact-dump session to-summarize to-keep))
             _       (when dump
                       (aset evt-ctx "precompactJsonPath" (:json-path dump))
@@ -877,7 +878,8 @@ with every section below present.
         ;; machine before the first fix.
         (try
         (when-not quiet?
-          (js-await ((:emit-async events) "before_compact" evt-ctx)))
+          (js-await ((:emit-async events) "before_compact" evt-ctx))
+          (when (some? summary) (aset evt-ctx "summary" summary)))
 
         (if (and (.-summary evt-ctx)
                  ;; An extension summary is used only if it VALIDATES. It used
@@ -935,16 +937,20 @@ with every section below present.
                                :to-summarize        to-summarize
                                :files-read          files-read
                                :files-modified      files-modified})
-                marker       (keep-marker to-summarize to-keep)
                 ;; Only on the model compaction would use anyway: after /model
                 ;; or a fallback the snapshot names one the user left, and
                 ;; its tokens would be priced at `lookup`'s rates.
                 same-model?  (fn [s] (let [m (some-> (:base s) .-model)]
                                        (and m (= (.-modelId m) (.-modelId model))
                                             (= (.-provider m) (.-provider model)))))
-                snap         (when (and (= strat default-strategy) (not= marker :ambiguous))
+                ;; The marker serialises the whole span: only once the cheap
+                ;; checks say the cached path is in play.
+                snap         (when (= strat default-strategy)
                                (let [s (usable-snapshot state-atom)]
-                                 (when (and s (same-model? s) (marker-sent? s marker)) s)))
+                                 (when (and s (same-model? s))
+                                   (let [marker (keep-marker to-summarize to-keep)]
+                                     (when (and (not= marker :ambiguous) (marker-sent? s marker))
+                                       (assoc s :marker marker))))))
                 prefix-read  (atom nil)
                 on-usage     (fn [u]
                                (when-let [e (and store (pricing/usage-event lookup u))]
@@ -958,7 +964,7 @@ with every section below present.
                                                 {:system-prompt       (:system-prompt strat)
                                                  :custom-instructions custom-instructions
                                                  :previous-summary    (:content prev-compaction)
-                                                 :keep-from           marker
+                                                 :keep-from           (:marker snap)
                                                  :files-read          files-read
                                                  :files-modified      files-modified})
                                                files-read files-modified gen-fn strat

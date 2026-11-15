@@ -18,18 +18,24 @@
 
 (def ^:private bridge-priority 200)
 
+(defn cc-trigger
+  "Claude Code knows manual|auto. nyma's idle and server compactions were
+   not asked for by the user, so they are `auto` to a hook's matcher."
+  [t]
+  (if (= "manual" (str t)) "manual" "auto"))
+
 (defn- pre-payload [api evt-ctx]
   (js/Object.assign
    (common/base api "PreCompact")
    ;; CC's PreCompact input: `custom_instructions` is what the user
    ;; passed to /compact, null when nothing (and always null for auto).
-   #js {:trigger             (or (.-trigger evt-ctx) "auto")
+   #js {:trigger             (cc-trigger (.-trigger evt-ctx))
         :custom_instructions (or (.-customInstructions evt-ctx) nil)}))
 
 (defn- post-payload [api data]
   (js/Object.assign
    (common/base api "PostCompact")
-   #js {:trigger         (or (.-trigger data) "auto")
+   #js {:trigger         (cc-trigger (.-trigger data))
         ;; CC's PostCompact input; nyma's `compact` event carries :summary.
         :compact_summary (str (or (.-summary data) ""))
         ;; nyma extra. The event carries token counts, not a delta; a
@@ -40,7 +46,7 @@
   [{:keys [api hooks-atom cwd]}]
   (let [pre-handler
         (^:async fn [evt-ctx]
-          (let [trigger (str (or (.-trigger evt-ctx) "auto"))
+          (let [trigger (cc-trigger (.-trigger evt-ctx))
                 merged  (js-await
                          (dispatch/dispatch
                           {:hooks-map     @hooks-atom
@@ -59,7 +65,7 @@
 
         post-handler
         (fn [data]
-          (let [trigger (str (or (.-trigger data) "auto"))]
+          (let [trigger (cc-trigger (.-trigger data))]
             (dispatch/dispatch
              {:hooks-map     @hooks-atom
               :event-name    "PostCompact"

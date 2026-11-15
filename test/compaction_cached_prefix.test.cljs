@@ -162,6 +162,27 @@
                                                         (-> (expect (count ((:get-tree sm)))) (.toBe before))
                                                         (-> (expect (identical? msgs (:messages @state))) (.toBe true)))))
 
+                                        (it "applying a precomputed summary runs before_compact, and keeps the summary"
+                                            ;; PreCompact hooks (a transcript backup) fired for every
+                                            ;; compaction but the idle one
+                                            ^:async (fn []
+                                                      (let [sm    (session-with 40)
+                                                            state (state-with-snapshot sm)
+                                                            fired (atom [])
+                                                            evs   {:on (fn [_ _] nil) :emit (fn [_ _] nil)
+                                                                   :emit-async (fn [ev ctx]
+                                                                                 (when (= ev "before_compact")
+                                                                                   (swap! fired conj (.-trigger ctx))
+                                                                                   (aset ctx "summary" "overwritten"))
+                                                                                 (js/Promise.resolve nil))}]
+                                                        (js-await (c/compact sm claude-x evs
+                                                                             {:gen-fn (capture (atom []) six) :state-atom state
+                                                                              :force? true :summary six :trigger "idle"}))
+                                                        (-> (expect (clj->js @fired)) (.toEqual #js ["idle"]))
+                                                        (-> (expect (.includes (str (:content (first (:messages @state))))
+                                                                               "## 6. Pending Tasks"))
+                                                            (.toBe true)))))
+
                                         (it "a precomputed summary is applied without a model call"
                                             ^:async (fn []
                                                       (let [sm    (session-with 40)
