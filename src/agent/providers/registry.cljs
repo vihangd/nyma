@@ -74,8 +74,7 @@
                                 "'. Run /login " provider-name " or set "
                                 (or (:api-key-env config) "the API key env var") "."))))
                  (let [{:keys [key oauth?]} resolved]
-                   (case (:api config)
-                     "anthropic"
+                   (if (= "anthropic" (:api config))
                      (if oauth?
                   ;; OAuth: use authToken + required beta headers
                        ((createAnthropic
@@ -89,16 +88,14 @@
                          #js {:apiKey  key
                               :baseURL (:base-url config)})
                         model-id))
-                     "openai-compatible"
-                     ((createOpenAI #js {:apiKey        key
-                                         :baseURL       (:base-url config)
-                                        })
-                      model-id)
-                ;; Default: try openai-compatible
-                     ((createOpenAI #js {:apiKey        key
-                                         :baseURL       (:base-url config)
-                                        })
-                      model-id)))))))))
+                     ;; `openai-compatible` means Chat Completions. Calling the provider
+                     ;; directly picks /responses in @ai-sdk/openai 4, which
+                     ;; compatible endpoints (dashscope, for qwen-cli) do not all
+                     ;; serve, and which made agent.thinking attach OpenAI's
+                     ;; reasoningEffort to models that never asked for it.
+                     (.chat (createOpenAI #js {:apiKey  key
+                                               :baseURL (:base-url config)})
+                            model-id)))))))))
 
 (defn create-provider-registry
   "Create a provider registry for managing LLM providers.

@@ -15,6 +15,18 @@
         (-> (expect ((:create-model entry) "gpt-4")) (.toBe "m:gpt-4"))
         (-> (expect (:extra entry)) (.toBe "data")))))
 
+  (it "openai-compatible builds a Chat Completions model, not /responses"
+    ;; @ai-sdk/openai 4 picks /responses when the provider is called directly;
+    ;; compatible endpoints (qwen-cli's dashscope) speak chat.
+    (fn []
+      (aset js/process.env "NYMA_TEST_REG_KEY" "k")
+      (let [entry (build-provider-entry "t" {:api "openai-compatible"
+                                             :baseUrl "https://example.com/v1"
+                                             :apiKeyEnv "NYMA_TEST_REG_KEY"})
+            m     ((:create-model entry) "qwen3-coder-plus")]
+        (js-delete js/process.env "NYMA_TEST_REG_KEY")
+        (-> (expect (.-provider m)) (.toBe "openai.chat")))))
+
   (it "accepts camelCase :createModel key"
     (fn []
       (let [config {:createModel (fn [id] (str "cm:" id))}
