@@ -267,7 +267,7 @@
    Totals only move at run end, so a long run otherwise reads as free. Separate
    from :usage-updated, which stays once per run: rows, `turn-count` and the
    after_provider_request subscribers all count runs."
-  [st cost-key u]
+  [st cost-key u answered?]
   (let [[cr cw] (cache-split u)]
     (-> st
         (update :run-steps (fnil inc 0))
@@ -278,9 +278,13 @@
                                       :cache-read-tokens  cr
                                       :cache-write-tokens cw}))
         ;; Sticky, like the total it qualifies: the spend stays uncounted after
-        ;; the session moves to a priced model.
-        (cond-> (and (pos? (or (some-> u .-inputTokens) 0))
-                     (not (pricing/priced? cost-key)))
+        ;; the session moves to a priced model. A step that answered but
+        ;; reported no input tokens dropped its usage (every request has
+        ;; input), so its cost is unknown too, not $0.00. A failed step
+        ;; reports none either, and cost nothing.
+        (cond-> (if (pos? (or (some-> u .-inputTokens) 0))
+                  (not (pricing/priced? cost-key))
+                  answered?)
           (assoc :cost-unknown? true)))))
 
 (defn- inject-steer-messages!
@@ -711,7 +715,8 @@
                                                 (try
                                                   (swap! state add-live-step
                                                          (request-cost-key agent @request-config)
-                                                         (.-usage step))
+                                                         (.-usage step)
+                                                         (or (seq (.-text step)) (seq (.-toolCalls step))))
                                                   (catch :default e
                                                     (dbg/error "loop" (str "step cost: " (.-message e)))))
                                                 (emit "turn_end" step)

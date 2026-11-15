@@ -216,8 +216,20 @@
     (swap! pricing/token-costs dissoc own)
     (-> (expect (:cost-unknown? @(:state agent))) (.toBe true))))
 
+(defn ^:async test-missing-usage-is-unknown []
+  ;; A provider that drops usage: the answer came, its cost did not, so the
+  ;; status line must not read $0.00 on a priced model.
+  (let [agent (make-test-agent {:model (answer 0)})
+        own   (pricing/model-cost-key (:config agent))]
+    (swap! pricing/token-costs assoc own [1 1])
+    (js-await (run agent "go"))
+    (swap! pricing/token-costs dissoc own)
+    (-> (expect (:cost-unknown? @(:state agent))) (.toBe true))))
+
 (describe "a run that fell back"
   (fn []
+    (it "a priced model whose answer carried no usage costs unknown, not $0"
+        test-missing-usage-is-unknown)
     (it "flags unknown cost by the model that answered, not the session's"
         test-unknown-follows-what-answered)
     (it "keeps the flag once unpriced spend happened"
