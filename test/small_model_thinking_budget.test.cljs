@@ -75,12 +75,22 @@
           (fire h "turn_finalize" #js {:finishReason "length" :toolCalls 0 :nudged false})
           (-> (expect @(:level h)) (.toBe "medium")))))
 
-  (it "budget is not injected while a no-thinking retry is in flight"
+  (it "the budget is capped while no no-thinking retry is in flight"
                                               (fn []
                                                 (let [h (harness)
-                                                      before (fn [] (let [d #js {}] (fire h "before_provider_request" d) (.-providerOptions d)))]
-                                                  (-> (expect (.-thinkingBudget (before))) (.toBe 8000))
+                                                      before (fn [] (let [d #js {:providerOptions #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens 24000}}}}]
+                                                                      (fire h "before_provider_request" d)
+                                                                      (.. d -providerOptions -anthropic -thinking -budgetTokens)))]
+                                                  (-> (expect (before)) (.toBe 8000))
                                                   (fire h "turn_finalize" #js {:finishReason "length" :toolCalls 0 :nudged true})
-                                                  (-> (expect (before)) (.toBeUndefined))
+                                                  (-> (expect (before)) (.toBe 24000))
                                                   (fire h "agent_end" #js {})
-                                                  (-> (expect (.-thinkingBudget (before))) (.toBe 8000)))))))
+                                                  (-> (expect (before)) (.toBe 8000)))))
+
+  (it "caps the budgets providers read, never a top-level key"
+      ;; it wrote providerOptions.thinkingBudget, which nothing reads
+      (fn []
+        (let [po #js {:google #js {:thinkingConfig #js {:thinkingBudget 24576}}}]
+          (tb/cap-budgets! po 8000)
+          (-> (expect (.. po -google -thinkingConfig -thinkingBudget)) (.toBe 8000))
+          (-> (expect (.-thinkingBudget po)) (.toBeUndefined)))))))

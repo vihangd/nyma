@@ -3,7 +3,7 @@
    thinking on overflow or provider error.
 
    Hooks used:
-     before_provider_request — inject thinkingBudget into providerOptions
+     before_provider_request — cap the request's thinking token budget
      provider_error          — retry once with thinking disabled on budget overflow
      turn_finalize           — a turn cut off at the output cap that called no
                                tool is deliberation that never committed: the
@@ -15,6 +15,24 @@
    disabled and the partial trace kept in context. Before it, the nudge
    re-ran with thinking still on and a small model could overflow again."
   (:require [clojure.string :as str]))
+
+;; ── The cap ──────────────────────────────────────────────────────
+
+(defn cap-budgets!
+  "Lower the thinking budgets agent.thinking put on the request to `max-tok`,
+   in place. It used to write a top-level `providerOptions.thinkingBudget`,
+   which no provider reads: the cap never capped anything. Only token budgets
+   can be capped — Anthropic's `enabled` thinking and Gemini's
+   thinkingConfig; adaptive thinking and effort-only dialects take none."
+  [po max-tok]
+  (when po
+    (when-let [t (some-> (aget po "anthropic") (aget "thinking"))]
+      (when (and (= "enabled" (aget t "type")) (number? (aget t "budgetTokens")))
+        (aset t "budgetTokens" (min (aget t "budgetTokens") max-tok))))
+    (when-let [g (some-> (aget po "google") (aget "thinkingConfig"))]
+      (when (number? (aget g "thinkingBudget"))
+        (aset g "thinkingBudget" (min (aget g "thinkingBudget") max-tok)))))
+  po)
 
 ;; ── Activation ───────────────────────────────────────────────────
 
@@ -39,10 +57,7 @@
         on-before-request
         (fn [data _ctx]
           (when-not @saved-level
-            ;; Inject thinkingBudget via providerOptions (Anthropic extended thinking)
-            (let [po (or (.-providerOptions data) #js {})]
-              (aset po "thinkingBudget" max-tok)
-              (aset data "providerOptions" po)))
+            (cap-budgets! (.-providerOptions data) max-tok))
           nil)
 
         on-provider-error
