@@ -189,6 +189,18 @@
                    (-> (expect (.includes content "<think>let me think harder</think>")) (.toBe true))
                    (-> (expect (.includes content "Answer: 42")) (.toBe true)))))))
 
+(describe "reasoning-stream/wrap-response OpenRouter reasoning_details"
+          (fn []
+            (it "shows reasoning.text, never a reasoning.encrypted blob"
+                (^:async fn []
+                 (let [chunks #js ["data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"plan\"}]},\"index\":0}]}\n\n"
+                                   "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.encrypted\",\"data\":\"gAAAAB\"}]},\"index\":0}]}\n\n"
+                                   "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"index\":0}]}\n\n"
+                                   "data: [DONE]\n\n"]
+                       content (assembled-content (js-await (.text (wrap-response (sse-response chunks) false))))]
+                   (-> (expect content) (.toContain "plan"))
+                   (-> (expect content) (.not.toContain "gAAAAB")))))))
+
 ;;; ─── prefill must not fire on the role-only chunk ────────────────────────
 ;;;
 ;;; vLLM opens every stream with {"role":"assistant","content":""} and then

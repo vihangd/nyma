@@ -34,7 +34,9 @@
           (let [parts (atom [])]
             (dotimes [i (.-length details)]
               (let [d (aget details i)
-                    t (or (.-text d) (.-summary d) (.-data d))]
+                    ;; Not `.data`: that is a reasoning.encrypted blob,
+                    ;; base64 that rendered as reasoning text.
+                    t (or (.-text d) (.-summary d))]
                 (when (string? t) (swap! parts conj t))))
             (when (seq @parts) (.join (clj->js @parts) "")))))))
 
