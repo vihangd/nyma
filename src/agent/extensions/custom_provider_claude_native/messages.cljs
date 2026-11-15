@@ -98,11 +98,15 @@
         :else nil))))
 
 (defn- reasoning-part->anthropic
-  "A reasoning part streamed by this provider back to a `thinking` block. Only
-   a signed one: Anthropic rejects a thinking block without its signature."
+  "A reasoning part streamed by this provider back to a `thinking` block, or a
+   `redacted_thinking` one. Only a signed thinking block: Anthropic rejects one
+   without its signature."
   [part]
-  (when-let [sig (some-> (.-providerOptions part) (aget "anthropic") (aget "signature"))]
-    #js {:type "thinking" :thinking (or (.-text part) "") :signature sig}))
+  (let [anth (some-> (.-providerOptions part) (aget "anthropic"))]
+    (if-let [data (some-> anth (aget "redactedData"))]
+      #js {:type "redacted_thinking" :data data}
+      (when-let [sig (some-> anth (aget "signature"))]
+        #js {:type "thinking" :thinking (or (.-text part) "") :signature sig}))))
 
 (defn- content-part->anthropic [part]
   (case (.-type part)
@@ -189,7 +193,7 @@
                            ;; as @ai-sdk/anthropic places it — but never on a
                            ;; thinking block, which Anthropic refuses to mark.
                            (when-let [cc (cache-control-of msg)]
-                             (when-let [b (last (remove #(= "thinking" (.-type %)) (.-content am)))]
+                             (when-let [b (last (remove #(contains? #{"thinking" "redacted_thinking"} (.-type %)) (.-content am)))]
                                (aset b "cache_control" cc)))
                            (.push result am)))))
     result))

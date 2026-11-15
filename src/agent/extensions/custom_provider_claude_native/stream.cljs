@@ -124,7 +124,17 @@
             (swap! blocks assoc idx {:type "thinking" :id block-id :signature nil})
             (enqueue-safe! ctrl #js {:type "reasoning-start" :id block-id} closed?))
 
-          nil))  ; unknown block types (redacted_thinking, server_tool_use, etc.) skipped
+          ;; Thinking the safety system encrypted. Nothing to show, but it must
+          ;; go back with the tool results or a thinking tool loop 400s; it
+          ;; rides on providerMetadata.anthropic.redactedData, as in
+          ;; @ai-sdk/anthropic.
+          "redacted_thinking"
+          (let [block-id (str "reasoning-" idx)
+                meta     #js {:anthropic #js {:redactedData (.-data block)}}]
+            (swap! blocks assoc idx {:type "redacted_thinking" :id block-id :meta meta})
+            (enqueue-safe! ctrl #js {:type "reasoning-start" :id block-id :providerMetadata meta} closed?))
+
+          nil))  ; unknown block types (server_tool_use, etc.) skipped
 
       (= t "content_block_delta")
       (let [idx   (.-index evt)
@@ -175,6 +185,10 @@
                                   (:signature block)
                                   (doto (aset "providerMetadata"
                                               #js {:anthropic #js {:signature (:signature block)}})))
+                           closed?)
+
+            "redacted_thinking"
+            (enqueue-safe! ctrl #js {:type "reasoning-end" :id (:id block) :providerMetadata (:meta block)}
                            closed?)
 
             "tool_use"

@@ -303,8 +303,18 @@
     (-> (expect (.-delta (first (filter #(= "reasoning-delta" (.-type %)) parts)))) (.toBe "plan"))
     (-> (expect (.. end -providerMetadata -anthropic -signature)) (.toBe "sig1"))))
 
+(defn ^:async test-redacted-thinking-block []
+  ;; redacted_thinking was skipped, so a thinking tool loop could not send it
+  ;; back and Anthropic 400s.
+  (let [start (js/JSON.stringify #js {:type "content_block_start" :index 0
+                                      :content_block #js {:type "redacted_thinking" :data "ENC"}})
+        parts (js-await (collect-parts [msg-start start (block-stop 0) (msg-delta-line "end_turn") msg-stop]))
+        end   (first (filter #(= "reasoning-end" (.-type %)) parts))]
+    (-> (expect (.. end -providerMetadata -anthropic -redactedData)) (.toBe "ENC"))))
+
 (describe "claude-native/stream — thinking blocks" (fn []
-                                                     (it "streams thinking as reasoning parts, signature on the end" test-thinking-block)))
+                                                     (it "streams thinking as reasoning parts, signature on the end" test-thinking-block)
+                                                     (it "carries redacted_thinking data on the reasoning parts" test-redacted-thinking-block)))
 
 (defn ^:async test-window-exceeded-is-error []
   (let [parts (js-await (collect-parts [msg-start (block-start 0 "text") (text-delta 0 "par")

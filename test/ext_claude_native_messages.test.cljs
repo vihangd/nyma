@@ -348,7 +348,18 @@
             c    (get-in body ["messages" 1 "content"])]
         (-> (expect (count c)) (.toBe 2))
         (-> (expect (.-type (first c))) (.toBe "thinking"))
-        (-> (expect (.-signature (first c))) (.toBe "s")))))))
+        (-> (expect (.-signature (first c))) (.toBe "s")))))
+
+  (it "replays redacted reasoning as a redacted_thinking block"
+    (fn []
+      (let [asst #js {:role "assistant"
+                      :content #js [#js {:type "reasoning" :text ""
+                                         :providerOptions #js {:anthropic #js {:redactedData "ENC"}}}
+                                    (text-part "ok")]}
+            body (msgs/build-request-body "claude-haiku-4-5-20251001" (make-opts [(user-msg "hi") asst (user-msg "more")]))
+            b    (first (get-in body ["messages" 1 "content"]))]
+        (-> (expect (.-type b)) (.toBe "redacted_thinking"))
+        (-> (expect (.-data b)) (.toBe "ENC")))))))
 
 (describe "claude-native/messages — breakpoints and thinking" (fn []
   (it "a message breakpoint skips a trailing thinking block"
