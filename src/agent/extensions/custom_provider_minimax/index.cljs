@@ -1,5 +1,6 @@
 (ns agent.extensions.custom-provider-minimax.index
-  (:require ["@ai-sdk/openai" :refer [createOpenAI]]
+  (:require [agent.utils.reasoning-stream :as rs]
+            ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.utils.credentials :as credentials]
 ))
 
@@ -37,8 +38,10 @@
 ;; extra_body parameter on /v1/chat/completions. @ai-sdk/openai v3.x has
 ;; no `extraBody` option, so we wrap the fetch to splice the field in
 ;; just before the request goes out. When the field is present, MiniMax
-;; returns reasoning in a separate channel that the AI SDK surfaces as
-;; `reasoning-start`/`-delta`/`-end` events (already wired in loop.cljs).
+;; streams reasoning as `delta.reasoning_content` (+ `reasoning_details`),
+;; which @ai-sdk/openai's chat schema drops: reasoning_stream's wrapper turns
+;; it into <think> for the UI and lifts it back for replay. Without that
+;; wrapper reasoning was requested and never shown (0 chars, measured).
 ;;
 ;; If splice fails (non-JSON body, malformed, etc.) we fall through to
 ;; the original request rather than break the call.
@@ -97,7 +100,8 @@
     ;; channel; without it the model produces only the final answer.
     (.chat (createOpenAI #js {:apiKey  key
                               :baseURL (resolve-base-url)
-                              :fetch   (wrap-fetch-with-reasoning js/fetch)})
+                              :fetch   (wrap-fetch-with-reasoning
+                                        (rs/make-fetch rs/lift-think-request-rewriter))})
            id)))
 
 (defn ^:export default [api]
