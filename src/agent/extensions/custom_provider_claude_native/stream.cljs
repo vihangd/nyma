@@ -100,7 +100,15 @@
                                      :toolName tool-name}
                            closed?))
 
-          nil))  ; unknown block types (thinking, server_tool_use, etc.) skipped for now
+          ;; Extended thinking. The signature arrives as its own delta and is
+          ;; carried on reasoning-end, where @ai-sdk/anthropic puts it, so the
+          ;; block can be replayed.
+          "thinking"
+          (let [block-id (str "reasoning-" idx)]
+            (swap! blocks assoc idx {:type "thinking" :id block-id :signature nil})
+            (enqueue-safe! ctrl #js {:type "reasoning-start" :id block-id} closed?))
+
+          nil))  ; unknown block types (redacted_thinking, server_tool_use, etc.) skipped
 
       (= t "content_block_delta")
       (let [idx   (.-index evt)
@@ -113,6 +121,15 @@
                                      :id    (:id block)
                                      :delta (.-text delta)}
                            closed?)
+
+            (and (= (:type block) "thinking") (= (.-type delta) "thinking_delta"))
+            (enqueue-safe! ctrl #js {:type  "reasoning-delta"
+                                     :id    (:id block)
+                                     :delta (.-thinking delta)}
+                           closed?)
+
+            (and (= (:type block) "thinking") (= (.-type delta) "signature_delta"))
+            (swap! blocks assoc-in [idx :signature] (.-signature delta))
 
             (and (= (:type block) "tool_use") (= (.-type delta) "input_json_delta"))
             (let [chunk (.-partial_json delta)]
@@ -129,6 +146,13 @@
           (case (:type block)
             "text"
             (enqueue-safe! ctrl #js {:type "text-end" :id (:id block)} closed?)
+
+            "thinking"
+            (enqueue-safe! ctrl (cond-> #js {:type "reasoning-end" :id (:id block)}
+                                  (:signature block)
+                                  (doto (aset "providerMetadata"
+                                              #js {:anthropic #js {:signature (:signature block)}})))
+                           closed?)
 
             "tool_use"
             (do

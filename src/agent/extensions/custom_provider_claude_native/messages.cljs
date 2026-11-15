@@ -83,9 +83,17 @@
                                   (.toString (js/Buffer.from data) "utf-8"))}}
         :else nil))))
 
+(defn- reasoning-part->anthropic
+  "A reasoning part streamed by this provider back to a `thinking` block. Only
+   a signed one: Anthropic rejects a thinking block without its signature."
+  [part]
+  (when-let [sig (some-> (.-providerOptions part) (aget "anthropic") (aget "signature"))]
+    #js {:type "thinking" :thinking (or (.-text part) "") :signature sig}))
+
 (defn- content-part->anthropic [part]
   (case (.-type part)
     "text"      (text-part->anthropic part)
+    "reasoning" (reasoning-part->anthropic part)
     "tool-call" (tool-call-part->anthropic part)
     "file"      (file-part->anthropic part)
     nil))
@@ -221,7 +229,10 @@
         ;; Current Claude models reject non-default sampling parameters with
         ;; a 400, and settings default temperature to 0.2 — every request
         ;; failed. @ai-sdk/anthropic strips them for these models; so must this.
-        sampling?  (not (thinking-util/rejects-sampling? model-id))
+        ;; Thinking on: "`temperature` may only be set to 1 when thinking is
+        ;; enabled" — a 400 on every request at any level above off.
+        sampling?  (and (not (thinking-util/rejects-sampling? model-id))
+                        (not (contains? #{"enabled" "adaptive"} (get thinking "type"))))
         budget     (get thinking "budget_tokens")
         ;; Anthropic counts reasoning against max_tokens and rejects a request
         ;; whose budget is not strictly smaller.

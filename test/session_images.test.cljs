@@ -82,7 +82,8 @@
                     (-> (expect (get-in b ["thinking" "type"])) (.toBe "adaptive"))
                     (-> (expect (get-in b ["output_config" "effort"])) (.toBe "high"))
                     (-> (expect (contains? b "temperature")) (.toBe false)))))
-            (it "older models keep the budget and their temperature"
+            (it "older models keep the budget; thinking drops temperature"
+                ;; live: "`temperature` may only be set to 1 when thinking is enabled"
                 (fn []
                   (let [b (native/build-request-body
                            "claude-haiku-4-5"
@@ -90,4 +91,4 @@
                                 :temperature 0.2
                                 :providerOptions #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens 4000}}}})]
                     (-> (expect (get-in b ["thinking" "budget_tokens"])) (.toBe 4000))
-                    (-> (expect (get b "temperature")) (.toBe 0.2)))))))
+                    (-> (expect (contains? b "temperature")) (.toBe false)))))))

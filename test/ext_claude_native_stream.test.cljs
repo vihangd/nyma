@@ -288,3 +288,20 @@
                                                      (it "assembles complete JSON string from delta chunks"          test-tool-call-input-assembled)
                                                      (it "tool-input-start carries block id and toolName"            test-tool-call-input-start-id)
                                                      (it "mixed text + tool blocks both arrive in order"             test-mixed-text-and-tool)))
+
+(defn ^:async test-thinking-block []
+  ;; Thinking blocks were skipped: reasoning was requested, paid for, never shown.
+  (let [delta (fn [d] (js/JSON.stringify #js {:type "content_block_delta" :index 0 :delta d}))
+        parts (js-await (collect-parts
+                         [msg-start (block-start 0 "thinking")
+                          (delta #js {:type "thinking_delta" :thinking "plan"})
+                          (delta #js {:type "signature_delta" :signature "sig1"})
+                          (block-stop 0) (msg-delta-line "end_turn") msg-stop]))
+        types (mapv #(.-type %) parts)
+        end   (first (filter #(= "reasoning-end" (.-type %)) parts))]
+    (-> (expect (clj->js types)) (.toContain "reasoning-start"))
+    (-> (expect (.-delta (first (filter #(= "reasoning-delta" (.-type %)) parts)))) (.toBe "plan"))
+    (-> (expect (.. end -providerMetadata -anthropic -signature)) (.toBe "sig1"))))
+
+(describe "claude-native/stream — thinking blocks" (fn []
+                                                     (it "streams thinking as reasoning parts, signature on the end" test-thinking-block)))

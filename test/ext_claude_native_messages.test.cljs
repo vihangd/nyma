@@ -322,3 +322,30 @@
           (-> (expect (marked 0)) (.toBe false))
           (-> (expect (marked 2)) (.toBe true))
           (-> (expect (marked 6)) (.toBe true)))))))
+
+(describe "claude-native/messages — thinking" (fn []
+  (it "drops temperature when thinking is on (Anthropic 400s on it)"
+    (fn []
+      (let [o    (make-opts [(user-msg "hi")] 4096 0.2)
+            _    (aset o "providerOptions" #js {:anthropic #js {:thinking #js {:type "enabled" :budgetTokens 1024}}})
+            body (msgs/build-request-body "claude-haiku-4-5-20251001" o)]
+        (-> (expect (contains? body "temperature")) (.toBe false))
+        (-> (expect (get-in body ["thinking" "type"])) (.toBe "enabled")))))
+
+  (it "keeps temperature when thinking is off"
+    (fn []
+      (let [body (msgs/build-request-body "claude-haiku-4-5-20251001" (make-opts [(user-msg "hi")] 4096 0.2))]
+        (-> (expect (get body "temperature")) (.toBe 0.2)))))
+
+  (it "replays a signed reasoning part as a thinking block, drops an unsigned one"
+    (fn []
+      (let [asst #js {:role "assistant"
+                      :content #js [#js {:type "reasoning" :text "plan"
+                                         :providerOptions #js {:anthropic #js {:signature "s"}}}
+                                    #js {:type "reasoning" :text "nosig"}
+                                    (text-part "ok")]}
+            body (msgs/build-request-body "claude-haiku-4-5-20251001" (make-opts [(user-msg "hi") asst (user-msg "more")]))
+            c    (get-in body ["messages" 1 "content"])]
+        (-> (expect (count c)) (.toBe 2))
+        (-> (expect (.-type (first c))) (.toBe "thinking"))
+        (-> (expect (.-signature (first c))) (.toBe "s")))))))
