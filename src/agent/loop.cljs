@@ -564,6 +564,10 @@
               ;; and a binding introduced after st-config is not in that closure's
               ;; scope (a bare ReferenceError on every step that ran a tool).
               tools-this-turn (atom 0)
+              ;; This pass's completed steps as model messages (the SDK's are
+              ;; per step), so an overflow after a tool ran can continue from
+              ;; them instead of re-running the tools.
+              pass-messages   (atom #js [])
               ;; Model steps this run (tool call + response cycles).
               steps-this-run  (atom 0)
               ;; st-config, for :onStepFinish: it cannot name itself in its own
@@ -698,6 +702,8 @@
                                                                        (update :cache-write + cw))))))
                                                 (when-let [tc (.-toolCalls step)]
                                                   (swap! tools-this-turn + (count tc)))
+                                                (when-let [ms (some-> step .-response .-messages)]
+                                                  (swap! pass-messages #(.concat % ms)))
                                                 ;; Before the emit, so a handler
                                                 ;; reads this step's figures. Caught
                                                 ;; because the SDK swallows a throw
@@ -910,13 +916,19 @@
                             ;; when the declared window is wrong or missing, the
                             ;; case for relay and local providers. A second
                             ;; overflow is a real error, never a loop.
-                            recovered? (when (and @overflowed? can-retry? (not @overflow-recovered?))
+                            ;;
+                            ;; After a tool ran too: the retry CONTINUES from
+                            ;; this pass's completed steps (big outputs stubbed)
+                            ;; rather than restarting it, so nothing runs twice.
+                            recovered? (when (and @overflowed? (not @overflow-recovered?)
+                                                  (nil? @(:retry-state agent)) (< attempt 2))
                                          (reset! overflow-recovered? true)
                                          (js-await (compaction/recover-from-overflow! agent)))]
                         (if recovered?
                           (do
                             (aset st-config "messages"
-                                  (clj->js (js-await (pdf/lower-for-model (build-context agent) model-key))))
+                                  (.concat (clj->js (js-await (pdf/lower-for-model (build-context agent) model-key)))
+                                           (compaction/stub-large-tool-outputs @pass-messages 8000)))
                             (reset! overflowed? false)
                             (reset! stream-error nil)
                             (reset! accumulated "")

@@ -6,6 +6,7 @@
             ["@ai-sdk/provider" :refer [APICallError]]
             [agent.loop :refer [run]]
             [agent.sessions.manager :refer [create-session-manager]]
+            [agent.sessions.compaction :as cmp]
             [test-util.agent-harness :refer [make-test-agent]]))
 
 (def ^:private summary
@@ -87,17 +88,42 @@
     (-> (expect (count @prompts)) (.toBe 2))
     (-> (expect (.-message err)) (.toContain "prompt is too long"))))
 
-(defn ^:async test-later-step-fails-the-turn []
+(defn ^:async test-later-step-continues []
   (let [prompts  (atom [])
         agent    (agent-with-history (scripted prompts [tool-with-text :overflow answer]))
         compacts (count-event agent "compact")
-        err      (js-await (-> (run agent "go") (.then (fn [_] nil)) (.catch (fn [e] e))))]
-    ;; No retry: the tool would run twice.
-    (-> (expect (count @prompts)) (.toBe 2))
-    (-> (expect (.-message err)) (.toContain "prompt is too long"))
-    (-> (expect (not= "working on it" (:content (last (:messages @(:state agent)))))) (.toBe true))
-    ;; So the next prompt fits.
-    (-> (expect @compacts) (.toBe 1))))
+        ran      (count-event agent "tool_execution_start")]
+    (js-await (run agent "go"))
+    (-> (expect (count @prompts)) (.toBe 3))
+    ;; Continued, not restarted: the tool ran once, and the retry carries its
+    ;; call and result after the compacted history.
+    (-> (expect @ran) (.toBe 1))
+    (-> (expect (nth @prompts 2)) (.toContain "SUMMARISED"))
+    (-> (expect (nth @prompts 2)) (.toContain "\"c1\""))
+    (-> (expect (nth @prompts 2)) (.toContain "tool-result"))
+    (-> (expect @compacts) (.toBe 1))
+    (-> (expect (:content (last (:messages @(:state agent))))) (.toBe "done"))))
+
+(defn ^:async test-later-step-second-overflow []
+  (let [prompts (atom [])
+        agent   (agent-with-history (scripted prompts [tool-with-text :overflow :overflow answer]))
+        err     (js-await (-> (run agent "go") (.then (fn [_] nil)) (.catch (fn [e] e))))]
+    (-> (expect (count @prompts)) (.toBe 3))
+    (-> (expect (.-message err)) (.toContain "prompt is too long"))))
+
+(defn ^:async test-stub-large-outputs []
+  (let [big   (apply str (repeat 9000 "x"))
+        msgs  #js [#js {:role "assistant" :content #js [#js {:type "tool-call" :toolCallId "a"}]}
+                   #js {:role "tool" :content #js [#js {:type "tool-result" :toolCallId "a"
+                                                       :output #js {:type "text" :value big}}
+                                                  #js {:type "tool-result" :toolCallId "b"
+                                                       :output #js {:type "text" :value "small"}}]}]
+        out   (cmp/stub-large-tool-outputs msgs 8000)
+        parts (.-content (aget out 1))]
+    (-> (expect (.. (aget parts 0) -output -value)) (.toContain "elided"))
+    (-> (expect (.. (aget parts 1) -output -value)) (.toBe "small"))
+    ;; not mutated
+    (-> (expect (.. (aget (.-content (aget msgs 1)) 0) -output -value)) (.toBe big))))
 
 (defn ^:async test-no-session []
   (let [prompts (atom [])
@@ -110,5 +136,7 @@
           (fn []
             (it "the first step compacts and retries, without reporting a failure" test-first-step-recovers)
             (it "a second overflow is an error, not a loop" test-second-overflow-is-an-error)
-            (it "a later step fails the turn even with text, and compacts for the next" test-later-step-fails-the-turn)
+            (it "a later step continues from the completed steps; tools do not re-run" test-later-step-continues)
+            (it "a second overflow after a tool is an error, not a loop" test-later-step-second-overflow)
+            (it "stubs only the oversized tool outputs" test-stub-large-outputs)
             (it "without a session there is nothing to compact" test-no-session)))

@@ -1119,6 +1119,34 @@ with every section below present.
   [e]
   (error-class/context-overflow? (str (or (some-> e .-message) e ""))))
 
+(defn stub-large-tool-outputs
+  "`msgs` (AI SDK model messages: this pass's completed steps) with every tool
+   result over `max-chars` replaced by a note, for the retry after a mid-run
+   overflow. The likeliest cause is one huge result; the note tells the model
+   the call ran and to re-run it narrower, rather than re-reading it whole.
+
+   ponytail: a fixed threshold. Upgrade: shrink the largest outputs first
+   until the request fits the window."
+  [msgs max-chars]
+  (.map msgs
+        (fn [m]
+          (if (and (= "tool" (.-role m)) (js/Array.isArray (.-content m)))
+            (js/Object.assign
+             #js {} m
+             #js {:content
+                  (.map (.-content m)
+                        (fn [p]
+                          (let [n (count (str (js/JSON.stringify (.-output p))))]
+                            (if (and (= "tool-result" (.-type p)) (> n max-chars))
+                              (js/Object.assign
+                               #js {} p
+                               #js {:output #js {:type  "text"
+                                                 :value (str "[output elided after a context overflow: ~"
+                                                             (js/Math.round (/ n 4))
+                                                             " tokens. The call ran; re-run it narrower if you need the content.]")}})
+                              p))))})
+            m))))
+
 (defn ^:async recover-from-overflow!
   "Compact after a context-overflow error. True if the history got shorter; the
    caller rebuilds its request from `build-context`. Never throws: the overflow
