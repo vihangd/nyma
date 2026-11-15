@@ -477,3 +477,44 @@
         (doseq [[k g] (:unicode segs/glyph-sets)
                 :when (and (seq g) (not (contains? #{"mode-full-auto" "escalated"} (str k))))]
           (-> (expect (str k " " (visibleWidth g))) (.toBe (str k " 1"))))))))
+
+(describe "status-bar/ascii" (fn []
+  (it "NYMA_ASCII: no box-drawing divider or bullet, which an ascii terminal shows as tofu"
+    (fn []
+      (aset js/process.env "NYMA_ASCII" "1")
+      (try
+        (let [bar (create-status-bar theme)]
+          (.setState bar {:streaming true :turn-count 2 :model "m"})
+          (let [text (render-bar bar 120)]
+            (-> (expect text) (.not.toContain "│"))
+            (-> (expect text) (.not.toContain "●"))
+            (-> (expect text) (.toContain "|"))))
+        (finally (js-delete js/process.env "NYMA_ASCII")))))))
+
+(describe "status-bar/narrow left segments" (fn []
+  (it "a left segment that does not fit is dropped whole, not cut to a stub"
+    (fn []
+      (segs/register-segment
+       "test.y"
+       {:auto-append? true
+        :position     :left
+        :render       (fn [_] {:visible? true :content "SEGMENT-YYYY"})})
+      (try
+        (let [bar (create-status-bar theme)]
+          (.setState bar {:model "m"})
+          (let [wide   (render-bar bar 200)
+                narrow (render-bar bar (- (visibleWidth wide) 5))]
+            (-> (expect wide) (.toContain "SEGMENT-YYYY"))
+            (-> (expect narrow) (.not.toContain "SEGM"))))
+        (finally (segs/unregister-segment "test.y")))))))
+
+(describe "status-bar/narrow model" (fn []
+  (it "drops the provider prefix before cutting the model"
+    (fn []
+      (let [bar (create-status-bar theme)]
+        (.setState bar {:model "claude-haiku-4-5" :provider "anthropic" :thinking "medium"})
+        (let [wide   (render-bar bar 200)
+              narrow (render-bar bar (- (visibleWidth wide) 4))]
+          (-> (expect wide) (.toContain "anthropic/"))
+          (-> (expect narrow) (.not.toContain "anthropic"))
+          (-> (expect narrow) (.toContain "claude-haiku-4-5"))))))))

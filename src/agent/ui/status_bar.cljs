@@ -14,7 +14,14 @@
   (:require [agent.utils.ansi :refer [fg color-depth]]
             ["@earendil-works/pi-tui" :refer [truncateToWidth visibleWidth]]
             [agent.ui.status-line-segments :as segs]
+            [agent.ui.themes :as themes]
             [agent.debug :as dbg]))
+
+(defn- bar
+  "The segment divider: the box-drawing bar, or `|` where the terminal
+   cannot show unicode (NYMA_ASCII, non-UTF-8 locale)."
+  []
+  (if (themes/unicode-ok?) "│" "|"))
 
 (def ^:private ESC (js/String.fromCharCode 27))
 
@@ -80,7 +87,7 @@
    reads as 'previous │ segment'. Divider color follows the theme
    border so segments don't shout for attention."
   [{:keys [content color]} border]
-  (str (fg border) " │ " (RESET)
+  (str (fg border) " " (bar) " " (RESET)
        (when color (fg color)) content (RESET)))
 
 (defn- turn-label
@@ -177,9 +184,9 @@
                          core-right (str " "
                                          (cond
                                            streaming
-                                           (str (fg secondary) (BOLD) "● streaming" (RESET)
+                                           (str (fg secondary) (BOLD) (if (themes/unicode-ok?) "● " "* ") "streaming" (RESET)
                                                 (when-let [label (turn-label turn-count streaming run-steps)]
-                                                  (str (fg border) " │" (RESET)
+                                                  (str (fg border) " " (bar) (RESET)
                                                        (fg muted) (DIM) " " label (RESET))))
                                            compact?
                                            (str (fg muted) (DIM) (segs/glyph :ready)
@@ -188,7 +195,7 @@
                                            :else
                                            (str (fg muted) (DIM) "ready" (RESET)
                                                 (when-let [label (turn-label turn-count streaming run-steps)]
-                                                  (str (fg border) " │" (RESET)
+                                                  (str (fg border) " " (bar) (RESET)
                                                        (fg muted) (DIM) " " label (RESET)))))
                                          " ")
                          ;; Extension auto-append segments.
@@ -234,8 +241,6 @@
                                                         (- (js/Date.now) since))}
                          left-segs  (render-extension-segments theme :left seg-ctx width)
                          right-segs (render-extension-segments theme :right seg-ctx width)
-                         left  (str core-left
-                                    (apply str (map #(format-segment % border) left-segs)))
                          right (str (apply str (map #(format-segment % border) right-segs))
                                     core-right)
                          ;; COLUMNS, not characters. This measured `count` of
@@ -261,6 +266,18 @@
                                    right)
                          right-w (visibleWidth right)
                          left-w  (max 0 (- width right-w))
+                         ;; Left segments go in whole or not at all, in order:
+                         ;; cut by columns they read `○ d…`, a stub that says
+                         ;; nothing. Only the model piece is cut mid-word.
+                         left    (reduce (fn [acc seg]
+                                           (let [s (str acc (format-segment seg border))]
+                                             (if (<= (visibleWidth s) left-w) s (reduced acc))))
+                                         core-left left-segs)
+                         ;; Still too wide: the provider prefix goes before
+                         ;; the model or thinking level is cut.
+                         left    (if (and provider-piece (> (visibleWidth left) left-w))
+                                   (.replace left provider-piece "")
+                                   left)
                          left-t  (truncateToWidth left left-w "…" false)]
                      [(str left-t right)]))
 
