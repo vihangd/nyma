@@ -103,10 +103,19 @@
   "Claude models that support the server-side compaction API
    (`compact-2026-01-12` beta). Match by prefix to tolerate
    `:date` suffixes (e.g. `claude-sonnet-4-6-20260601`)."
+  ;; Probed 2026-11-15 (a 200 or a 400 on the context_management field):
+  ;; every current model takes it; Haiku 4.5 is the one refusal ("does not
+  ;; support the 'compact_20260112' context management"). Prefixes cover the
+  ;; point releases (claude-opus-5 → 5-5, claude-fable-5 → 5-1, 5-2).
   ["claude-mythos-preview"
-   "claude-opus-4-7"
    "claude-opus-4-6"
-   "claude-sonnet-4-6"])
+   "claude-opus-4-7"
+   "claude-opus-4-8"
+   "claude-opus-5"
+   "claude-sonnet-4-6"
+   "claude-sonnet-5"
+   "claude-haiku-5"
+   "claude-fable-5"])
 
 (defn model-supports-compaction?
   "True when the given model-id matches one of the supported

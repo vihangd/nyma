@@ -180,6 +180,15 @@
                                                     (fn []
                                                       (-> (expect (shared/model-supports-compaction? "claude-sonnet-4-5"))
                                                           (.toBe false))))
+                                                (it "current models, point releases included; not haiku-4-5"
+                                                    ;; probed live 2026-11-15
+                                                    (fn []
+                                                      (doseq [m ["claude-opus-5-5" "claude-sonnet-5-5" "claude-opus-4-8"
+                                                                 "claude-haiku-5-5" "claude-fable-5-2"]]
+                                                        (-> (expect #js [m (shared/model-supports-compaction? m)])
+                                                            (.toEqual #js [m true])))
+                                                      (-> (expect (shared/model-supports-compaction? "claude-haiku-4-5"))
+                                                          (.toBe false))))
                                                 (it "false for gpt-4o"
                                                     (fn []
                                                       (-> (expect (shared/model-supports-compaction? "gpt-4o"))
