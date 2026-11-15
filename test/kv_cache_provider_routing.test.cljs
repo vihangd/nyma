@@ -181,12 +181,13 @@
                                                            (-> (expect (shared/detect-cache-provider-for-model "gemini-2.0-flash"))
                                                                (.toBe :google))))))
 
-(defn ^:async key-body [make-model]
+(defn ^:async key-body [make-model & [spec]]
   (let [{:keys [box fetch]} (capture)
         model  (make-model fetch)
         agent  (create-agent {:model model :system-prompt long-system})
         api    (create-extension-api agent)
         _      (aset api "getSessionFile" (fn [] "/s/1793-abc.jsonl"))
+        _      (when spec (aset api "getActiveModelSpec" (fn [] spec)))
         _deact (kv-cache/activate api)
         config #js {:model model :system "s" :messages #js [#js {:role "user" :content "q"}]
                     :tools #js {} :providerOptions #js {}}]
@@ -205,6 +206,13 @@
         (let [zai (fn [f] (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1" :name "zai" :fetch f}) "glm"))]
           (-> (expect (.-prompt_cache_key (js-await (key-body zai)))) (.toBeUndefined))
           (-> (expect (.-prompt_cache_key (js-await (key-body anthropic-model)))) (.toBeUndefined)))))
+  (it "a createOpenAI provider with no name is still not openai (its spec says which)"
+      ;; groq, deepseek, relay, local… never pass `name`, so the SDK tags them
+      ;; all "openai.chat"; only the active spec tells them apart
+      ^:async (fn []
+        (let [gw (fn [f] (.chat (createOpenAI #js {:apiKey "k" :baseURL "https://relay.test/v1" :fetch f}) "glm"))]
+          (-> (expect (.-prompt_cache_key (js-await (key-body gw "zai/glm")))) (.toBeUndefined))
+          (-> (expect (.-prompt_cache_key (js-await (key-body openai-model "openai/gpt-5")))) (.toBe "1793-abc")))))
   (it "kv-cache.enabled false sends none"
       ^:async (fn []
         (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "nyma-kv-off-"))

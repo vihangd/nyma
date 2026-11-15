@@ -292,7 +292,13 @@
             ;; same cache. Opt-in per provider name: a strict gateway can 400
             ;; on a body field it does not know.
             (when (and (not provider) (:enabled kv-config))
-              (let [pname (first (.split (str (some-> model .-provider)) "."))
+              ;; The SDK tag is no name: every createOpenAI-built provider
+              ;; (groq, deepseek, relay, local…) reports "openai.chat". The
+              ;; active spec's provider is the one the user chose.
+              (let [spec  (try (some-> (.-getActiveModelSpec api) (.call api)) (catch :default _ nil))
+                    pname (if (and (seq (str spec)) (str/includes? (str spec) "/"))
+                            (first (.split (str spec) "/"))
+                            (first (.split (str (some-> model .-provider)) ".")))
                     sid   (some-> (try (.getSessionFile api) (catch :default _ nil)) str
                                   (.split "/") last (.replace #"\.jsonl$" ""))]
                 (when (and (seq sid) (some #(= pname %) (:cache-key-providers kv-config)))
