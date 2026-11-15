@@ -21,6 +21,7 @@
    Get a key at https://platform.deepseek.com/."
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.utils.credentials :as credentials]
+            [agent.utils.reasoning-request :as rr]
             [agent.utils.reasoning-stream :as rs]))
 
 (def ^:private provider-name "deepseek")
@@ -61,6 +62,30 @@
   (or (aget js/process.env "DEEPSEEK_API_KEY")
       (credentials/read-credential provider-name)))
 
+(def level-fn-atom (atom nil))
+
+;; ── Reasoning dialect ─────────────────────────────────────────────
+;; Measured 2026-11-15 on api.deepseek.com, replaying nyma's own request for
+;; deepseek-v4-pro four times (reasoning chars):
+;;   no parameter                         [152 0 0 0]   — the model decides
+;;   thinking enabled                     [114 0 103 78]
+;;   thinking enabled + effort max        [167 302 142 144]
+;;   thinking disabled                    [0 0 0 0]
+;; So /thinking was a no-op here, and most turns did not reason at all.
+(defmethod rr/reasoning-body provider-name [_ level _model-id]
+  (rr/thinking-effort-body level false))
+
+(defn request-rewriter
+  "Lift <think> back into reasoning_content for replay, then add the live
+   thinking level (read per request: /thinking can change at any time)."
+  [body-str init]
+  (let [lifted (rs/lift-think-request-rewriter body-str init)]
+    (try
+      (rr/splice-absent lifted (rr/reasoning-body provider-name
+                                                  (when-let [f @level-fn-atom] (f))
+                                                  nil))
+      (catch :default _ lifted))))
+
 (defn- create-deepseek-model [id]
   (let [key (resolve-api-key)]
     (when-not key
@@ -70,11 +95,12 @@
                    "Get a key at https://platform.deepseek.com/."))))
     (.chat (createOpenAI #js {:apiKey  key
                               :baseURL (resolve-base-url)
-                              :fetch   (rs/make-fetch
-                                        rs/lift-think-request-rewriter)})
+                              :fetch   (rs/make-fetch request-rewriter)})
            id)))
 
 (defn ^:export default [api]
+  (reset! level-fn-atom (when (.-getThinkingLevel api)
+                          (fn [] (try (.getThinkingLevel api) (catch :default _e nil)))))
   (.registerProvider api provider-name
                      #js {:createModel create-deepseek-model
                           :baseUrl     default-base-url

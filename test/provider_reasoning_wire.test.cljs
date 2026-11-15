@@ -14,7 +14,8 @@
             [agent.extensions.custom-provider-groq.index :as groq]
             [agent.extensions.custom-provider-minimax.index :as minimax]
             [agent.extensions.custom-provider-kimi.index :as kimi]
-            [agent.extensions.custom-provider-relay.index :as relay]))
+            [agent.extensions.custom-provider-relay.index :as relay]
+            [agent.extensions.custom-provider-deepseek.index :as deepseek]))
 
 (def ^:private base-body
   (js/JSON.stringify #js {:model "m" :messages #js [#js {:role "user" :content "hi"}]}))
@@ -144,3 +145,74 @@
                     (-> (expect (.-reasoning_effort b)) (.toBeUndefined))
                     ;; the pre-existing lift must survive the addition
                     (-> (expect (.-reasoning_content (first (.-messages b)))) (.toBe "plan")))))))
+
+(defn- body-for [model]
+  (js/JSON.stringify #js {:model model :messages #js [#js {:role "user" :content "hi"}]}))
+
+;; ── DeepSeek V4 / GLM: thinking + low/high/max ────────────────────
+(describe "wire/deepseek"
+          (fn []
+            (it "maps every level onto thinking + low/high/max"
+        ;; measured: with no parameter V4 decides per request (152 0 0 0 chars)
+                (fn []
+                  (doseq [[lvl effort] [["minimal" "low"] ["low" "low"] ["medium" "high"]
+                                        ["high" "max"] ["xhigh" "max"]]]
+                    (reset! deepseek/level-fn-atom (fn [] lvl))
+                    (let [b (rewrite deepseek/request-rewriter nil)]
+                      (-> (expect (.-type (.-thinking b))) (.toBe "enabled"))
+                      (-> (expect (.-reasoning_effort b)) (.toBe effort))))))
+
+            (it "off turns thinking off rather than sending nothing"
+                (fn []
+                  (reset! deepseek/level-fn-atom (fn [] "off"))
+                  (let [b (rewrite deepseek/request-rewriter nil)]
+                    (-> (expect (.-type (.-thinking b))) (.toBe "disabled"))
+                    (-> (expect (.-reasoning_effort b)) (.toBeUndefined)))))
+
+            (it "keeps lifting <think> for replay, and never overrides the caller"
+                (fn []
+                  (reset! deepseek/level-fn-atom (fn [] "high"))
+                  (let [body (js/JSON.stringify
+                              #js {:model "deepseek-v4-pro" :reasoning_effort "low"
+                                   :messages #js [#js {:role "assistant"
+                                                       :content "<think>plan</think>done"}]})
+                        b    (rewrite deepseek/request-rewriter body)]
+                    (-> (expect (.-reasoning_effort b)) (.toBe "low"))
+                    (-> (expect (.-reasoning_content (first (.-messages b)))) (.toBe "plan")))))))
+
+(describe "wire/relay model families"
+          (fn []
+            (it "GLM gets thinking + max at high, not OpenAI's high (less than its default)"
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "high"))
+                  (let [b (rewrite (relay/chat-request-rewriter) (body-for "glm-5.2"))]
+                    (-> (expect (.-type (.-thinking b))) (.toBe "enabled"))
+                    (-> (expect (.-reasoning_effort b)) (.toBe "max")))))
+
+            (it "GLM-5.3 cannot turn thinking off: off is the lightest effort"
+        ;; measured: thinking disabled → 400 code 1210
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "off"))
+                  (let [b (rewrite (relay/chat-request-rewriter) (body-for "glm-5.3-flash"))]
+                    (-> (expect (.-thinking b)) (.toBeUndefined))
+                    (-> (expect (.-reasoning_effort b)) (.toBe "low")))
+                  (let [b (rewrite (relay/chat-request-rewriter) (body-for "glm-5.2"))]
+                    (-> (expect (.-type (.-thinking b))) (.toBe "disabled")))))
+
+            (it "a vendor-prefixed DeepSeek V4 id is recognised"
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "medium"))
+                  (let [b (rewrite (relay/chat-request-rewriter) (body-for "deepseek/deepseek-v4-pro"))]
+                    (-> (expect (.-reasoning_effort b)) (.toBe "high"))
+                    (-> (expect (.-type (.-thinking b))) (.toBe "enabled")))))
+
+            (it "velona: off sends reasoning.enabled false, any other level nothing"
+        ;; measured: velona ignores every effort knob; only this turns it off
+                (fn []
+                  (reset! relay/level-fn-atom (fn [] "off"))
+                  (let [b (rewrite (relay/chat-request-rewriter "velona") (body-for "deepseek/deepseek-v4-pro"))]
+                    (-> (expect (.-enabled (.-reasoning b))) (.toBe false)))
+                  (reset! relay/level-fn-atom (fn [] "high"))
+                  (let [b (rewrite (relay/chat-request-rewriter "velona") (body-for "deepseek/deepseek-v4-pro"))]
+                    (-> (expect (.-reasoning b)) (.toBeUndefined))
+                    (-> (expect (.-reasoning_effort b)) (.toBeUndefined)))))))

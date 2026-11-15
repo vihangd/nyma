@@ -38,6 +38,7 @@
    @ai-sdk/openai drops them, and New API's OpenAI→Claude request converter
    discards any that survive."
   (:require ["@ai-sdk/anthropic" :refer [createAnthropic]]
+            [clojure.string :as str]
             ["@ai-sdk/openai" :refer [createOpenAI]]
             [agent.debug :as d]
             [agent.providers.model-fetch :as model-fetch]
@@ -136,6 +137,7 @@
     :catalog-url "https://velona.in/gateway/v1/models"
     :types     ["text"]
     :paid-only true
+    :reasoning "velona"
     ;; nemotron here emits a native tool call one turn and prints
     ;; <function=read>…</function> as prose the next. Measured, and the reason a
     ;; run stalls mid-task with the markup rendered as an answer.
@@ -276,6 +278,9 @@
    ;; lists, working or not.
    :available-only (entry-get-bool e "availableOnly" "available-only" true)
    :rescue-parsing (entry-get-bool e "rescueParsing" "rescue-parsing" false)
+   ;; Reasoning dialect name (`relay` by default; `velona`), for a gateway
+   ;; whose own reasoning switch is not the OpenAI one.
+   :reasoning   (entry-get e "reasoning" "reasoning")
    ;; Absolute URL of a richer catalog than <baseUrl>/models. See
    ;; model-fetch/fetch-models — the key is sent only if it is same-origin.
    :catalog-url (entry-get e "catalogUrl" "catalog-url")
@@ -386,12 +391,40 @@
 ;; speaking the same chat protocol, so the preset id is not the dispatch key.
 (def ^:private reasoning-dialect "relay")
 
-(defmethod rr/reasoning-body reasoning-dialect [_ level _model-id]
-  (when-let [l (rr/active-level level)]
-    {:reasoning_effort (case l
-                         "minimal" "low"
-                         "xhigh"   "high"
-                         l)}))
+;;
+;; Gateways relay vendors' models under the vendors' ids, and two families
+;; speak their own dialect through them (measured 2026-11-15, z.ai direct and
+;; openlux): GLM and DeepSeek V4 take `thinking` + low/high/max effort, where
+;; an OpenAI `high` asks GLM for LESS than its default max. Kimi on openlux
+;; reasons on any `reasoning_effort` and ignores `thinking`, so it stays here.
+(defn- bare-id [model-id]
+  (let [s (str model-id) i (.lastIndexOf s "/")] (.toLowerCase (subs s (inc i)))))
+
+(defn- glm-always-thinks?
+  ;; ponytail: hardcoded family; on a new always-thinking GLM, retry on 400
+  ;; code 1210 instead of listing it here.
+  [id] (str/starts-with? id "glm-5.3"))
+
+(defmethod rr/reasoning-body reasoning-dialect [_ level model-id]
+  (let [id (bare-id model-id)]
+    (cond
+      (str/starts-with? id "glm-")         (rr/thinking-effort-body level (glm-always-thinks? id))
+      (str/starts-with? id "deepseek-v4")  (rr/thinking-effort-body level false)
+      :else
+      (when-let [l (rr/active-level level)]
+        {:reasoning_effort (case l
+                             "minimal" "low"
+                             "xhigh"   "high"
+                             l)}))))
+
+;; Velona (measured 2026-11-15, deepseek-v4-pro and kimi-k2.6): reasoning is
+;; always on and never returned; neither `reasoning_effort` nor
+;; `reasoning.effort` moves output tokens, and only OpenRouter's
+;; `reasoning.enabled: false` turns it off (149 → 4 tokens). So `off` is the
+;; one level that can mean anything there.
+(defmethod rr/reasoning-body "velona" [_ level _model-id]
+  (when-not (rr/active-level level)
+    {:reasoning {:enabled false}}))
 
 (defn chat-request-rewriter
   "Lift <think> back into reasoning_content (as before), then add the relay's
@@ -403,20 +436,16 @@
 
    Only the OpenAI-compatible chat path uses this — the Anthropic path already
    gets thinking through `agent.thinking`, which recognises its provider tag."
-  []
-  (fn [body-str init]
-    (let [lifted (rs/lift-think-request-rewriter body-str init)]
-      (try
-        (if-let [r (rr/reasoning-body reasoning-dialect
-                                      (when-let [f @level-fn-atom] (f))
-                                      nil)]
-          (let [body (js/JSON.parse lifted)]
-            (if (nil? (.-reasoning_effort body))
-              (do (aset body "reasoning_effort" (:reasoning_effort r))
-                  (js/JSON.stringify body))
-              lifted))
-          lifted)
-        (catch :default _ lifted)))))
+  ([] (chat-request-rewriter nil))
+  ([dialect]
+   (fn [body-str init]
+     (let [lifted (rs/lift-think-request-rewriter body-str init)]
+       (try
+         (let [model (some-> (js/JSON.parse lifted) .-model)]
+           (rr/splice-absent lifted (rr/reasoning-body (or dialect reasoning-dialect)
+                                                       (when-let [f @level-fn-atom] (f))
+                                                       model)))
+         (catch :default _ lifted))))))
 
 (defn filtered-out-warning
   "A line explaining why `model-id` is not in this provider's catalog, or nil.
@@ -483,7 +512,7 @@
                                   ;; turn read as an answer and nothing ran.
                                   ;; Same failure `local` has carried a rescue
                                   ;; for; this is that rescue, opt-in per entry.
-                                  :fetch (let [f (rs/make-fetch (chat-request-rewriter))]
+                                  :fetch (let [f (rs/make-fetch (chat-request-rewriter (:reasoning entry)))]
                                            (if (:rescue-parsing entry)
                                              (rescue/wrap-fetch-with-rescue f @active-tools-atom)
                                              f))})

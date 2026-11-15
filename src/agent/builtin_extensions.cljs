@@ -100,7 +100,7 @@
     :manifest  #js {"namespace" "custom-provider-claude-native" "description" "Native Anthropic SDK provider (direct API, no OpenAI shim)" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-deepseek"
     :module    ext-custom-provider-deepseek
-    :manifest  #js {"namespace" "custom-provider-deepseek" "description" "DeepSeek models via `api.deepseek.com/v1`" "capabilities" #js ["providers"] "dependsOn" #js [] "dependencies" #js {}}}
+    :manifest  #js {"namespace" "custom-provider-deepseek" "description" "DeepSeek models via `api.deepseek.com/v1`" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}
    {:namespace "custom-provider-groq"
     :module    ext-custom-provider-groq
     :manifest  #js {"namespace" "custom-provider-groq" "description" "Groq models via OpenAI-compatible API" "capabilities" #js ["providers" "model"] "dependsOn" #js [] "dependencies" #js {}}}

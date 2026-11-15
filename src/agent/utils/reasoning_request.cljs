@@ -50,3 +50,40 @@
   (fn [provider _level _model-id] provider))
 
 (defmethod reasoning-body :default [_ _ _] nil)
+
+(defn three-step-effort
+  "A nyma level on the low/high/max scale DeepSeek V4 and z.ai GLM speak.
+   `high` is `max`: z.ai's default already IS max (sending `high` measured
+   21 reasoning chars against 217 for nothing), and on DeepSeek only `max`
+   made it reason on every turn of a real nyma request."
+  [level]
+  (case level
+    ("minimal" "low") "low"
+    "medium"          "high"
+    "max"))
+
+(defn thinking-effort-body
+  "`thinking` + `reasoning_effort` for the DeepSeek V4 / GLM dialect.
+
+   Unlike the other dialects, `off` sends something: with no parameter DeepSeek
+   decides per request whether to reason, and z.ai reasons at max. `always?` is
+   for models that reject `thinking: disabled` (GLM-5.3 answers 400 code 1210),
+   which get the lightest effort instead."
+  [level always?]
+  (if-let [l (active-level level)]
+    {:thinking {:type "enabled"} :reasoning_effort (three-step-effort l)}
+    (if always?
+      {:reasoning_effort "low"}
+      {:thinking {:type "disabled"}})))
+
+(defn splice-absent
+  "Body string with `fields` added where the body has no such key yet (a
+   caller's own setting wins). `fields` nil returns the body unchanged."
+  [body-str fields]
+  (if (empty? fields)
+    body-str
+    (let [body (js/JSON.parse body-str)]
+      (doseq [[k v] fields]
+        (when (undefined? (aget body (name k)))
+          (aset body (name k) (clj->js v))))
+      (js/JSON.stringify body))))
