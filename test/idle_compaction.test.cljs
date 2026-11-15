@@ -190,6 +190,17 @@
                                        :inputTokenDetails #js {:cacheReadTokens read}}} ctx))
 
 (describe "review fixes" (fn []
+  (it "learning is filed under provider/model when the active spec names it"
+      ;; glm direct on z.ai and glm behind a gateway are different caches
+      (fn []
+        (let [r (rig (state-for openai-model))]
+          (aset (:api r) "getActiveModelSpec" (fn [] "zai/model-b"))
+          (first-step! r "model-a" 0)
+          ((get (:h r) "after_provider_request") #js {:model "zai/model-a"} (:ctx r))
+          (swap! (:clock r) + 120000)
+          (first-step! r "model-b" 9000)
+          (-> (expect (get-in @(:saved r) ["zai/model-b" "hit-max"])) (.toBe 121))
+          (-> (expect (aget @(:saved r) "model-b")) (.toBeUndefined)))))
   (it "learning is filed under the model the request went to, not the last run's"
       (fn []
         (let [r (rig (state-for openai-model))]

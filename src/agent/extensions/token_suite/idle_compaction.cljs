@@ -115,7 +115,14 @@
         ;; known at the run's end, so it still names the previous run's model
         ;; when the first step (the one that measures the gap) finishes.
         req-model   (atom nil)
-        model-key   (fn [m] (str (if (string? m) m (some-> m .-modelId))))
+        ;; Provider-qualified when the active spec names this model: the same
+        ;; id direct and behind a gateway are different caches.
+        model-key   (fn [m]
+                      (let [id   (str (if (string? m) m (some-> m .-modelId)))
+                            spec (str (or (try (some-> (.-getActiveModelSpec api) (.call api))
+                                               (catch :default _ nil))
+                                          ""))]
+                        (if (and (seq id) (.endsWith spec (str "/" id))) spec id)))
         compacted?  (atom false)
         spec        (atom nil)
         ;; Models whose cache has served a read this session. The dialect alone
