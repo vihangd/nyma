@@ -11,3 +11,12 @@
   (it "an id nobody lists is still unknown"
     (fn []
       (-> (expect (mi/max-output "acme/unknown-model-x")) (.toBeUndefined))))))
+
+(describe "context window for gateway ids" (fn []
+  (it "a vendor-prefixed gateway id gets the vendor's window, not the 100000 default"
+    (fn []
+      (let [cw (:context-window (mi/create-model-registry))]
+        (-> (expect (cw "openlux/deepseek-v4-pro")) (.toBe (cw "deepseek/deepseek-v4-pro")))
+        (-> (expect (cw "openlux/deepseek-v4-pro")) (.not.toBe 100000))
+        (-> (expect (cw "velona/z-ai/glm-5.3")) (.toBe (cw "zai/glm-5.3")))
+        (-> (expect (cw "acme/unknown-model-x")) (.toBe 100000)))))))

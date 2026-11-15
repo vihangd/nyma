@@ -59,21 +59,26 @@
   (let [i (.indexOf id "/")]
     (when-not (neg? i) (.slice id (inc i)))))
 
-(def ^:private by-last-segment-memo (atom nil))
+(def ^:private by-last-segment-memo (js/Map.))
+
+(defn- last-segment [id] (subs id (inc (.lastIndexOf id "/"))))
 
 (defn- by-last-segment
-  "Output limits keyed by the id's last segment, from the vendors' own rows
-   (not the hosts that resell them, whose limits are their own). The smallest
-   wins on a clash: over-asking is a 400, under-asking only a shorter answer."
-  []
-  (or @by-last-segment-memo
-      (reset! by-last-segment-memo
-    (reduce-kv (fn [m k v]
-                 (if (re-find #"^(openrouter|groq|opencode-zen)/" k)
-                   m
-                   (let [seg (subs k (inc (.lastIndexOf k "/")))]
-                     (assoc m seg (min v (get m seg v))))))
-               {} pricing-data/output-limit))))
+  "`table` (a models.dev map: output limits or context windows) keyed by the
+   id's last segment, from the vendors' own rows (not the hosts that resell
+   them, whose limits are their own). The smallest wins on a clash: over-asking
+   is a 400 or an overflow, under-asking only a shorter answer or an early
+   compaction."
+  [table]
+  (or (.get by-last-segment-memo table)
+      (let [m (reduce-kv (fn [m k v]
+                           (if (re-find #"^(openrouter|groq|opencode-zen)/" k)
+                             m
+                             (let [seg (last-segment k)]
+                               (assoc m seg (min v (get m seg v))))))
+                         {} table)]
+        (.set by-last-segment-memo table m)
+        m)))
 
 (defn max-output
   "The most tokens `model-id` can return, or nil when unknown: exact, then the
@@ -84,7 +89,7 @@
   (let [id (str model-id)]
     (or (get pricing-data/output-limit id)
         (when-let [bare (bare-id id)] (get pricing-data/output-limit bare))
-        (get (by-last-segment) (subs id (inc (.lastIndexOf id "/")))))))
+        (get (by-last-segment pricing-data/output-limit) (last-segment id)))))
 
 (defn- usable
   "An entry with no context window is not an answer — it's a placeholder a
@@ -104,6 +109,12 @@
   [models id]
   (or (usable (get models id))
       (when-let [bare (bare-id id)] (usable (get models bare)))
+      ;; A gateway's id for a vendor model (`openlux/deepseek-v4-pro`,
+      ;; `velona/z-ai/glm-5.3`): the vendor's row for the last segment. The
+      ;; snapshot keys those rows `deepseek/…`, which neither step above nor
+      ;; the bare-key fuzzy match below can reach.
+      (when-let [n (get (by-last-segment pricing-data/context) (last-segment id))]
+        {:context-window n})
       ;; Fuzzy match, over BARE keys only, against the bare id.
       ;;
       ;; Qualified keys must be excluded. The 15-char prefix is shorter than
