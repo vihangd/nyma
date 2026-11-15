@@ -102,7 +102,8 @@
                 (fn []
                   (reset! kimi/level-fn-atom (fn [] "off"))
                   (let [b (rewrite (kimi/make-request-rewriter "kimi-k2.6") nil)]
-                    (-> (expect (.-thinking (.-chat_template_kwargs b))) (.toBe false)))))
+                    (-> (expect (.. b -thinking -type)) (.toBe "disabled"))
+                    (-> (expect (.-chat_template_kwargs b)) (.toBeUndefined)))))
 
             (it "sends no temperature to a thinking model, which refuses nyma's"
                 (fn []
@@ -114,7 +115,13 @@
                 (fn []
                   (reset! kimi/level-fn-atom (fn [] "medium"))
                   (let [b (rewrite (kimi/make-request-rewriter "kimi-k2.6") nil)]
-                    (-> (expect (.-thinking (.-chat_template_kwargs b))) (.toBe true)))))))
+                    (-> (expect (.. b -thinking -type)) (.toBe "enabled")))))
+
+            (it "K3 counts as a thinking model"
+                (fn []
+                  (reset! kimi/level-fn-atom (fn [] "off"))
+                  (let [b (rewrite (kimi/make-request-rewriter "kimi-k3.1-pro") nil)]
+                    (-> (expect (.. b -thinking -type)) (.toBe "disabled")))))))
 
 ;; ── Relay (yunwu and other New-API gateways) ──────────────────────
 (describe "wire/relay"

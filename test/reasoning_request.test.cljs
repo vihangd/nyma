@@ -84,10 +84,13 @@
 
 (describe "reasoning-request/kimi"
           (fn []
-            (it "off means false, not absent — the flag used to be hardcoded true"
+            (it "off means disabled, not absent — Moonshot thinks by default"
                 (fn []
-                  (-> (expect (:thinking (rr/reasoning-body "kimi" "off" nil))) (.toBe false))
-                  (-> (expect (:thinking (rr/reasoning-body "kimi" "high" nil))) (.toBe true))))))
+                  (-> (expect (get-in (rr/reasoning-body "kimi" "off" "kimi-k3") [:thinking :type])) (.toBe "disabled"))
+                  (-> (expect (get-in (rr/reasoning-body "kimi" "high" "kimi-k3") [:thinking :type])) (.toBe "enabled"))))
+            (it "sends nothing on off to a model that refuses disabled"
+                (fn []
+                  (-> (expect (rr/reasoning-body "kimi" "off" "kimi-k2.7-code")) (.toBeFalsy))))))
 
 (describe "reasoning-request/default"
           (fn []

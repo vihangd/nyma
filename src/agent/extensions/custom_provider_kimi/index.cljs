@@ -12,7 +12,8 @@
      carries <think> blocks, lift the inner text into a
      `reasoning_content` field on the message — Moonshot rejects
      thinking-mode tool-call replays that lack it.
-   - Inject `chat_template_kwargs.thinking=true` and
+   - Send `thinking: {type: enabled|disabled}` from the thinking level
+     (Moonshot ignores `chat_template_kwargs.thinking`, measured), and
      `preserve_thinking=true` so the server keeps thinking on across
      turns."
   (:require ["@ai-sdk/openai" :refer [createOpenAI]]
@@ -23,25 +24,23 @@
 (def ^:private provider-name "kimi")
 (def ^:private default-base-url "https://api.moonshot.ai/v1")
 
-;; K2.6 / K2.5 are the current production models (256k context, multimodal).
-;; K2 preview series is deprecated as of May 25 2026.
-;; moonshot-v1-* are legacy general-purpose models.
+;; The models this key lists (GET /v1/models, 2026-11-15). Every one thinks;
+;; the K2 previews and moonshot-v1-* are gone.
 (def ^:private models
-  [{:id "kimi-k2.6"             :name "Kimi K2.6"              :ctx 262144}
-   {:id "kimi-k2.5"             :name "Kimi K2.5"              :ctx 262144}
-   {:id "kimi-k2-0905-preview"  :name "Kimi K2 0905 (preview)" :ctx 262144}
-   {:id "kimi-k2-turbo-preview" :name "Kimi K2 Turbo (preview)" :ctx 262144}
-   {:id "kimi-k2-thinking"      :name "Kimi K2 Thinking"       :ctx 262144}
-   {:id "kimi-k2-thinking-turbo" :name "Kimi K2 Thinking Turbo" :ctx 262144}
-   {:id "kimi-k2-0711-preview"  :name "Kimi K2 0711 (preview)" :ctx 131072}
-   {:id "moonshot-v1-128k"      :name "Moonshot v1 128k"       :ctx 131072}
-   {:id "moonshot-v1-32k"       :name "Moonshot v1 32k"        :ctx 32768}
-   {:id "moonshot-v1-8k"        :name "Moonshot v1 8k"         :ctx 8192}])
+  [{:id "kimi-k3.1-pro"             :name "Kimi K3.1 Pro"             :ctx 1048576}
+   {:id "kimi-k3.1-pro-highspeed"   :name "Kimi K3.1 Pro Highspeed"   :ctx 1048576}
+   {:id "kimi-k3"                   :name "Kimi K3"                   :ctx 1048576}
+   {:id "kimi-k2.7-code"            :name "Kimi K2.7 Code"            :ctx 262144}
+   {:id "kimi-k2.7-code-highspeed"  :name "Kimi K2.7 Code Highspeed"  :ctx 262144}
+   {:id "kimi-k2.6"                 :name "Kimi K2.6"                 :ctx 262144}])
 
 (defn- thinking-model? [id]
-  (or (= id "kimi-k2.6")
-      (= id "kimi-k2.5")
-      (.includes (str id) "thinking")))
+  (boolean (re-find #"^kimi-k(2\.[5-9]|[3-9])|thinking" (str id))))
+
+;; 400 on disabled: "invalid thinking: only type=enabled is allowed for this
+;; model". ponytail: name list; retry without on that 400 if more appear.
+(defn- always-thinks? [id]
+  (boolean (re-find #"kimi-k2\.7-code" (str id))))
 
 (defn- ->js-model [{:keys [id name ctx]}]
   #js {:id            id
@@ -59,15 +58,18 @@
 ;;; ─── Request rewrite ──────────────────────────────────────────────────
 ;;; Lifting <think> back to reasoning_content lives in
 ;;; `agent.utils.reasoning-stream`; here we only add Moonshot's
-;;; `chat_template_kwargs.thinking` / `preserve_thinking` injection.
+;;; `thinking` / `preserve_thinking` injection.
 
 (def level-fn-atom (atom nil))
 
-;; Unlike the other dialects this one never returns nil: Moonshot's flag is a
-;; boolean, and `off` has to send `false` to turn thinking off. The extension
-;; used to hardcode `true`, so `/thinking off` never reached the server.
-(defmethod rr/reasoning-body provider-name [_ level _model-id]
-  {:thinking (boolean (rr/active-level level))})
+;; `off` has to send `disabled`: Moonshot thinks by default. Nil only for a
+;; model that refuses `disabled`. (Was chat_template_kwargs.thinking, which
+;; Moonshot ignores: off still reasoned.)
+(defmethod rr/reasoning-body provider-name [_ level model-id]
+  (cond
+    (rr/active-level level)   {:thinking {:type "enabled"}}
+    (always-thinks? model-id) nil
+    :else                     {:thinking {:type "disabled"}}))
 
 (defn make-request-rewriter [model-id]
   (fn [body-str init]
@@ -75,17 +77,13 @@
       (if-not (thinking-model? model-id)
         lifted
         (try
-          (let [body   (js/JSON.parse lifted)
-                kwargs (or (.-chat_template_kwargs body) #js {})
-                ;; Was hardcoded `true`, so `/thinking off` left Moonshot
-                ;; thinking anyway — the level now decides.
-                want   (:thinking (rr/reasoning-body
-                                   provider-name
-                                   (when-let [f @level-fn-atom] (f))
-                                   model-id))]
-            (when (nil? (.-thinking kwargs))
-              (aset kwargs "thinking" want))
-            (aset body "chat_template_kwargs" kwargs)
+          (let [body (js/JSON.parse lifted)
+                want (:thinking (rr/reasoning-body
+                                 provider-name
+                                 (when-let [f @level-fn-atom] (f))
+                                 model-id))]
+            (when (and want (nil? (.-thinking body)))
+              (aset body "thinking" (clj->js want)))
             (when (nil? (.-preserve_thinking body))
               (aset body "preserve_thinking" true))
             ;; Refused otherwise: "invalid temperature: only 1 is allowed for
