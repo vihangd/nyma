@@ -320,11 +320,12 @@
    used by Kimi to inject `chat_template_kwargs.thinking` and lift
    <think> tags into `reasoning_content` for replay.
    `opts` (optional) may include `:think-prefill?` — synthesize an opening
-   <think> at content start for template-prefilled models (poolside/Laguna)."
+   <think> at content start for template-prefilled models (poolside/Laguna);
+   a fn is asked per request, for a model that prefills only while thinking."
   ([] (make-fetch nil nil))
   ([request-rewriter] (make-fetch request-rewriter nil))
   ([request-rewriter opts]
-   (let [think-prefill? (boolean (:think-prefill? opts))]
+   (let [tp (:think-prefill? opts)]
      (fn [url init]
        (let [body  (and init (.-body init))
              body2 (if (and request-rewriter (string? body))
@@ -334,4 +335,4 @@
                      (doto (js/Object.assign #js {} init) (aset "body" body2))
                      init)]
          (-> (js/fetch url init2)
-             (.then (fn [resp] (wrap-response resp think-prefill?)))))))))
+             (.then (fn [resp] (wrap-response resp (boolean (if (fn? tp) (tp) tp)))))))))))

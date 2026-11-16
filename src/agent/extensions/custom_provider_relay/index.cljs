@@ -94,6 +94,10 @@
     ;; would otherwise appear under both providers. Keep them on yunwu-claude:
     ;; that is the only variant where prompt caching works.
     :exclude   ["claude"]
+    ;; Alibaba group, 2026-11-16: with thinking on, these two stream their
+    ;; reasoning as plain content and close it with a bare </think> (the
+    ;; template's opener is never sent). Off, they answer cleanly.
+    :think-prefill ["qwen3.5-27b" "qwen3.5-122b-a10b"]
     :models    [{:id "deepseek-v3.2"}
                 ;; Also declares the `anthropic` endpoint — the only DeepSeek id
                 ;; here that does — and it genuinely works. Kept on the OpenAI
@@ -289,6 +293,9 @@
    ;; lists, working or not.
    :available-only (entry-get-bool e "availableOnly" "available-only" true)
    :rescue-parsing (entry-get-bool e "rescueParsing" "rescue-parsing" false)
+   ;; Model ids whose chat template pre-fills <think> when thinking is on, so
+   ;; the stream carries reasoning as content up to a bare </think>.
+   :think-prefill (->vec (entry-get e "thinkPrefill" "think-prefill"))
    ;; Reasoning dialect name (`relay` by default; `velona`), for a gateway
    ;; whose own reasoning switch is not the OpenAI one.
    :reasoning   (entry-get e "reasoning" "reasoning")
@@ -508,7 +515,13 @@
                                   ;; turn read as an answer and nothing ran.
                                   ;; Same failure `local` has carried a rescue
                                   ;; for; this is that rescue, opt-in per entry.
-                                  :fetch (let [f (rs/make-fetch (chat-request-rewriter (:reasoning entry)))]
+                                  :fetch (let [f (rs/make-fetch
+                                                  (chat-request-rewriter (:reasoning entry))
+                                                  {:think-prefill?
+                                                   (when (some #(= (str %) (str model-id)) (:think-prefill entry))
+                                                     ;; Only while a level is sent: thinking
+                                                     ;; off, these answer as plain content.
+                                                     #(some? (rr/active-level (when-let [f @level-fn-atom] (f)))))})]
                                            (if (:rescue-parsing entry)
                                              (rescue/wrap-fetch-with-rescue f @active-tools-atom)
                                              f))})

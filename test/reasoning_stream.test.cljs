@@ -2,7 +2,7 @@
   (:require [test-util.sse :refer [sse-response]]
              ["bun:test" :refer [describe it expect]]
             ["./agent/utils/reasoning_stream.mjs"
-             :refer [extract-think-blocks rewrite-assistant-msg wrap-response]]))
+             :refer [extract-think-blocks rewrite-assistant-msg wrap-response make-fetch]]))
 
 (describe "reasoning-stream/extract-think-blocks"
           (fn []
@@ -304,3 +304,20 @@
                        #js ["data: {\"choices\":[{\"delta\":{\"content\":\"plain\"},\"index\":0}]}\n\n"
                             "data: [DONE]\n\n"])
                       (.then (fn [s] (-> (expect s) (.toBe "plain")))))))))
+
+(defn ^:async test-prefill-fn-per-request []
+  ;; openlux qwen3.5-27b prefills <think> only while thinking is on
+  (let [orig js/globalThis.fetch
+        on?  (atom true)
+        f    (make-fetch nil {:think-prefill? #(deref on?)})]
+    (try
+      (aset js/globalThis "fetch" (fn [_ _] (js/Promise.resolve (sse-response prefill-chunks))))
+      (let [a (js-await (.text (js-await (f "u" #js {}))))
+            _ (reset! on? false)
+            b (js-await (.text (js-await (f "u" #js {}))))]
+        (-> (expect a) (.toContain "<think>weighing options</think>"))
+        (-> (expect b) (.not.toContain "<think>weighing")))
+      (finally (aset js/globalThis "fetch" orig)))))
+
+(describe "make-fetch think-prefill as a fn" (fn []
+  (it "is asked per request" test-prefill-fn-per-request)))

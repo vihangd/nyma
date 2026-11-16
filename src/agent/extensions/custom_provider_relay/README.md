@@ -83,6 +83,7 @@ replace it.
 | `paidOnly` | `false` | Drop models the catalog prices at zero on both sides. |
 | `availableOnly` | `true` | Drop models the catalog itself flags `available: false`. On by default, and safe: gateways that never report the field are untouched. Set `false` to list everything, working or not. |
 | `rescueParsing` | `false` | Recover tool calls a model emits as prose instead of `tool_calls`. |
+| `thinkPrefill` | *(none)* | Model ids whose template pre-fills `<think>` while thinking is on, so the stream carries reasoning as content up to a bare `</think>`. nyma adds the opener, only while a thinking level is sent. The `openlux` preset lists `qwen3.5-27b` and `qwen3.5-122b-a10b`. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |
