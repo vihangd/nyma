@@ -176,7 +176,9 @@
     ;; Confirmed against a live catalogue: Claude ids there declare
     ;; [anthropic, openai], so /v1/messages is genuinely served.
     :endpoint-types ["anthropic"]
-    :models    [{:id "claude-opus-5"}
+    :models    [{:id "claude-opus-5-5"}
+                {:id "claude-opus-5"}
+                {:id "claude-sonnet-5-5"}
                 {:id "claude-sonnet-5"}
                 {:id "claude-haiku-4-5-20251001"}]}
    ;; ── openlux billing groups ──────────────────────────────────
@@ -202,8 +204,11 @@
    ;; `openlux` above is likelier here, and caching / thinking parity with the
    ;; official route is what the upstream CLI happens to pass through.
    ;;
-   ;; Seed costs are the sheet as of 2026-09-23 (USD per 1M); discovery
-   ;; overwrites them (merge-declared: discovery wins).
+   ;; Seed costs are the sheet as of 2026-11-16 (USD per 1M); discovery
+   ;; overwrites them (merge-declared: discovery wins). Live 2026-11-16 on
+   ;; Kiro: tool use, thinking + tools and prompt caching all work. The
+   ;; upstream injects a Claude Code system prompt (~1.1k tokens, served from
+   ;; cache) and reports input_tokens 0, all input as cache read/write.
    {:name      "openlux-kiro"
     :base-url  "https://api.openlux.ai/v1"
     :api-key-env "OPENLUX_KIRO_API_KEY"
@@ -211,12 +216,18 @@
     :discover  true
     :endpoint-types ["anthropic"]
     :group     "Kiro-Claude-1"
-    :models    [{:id "claude-sonnet-5" :context-window 1000000
+    :models    [{:id "claude-opus-5-5" :context-window 1000000
+                 :cost {:input 0.353 :output 1.765 :cache-read 0.018 :cache-write 0.441}}
+                {:id "claude-sonnet-5-5" :context-window 1000000
+                 :cost {:input 0.176 :output 0.882 :cache-read 0.009 :cache-write 0.221}}
+                {:id "claude-opus-5" :context-window 1000000
+                 :cost {:input 0.441 :output 2.206 :cache-read 0.044 :cache-write 0.551}}
+                {:id "claude-sonnet-5" :context-window 1000000
                  :cost {:input 0.176 :output 0.882 :cache-read 0.018 :cache-write 0.221}}
+                {:id "claude-opus-4-8" :context-window 1000000
+                 :cost {:input 0.441 :output 2.206 :cache-read 0.044 :cache-write 0.551}}
                 {:id "claude-haiku-4-5-20251001" :context-window 200000
-                 :cost {:input 0.088 :output 0.441 :cache-read 0.009 :cache-write 0.110}}
-                {:id "claude-opus-5"
-                 :cost {:input 0.441 :output 2.206 :cache-read 0.044 :cache-write 0.551}}]}
+                 :cost {:input 0.088 :output 0.441 :cache-read 0.009 :cache-write 0.110}}]}
    {:name      "openlux-codex"
     :base-url  "https://api.openlux.ai/v1"
     :api-key-env "OPENLUX_CODEX_API_KEY"

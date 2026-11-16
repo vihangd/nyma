@@ -179,12 +179,23 @@ is its own provider with its own token:
 /model openlux-codex/gpt-5.6-terra
 ```
 
+A token can also carry several groups (the token log's `token_group` lists them, e.g.
+`Anthropic-Claude-1,…,Kiro-Claude-1`); openlux then picks the group per request, and on
+2026-11-16 a multi-group `openlux` token was served from Kiro while the official route
+answered 503. nyma cannot tell which group served a request, so `openlux-claude` stays
+unpriced; a token minted in Kiro alone is what makes `openlux-kiro`'s prices exact.
+
+Measured on Kiro (2026-11-16, claude-opus-5-5): tool use, thinking with tools, and prompt
+caching all work. The upstream adds a Claude Code system prompt (~1.1k tokens, served from
+cache, and the model may introduce itself as Claude Code) and reports `input_tokens: 0`,
+with all input counted as cache read or write.
+
 Two presets ship. Neither shares the `openlux` credential: a shared token is a token in the
 wrong group.
 
-| Preset | Group | Wire | Serves (sheet, 2026-09-23) | USD per 1M in / out |
+| Preset | Group | Wire | Serves (sheet; Kiro 2026-11-16, Codex 2026-09-23) | USD per 1M in / out |
 | --- | --- | --- | --- | --- |
-| `openlux-kiro` | `Kiro-Claude-1` (×0.088) | anthropic | claude-sonnet-5, haiku-4-5, opus-5, opus-4-5…4-8, sonnet-4-5/4-6, fable-5, fable-5-1 | sonnet-5 0.18 / 0.88 · haiku 0.09 / 0.44 · opus-5 0.44 / 2.21 |
+| `openlux-kiro` | `Kiro-Claude-1` (×0.088) | anthropic | claude-opus-5-5, opus-5, opus-4-5…4-8, sonnet-5-5, sonnet-5, sonnet-4-5/4-6, haiku-4-5 | opus-5-5 0.35 / 1.76 · opus-5 0.44 / 2.21 · sonnet-5(-5) 0.18 / 0.88 · haiku 0.09 / 0.44 |
 | `openlux-codex` | `Codex-Gpt-1` (×0.037) | openai (+responses) | gpt-5.6-terra, gpt-5.6-sol, gpt-5.5, gpt-5-codex, gpt-6-astra | terra 0.07 / 0.44 · gpt-5-codex 0.05 / 0.37 · sol 0.18 / 1.10 |
 
 What `group` does at discovery: it fetches the relay's public `GET /api/pricing` (no key is
@@ -210,7 +221,7 @@ is in — nyma cannot read it off the wire:
 Caveats. Capacity is the subscription's: the `429 当前分组上游负载已饱和` note above is likelier
 in these groups, and there is no retry-after. Prompt caching and thinking work as far as the
 upstream CLI passes them through; the official route is the reference. Seed prices in the
-presets are the sheet as of 2026-09-23; discovery overwrites them.
+presets are the sheet as of the dates in the table above; discovery overwrites them.
 
 ## Where the context windows come from
 
