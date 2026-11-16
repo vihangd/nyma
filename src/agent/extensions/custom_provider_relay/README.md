@@ -84,6 +84,7 @@ replace it.
 | `availableOnly` | `true` | Drop models the catalog itself flags `available: false`. On by default, and safe: gateways that never report the field are untouched. Set `false` to list everything, working or not. |
 | `rescueParsing` | `false` | Recover tool calls a model emits as prose instead of `tool_calls`. |
 | `thinkPrefill` | *(none)* | Model ids whose template pre-fills `<think>` while thinking is on, so the stream carries reasoning as content up to a bare `</think>`. nyma adds the opener, only while a thinking level is sent. The `openlux` preset lists `qwen3.5-27b` and `qwen3.5-122b-a10b`. |
+| `sort` | *(none)*; `price` on `openlux`, `openlux-claude` | New API routing mode, sent as `provider.sort` on every request: `price`, `speed`, `success_rate` or `auto`. On a token with several groups it picks among them per request (a body that sets its own `provider` wins). No exact group can be named per request; that takes a token per group. |
 | `include` | *(all)* | Allow-list of substrings or `/regex/`, case-insensitive. |
 | `exclude` | *(none)* | Subtracted after `include`. |
 | `overheadTokens` | *(none)* | Tokens the gateway adds to every request (see below). |

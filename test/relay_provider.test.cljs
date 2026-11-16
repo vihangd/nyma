@@ -951,3 +951,24 @@
   (it "says nothing for an entry with no filters at all"
       (fn []
         (-> (expect (relay/filtered-out-warning {:name "plain"} "anything")) (.toBeNil))))))
+
+(defn ^:async test-sort-fetch []
+  (let [seen (atom [])
+        f    (relay/sort-fetch {:sort "price"}
+                               (fn [_ init] (swap! seen conj (js/JSON.parse (.-body init)))
+                                 (js/Promise.resolve nil)))]
+    (js-await (f "u" #js {:body "{\"model\":\"qwen3.8-max\"}"}))
+    ;; the caller's own provider object wins
+    (js-await (f "u" #js {:body "{\"model\":\"m\",\"provider\":{\"sort\":\"speed\"}}"}))
+    (-> (expect (.. (first @seen) -provider -sort)) (.toBe "price"))
+    (-> (expect (.. (second @seen) -provider -sort)) (.toBe "speed"))))
+
+(describe "relay sort" (fn []
+  (it "adds provider.sort to each request" test-sort-fetch)
+  (it "is nil without a sort, so the SDK keeps its own fetch"
+      (fn [] (-> (expect (relay/sort-fetch {})) (.toBeNil))))
+  (it "is read from a settings entry"
+      (fn [] (-> (expect (:sort (relay/normalize-entry #js {:name "x" :baseUrl "https://x/v1" :sort "price"})))
+                 (.toBe "price"))))
+  (it "is on the openlux presets"
+      (fn [] (-> (expect (:sort (first (filter #(= "openlux" (:name %)) relay/presets)))) (.toBe "price"))))))

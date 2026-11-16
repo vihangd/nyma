@@ -98,6 +98,9 @@
     ;; reasoning as plain content and close it with a bare </think> (the
     ;; template's opener is never sent). Off, they answer cleanly.
     :think-prefill ["qwen3.5-27b" "qwen3.5-122b-a10b"]
+    ;; A multi-group token is routed per request; cheapest first. openlux
+    ;; still retries other groups when the cheap one fails.
+    :sort      "price"
     :models    [{:id "deepseek-v3.2"}
                 ;; Also declares the `anthropic` endpoint — the only DeepSeek id
                 ;; here that does — and it genuinely works. Kept on the OpenAI
@@ -175,6 +178,7 @@
     :credential-fallbacks ["yunwu"]
     ;; Same account as `yunwu`, so one /login covers both.
     :credential-name "openlux"
+    :sort      "price"
     :api       "anthropic"
     :discover  true
     ;; Confirmed against a live catalogue: Claude ids there declare
@@ -296,6 +300,8 @@
    ;; Model ids whose chat template pre-fills <think> when thinking is on, so
    ;; the stream carries reasoning as content up to a bare </think>.
    :think-prefill (->vec (entry-get e "thinkPrefill" "think-prefill"))
+   ;; New API routing mode, sent as provider.sort (see sort-fetch).
+   :sort        (entry-get e "sort" "sort")
    ;; Reasoning dialect name (`relay` by default; `velona`), for a gateway
    ;; whose own reasoning switch is not the OpenAI one.
    :reasoning   (entry-get e "reasoning" "reasoning")
@@ -475,6 +481,25 @@
            "as an agent model — expect turns that think and then answer nothing. "
            "Run `/model` for the ids this provider actually lists."))))
 
+(defn sort-fetch
+  "`f` (default the global fetch, read per call) with the entry's `sort` added
+   to each JSON request body as `provider.sort`, unless the body has its own
+   `provider`. openlux (New API) routes on it across the token's groups:
+   `price`, `speed`, `success_rate`, `auto` — measured 2026-11-16, `price`
+   moved qwen3.8-max from Alibaba-2 to Self-Deployed-1, ~8x cheaper. The
+   same works as a `:price` model-id suffix, which would break nyma's
+   per-id window and price lookups. nil when the entry sets no sort."
+  [entry & [f]]
+  (when-let [sort (some-> (:sort entry) str not-empty)]
+    (fn [url init]
+      (let [body (some-> init .-body)
+            init (if (string? body)
+                   (doto (js/Object.assign #js {} init)
+                     (aset "body" (try (rr/splice-absent body {:provider {:sort sort}})
+                                       (catch :default _ body))))
+                   init)]
+        ((or f js/fetch) url init)))))
+
 (defn create-model-fn
   "`endpoints-of` maps a model id to its declared endpoint types. It's a
    function rather than a value because discovery re-registers the provider,
@@ -491,15 +516,16 @@
         ;; works: cache_control breakpoints survive it, and are dropped by the
         ;; OpenAI-compatible one.
         :anthropic
-        ((createAnthropic #js {:apiKey  key
-                               :baseURL (:base-url entry)})
+        ((createAnthropic (cond-> #js {:apiKey  key
+                                       :baseURL (:base-url entry)}
+                            (:sort entry) (doto (aset "fetch" (sort-fetch entry)))))
          model-id)
 
         ;; /responses has native reasoning handling, so no think-lifting shim.
         :responses
-        (.responses (createOpenAI #js {:apiKey        key
-                                       :baseURL       (:base-url entry)
-                                      })
+        (.responses (createOpenAI (cond-> #js {:apiKey  key
+                                               :baseURL (:base-url entry)}
+                                    (:sort entry) (doto (aset "fetch" (sort-fetch entry)))))
                     model-id)
 
         ;; Gateways relay DeepSeek/GLM/Qwen, which stream reasoning through
@@ -522,9 +548,10 @@
                                                      ;; Only while a level is sent: thinking
                                                      ;; off, these answer as plain content.
                                                      #(some? (rr/active-level (when-let [f @level-fn-atom] (f)))))})]
-                                           (if (:rescue-parsing entry)
-                                             (rescue/wrap-fetch-with-rescue f @active-tools-atom)
-                                             f))})
+                                           (let [f (if (:rescue-parsing entry)
+                                                     (rescue/wrap-fetch-with-rescue f @active-tools-atom)
+                                                     f)]
+                                             (or (sort-fetch entry f) f)))})
                model-id)))))
 
 (defn- ->js-model [m]
