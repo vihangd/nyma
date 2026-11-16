@@ -178,7 +178,10 @@
     :credential-fallbacks ["yunwu"]
     ;; Same account as `yunwu`, so one /login covers both.
     :credential-name "openlux"
-    :sort      "price"
+    ;; No :sort. Measured 2026-11-16 on a 31k-token opus-5-5 prompt: `price`
+    ;; picks Claude-Code-1, which wrote the cache on every request and never
+    ;; read it (18063 quota each); left to itself openlux picked Kiro, which
+    ;; caches on its own (3123 cold, 432 warm).
     :api       "anthropic"
     :discover  true
     ;; Confirmed against a live catalogue: Claude ids there declare
