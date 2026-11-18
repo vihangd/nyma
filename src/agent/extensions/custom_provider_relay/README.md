@@ -187,6 +187,11 @@ A token can also carry several groups (the token log's `token_group` lists them,
 answered 503. nyma cannot tell which group served a request, so `openlux-claude` stays
 unpriced; a token minted in Kiro alone is what makes `openlux-kiro`'s prices exact.
 
+Qwen on the same token (2026-11-17): `Alibaba-1` serves qwen3.5, qwen3.7-max and
+qwen-max/plus/flash; qwen3.8 needs `Alibaba-2` or `-3`, and `Self-Deployed-*` serves some
+3.8 models cheaper (with `sort: price`, qwen3.8-max went to `Self-Deployed-1` at ~1/8 of
+`Alibaba-2`). Every Qwen tested made tool calls; there is no qwen4.
+
 Measured on Kiro (2026-11-16, claude-opus-5-5): tool use, thinking with tools, and prompt
 caching all work. The upstream adds a Claude Code system prompt (~1.1k tokens, served from
 cache, and the model may introduce itself as Claude Code) and reports `input_tokens: 0`,
