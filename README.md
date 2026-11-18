@@ -989,7 +989,6 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 | `mcp_client` | `mcp-client` | MCP server integration — third-party tools from `.mcp.json` / `settings.mcp`, with a per-tool description budget (`mcp.max-description-length`) |
 | `memory` | `memory` | Agent-maintained `MEMORY.md`, injected each run |
 | `model_roles` | `model-roles` | Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain |
-| `openwiki` | `openwiki` | AI-maintained, git-aware living documentation for the repo (off by default) |
 | `prompt_history` | `prompt-history` | SQLite-backed prompt history with picker UI |
 | `questionnaire` | `questionnaire` | Structured user input flows for extensions |
 | `refine` | `refine` | `/refine` mines the session for stalls, repeated commands and re-reads, writes a report and offers to append it to `MEMORY.md` (no model-facing tools) |
@@ -1014,7 +1013,7 @@ Nyma ships with several extension suites in `src/agent/extensions/`:
 Any extension, builtin or user, can be switched off by namespace in settings:
 
 ```json
-{ "extensions": { "openwiki": false } }
+{ "extensions": { "headroom": false } }
 ```
 
 Global (`~/.nyma/settings.json`) and project (`.nyma/settings.json`) entries are merged per

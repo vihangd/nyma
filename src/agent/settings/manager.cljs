@@ -201,7 +201,7 @@
    ;;                   shared with the advisor tool). Set to :plan to use the
    ;;                   :plan role's own model, or false to disable the switch.
    :plan-mode      {:auto-approve false :planner-role :advisor}
-   ;; Extensions switched off by namespace: {"openwiki" false}. Builtin or
+   ;; Extensions switched off by namespace: {"headroom" false}. Builtin or
    ;; user, either scope; `/extensions disable <ns>` writes it. Merged PER KEY
    ;; across global and project (see `:get`), unlike the top-level replace.
    :extensions     {}

@@ -226,7 +226,7 @@ Declare a tool's inputs once as data and render them where needed:
 ```
 
 Every core tool in `tools.cljs` and the `subagent` tool use it; the remaining
-raw-JSON extension tools (memory, todos, ast_tools, lsp_suite, openwiki,
+raw-JSON extension tools (memory, todos, ast_tools, lsp_suite,
 questionnaire, small_model) migrate on touch. `test/all_tools_schema_validation.test.cljs`
 sweeps every registered tool through the SDK's `asSchema`.
 

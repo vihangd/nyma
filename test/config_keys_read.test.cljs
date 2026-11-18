@@ -30,7 +30,6 @@
             [agent.extensions.verify-gate.shared :as verify-gate]
             [agent.extensions.bash-suite.shared :as bash-suite]
             [agent.extensions.headroom.shared :as headroom]
-            [agent.extensions.openwiki.shared :as openwiki]
             [agent.extensions.budget.shared :as budget]))
 
 (def ^:private extensions
@@ -40,7 +39,6 @@
    ["verify_gate" verify-gate/default-config]
    ["bash_suite"  bash-suite/default-config]
    ["headroom"    headroom/default-config]
-   ["openwiki"    openwiki/default-config]
    ["budget"      budget/default-config]])
 
 (def ^:private known-inert

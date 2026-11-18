@@ -51,8 +51,8 @@
 (defn ^:export default [api]
   (.registerFlag api "headroom"
                  ;; No :default — an absent flag must read as nil so settings
-                 ;; decide. Registered before the read for the same reason
-                 ;; openwiki does it: --ext-headroom is applied by the CLI's
+                 ;; decide. Registered before the read because --ext-headroom
+                 ;; is applied by the CLI's
                  ;; resolve-ext-flags, which runs after extensions load, and
                  ;; without a registered flag the switch the disabled-hint
                  ;; advertises would do nothing at all.

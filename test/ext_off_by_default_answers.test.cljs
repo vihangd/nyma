@@ -1,9 +1,11 @@
 (ns ext-off-by-default-answers.test
   "An off extension should say it is off, not vanish.
 
-   openwiki registered `/openwiki` only inside `(when (:enabled config))`, so
-   with the extension off the command did not exist — and `Unknown command`
-   reads as a broken install rather than a switch nobody flipped.
+   The former openwiki extension registered `/openwiki` only inside
+   `(when (:enabled config))`, so with the extension off the command did not
+   exist — and `Unknown command` reads as a broken install rather than a
+   switch nobody flipped. That extension is gone (upstream's MCP server
+   replaced it); the rule it taught stays.
 
    budget and verify_gate register no commands at all; they switch on by the
    presence of a cap / of `verify.cmd`. verify_gate has the sharper failure:
@@ -13,12 +15,6 @@
    registers it as defaults, so every user has a `verify` section — but an
    unrecognised key in it is proof somebody tried."
   (:require ["bun:test" :refer [describe it expect]]
-            [agent.extensions.openwiki.shared :as ow]
-            ;; openwiki's index.cljs declares the ns `agent.extensions.openwiki`
-            ;; while living at .../openwiki/index.cljs, so a ns-based require
-            ;; resolves to a package that does not exist. Import the compiled
-            ;; file next to this one instead.
-            ["./agent/extensions/openwiki/index.mjs" :as ow-index]
             [agent.extensions.verify-gate.shared :as vg]
             [agent.extensions.verify-gate.index :as vg-index]
             [agent.extensions.budget.shared :as budget]
@@ -51,47 +47,6 @@
                                       (or (aget (or settings #js {}) section) #js {})
                                       (or settings #js {})))
                :ui                #js {:available false}}}))
-
-;;; ─── openwiki ─────────────────────────────────────────────────────────────
-
-(describe "openwiki answers /openwiki when it is off"
-          (fn []
-            (it "names the setting and the flag"
-                (fn []
-                  (let [hint (ow/disabled-hint "wiki")]
-                    (-> (expect (.includes hint "openwiki is off")) (.toBe true))
-                    (-> (expect (.includes hint "openwiki.enabled: true")) (.toBe true))
-                    (-> (expect (.includes hint ".nyma/settings.json")) (.toBe true))
-                    (-> (expect (.includes hint "--ext-openwiki")) (.toBe true))
-                    (-> (expect (.includes hint "wiki/")) (.toBe true)))))
-
-            (it "registers the command even with the extension disabled"
-                (fn []
-                  (let [{:keys [registered api]} (stub-api {:settings #js {} :flag nil})
-                        dispose ((.-default ow-index) api)]
-                    (-> (expect (contains? @registered "openwiki")) (.toBe true))
-                    (-> (expect (.includes ((.-handler (get @registered "openwiki")) "" nil)
-                                           "openwiki is off"))
-                        (.toBe true))
-                    (dispose)
-                    (-> (expect (contains? @registered "openwiki")) (.toBe false)))))
-
-            (it "does not register the stub on top of the real command"
-                (fn []
-                  ;; The stub sits in the post-flag-resolution branch. Registered
-                  ;; any earlier, --ext-openwiki would bind both handlers to one
-                  ;; name and the stub would be what a user got.
-                  (let [{:keys [registered api]} (stub-api {:settings #js {} :flag true})]
-                    ((.-default ow-index) api)
-                    ;; One registration, and it is the real one — the stub's
-                    ;; description is the tell, since calling the real handler
-                    ;; here would run a whole init prompt.
-                    (-> (expect (.includes (.-description (get @registered "openwiki"))
-                                           "is off"))
-                        (.toBe false))
-                    (-> (expect (.includes (.-description (get @registered "openwiki"))
-                                           "init | update"))
-                        (.toBe true)))))))
 
 ;;; ─── verify_gate ──────────────────────────────────────────────────────────
 

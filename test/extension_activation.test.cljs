@@ -169,17 +169,6 @@
                 (-> (expect (fs/existsSync (path/join dir ".nyma" "refine"))) (.toBe false))
                 (finally (js-await (deactivate-all loaded))))))))
 
-(defn ^:async test-openwiki []
-  (let [{:keys [agent loaded]} (js-await (load-alone "openwiki"))
-        notes (atom [])]
-    (try
-      ;; Off by default: the command exists and says how to turn it on.
-      (let [text ((command agent "openwiki") [] (ui-ctx notes))]
-        (-> (expect text) (.toContain "openwiki"))
-        (-> (expect (last @notes)) (.toBe text)))
-      (-> (expect (tool agent "openwiki_read")) (.toBeUndefined))
-      (finally (js-await (deactivate-all loaded))))))
-
 (defn ^:async test-prompt-history []
   (let [store (memory-store)
         {:keys [agent loaded]} (js-await (load-alone "prompt-history"
@@ -256,7 +245,6 @@
             (it "checkpoints: an edit is snapshotted and /rewind restores the file" test-checkpoints)
             (it "add-dir: /add-dir injects the root into the prompt and remove takes it out" test-add-dir)
             (it "refine: reports nothing to read / nothing to refine without writing a report" test-refine)
-            (it "openwiki: off by default, /openwiki explains how to turn it on" test-openwiki)
             (it "prompt-history: input_submit is stored and /history reads it from SQLite" test-prompt-history)
             (it "stats-dashboard: /stats renders the SQLite usage totals" test-stats-dashboard)
             (it "custom-provider-qwen-cli: registers the provider and resolves/refreshes the device-code token" test-qwen-cli)))

@@ -197,6 +197,17 @@ Anything that speaks MCP over stdio. Common picks:
 - **@modelcontextprotocol/server-filesystem** — sandboxed file I/O
 - **@modelcontextprotocol/server-github** — GitHub API
 - **@modelcontextprotocol/server-postgres** — read-only Postgres
+- **openwiki** — AI-maintained OKF documentation of the repo, with
+  Grounded Claims and resumable page jobs; the host model (yours) does
+  the research and prose, the server owns the queue and validation.
+  `npm i -g openwiki`, then in the repo
+  `openwiki integrations install claude --project .` — it writes
+  `.mcp.json` and `.claude/skills/openwiki/`, both of which nyma reads
+  as they are. Ask "Initialize OpenWiki for this repository" and the
+  model follows the skill's begin → plan → page → finish loop; the
+  `openwiki_search`/`openwiki_read` tools then answer architecture
+  questions from the wiki. If `submit_page` fails on sqlite, reinstall
+  with `--allow-scripts=better-sqlite3`. https://github.com/langchain-ai/openwiki
 
 For a curated list, see the official MCP server registry.
 

@@ -13,7 +13,7 @@
      token_suite/smart_compaction  edit tracking
      token_suite/structured_context hot-file window
      lsp_suite/index.cljs          didChange / diagnostics
-     openwiki/events.cljs          status line
+     openwiki/events.cljs          status line (extension since removed)
 
    Demonstrated for the first before fixing: with `*.secret` in `.nymaignore`,
    `edit`, `write` and `multi_edit` were blocked and `token-suite__multi_edit`

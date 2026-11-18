@@ -43,7 +43,6 @@
             [agent.extensions.mcp-client.index :as ext-mcp-client]
             [agent.extensions.memory.index :as ext-memory]
             [agent.extensions.model-roles.index :as ext-model-roles]
-            [agent.extensions.openwiki.index :as ext-openwiki]
             [agent.extensions.prompt-history.index :as ext-prompt-history]
             [agent.extensions.questionnaire.index :as ext-questionnaire]
             [agent.extensions.refine.index :as ext-refine]
@@ -146,9 +145,6 @@
    {:namespace "model-roles"
     :module    ext-model-roles
     :manifest  #js {"namespace" "model-roles" "description" "Named model presets (`/role fast`, `/role deep`, etc.), plan mode, and escalation — `/escalate` hands a stuck task to a stronger model, and provider errors fail over down a chain" "capabilities" #js ["events" "commands" "model" "state" "ui" "messages" "shortcuts" "tools"] "dependsOn" #js [] "settings" #js {"model-roles" #js {"cycle-key" "ctrl+g"} "plan-mode" #js {"auto-approve" false "planner-role" "advisor"} "escalate" #js {"mode" "ask" "to" "advisor" "on" #js {"no-op-turns" 3 "repeat-tool-calls" 3 "verify-exhausted" true} "prune" true "retries-before-escalate" 1 "revert" "next-request" "max-per-session" 2 "fallback" #js {"default" #js [] "cooldown-ms" 300000 "revert" "cooldown"}}}}}
-   {:namespace "openwiki"
-    :module    ext-openwiki
-    :manifest  #js {"namespace" "openwiki" "description" "AI-maintained, git-aware living documentation for the repo (off by default)" "capabilities" #js ["events" "commands" "tools" "flags" "ui"] "dependsOn" #js [] "settings" #js {"openwiki" #js {"enabled" false "dir" "openwiki" "sections" #js ["architecture" "workflows" "domain" "operations" "testing"]}}}}
    {:namespace "prompt-history"
     :module    ext-prompt-history
     :manifest  #js {"namespace" "prompt-history" "description" "SQLite-backed prompt history with picker UI" "capabilities" #js ["commands" "events" "shortcuts" "ui"] "dependsOn" #js []}}
