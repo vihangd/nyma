@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.2 — 2026-11-19
 
 ### Fixed
 - A turn that ended with no text and no tool call ended in silence: no row in
