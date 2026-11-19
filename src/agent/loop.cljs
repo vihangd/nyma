@@ -167,7 +167,7 @@
           (notify! (str "Step limit reached (" (:max-steps config) "): progress made ("
                         (get answer "reason") "), continuing, extension "
                         (inc used) " of " limit "."))
-          (follow-up agent {:role "user" :content step-extension-nudge}))))))
+          (follow-up agent {:role "user" :content step-extension-nudge :turn {:synthetic true}}))))))
 
 (defn- event-type [chunk]
   (get stream-event-types (.-type chunk)))
@@ -840,6 +840,9 @@
                                 (throw (with-provider-detail! e))))))
                         accumulated (atom "")
                         aborted     (atom false)
+                        ;; The filter's reason, for the message when the retries
+                        ;; run out; retry-state is consumed by the next attempt.
+                        abort-reason (atom nil)
                         ;; The provider's own explanation, if the stream carried
                         ;; one. Kept so it can be attached to whatever the SDK
                         ;; throws afterwards.
@@ -902,6 +905,7 @@
                                       (when (and (get filter-result "abort")
                                                  (zero? @tools-this-turn))
                                         (reset! aborted true)
+                                        (reset! abort-reason (get filter-result "reason"))
                                         (reset! (:retry-state agent)
                                                 {:reason (get filter-result "reason")
                                                  :inject (or (get filter-result "inject") [])})))
@@ -1013,10 +1017,20 @@
                               (emit "agent_end" {:text block :usage nil}))
                         (if (< attempt 2)
                           (recur (inc attempt))
-                        ;; Max retries exceeded
-                          (emit "agent_end" {:text         @accumulated
-                                             :usage        nil
-                                             :finishReason "stream-filter-aborted"}))))
+                        ;; Max retries exceeded. Say so: this used to emit and
+                        ;; store nothing, so the user saw a turn that produced
+                        ;; nothing and had no idea a filter had ended it.
+                          (let [reason (or @abort-reason "stream filter")
+                                msg    (str "Stopped by a stream filter after " attempt " retries: " reason)]
+                            (dbg/warn (str "[loop] " msg))
+                            (if-let [store (:store agent)]
+                              ((:dispatch! store) :message-added {:message {:role "assistant" :content msg}})
+                              (swap! state update :messages conj {:role "assistant" :content msg}))
+                            (when-let [ui (some-> (.-extension-api agent) .-ui)]
+                              (when (.-notify ui) (.notify ui msg "warning")))
+                            (emit "agent_end" {:text         @accumulated
+                                               :usage        nil
+                                               :finishReason "stream-filter-aborted"})))))
 
                     ;; Normal completion — capture final state, track usage
                       (let [final-text     (try
@@ -1255,7 +1269,8 @@
                           (reset! nudged? true)
                           (dbg/warn (str "[loop] empty turn (finish: " @turn-finish ") — nudging once"))
                           (notify! "The model returned an empty response. Asking it to continue.")
-                          (follow-up agent {:role "user" :content empty-turn-nudge}))
+                          (follow-up agent {:role "user" :content empty-turn-nudge
+                                            :turn {:synthetic true}}))
 
                       :else
                       (do (dbg/warn (str "[loop] empty turn (finish: " @turn-finish ")"))
@@ -1267,7 +1282,7 @@
                   (reset! nudged? true)
                   (dbg/warn "[loop] response hit the output-token cap and was cut off")
                   (notify! "The model's response hit its output-token limit and was cut off. Asking it to continue more concisely.")
-                  (follow-up agent {:role "user" :content cut-off-nudge}))
+                  (follow-up agent {:role "user" :content cut-off-nudge :turn {:synthetic true}}))
 
                 ;; The step cap is a limit that fired in silence: streamText just
                 ;; returns, so a capped run was indistinguishable from a finished
@@ -1346,7 +1361,17 @@
 
             (if @turn-error
              ;; Surface the error after the gate had its chance (don't drain).
-              (throw @turn-error)
+             ;; And drop nyma's own queued nudges: a continue-nudge left here
+             ;; ran after the user's NEXT prompt, as if they had asked for it.
+             ;; What the user queued (alt+enter, /spec import --run) stays:
+             ;; that work is deferred to the next good turn, not lost.
+              (let [q      @(:follow-queue agent)
+                    kept   (vec (remove #(:synthetic (:turn %)) q))
+                    n-drop (- (count q) (count kept))]
+                (when (pos? n-drop)
+                  (dbg/warn (str "[loop] turn failed; dropping " n-drop " queued nudge(s)"))
+                  (reset! (:follow-queue agent) kept))
+                (throw @turn-error))
              ;; Process follow-up queue — recur → outer run-loop
               (when-let [next (first @(:follow-queue agent))]
                 (dbg/debug "loop/follow-queue"

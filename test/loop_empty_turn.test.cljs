@@ -50,6 +50,47 @@
 (defn- assistant-texts [agent]
   (keep (fn [m] (when (= (:role m) "assistant") (str (:content m)))) (:messages @(:state agent))))
 
+(defn- failing-model []
+  (new MockLanguageModelV4
+       #js {:doStream (fn [_] (js/Promise.reject (js/Error. "provider down")))}))
+
+(describe "a failed turn"
+  (fn []
+    (it "drops nyma's queued nudges but keeps what the user queued"
+        (fn []
+          (let [agent (make-test-agent {:model (failing-model)})]
+            ;; queued by the user before the run (alt+enter, /spec import --run)
+            (swap! (:follow-queue agent) conj {:role "user" :content "next task"})
+            ((:on (:events agent)) "turn_finalize"
+                                   (fn [d] (when (.-error d)
+                                             ;; what an extension's sendUserMessage followUp queues
+                                             (swap! (:follow-queue agent) conj {:role "user" :content "stale nudge"
+                                                                                :turn {:synthetic true}}))
+                                     nil))
+            (-> (run agent "go")
+                (.then (fn [] (throw (js/Error. "expected a throw")))
+                       (fn [e]
+                         (-> (expect (.-message e)) (.toContain "provider down"))
+                         (-> (expect (mapv :content @(:follow-queue agent))) (.toEqual #js ["next task"]))))))))))
+
+(describe "a stream filter that keeps aborting"
+  (fn []
+    (it "ends the turn with a stored, visible reason"
+        (fn []
+          (let [{:keys [model calls]} (scripted-model [(text-parts "eval() here")])
+                agent (make-test-agent {:model model})
+                seen  (notifies! agent)]
+            ((:on (:events agent)) "stream_filter" (fn [_] #js {:abort true :reason "matched eval()"}))
+            (-> (run agent "go")
+                (.then (fn []
+                         ;; two retries, then the cap
+                         (-> (expect @calls) (.toBe 3))
+                         (-> (expect (last (assistant-texts agent))) (.toContain "matched eval()"))
+                         (-> (expect (some (fn [[lvl msg]] (and (= lvl "warning") (.includes msg "stream filter"))) @seen))
+                             (.toBeTruthy))
+                         ;; not also treated as an empty turn
+                         (-> (expect (vec (filter #(= % empty-turn-nudge) (user-texts agent)))) (.toHaveLength 0))))))))))
+
 (describe "an empty turn"
   (fn []
     (it "gets one nudge, a warning, and the answer that follows is stored"
