@@ -139,6 +139,53 @@
                          (-> (expect (vec (filter #(= % empty-turn-nudge) (user-texts agent)))) (.toHaveLength 0))
                          (-> (expect (some (fn [[lvl _]] (= lvl "warning")) @seen)) (.toBeTruthy))))))))
 
+    (it "the next run gets its own nudge, even in a chat with no tools"
+        (fn []
+          (let [{:keys [model calls]} (scripted-model [(empty-parts) (text-parts "a1") (empty-parts) (text-parts "a2")])
+                agent (make-test-agent {:model model})
+                _     (notifies! agent)]
+            (-> (run agent "q1")
+                (.then (fn [] (run agent "q2")))
+                (.then (fn []
+                         (-> (expect @calls) (.toBe 4))
+                         (-> (expect (vec (filter #(= % empty-turn-nudge) (user-texts agent)))) (.toHaveLength 2))
+                         (-> (expect (last (assistant-texts agent))) (.toBe "a2"))))))))
+
+    (it "a silent step-capped turn is reported, not nudged on top of the report"
+        (fn []
+          (let [{:keys [model calls]} (scripted-model [(empty-parts) (text-parts "report")])
+                agent (make-test-agent {:model model})
+                seen  (notifies! agent)]
+            (aset (:config agent) "max-steps" 1)
+            (-> (run agent "go")
+                (.then (fn []
+                         ;; the empty step, then the step-cap report turn — no third call
+                         (-> (expect @calls) (.toBe 2))
+                         (-> (expect (vec (filter #(= % empty-turn-nudge) (user-texts agent)))) (.toHaveLength 0))
+                         (-> (expect (some (fn [[_ msg]] (.includes msg "empty response")) @seen)) (.toBeTruthy))))))))
+
+    (it "a report turn that comes back silent is named, not re-asked"
+        (fn []
+          (let [{:keys [model calls]} (scripted-model [(empty-parts) (empty-parts)])
+                agent (make-test-agent {:model model})
+                seen  (notifies! agent)]
+            (aset (:config agent) "max-steps" 1)
+            (-> (run agent "go")
+                (.then (fn []
+                         (-> (expect @calls) (.toBe 2))
+                         (-> (expect (vec (filter #(= % empty-turn-nudge) (user-texts agent)))) (.toHaveLength 0))
+                         (-> (expect (count (filter (fn [[_ msg]] (.includes msg "empty response")) @seen))) (.toBe 2))))))))
+
+    (it "the stored assistant message carries the finish reason, the model never sees it"
+        (fn []
+          (let [{:keys [model]} (scripted-model [(empty-parts "content-filter")])
+                agent (make-test-agent {:model model})
+                _     (notifies! agent)]
+            (-> (run agent "go")
+                (.then (fn []
+                         (let [m (last (filter #(= "assistant" (:role %)) (:messages @(:state agent))))]
+                           (-> (expect (:finish-reason (:metadata m))) (.toBe "content-filter")))))))))
+
     (it "a turn with text is left alone"
         (fn []
           (let [{:keys [model calls]} (scripted-model [(text-parts "fine")])

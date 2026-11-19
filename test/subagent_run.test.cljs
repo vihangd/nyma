@@ -315,9 +315,14 @@
             :usage #js {:inputTokens #js {:total 1} :outputTokens #js {:total 0}}}])
 
 (defn ^:async test-empty-status []
-  ;; Two silent answers: the loop nudges an empty turn once, so the child gets
-  ;; a second call before it is "empty".
-  (let [r (js-await (run-on (scripted silent-chunks silent-chunks) {}))]
+  ;; One call only: a child is not nudged for an empty turn, the runner
+  ;; reports it as "empty" itself; a second paid call per silent child buys nothing.
+  (let [calls (atom 0)
+        model (new MockLanguageModelV4
+                   #js {:doStream (fn [_] (swap! calls inc)
+                                    (js/Promise.resolve #js {:stream (convertArrayToReadableStream silent-chunks)}))})
+        r     (js-await (run-on model {}))]
+    (-> (expect @calls) (.toBe 1))
     (-> (expect (:status r)) (.toBe "empty"))
     (-> (expect (:ok r)) (.toBe false))))
 

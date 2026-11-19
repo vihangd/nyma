@@ -301,16 +301,21 @@
                   answered?)
           (assoc :cost-unknown? true)))))
 
+(defn- add-message!
+  "Append a message to the conversation: through the event store when the
+   agent has one, straight onto the state otherwise."
+  [agent msg]
+  (if-let [store (:store agent)]
+    ((:dispatch! store) :message-added {:message msg})
+    (swap! (:state agent) update :messages conj msg)))
+
 (defn- inject-steer-messages!
   "Move steer queue messages into agent state between tool steps. Returns them:
    state only reaches the model on the next run, so this run has to be told."
   [agent]
   (let [queued @(:steer-queue agent)]
     (when (seq queued)
-      (if-let [store (:store agent)]
-        (doseq [msg queued]
-          ((:dispatch! store) :message-added {:message msg}))
-        (swap! (:state agent) update :messages into queued))
+      (doseq [msg queued] (add-message! agent msg))
       (reset! (:steer-queue agent) [])
       queued)))
 
@@ -333,18 +338,18 @@
         ;; Bind event bus functions as locals — prevents formatter from
         ;; corrupting ((:emit events) ...) double-paren calls.
         emit         (:emit events)
-        emit-collect (:emit-collect events)]
+        emit-collect (:emit-collect events)
+        notify!      (fn [msg]
+                       (when-let [ui (some-> (.-extension-api agent) .-ui)]
+                         (when (.-notify ui) (.notify ui msg "warning"))))]
 
     (dbg/debug "loop/run"
                (str "user-message: " (.slice (str user-message) 0 200)
                     " | msg-count: " (count (:messages @state))))
 
-    (swap! state dissoc :step-extensions :stop-run :run-cost :run-steps)
+    (swap! state dissoc :step-extensions :stop-run :run-cost :run-steps :empty-nudged?)
 
-    ;; Append user message via event store (or direct swap for backwards compat)
-    (if-let [store (:store agent)]
-      ((:dispatch! store) :message-added {:message {:role "user" :content user-message}})
-      (swap! state update :messages conj {:role "user" :content user-message}))
+    (add-message! agent {:role "user" :content user-message})
 
     ;; Fresh AbortController per run so an abort from a previous turn doesn't
     ;; poison this one (the controller is single-use). Its signal is wired into
@@ -778,9 +783,7 @@
            ;; If before_provider_request blocked, skip LLM call
             (if (get provider-result "block")
               (let [block-msg (or (get provider-result "reason") "Blocked by extension")]
-                (if-let [store (:store agent)]
-                  ((:dispatch! store) :message-added {:message {:role "assistant" :content block-msg}})
-                  (swap! state update :messages conj {:role "assistant" :content block-msg}))
+                (add-message! agent {:role "assistant" :content block-msg})
                 (emit "agent_end" {:text block-msg :usage nil}))
 
             ;; Normal LLM call
@@ -987,10 +990,7 @@
                     (if-let [retry @(:retry-state agent)]
                       (do
                         (reset! (:retry-state agent) nil)
-                        (doseq [msg (:inject retry)]
-                          (if-let [store (:store agent)]
-                            ((:dispatch! store) :message-added {:message msg})
-                            (swap! state update :messages conj msg)))
+                        (doseq [msg (:inject retry)] (add-message! agent msg))
                         ;; The request was built before these existed.
                         (aset st-config "messages"
                               (.concat (aget st-config "messages") (clj->js (:inject retry))))
@@ -1011,9 +1011,7 @@
                                              (or (get r "reason") "Blocked by extension"))))]
                           ;; A guard that blocks the fallback model blocks it,
                           ;; as it would have on the first request.
-                          (do (if-let [store (:store agent)]
-                                ((:dispatch! store) :message-added {:message {:role "assistant" :content block}})
-                                (swap! state update :messages conj {:role "assistant" :content block}))
+                          (do (add-message! agent {:role "assistant" :content block})
                               (emit "agent_end" {:text block :usage nil}))
                         (if (< attempt 2)
                           (recur (inc attempt))
@@ -1023,11 +1021,11 @@
                           (let [reason (or @abort-reason "stream filter")
                                 msg    (str "Stopped by a stream filter after " attempt " retries: " reason)]
                             (dbg/warn (str "[loop] " msg))
-                            (if-let [store (:store agent)]
-                              ((:dispatch! store) :message-added {:message {:role "assistant" :content msg}})
-                              (swap! state update :messages conj {:role "assistant" :content msg}))
-                            (when-let [ui (some-> (.-extension-api agent) .-ui)]
-                              (when (.-notify ui) (.notify ui msg "warning")))
+                            ;; Local only: the transcript keeps it, the model
+                            ;; never sees nyma's note as its own prior turn.
+                            (add-message! agent {:role "assistant" :content msg :local-only true
+                                                 :metadata {:finish-reason "stream-filter-aborted"}})
+                            (notify! msg)
                             (emit "agent_end" {:text         @accumulated
                                                :usage        nil
                                                :finishReason "stream-filter-aborted"})))))
@@ -1096,16 +1094,11 @@
                                                                :content final-text
                                                                :model   model-id}))
                               final-text   (or (get store-result "content") final-text)]
-                          ;; Set BEFORE the dispatch: the session manager
-                          ;; writes the assistant entry from the store's
-                          ;; subscriber and reads it off the state there, so
-                          ;; the transcript says how the turn ended. Until it
-                          ;; did, an empty turn on disk could not be told
-                          ;; apart from a refusal.
-                          (swap! state assoc :last-finish-reason finish-reason)
-                          (if store
-                            ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
-                            (swap! state update :messages conj {:role "assistant" :content final-text})))
+                          ;; The finish reason rides the message: the session
+                          ;; manager stores it, so an empty entry on disk can be
+                          ;; told apart from a refusal.
+                          (add-message! agent {:role "assistant" :content final-text
+                                               :metadata {:finish-reason finish-reason}}))
 
                       ;; What this run last sent, so a compaction can summarise
                       ;; on the same prefix and read the cache it warmed.
@@ -1233,8 +1226,7 @@
                     {:keys [cut-off? count-stall? step-capped? empty?]}
                     (turn-outcome @turn-finish @tools-this-turn
                                   @steps-this-run (:max-steps config) @turn-text)
-                    ui        (some-> (.-extension-api agent) .-ui)
-                    notify!   (fn [msg] (when (and ui (.-notify ui)) (.notify ui msg "warning")))]
+]
                 ;; A cut-off turn that ran no tools is NOT a stall: the model was
                 ;; still talking when the cap hit. Counting it drove the two-turn
                 ;; warning and escalate's stall detection to the wrong remedy —
@@ -1245,26 +1237,31 @@
                 (cond
                   final-report?            nil
                   count-stall?             (swap! st update :no-op-turns (fnil inc 0))
-                  (pos? @tools-this-turn)  (swap! st assoc :worked? true :empty-nudged? false
-                                                  :no-op-turns 0)
+                  (pos? @tools-this-turn)  (swap! st assoc :worked? true :no-op-turns 0)
                   :else                    nil)
+                ;; A turn that produced anything ends the silence.
+                (when-not empty? (swap! st dissoc :empty-nudged?))
 
                 ;; An empty turn: no text, no tool call, not cut off. Once per
                 ;; silence — a model that answers the nudge with another empty
                 ;; turn is not going to be talked out of it, and each nudge is a
-                ;; paid call; the flag clears on the next turn that runs a tool.
+                ;; paid call; the flag clears on the next turn that produces
+                ;; anything, and at the start of every run.
                 ;; A refusal ("content-filter") is not re-asked at all: it is
-                ;; named, so the user knows why nothing came back.
+                ;; named, so the user knows why nothing came back. Neither is
+                ;; a report turn (tool-less by design) or a step-capped turn
+                ;; (the cap owns the follow-up); both still get the notice.
                 ;; `@turn-finish` set: the provider answered. The block path
                 ;; (before_provider_request) never ran it and is not an empty turn.
-                (when (and empty? @turn-finish (not final-report?))
+                (when (and empty? @turn-finish)
                   (let [refused? (= "content-filter" (str @turn-finish))]
                     (cond
                       refused?
                       (do (dbg/warn "[loop] the model declined to continue (finish: content-filter)")
                           (notify! "The model declined to continue (provider reported a content filter)."))
 
-                      (and (:empty-turn-nudge config) (not (:empty-nudged? @st)))
+                      (and (:empty-turn-nudge config) (not final-report?) (not step-capped?)
+                           (not (:empty-nudged? @st)))
                       (do (swap! st assoc :empty-nudged? true)
                           (reset! nudged? true)
                           (dbg/warn (str "[loop] empty turn (finish: " @turn-finish ") — nudging once"))
@@ -1381,9 +1378,7 @@
                 ;; Per-turn options ride the message, not the transcript: the
                 ;; loop top reads and clears them before anything else runs.
                 (when-let [t (:turn next)] (swap! state assoc :turn-opts t))
-                (if-let [store (:store agent)]
-                  ((:dispatch! store) :message-added {:message {:role "user" :content (:content next)}})
-                  (swap! state update :messages conj {:role "user" :content (:content next)}))
+                (add-message! agent {:role "user" :content (:content next)})
                 (recur)))))))))
 
 (defn ^:async run-turn-with-update-handler

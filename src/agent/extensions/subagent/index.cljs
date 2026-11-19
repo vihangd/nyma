@@ -524,6 +524,9 @@ intermediate tool calls, so put everything that matters in the summary.")
               ;; Rates are keyed provider/model: without this a child's lookup
               ;; missed, and a paid model cost 0.
               (aset (:config child) "active-provider-name" provider)
+              ;; The runner reports a silent child as "empty" itself; a
+              ;; second paid call per silent child buys nothing.
+              (aset (:config child) "empty-turn-nudge" false)
               (gate-child! child api agent-name)
               ;; Children never receive the `subagent` tool → depth capped at 1.
               (when allowed
