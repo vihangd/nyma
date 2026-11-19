@@ -874,6 +874,14 @@
           (update-messages!
            (fn [msgs] (reducers/apply-tool-update msgs data))))
 
+        ;; agent_end carries the turn's final text; with none streamed, no row
+        ;; exists yet, and the warning that follows would explain a silence
+        ;; the transcript does not show.
+        on-agent-end
+        (fn [data]
+          (update-messages!
+           (fn [msgs] (reducers/apply-empty-turn msgs (:text data)))))
+
         ;; ── Submit / steer ────────────────────────────────────────────────
         border-atom    (atom nil)
         editor-theme   (make-editor-theme theme-fn border-atom)
@@ -1127,6 +1135,7 @@
       ((:on events) "tool_execution_start"  on-tool-start)
       ((:on events) "tool_execution_end"    on-tool-end)
       ((:on events) "tool_execution_update" on-tool-update)
+      ((:on events) "agent_end"             on-agent-end)
       ((:on events) "model_select"          on-model-select)
       ((:on events) "compact"               on-compact)
       ((:on events) "session_clear"         on-session-clear)
@@ -1295,6 +1304,7 @@
                             ((:off events) "tool_execution_start"  on-tool-start)
                             ((:off events) "tool_execution_end"    on-tool-end)
                             ((:off events) "tool_execution_update" on-tool-update)
+                            ((:off events) "agent_end"             on-agent-end)
                             ((:off events) "model_select"          on-model-select)
                             ((:off events) "compact"               on-compact)
                             ((:off events) "session_clear"         on-session-clear)

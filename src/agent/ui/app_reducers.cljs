@@ -107,6 +107,20 @@
       (assoc prev-v idx end-msg)
       (conj prev-v end-msg))))
 
+(defn apply-empty-turn
+  "A turn ended with no text: the pane builds the assistant row from text
+   deltas, so there was nothing to show, and a user whose last message was
+   followed by tool rows and then nothing read it as a hang. Append a blank
+   assistant row — chat-renderer draws it as a dim `…` — unless one is
+   already the last row. `text` is the turn's final text; a turn with any is
+   left alone."
+  [msgs text]
+  (let [v (vec msgs)]
+    (if (or (seq (.trim (str (or text ""))))
+            (= "assistant" (:role (last v))))
+      v
+      (conj v {:role "assistant" :content "" :id (new-id)}))))
+
 (defn apply-tool-update
   "Handle a `tool_execution_update` event: find the matching in-flight
    `tool-start` and update its :custom-status-text. If no match,

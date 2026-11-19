@@ -82,3 +82,20 @@
                   (-> (expect (fn? r/make-guarded-setter))      (.toBe false))
                   (-> (expect (fn? r/make-ink-paste-fn))        (.toBe false))
                   (-> (expect (fn? r/make-stdin-paste-handler)) (.toBe false))))))
+
+(describe "app-reducers/empty turn"
+          (fn []
+            (it "appends a blank assistant row when the turn streamed no text"
+                (fn []
+                  (let [out (r/apply-empty-turn [{:role "user" :content "q"}
+                                                 {:role "tool_call" :content "x"}] "")]
+                    (-> (expect (count out)) (.toBe 3))
+                    (-> (expect (:role (last out))) (.toBe "assistant"))
+                    (-> (expect (:content (last out))) (.toBe "")))))
+
+            (it "leaves a turn with text, or an existing assistant row, alone"
+                (fn []
+                  (let [msgs [{:role "user" :content "q"} {:role "assistant" :content "a"}]]
+                    (-> (expect (count (r/apply-empty-turn msgs "a"))) (.toBe 2))
+                    (-> (expect (count (r/apply-empty-turn msgs ""))) (.toBe 2))
+                    (-> (expect (count (r/apply-empty-turn [{:role "user" :content "q"}] "  reply "))) (.toBe 1)))))))
