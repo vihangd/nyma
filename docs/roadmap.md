@@ -783,7 +783,9 @@ From the full audit + SOTA research round (bugs and quick wins landed; these did
 Landed: `/refine` (deterministic session mining), escalation (`/escalate` + provider failover in
 `model_roles/features/escalate.cljs`), and the review fixes around them. Deferred:
 
-- **Empty-turn detection is hooked where it cannot see the case it names.**
+- ~~Empty-turn detection~~ Done 2026-11-19: moved to the loop (`turn-outcome :empty?`,
+  `empty-turn-nudge`), for every model; the quality_monitor copy is gone.
+- **Empty-turn detection is hooked where it cannot see the case it names.** (historical)
   `quality_monitor`'s empty-turn abort rides `stream_filter`, which only fires on `text-delta`
   parts (`loop.cljs:12-20`) — a turn that emits no text at all never reaches it. Until the
   `textDelta`→`text` fix it was firing on the FIRST delta of every turn instead (both fields were

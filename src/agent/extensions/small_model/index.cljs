@@ -9,7 +9,7 @@
    default) no hooks are wired and behaviour is identical to baseline.
 
    Modules:
-     quality-monitor  — empty turns, hallucinated tools, repeat loops,
+     quality-monitor  — hallucinated tools, repeat loops,
                         turn budget (context-ceiling guard); escalating nudges
      profiles         — per-model tuning (thinking, temperature, allowedTools,
                         editStrategy)

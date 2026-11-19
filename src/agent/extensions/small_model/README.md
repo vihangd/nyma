@@ -172,7 +172,7 @@ of mistake. This is the missing *learning-across-turns* layer — profiles tune 
 evidence remembers task state, self-tune accumulates behavioural rules.
 
 **Failure signals** (what "fails" means — never a crash):
-- `quality-signal` from `quality-monitor` — hallucinated tool, exact-repeat call, empty turn.
+- `quality-signal` from `quality-monitor` — hallucinated tool, exact-repeat call.
 - `verify-fail` from `verify_gate` — the worker's edit broke the configured test command.
 
 On frontier models none of these fire, so self-tune is inert.
