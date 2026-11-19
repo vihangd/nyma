@@ -72,6 +72,7 @@
          (filter message-entry?)
          (filter llm-visible?)
          (map without-reasoning)
+         (map #(dissoc % :metadata))
          (remove blank-assistant?)
          (map provider-role)
          vec)))

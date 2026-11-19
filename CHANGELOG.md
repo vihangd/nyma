@@ -6,9 +6,11 @@
 - A turn that ended with no text and no tool call ended in silence: no row in
   the chat, no warning, nothing logged. Measured on one session as 5 of 9
   turns, with `continue` typed 8 times. The loop now sends one follow-up per
-  silence (cleared by the next turn that runs a tool), shows a warning, and
-  draws a dim `…` row. A `content-filter` finish is named instead of re-asked.
-  `empty-turn-nudge` (default `true`) turns the follow-up off.
+  silence (cleared by the next turn that produces anything, and at the start
+  of every run), shows a warning, and draws a dim `…` row. A `content-filter`
+  finish, a silent report turn and a silent step-capped turn are named instead
+  of re-asked. `empty-turn-nudge` (default `true`) turns the follow-up off;
+  subagent children run with it off, their runner already reports `empty`.
 - Why a turn ended is now recorded: every turn logs its finish reason, text
   length, tool and step counts at info level, the assistant entry in the
   session file carries `metadata.finish-reason`, and `turn_finalize` carries

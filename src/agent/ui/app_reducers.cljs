@@ -11,7 +11,8 @@
    (`make-guarded-setter`, `make-ink-paste-fn`, `make-stdin-paste-handler`),
    left over from the ink UI. They were dead: pi-tui's Editor collapses a
    >10-line paste into its own `[paste #1 +50 lines]` marker (pi-tui README,
-   \"Large paste handling\"), so nothing wired them up and nothing should.")
+   \"Large paste handling\"), so nothing wired them up and nothing should."
+  (:require [clojure.string :as str]))
 
 ;;; ─── Tool execution reducers ─────────────────────────────
 
@@ -116,7 +117,7 @@
    left alone."
   [msgs text]
   (let [v (vec msgs)]
-    (if (or (seq (.trim (str (or text ""))))
+    (if (or (not (str/blank? (str (or text ""))))
             (= "assistant" (:role (last v))))
       v
       (conj v {:role "assistant" :content "" :id (new-id)}))))

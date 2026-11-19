@@ -388,14 +388,14 @@
                ;; deterministic, loses nothing of the answer, and shrinks what
                ;; compaction later has to summarize.
                ((:append session)
+                ;; :metadata rides the message (the loop puts the finish
+                ;; reason there). An empty entry on disk used to be mute about
+                ;; whether the model stopped, refused, or was cut off.
                 (cond-> (select-keys msg [:role :content])
                   (= role "assistant")
                   (update :content #(strip-think-tags (str %)))
-                  ;; Why the turn ended, from the loop (set just before the
-                  ;; dispatch). An empty entry on disk used to be mute about
-                  ;; whether the model stopped, refused, or was cut off.
-                  (and (= role "assistant") (:last-finish-reason state))
-                  (assoc :metadata {:finish-reason (:last-finish-reason state)})))
+                  (:metadata msg)
+                  (assoc :metadata (:metadata msg))))
                (cond
                  ;; The real entry is on disk now, so the checkpoint has
                  ;; nothing left to protect.
