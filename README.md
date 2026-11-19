@@ -1147,7 +1147,7 @@ The event bus provides lifecycle hooks for extensions. Two delivery semantics:
 | `agent_end` | emit | A turn's provider call finished: `{text, usage, finishReason}` |
 | `turn_start` | emit | A provider call is about to start |
 | `turn_end` | emit | One model step finished (AI SDK StepResult) |
-| `turn_finalize` | emit-async | Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason, stepCapped}` |
+| `turn_finalize` | emit-async | Awaited post-turn boundary, before the follow-up drain: `{error, toolCalls, noOpTurns, finishReason, textLength, stepCapped}` |
 | `step_cap` | emit-collect | A capped run has reported: `{steps, extensions, maxExtensions}`; return `{continue: true, reason}` to grant another block of steps |
 | `message_start` | emit | A streamed text block begins |
 | `message_update` | emit | A streamed text delta |

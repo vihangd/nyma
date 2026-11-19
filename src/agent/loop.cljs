@@ -1082,6 +1082,13 @@
                                                                :content final-text
                                                                :model   model-id}))
                               final-text   (or (get store-result "content") final-text)]
+                          ;; Set BEFORE the dispatch: the session manager
+                          ;; writes the assistant entry from the store's
+                          ;; subscriber and reads it off the state there, so
+                          ;; the transcript says how the turn ended. Until it
+                          ;; did, an empty turn on disk could not be told
+                          ;; apart from a refusal.
+                          (swap! state assoc :last-finish-reason finish-reason)
                           (if store
                             ((:dispatch! store) :message-added {:message {:role "assistant" :content final-text}})
                             (swap! state update :messages conj {:role "assistant" :content final-text})))
@@ -1309,6 +1316,9 @@
                                                  ;; So a consumer can tell a stall from a
                                                  ;; response that was merely cut off.
                                                  :finishReason @turn-finish
+                                                 ;; Characters in the final text, so a handler can
+                                                 ;; tell an empty turn without tapping the stream.
+                                                 :textLength   (count (str (or @turn-text "")))
                                                  ;; The step limit stopped this turn: its text is
                                                  ;; mid-work, not a finished answer.
                                                  :stepCapped   (and (not @turn-error) (not final-report?)

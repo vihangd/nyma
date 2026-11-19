@@ -46,6 +46,27 @@
                                                     (-> (expect (.-role (first lines))) (.toBe "user"))
                                                     (-> (expect (.-content (nth lines 1))) (.toBe "a1"))))))
 
+                                          ;; An empty assistant entry on disk was mute about WHY: the
+                                          ;; loop sets :last-finish-reason on the state before it
+                                          ;; dispatches, and the entry carries it. Context rebuilt
+                                          ;; from the file still selects role+content only.
+                                          (it "records the finish reason on the assistant entry, and only there"
+                                              (fn []
+                                                (let [fp    (path/join @test-dir "fr.jsonl")
+                                                      _     (fs/writeFileSync fp "")
+                                                      mgr   (create-session-manager fp)
+                                                      store (create-agent-store {:messages []})
+                                                      agent {:store store}]
+                                                  (attach-session-persistence! agent mgr)
+                                                  ((:dispatch! store) :message-added {:message {:role "user" :content "q1"}})
+                                                  ((:swap store) #(assoc % :last-finish-reason "content-filter"))
+                                                  ((:dispatch! store) :message-added {:message {:role "assistant" :content ""}})
+                                                  (let [lines (read-lines fp)]
+                                                    (-> (expect (.-metadata (first lines))) (.toBeUndefined))
+                                                    (-> (expect (aget (.-metadata (nth lines 1)) "finish-reason")) (.toBe "content-filter"))
+                                                    (-> (expect (js/Object.keys (first ((:build-context mgr)))))
+                                                        (.toEqual #js ["role" "content"]))))))
+
                                           (it "does not append non user/assistant roles"
                                               (fn []
                                                 (let [fp    (path/join @test-dir "s.jsonl")
