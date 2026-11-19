@@ -315,7 +315,9 @@
             :usage #js {:inputTokens #js {:total 1} :outputTokens #js {:total 0}}}])
 
 (defn ^:async test-empty-status []
-  (let [r (js-await (run-on (scripted silent-chunks) {}))]
+  ;; Two silent answers: the loop nudges an empty turn once, so the child gets
+  ;; a second call before it is "empty".
+  (let [r (js-await (run-on (scripted silent-chunks silent-chunks) {}))]
     (-> (expect (:status r)) (.toBe "empty"))
     (-> (expect (:ok r)) (.toBe false))))
 

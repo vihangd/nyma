@@ -133,6 +133,10 @@
                                      ;; the run ends with a report, not silence.
                                      :step-cap-report      (let [v (get merged-settings :step-cap-report)]
                                                              (if (some? v) (boolean v) true))
+                                     ;; An empty turn (no text, no tool call)
+                                     ;; gets one continue-nudge.
+                                     :empty-turn-nudge     (let [v (get merged-settings :empty-turn-nudge)]
+                                                             (if (some? v) (boolean v) true))
                                      :max-retries          (let [r (get merged-settings :retry)
                                                                  on? (let [e (get r :enabled)]
                                                                        (if (some? e) (boolean e) true))

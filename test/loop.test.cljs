@@ -233,7 +233,24 @@
             (it "the nudge names the limit and asks for the next action"
                 (fn []
                   (-> (expect l/cut-off-nudge) (.toContain "output token limit"))
-                  (-> (expect l/cut-off-nudge) (.toContain "concisely"))))))
+                  (-> (expect l/cut-off-nudge) (.toContain "concisely"))))
+
+            ;; Measured: 5 of 9 turns in one session ended on a clean "stop" with
+            ;; no text and no tool call; the user typed `continue` 8 times.
+            (it "an empty turn is no text, no tool call, and not cut off"
+                (fn []
+                  (-> (expect (:empty? (l/turn-outcome "stop" 0 1 100 ""))) (.toBe true))
+                  (-> (expect (:empty? (l/turn-outcome "stop" 0 1 100 "   \n"))) (.toBe true))
+                  (-> (expect (:empty? (l/turn-outcome "stop" 0 1 100 nil))) (.toBe true))
+                  (-> (expect (:empty? (l/turn-outcome "content-filter" 0 1 100 ""))) (.toBe true))
+                  ;; it is still a stall
+                  (-> (expect (:count-stall? (l/turn-outcome "stop" 0 1 100 ""))) (.toBe true))
+                  ;; text, a tool call, or the output cap each make it something else
+                  (-> (expect (:empty? (l/turn-outcome "stop" 0 1 100 "done"))) (.toBe false))
+                  (-> (expect (:empty? (l/turn-outcome "stop" 2 3 100 ""))) (.toBe false))
+                  (-> (expect (:empty? (l/turn-outcome "length" 0 1 100 ""))) (.toBe false))
+                  ;; the four-arg form still works
+                  (-> (expect (:empty? (outcome "stop" 0 1 100))) (.toBe true))))))
 
 ;; --- agent_end fires once per run ---
 

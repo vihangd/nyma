@@ -51,12 +51,18 @@
      :count-stall? whether :no-op-turns should be incremented
      :step-capped? the step limit stopped a model that was still working. Counted,
                    never inferred from finish-reason, which an abort path
-                   (budget, stream filter) produces too."
-  [finish-reason tool-calls steps max-steps]
+                   (budget, stream filter) produces too.
+     :empty?       the turn produced neither text nor a tool call and was not cut
+                   off. Measured: one session had 5 of 9 turns end this way on a
+                   clean \"stop\", and the user typed `continue` 8 times, because
+                   nothing here looked at the text. Also a stall; this is the
+                   case that gets a nudge of its own."
+  [finish-reason tool-calls steps max-steps & [text]]
   (let [cut-off? (= (str finish-reason) "length")
         no-tools? (zero? (or tool-calls 0))]
     {:cut-off?     cut-off?
      :count-stall? (and no-tools? (not cut-off?))
+     :empty?       (and no-tools? (not cut-off?) (str/blank? (str (or text ""))))
      :step-capped? (boolean (and (pos? (or max-steps 0))
                                  (>= (or steps 0) max-steps)))}))
 
@@ -84,6 +90,14 @@
        "cut off before it finished. Continue from where you stopped, and "
        "respond more concisely — take the next concrete action with a tool "
        "rather than restating the plan."))
+
+(def empty-turn-nudge
+  "Answers a turn that ended with no text and no tool call. The small-model
+   quality monitor used to send this, but only when that extension was on;
+   every model does it sometimes, so core sends it, once per silence."
+  (str "Your previous response was empty: no text and no tool call. Continue "
+       "the task — take the next concrete action with a tool, or answer the "
+       "user directly."))
 
 (def volatile-boundary
   "Separator between the stable system prompt and the per-turn tail built from
@@ -748,6 +762,9 @@
                 ;; CUT OFF at the output-token cap — a fact, not a heuristic, and
                 ;; until now read by nothing at all.
                 turn-finish (atom nil)
+                ;; What the final step said, for the empty-turn check below:
+                ;; `final-text` is scoped to the completion let.
+                turn-text   (atom nil)
                 ;; One overflow recovery per turn — a second is a real error.
                 overflow-recovered? (atom false)
                 ;; This pass ended on an overflow it could not recover from.
@@ -1051,6 +1068,11 @@
                                                (and (object? fr) (.-unified fr)) (str (.-unified fr))
                                                :else (str fr)))
                             _              (reset! turn-finish finish-reason)
+                            _              (reset! turn-text final-text)
+                            _              (dbg/info "loop" (str "turn finished: finish=" finish-reason
+                                                                 " text=" (count (str final-text))
+                                                                 " tools=" @tools-this-turn
+                                                                 " steps=" @steps-this-run))
                             store          (:store agent)]
 
                       ;; message_before_store — extensions can modify content before storage
@@ -1187,9 +1209,9 @@
                     ;; The provider stopped mid-response at the output-token cap.
                     ;; Borrowed from mini-swe-agent, which answers this case with
                     ;; a specific instruction instead of silence.
-                    {:keys [cut-off? count-stall? step-capped?]}
+                    {:keys [cut-off? count-stall? step-capped? empty?]}
                     (turn-outcome @turn-finish @tools-this-turn
-                                  @steps-this-run (:max-steps config))
+                                  @steps-this-run (:max-steps config) @turn-text)
                     ui        (some-> (.-extension-api agent) .-ui)
                     notify!   (fn [msg] (when (and ui (.-notify ui)) (.notify ui msg "warning")))]
                 ;; A cut-off turn that ran no tools is NOT a stall: the model was
@@ -1202,8 +1224,35 @@
                 (cond
                   final-report?            nil
                   count-stall?             (swap! st update :no-op-turns (fnil inc 0))
-                  (pos? @tools-this-turn)  (swap! st assoc :worked? true :no-op-turns 0)
+                  (pos? @tools-this-turn)  (swap! st assoc :worked? true :empty-nudged? false
+                                                  :no-op-turns 0)
                   :else                    nil)
+
+                ;; An empty turn: no text, no tool call, not cut off. Once per
+                ;; silence — a model that answers the nudge with another empty
+                ;; turn is not going to be talked out of it, and each nudge is a
+                ;; paid call; the flag clears on the next turn that runs a tool.
+                ;; A refusal ("content-filter") is not re-asked at all: it is
+                ;; named, so the user knows why nothing came back.
+                ;; `@turn-finish` set: the provider answered. The block path
+                ;; (before_provider_request) never ran it and is not an empty turn.
+                (when (and empty? @turn-finish (not final-report?))
+                  (let [refused? (= "content-filter" (str @turn-finish))]
+                    (cond
+                      refused?
+                      (do (dbg/warn "[loop] the model declined to continue (finish: content-filter)")
+                          (notify! "The model declined to continue (provider reported a content filter)."))
+
+                      (and (:empty-turn-nudge config) (not (:empty-nudged? @st)))
+                      (do (swap! st assoc :empty-nudged? true)
+                          (reset! nudged? true)
+                          (dbg/warn (str "[loop] empty turn (finish: " @turn-finish ") — nudging once"))
+                          (notify! "The model returned an empty response. Asking it to continue.")
+                          (follow-up agent {:role "user" :content empty-turn-nudge}))
+
+                      :else
+                      (do (dbg/warn (str "[loop] empty turn (finish: " @turn-finish ")"))
+                          (notify! "The model returned an empty response.")))))
 
                 ;; The nudge is NOT conditioned on the tool count: a turn that ran
                 ;; five tools and got cut off on the sixth needs it just as much.

@@ -743,6 +743,7 @@ before relying on a value here.
   "retry": { "enabled": true, "max-retries": 5 },
   "max-steps": 100,
   "step-cap-report": true,
+  "empty-turn-nudge": true,
   "dev": { "watch-extensions": false, "eval": false },
   "extensions": {},
   "context-files": ["AGENTS.md", "CLAUDE.md"],
@@ -857,6 +858,10 @@ Each verdict, and your answer to a permission one, go to `~/.nyma/decisions.json
 tool-less call asking the model to report what it found or changed, instead of
 ending in silence. It is what turns a step-capped subagent's mid-work text into
 a usable report.
+
+`empty-turn-nudge` (default `true`): a turn that ends with no text and no tool
+call gets one follow-up asking the model to continue, and a warning in the chat.
+A refusal (`content-filter`) is named instead of re-asked.
 
 `max-extensions` (default `3`): how many more blocks of `max-steps` a top-level
 run can earn. After the report, nyma continues only on outside evidence of

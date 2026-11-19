@@ -41,6 +41,10 @@
    ;; children inherit it, so a capped child returns a report rather than
    ;; mid-work text.
    :step-cap-report true
+   ;; A turn that ends with no text and no tool call gets ONE follow-up asking
+   ;; the model to continue, instead of ending in silence. Off for benchmarks
+   ;; that count every call.
+   :empty-turn-nudge true
    ;; Session logs compress to about 13% of their size (0.82MB -> 0.11MB in 2ms,
    ;; measured), so an old sessions directory is mostly air. Off by default:
    ;; archive-after-days 0 means never, and any positive number compresses
