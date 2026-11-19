@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A turn that ended with no text and no tool call ended in silence: no row in
+  the chat, no warning, nothing logged. Measured on one session as 5 of 9
+  turns, with `continue` typed 8 times. The loop now sends one follow-up per
+  silence (cleared by the next turn that runs a tool), shows a warning, and
+  draws a dim `…` row. A `content-filter` finish is named instead of re-asked.
+  `empty-turn-nudge` (default `true`) turns the follow-up off.
+- Why a turn ended is now recorded: every turn logs its finish reason, text
+  length, tool and step counts at info level, the assistant entry in the
+  session file carries `metadata.finish-reason`, and `turn_finalize` carries
+  `textLength`.
+- A follow-up queued during a turn that then failed ran after the user's next
+  prompt. nyma's own nudges are dropped on a failed turn; what the user queued
+  is still deferred to the next good turn.
+- A stream filter that aborted twice ended the turn with nothing stored and
+  nothing shown. The filter's reason is now stored as the reply and shown.
+
+### Changed
+- `small-model`'s quality monitor no longer checks for empty turns; the loop
+  does it for every model.
+
 ## 0.13.1 — 2026-11-13
 
 ### Fixed

@@ -460,6 +460,33 @@ gated methods. For events, prefer a subscriber in-tree or say plainly in the
 docs that the event has no consumer.
 
 
+### 3l. "Silent end state"
+
+**2026-11-19.** A turn that ended with no text and no tool call on a clean
+`stop` stored `""` and showed nothing; the loop only ever read finishReason
+`"length"`, and finishReason was neither logged nor persisted. 29 of 32 empty
+assistant entries across all sessions were this. Fixed in the loop
+(`turn-outcome :empty?`, `empty-turn-nudge`, finish reason on the entry), and
+two siblings with it: a failed turn's queued nudges running after the next
+prompt, and the stream-filter retry cap storing nothing.
+
+Same shape, still open (each verified in source, none reproduced live):
+- A budget abort after ≥1 step takes the normal completion path (the AI SDK's
+  flush resolves from recorded steps), so the budget's reason never reaches
+  the UI; before any step, `interactive.cljs` shows it as a plain "aborted".
+- Esc after ≥1 step: same path, the run ends as if finished.
+- `escalate` stall in headless mode with `mode=ask`: `d/info` only.
+- `maybe-extend!` returning with no log or notify when the queue is non-empty
+  or the signal aborted (`loop.cljs`).
+- `finalize_warn` past its cap, or a Jev verdict under 0.8: no log.
+- Tool-call rescue parse failure shows the raw markup as the answer.
+- Announce-then-stop ("Let me try X." with no tool call): `finalize_warn`
+  excludes bare "I'll"/"let me" on purpose; `judge.finalize` is the opt-in.
+
+**Mitigation:** every end state the loop can reach should either store a
+message the user sees or `dbg/warn` why not; `turn_finalize` now carries
+`finishReason` and `textLength` so an extension can check too.
+
 ## 3.5 Deferred, with a known reason (2026-08)
 
 Each of these was found while fixing something else, understood, and left. They are not "unknown unknowns".
